@@ -130,7 +130,24 @@ F MODE (ADSR / AHD). HOLD is not on stock's 1.12 page either. The destinations a
   track): the 16 steps of the page playing, a filled cell a locked step and the playing step underlined, then a tick
   a page, tall when that page holds a lock, the page playing underlined.
 
-Next in this phase: MOD SETUP's rows (VEL MW PB AT BC KEY, stock's four routes a source).
+- **MOD SETUP's rows** (VEL MW PB AT BC KEY, after ENV2; five rows are shown, the list scrolls with the lit row): read
+  only (main, 2026-11-13: option (a)); they are edited on stock's MOD SETUP page. A row shows its source's routes into
+  this parameter, summed, as stock's depth word / 256, and the moving bar as stock applies it. The lit row says SETUP;
+  its knob does nothing.
+
+### Where stock keeps MOD SETUP (1.12, read in the bytes)
+
+A sound's 153 bytes from byte 222 are its MOD SETUP: at each note `0x4002549c` copies them whole into the voice's
+descriptor record (`0x80003af0 + 3468 + 153 v`), which the frame copies to OUT + 3468 (`0x400db28e`). From +230 (+8):
+six lists of four `{s16 depth, s16 slot}`, 16 bytes a list, in the kernel's order VEL MW PB BC AT KEY
+(`docs/modulation-matrix.md`: rows 2-5 ordered by registration, not each proved). The driver `0x400db390` (1.11's
+`0x400db22c`) runs the kernel `0x400db340` on each list before the LFOs' evaluator: cell + value x depth / 2048,
+saturated. The values: VEL `0x8000dd40[v]`, MW `0x8000de40`, PB `0x8000de20`, BC `0x8000de00`, AT `0x8000dde0`
+indexed by the voice's track (`0x80005308[v]`), KEY `0x8000dda0[v]` (a long, >> 8, less 15360). Stored on the card
+as three bytes a target (`0x400dd4cc`: the depth word, then a dest byte mapped to the slot by `0x400dce24`).
+
+The depth word reads as stock's usual value x 256 (factory sounds hold 32512 = 0x7f00 and -32768); the number stock's
+own MOD SETUP page prints for it is not measured, so the popup's "+n" (word / 256) may differ from it in scale.
 
 ## Read in the UI pass, never in the frame
 

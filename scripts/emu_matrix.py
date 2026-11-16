@@ -266,7 +266,7 @@ def scenario_popup(a, report, sym):
     FREQ's knob opens it; turning makes LFO1's route (stock's route 1: its DEST and DEP), push-and-turn moves to LFO2
     (its own route 1) and to ENV1 (a route of the record); YES keeps them; a route turned back to 0 goes at the close;
     NO undoes; FUNC + a long push resets FREQ to its record's default"""
-    from emulib.panel import ENCODER_PUSH, NO, YES, Panel
+    from emulib.panel import DOWN, ENCODER_PUSH, NO, UP, YES, Panel
     from unicorn import UC_HOOK_CODE
     m = setup(a.build, a.snapshot)
     panel = Panel(m, png_dir=str(pathlib.Path(a.json or "out/matrix").with_suffix("")) + "_png")
@@ -377,6 +377,28 @@ def scenario_popup(a, report, sym):
                 return "record", r[2] << 8 | r[3]
         return None, 0x4000
 
+    mod = snd + 230                                     # MOD SETUP (stock's, read only): VEL into FREQ, AT twice
+    mod0 = bytes(m.read(mod, 96))
+    want = struct.pack(">hh", 0x2000, 67) + mod0[4:64] + struct.pack(">hhhh", -0x400, 67, 0x300, 67) + mod0[72:]
+    m.write(mod, want)
+    m.flush()
+    rec0 = record()
+    for _ in range(5):
+        panel.tap(DOWN)
+    vel = (struct.unpack(">i", m.read(sym["mxp_setup_dep"], 4))[0], m.long(sym["mxp_setup_rows"]))
+    for _ in range(3):
+        panel.tap(DOWN)
+    at = (struct.unpack(">i", m.read(sym["mxp_setup_dep"], 4))[0], m.long(sym["mxp_setup_rows"]))
+    panel.screen("popup_setup")
+    turned = turn(+1, 1)
+    check("popup: MOD SETUP's rows show VEL's and AT's routes into FREQ (AT's two summed), read only",
+          vel[0] == 0x2000 and vel[1] & 1 and at[0] == -0x100 and at[1] & 9 == 9 and turned > 0
+          and bytes(m.read(mod, 96)) == want and record() == rec0,
+          f"VEL {vel}, AT {at}, turned {turned}")
+    m.write(mod, mod0)
+    m.flush()
+    for _ in range(8):
+        panel.tap(UP)
     got1 = turn(+1, 2)                                  # the lit row: LFO1
     where1, d1 = depth_of(0, 4, 8)
     check(f"popup: LFO1 turned {got1} detents: a route into FREQ at that depth (route 1 first if free)",

@@ -5,14 +5,19 @@
  * parameter. Still held at 0.6 s: the parameter goes back to its record's default (stock's own setValue). Between
  * the two, nothing.
  *
- * The popup covers the screen. A slim header with the parameter's name; a row a source: LFO1-3, ENV1, ENV2 (MOD
- * SETUP's sources are the next step). A row at depth 0 is an empty line (its icon and name); a
+ * The popup covers the screen. A slim header with the parameter's name; a row a source: LFO1-3, ENV1, ENV2, then MOD
+ * SETUP's VEL MW PB AT BC KEY, five rows shown at a time (the list scrolls with the lit row). A row at depth 0 is an
+ * empty line (its icon and name); a
  * route shows its depth and the moving bar: the outline is the reach (0 to the depth, and to minus it for an LFO,
  * which swings both ways), a tall tick the depth, the solid bar the offset the source applies now, on the voice the
  * track last played. The lit row's count: the LFOs' shared pool ("13/16", FULL when it is full and this LFO has no
  * route here), an envelope's own four ("2/4", FULL). At the bottom, LOCKS: this parameter's p-locks on the track's
  * pattern, the 16 steps of the page playing (a filled cell a locked step, the playing step underlined), then a tick
  * a page (filled when the page holds a lock, the page playing underlined); the dest-knob study §6.
+ *
+ * MOD SETUP's rows are read only (main, 2026-11-13: option (a); they are edited on stock's MOD SETUP page): a row shows
+ * the sum of its source's routes into this slot, in stock's depth word / 256, and the moving bar as stock's kernel
+ * (0x400db340) applies it: cell + value x depth / 2048. The lit row says SETUP; its knob does nothing.
  *
  * Turning the knob sets the lit row's depth, live; push-and-turn (or UP / DOWN) moves the lit row. A row turned from 0
  * makes the route: an LFO's stock route 1 first when it is free (DEST, DEP: stock's parameters, so a stock unit plays
@@ -64,7 +69,9 @@ typedef short s16;
 #define LONG       900u                                 /* 0.6 s: still held, the parameter is reset */
 #define IDLE       9000u                                /* 6 s untouched: closed */
 #define REDRAW     60u                                  /* 25 a second while up (the moving bar) */
-#define ROWS       5
+#define OWN_ROWS   5                                    /* LFO1-3, ENV1, ENV2: ours to edit */
+#define ROWS       11                                   /* then MOD SETUP's six, read only */
+#define SHOWN      5                                    /* the rows on screen */
 #define LFO_CAP    16
 #define ENV_CAP    4
 #define NONE       0x4000
@@ -81,7 +88,7 @@ extern int amp_sub;
 extern int ins_visible(void);
 int mx_route_level(u32 v, u32 src);                    /* matrix.c: a source's value on voice V, 1.31 */
 
-static const char *const NAME[ROWS] = {"LFO1", "LFO2", "LFO3", "ENV1", "ENV2"};
+static const char *const NAME[ROWS] = {"LFO1", "LFO2", "LFO3", "ENV1", "ENV2", "VEL", "MW", "PB", "AT", "BC", "KEY"};
 static const u8 DEST_REC[3] = {78, 88, 98};             /* LFO1-3 DEST and DEP (stock's records) */
 static const u8 DEP_REC[3] = {83, 93, 103};
 
@@ -271,6 +278,44 @@ static void undo(void)
     record_put(P.undo_routes, P.undo_n);
 }
 
+/* --- MOD SETUP's routes (stock's): read only ----------------------------------------------------- */
+/* A sound keeps them from byte 222 (153 bytes, copied whole into the voice's descriptor record at each note:
+ * 0x4002549c): from +230 six lists of four {s16 depth, s16 slot} in the kernel's order VEL MW PB BC AT KEY
+ * (0x400db390; docs/modulation-matrix.md: rows 2-5 ordered, not each proved). The kernel adds value x depth / 2048 to
+ * the slot's cell. Each source's value: VEL by voice, MW PB BC AT by the voice's track, KEY by voice (a long, >> 8,
+ * less 15360). */
+static const u8 MOD_LIST[6] = {0, 1, 2, 4, 3, 5};       /* row VEL MW PB AT BC KEY -> the sound's list */
+static const u32 MOD_VAL[5] = {0x8000DD40u, 0x8000DE40u, 0x8000DE20u, 0x8000DE00u, 0x8000DDE0u};
+#define MOD_KEY    ((volatile s32 *)0x8000DDA0u)
+#define MOD_FULL   32512                                /* a source's top (0x7f00) */
+
+s32 mxp_setup_dep D_ = 0;                               /* the checks: the lit MOD SETUP row's depth as drawn */
+u32 mxp_setup_rows D_ = 0;                              /* the MOD SETUP rows drawn with a route (bit j: row 5 + j) */
+
+static s32 mod_depth(u32 j, int *any)                   /* row 5 + J: its routes into this slot, summed */
+{
+    const u8 *p = (const u8 *)sound_of(P.track);
+    s32 d = 0;
+    *any = 0;
+    if (!p)
+        return 0;
+    p += 230u + 16u * MOD_LIST[j];
+    for (u32 i = 0; i < 4u; i++, p += 4)
+        if ((u32)(s16)(p[2] << 8 | p[3]) == P.slot) {
+            d += (s16)(p[0] << 8 | p[1]);
+            *any = 1;
+        }
+    return d;
+}
+
+static s32 mod_value(u32 j, u32 v)                      /* row 5 + J's source now, on voice V */
+{
+    u32 l = MOD_LIST[j];
+    if (l == 5u)
+        return (MOD_KEY[v] >> 8) - 15360;
+    return ((volatile s16 *)MOD_VAL[l < 5u ? l : 0u])[l ? OWNER[v] & 15u : v];
+}
+
 /* --- open, close, the keys -------------------------------------------------------------------- */
 static int refused(u32 t)
 {
@@ -374,7 +419,7 @@ int mxp_pop(u8 *it)
             P.turned = 1;
             int r = (int)P.lit + (d > 0 ? 1 : d < 0 ? -1 : 0);
             P.lit = (u32)(r < 0 ? 0 : r >= ROWS ? ROWS - 1 : r);
-        } else {
+        } else if (P.lit < OWN_ROWS) {
             int where, at;
             int dep = (int)row_depth(P.lit, &where, &at) + d * 0x100;
             dep = dep < 0 ? 0 : dep > DEP_TOP ? DEP_TOP : dep;
@@ -480,6 +525,29 @@ static void bar(void *c, int y, int x0, int x1, s32 depth, int both, s32 now)
         fill(c, o < 0 ? z + o : z, y + 1, o < 0 ? z : z + o, y + 3, 1);
 }
 
+/* a MOD SETUP row: its name; with a route, the depth and the bar as the kernel applies it (in the LFO rows' units:
+ * half the cells' reach); lit, SETUP */
+static void mod_row(void *c, u32 r, int y, int live, s32 v)
+{
+    int any;
+    u32 j = r - OWN_ROWS;
+    s32 d = mod_depth(j, &any);
+    TEXT(c, FONT, 13, y, 0, "%s", NAME[r]);
+    if (any) {                                          /* x / 4096 in 32 bits: four routes' depth reaches 2^17 */
+        s32 reach = ((d >> 4) * MOD_FULL) >> 8, now = live ? ((mod_value(j, (u32)v) >> 4) * d) >> 8 : 0;
+        reach = reach > DEP_TOP ? DEP_TOP : reach < -DEP_TOP ? -DEP_TOP : reach;
+        now = now > DEP_TOP ? DEP_TOP : now < -DEP_TOP ? -DEP_TOP : now;
+        TEXT(c, FONT, 38, y, 0, "%+d", d >> 8);
+        bar(c, y + 1, 58, 98, reach, MOD_LIST[j] == 2u || MOD_LIST[j] == 5u, now);   /* PB and KEY swing both ways */
+        mxp_setup_rows |= 1u << j;
+    }
+    if (r == P.lit) {
+        mxp_setup_dep = any ? d : 0;
+        TEXT(c, FONT, 104, y, 0, "SETUP");
+        invert(c, 0, y - 1, 127, y + 7);
+    }
+}
+
 /* LOCKS: this parameter's p-locks on the UI track's pattern (the pool's record of that slot and track, in RAM its
  * head is the mirror slot) */
 static void locks_strip(void *c)
@@ -536,8 +604,14 @@ void mxp_draw(void *c)
         SET_PIXEL(c, x, 55, 1);
     s32 v = sl_lastv[P.track];
     int live = v >= 0 && v < 16 && OWNER[v] == P.track;
-    for (u32 r = 0; r < ROWS; r++) {
-        int y = 46 - 9 * (int)r, where, at;
+    u32 top = P.lit < SHOWN ? 0u : P.lit - (SHOWN - 1u);
+    mxp_setup_rows = 0;
+    for (u32 r = top; r < top + SHOWN; r++) {
+        int y = 46 - 9 * (int)(r - top), where, at;
+        if (r >= OWN_ROWS) {
+            mod_row(c, r, y, live, v);
+            continue;
+        }
         u32 dep = row_depth(r, &where, &at);
         const u16 *ic = ICON[7];
         if (r < 3u) {
