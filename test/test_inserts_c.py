@@ -95,8 +95,6 @@ def expected(recs):
             else:
                 f0 = 0
         knobs = [x & 0x7F for x in r[2:8]]
-        if y == D.SUB:
-            knobs[4] = 0                                       # 2026-11-11: SUB's DRY is gone: always 0 to the DSP
         out += [f0, r[1] & 0x7F] + knobs
     return out
 
@@ -127,8 +125,16 @@ def test_unknown_type_is_off(exe):
     assert D.unpack(w[2:])[0] == 0 and back[0][0] == 0
 
 
-def test_sub_dry_is_not_sent_but_kept(exe):
-    recs = [[D.SUB, 90, 10, 20, 30, 40, 99, 6]] + [[0] * 8 for _ in range(D.RECORDS - 1)]
+def test_knobs_off_the_page_are_still_saved_and_sent(exe):
+    """2026-11-11: SUB's LEV and DRY, HARM's and RING's LEV are no knobs now; an old project's values play as before"""
+    recs = [[D.SUB, 90, 10, 20, 30, 40, 99, 6], [D.HARM, 80, 1, 2, 3, 4, 77, 6], [D.RING, 70, 1, 2, 3, 66, 5, 6]]
+    recs += [[0] * 8 for _ in range(D.RECORDS - 3)]
     w, back = run(exe, recs)
-    assert D.unpack(w[2:])[:8] == [D.SUB, 90, 10, 20, 30, 40, 0, 6]   # DRY (K5) 0 to the DSP
-    assert back[0] == recs[0]                                          # an old project's DRY stays in the record
+    assert D.unpack(w[2:])[:24] == [D.SUB, 90, 10, 20, 30, 40, 99, 6, D.HARM, 80, 1, 2, 3, 4, 77, 6, D.RING, 70, 1, 2, 3, 66, 5, 6]
+    assert back[:3] == recs[:3]
+
+
+def test_new_sub_starts_without_the_dry():
+    src = (ROOT / "csrc" / "inserts" / "ins.c").read_text()
+    assert "{100, 85, 59, 0, SUB_DRY, 0}" in src and "#define SUB_DRY   0 " in src
+    assert '{"", "BAND", "TONE", "OCT", "", ""}' in src

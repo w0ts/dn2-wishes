@@ -49,18 +49,18 @@ OFF 0..14 .. XDLY 114..127). A saved record keeps the type; loaded, M.SEL sits i
 
 | insert | B | C | D | E | F | G |
 |---|---|---|---|---|---|---|
-| FUZZ | DRIV | TONE | BIAS | PRE | GATE | LEV |
+| FUZZ | DRIV | TONE | BIAS | PRE | GATE | PGAIN |
 | TAPE | DRIV | WOW | WRAT | FLUT | AGE | HISS |
-| FOLD | AMNT | SYMM | SHPE | TONE | LEV | |
+| FOLD | AMNT | SYMM | SHPE | TONE | PGAIN | |
 | CHOR | DPTH | RATE | DLY | VOIC | WDTH | FDBK |
 | WIDE | WDTH | TIME | BASS | TONE | | |
-| HARM | AMNT | FREQ | EVEN | TONE | LEV | |
+| HARM | AMNT | FREQ | EVEN | TONE | | |
 | FDN8 | PRE | SIZE | DAMP | MOD | HPF | LPF |
 | XDLY | TIM1 | TIM2 | FDBK | MOD | TONE | |
-| SUB | LEV | BAND | TONE | OCT | | |
-| DIST | DRIV | TONE | BIAS | LOW | LEV | |
+| SUB | | BAND | TONE | OCT | | |
+| DIST | DRIV | TONE | BIAS | LOW | PGAIN | |
 | GATR (GATER) | DPTH | PATN | RATE | SHPE | SWNG | |
-| RING | FREQ | SHPE | AM | LEV | | |
+| RING | FREQ | SHPE | AM | | | |
 
 `csrc/inserts/ins.c` draws the page over the screen (page.c `wr_screen`) with **stock 1.12's own
 widgets** (`csrc/waverider/widgets.h`, docs/widgets.md): M.SEL a choice box, the insert's knobs and
@@ -150,13 +150,30 @@ each rising crossing (the octave down) and, OCT 64..127, a second flip-flop on t
 (two octaves down); a square at the envelope's level, rounded by TONE (a one-pole, 60 Hz x 16^p: 60 ..
 960 Hz; Optimist's ~220 Hz at TONE 59); out = DRY x the voice + LEV x the square, then MIX.
 
-2026-11-11 (the User: "remove it", MIX does the dry / wet): SUB's **DRY knob is gone** (place E left empty). The
-DSP's DRY is always 0 now (`SUB_DRY` in ins.c, applied where the fields go to the DSP): the wet is the sub
-alone, MIX blends the voice back. A project saved with a DRY keeps it in its record (saved and loaded
-unchanged) but it is not sent: a SUB that had DRY above 0 loses that share of the voice in its wet path (a
-default SUB had 127, the full voice added to the sub at MIX 127: now the sub alone). **OCT** reads **-1**
-(knob 0..63) and **-2** (64..127): the same two sounds as before (one flip-flop, two), only the readout
-changed, so an old project's octave is the same sound.
+2026-11-11 (the User: "remove it", MIX does the dry / wet): SUB's **DRY knob is gone**, and its **LEV** with it
+(below). Their values are still saved, loaded and sent (a project that has them plays as before); a NEW SUB
+starts with DRY 0 (`SUB_DRY` in ins.c: the wet is the sub alone, MIX blends the voice) and LEV 100. **OCT**
+reads **-1** (knob 0..63) and **-2** (64..127): the same two sounds as before, only the readout changed.
+
+### What each LEV did (audit 2026-11-11, the User: "the level of the wet ... we have a dry wet. useless")
+
+Every insert's LEV scaled the wet before MIX (`dnfw.inserts.ref`). Kept and renamed **PGAIN** where the wet's level is
+set by the effect, not by the input, so only a gain stage after it can match it to the dry; removed from the page
+where it only turned a wet already at the input's level down, which MIX (and the track's volume) does:
+
+| insert | knob | in the DSP | now |
+|---|---|---|---|
+| FUZZ | K6 LEV | the clipped, toned signal (about full scale whatever the input) x LEV x the gate | kept, **PGAIN** |
+| FOLD | K5 LEV | the folded signal (a triangle / sine of full scale) x LEV | kept, **PGAIN** |
+| DIST | K5 LEV | the clip, brought back to the voice's peak, x LEV x 2 (a boost up to 2) | kept, **PGAIN** |
+| HARM | K5 LEV | (dry + harmonics) x LEV, LEV at most 1 | removed from the page |
+| SUB | K1 LEV | the square (at the band's envelope, so the input's level) x LEV, at most 1 | removed from the page |
+| SUB | K5 DRY | the voice x DRY added to the sub | removed from the page |
+| RING | K4 LEV | voice x carrier (at most the input's level) x LEV, at most 1 | removed from the page |
+
+A removed knob's stored value stays in the record and goes to the DSP unchanged, so an old project sounds the
+same; the page just cannot change it (a NEW insert starts at its DEFAULT: HARM 100, SUB LEV 100, RING 100,
+SUB DRY 0). The place is left empty.
 
 **DIST**: Optimist's DIST, on FUZZ's sample loop (one copy of the loop, `fz_loop`, run after FUZZ's or
 DIST's block values; DIST adds its block values only). The drive is relative to the voice's peak (FUZZ's

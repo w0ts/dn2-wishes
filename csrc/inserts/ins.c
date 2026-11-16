@@ -49,8 +49,9 @@ typedef signed char s8;
 #define TYPES     13                            /* OFF and the twelve (dnfw.inserts.design: a type keeps its
                                                  * number for good; 2026-11-10 SUB DIST GATER RING 9..12, Optimist's) */
 #define SLOTS     2
-#define T_SUB     9
-#define SUB_DRY   0                             /* SUB's DRY knob is gone (2026-11-11, the User: MIX is the dry / wet): the DSP always gets 0, the wet is the sub alone; a saved DRY is kept in the project but not sent */
+#define SUB_DRY   0                             /* SUB's start for DRY (K5), a knob no more (2026-11-11, the User: MIX is the dry / wet): a NEW
+                                                 * SUB is the sub alone. The value is still saved, loaded and sent; a project that has one plays as
+                                                 * before. Likewise the hidden LEVs: SUB K1, HARM K5, RING K4 (see LABEL) */
 #define T_FDN8    7
 #define T_XDLY    8
 #define N_FDN8    8                             /* the DSP's instances (design.FDN8_INSTANCES, XDLY_INSTANCES) */
@@ -68,18 +69,18 @@ static const char *const NAME[TYPES] = {"OFF", "FUZZ", "TAPE", "FOLD", "CHOR", "
                                         "SUB", "DIST", "GATR", "RING"};
 static const char *const LABEL[TYPES][6] = {
     {"", "", "", "", "", ""},
-    {"DRIV", "TONE", "BIAS", "PRE", "GATE", "LEV"},
+    {"DRIV", "TONE", "BIAS", "PRE", "GATE", "PGAIN"},
     {"DRIV", "WOW", "WRAT", "FLUT", "AGE", "HISS"},
-    {"AMNT", "SYMM", "SHPE", "TONE", "LEV", ""},
+    {"AMNT", "SYMM", "SHPE", "TONE", "PGAIN", ""},
     {"DPTH", "RATE", "DLY", "VOIC", "WDTH", "FDBK"},
     {"WDTH", "TIME", "BASS", "TONE", "", ""},
-    {"AMNT", "FREQ", "EVEN", "TONE", "LEV", ""},
+    {"AMNT", "FREQ", "EVEN", "TONE", "", ""},
     {"PRE", "SIZE", "DAMP", "MOD", "HPF", "LPF"},     /* FDN8 (docs/fdn8.md's knobs) */
     {"TIM1", "TIM2", "FDBK", "MOD", "TONE", ""},      /* XDLY (docs/xdly.md's knobs) */
-    {"LEV", "BAND", "TONE", "OCT", "", ""},           /* SUB (docs/inserts.md, ported from Optimist); DRY (knob 5) removed 2026-11-11 */
-    {"DRIV", "TONE", "BIAS", "LOW", "LEV", ""},       /* DIST */
+    {"", "BAND", "TONE", "OCT", "", ""},              /* SUB (docs/inserts.md, ported from Optimist); LEV (K1) and DRY (K5) off the page 2026-11-11 */
+    {"DRIV", "TONE", "BIAS", "LOW", "PGAIN", ""},       /* DIST */
     {"DPTH", "PATN", "RATE", "SHPE", "SWNG", ""},     /* GATER */
-    {"FREQ", "SHPE", "AM", "LEV", "", ""},            /* RING */
+    {"FREQ", "SHPE", "AM", "", "", ""},              /* RING (LEV, K4, off the page 2026-11-11) */
 };
 static const u8 DEFAULT[TYPES][6] = {
     {0, 0, 0, 0, 0, 0}, {64, 90, 0, 30, 0, 100}, {50, 30, 20, 25, 50, 10}, {80, 64, 0, 100, 100, 0},
@@ -179,7 +180,7 @@ static void fields(int t, int j, u8 *f)
     f[0] = full || !BUILT[y] ? 0 : (u8)(y | (instances(y) ? ins_inst[t][j] << 4 : 0));
     f[1] = ins_mod[t][j];
     for (int k = 0; k < 6; k++)
-        f[2 + k] = y == T_SUB && k == 4 ? SUB_DRY : ins_kv[t][j][y][k];
+        f[2 + k] = ins_kv[t][j][y][k];
 }
 
 /* the 58 words the DSP reads from GEN_OFFSET (dnfw.inserts.design.pack, held to it by
