@@ -90,6 +90,8 @@ S_END = S_E + 12
 (T_INC, T_RINC, T_B0, T_K, T_G, T_AMP, T_X, T_OSN, T_INCI) = range(S_END + 5, S_END + 14)
 # (perf, 2026-11-11) the oversampled samples' ladder outputs, the elliptic decimator's four inputs
 T_Y0 = S_END + 14
+# (perf, 2026-11-12) the frequency T_INC, T_INCI and T_RINC were last made from (0 until a note: never a note's)
+T_FQ = T_Y0 + 4
 
 
 def _pm():
@@ -192,7 +194,7 @@ def exact(A: int, F: int, knobs, pre: int = 0) -> dict:
 def init(p: Prog, L: C.Layout) -> None:
     """Every word 0, idle (silent until the first note, as Open303 before its first)."""
     p.iconst(0, 0)
-    for k in range(S_END):
+    for k in (*range(S_END), T_FQ):
         _sv(p, k, 0)
     p.fconst(0, SLEW)
     _sv(p, S_SLC, 0)
@@ -312,6 +314,10 @@ def _params(p: Prog, L: C.Layout) -> None:
     _sv(p, D_RES, 4)
     _unit(p, 4, 6)
     _sv(p, D_BL, 4)
+    if FILT4:                                    # _filt4's coefficients (I3: past I0's reach)
+        for m, c in enumerate(HP1 + FBHP):
+            p.fconst(4, c)
+            C.sts(p, U_C + m, 4)
     # the note: a trigger jumps the slew to it (S_IDLE 3), a slide only sets it (2)
     _ld(p, 4, S_BASE)
     _sv(p, S_TGT, 4)
@@ -333,13 +339,20 @@ def _control(p: Prog, L: C.Layout) -> None:
     p.fop(5, 5, "*", 6)
     p.fop(5, 5, "+", 4)
     _sv(p, S_FRQ, 5)
-    _mulk(p, 5, 5, 1.0 / OSR)
-    _sv(p, T_INC, 5)
-    _mulk(p, 6, 5, 2.0 ** 32)
-    p.trunc(6, 6)
-    _sv(p, T_INCI, 6)                            # the phase's increment, 32-bit (S_PH: a turn is 2^32)
-    _recip(p, 6, 5)
-    _sv(p, T_RINC, 6)
+
+    def incs():
+        _sv(p, T_FQ, 5)
+        _mulk(p, 5, 5, 1.0 / OSR)
+        _sv(p, T_INC, 5)
+        _mulk(p, 6, 5, 2.0 ** 32)
+        p.trunc(6, 6)
+        _sv(p, T_INCI, 6)                        # the phase's increment, 32-bit (S_PH: a turn is 2^32)
+        _recip(p, 6, 5)
+        _sv(p, T_RINC, 6)
+    # (perf, 2026-11-12) once the slew has settled the frequency stays the same word, and so would the three
+    # values from it: they are worked out again only when it differs from the one they were made from (T_FQ)
+    _ld(p, 6, T_FQ)
+    p.if_(5, "NE", 6, incs)
     # mainEnv, rc1, rc2 (rc2 fed only with an accent)
     _ld(p, 4, S_MENV)
     _ld(p, 5, S_MC)
@@ -481,6 +494,39 @@ def _tanh(p: Prog, L: C.Layout, d: int, x: int) -> None:
     _addk(p, d, d, 1.0)
 
 
+_ENDS: dict = {}
+
+
+def _tanh_ends(L: C.Layout) -> tuple[float, float]:
+    """(perf, 2026-11-12) what _tanh gives at its clamps, -5.5 and +5.5: the same operations run once here on
+    PERC's exp2 table (the program's), so a clamped input can take its value as a constant, bit for bit."""
+    key = L.perc.T["exp2"]
+    if key not in _ENDS:
+        from ..perc import dsl, live as PL
+        words = PL.table_words(PL.layout())
+        q = Prog("run", dsl.Mem(lambda a: words.get(a, 0)))
+        ends = []
+        for x in (-5.5, 5.5):
+            q.fconst(6, x)
+            _tanh(q, L, 7, 6)
+            ends.append(q.F(7))
+        _ENDS[key] = tuple(ends)
+    return _ENDS[key]
+
+
+def _tanh_sq(p: Prog, L: C.Layout, d: int, x: int) -> None:
+    """_tanh, but an input at or past a clamp (the square's flat parts: about 92 % of a cycle at K_SQ) takes the
+    clamp's value as a constant (_tanh_ends): the same result, without the exp2 lookup (two DDR reads) and the
+    reciprocal. Clobbers what _tanh does."""
+    lo, hi = _tanh_ends(L)
+    p.fconst(12, 5.5)
+
+    def inside():
+        p.fconst(12, -5.5)
+        p.if_(x, "LE", 12, lambda: p.fconst(d, lo), lambda: _tanh(p, L, d, x))
+    p.if_(x, "GE", 12, lambda: p.fconst(d, hi), inside)
+
+
 def _blep(p: Prog, d: int, edge: float, h: int) -> None:
     """Fd += the poly-BLEP residual of a step of height Fh at phase EDGE (the phase at T_X,
     the increment T_INC, its inverse T_RINC). Clobbers R0, R1, R7, R8, R12."""
@@ -536,7 +582,7 @@ def _osc(p: Prog, L: C.Layout) -> None:
         _saw(p, 6, 5)
         _mulk(p, 6, 6, K_SQ)
         _addk(p, 6, 6, OFF_SQ)
-        _tanh(p, L, 7, 6)
+        _tanh_sq(p, L, 7, 6)
         _ld(p, 9, D_BL)
         p.fop(7, 7, "*", 9)
         _mulk(p, 7, 7, -0.5)
@@ -721,6 +767,89 @@ def _ellip4(p: Prog) -> None:
     p.fpass(4, 11)
 
 
+FILT4 = True                                     # (perf, 2026-11-12) _filt4; False = sample by sample as before
+U_C = 64                                         # slot words 64..69: HP1's and FBHP's coefficients (_params), at I1
+
+
+def _filt4(p: Prog) -> None:
+    """T_Y0.. = the four oscillator samples there negated, through the 44.5 Hz high-pass and the ladder (with its
+    feedback high-pass), as _onepole and _ladder do them sample by sample: the same operations on the same
+    operands, so bit for bit their results, scheduled together (dnfw.mnm.sched: the multiplier, the ALU and a memory
+    move in one instruction where the registers allow). The ladder's states in F12-F15 for the four, b0 K G in
+    F4-F6, the coefficients loaded into F7 as they are needed (from U_C, I1). Clobbers R0-R15, I1."""
+    from .sched import Sched
+    p.geti(8, 0)
+    p.iconst(12, 4 * (U_C - S_MID))
+    p.iop(8, 8, "+", 12)
+    p.seti(1, 8, "I1 = the slot's word U_C")
+    s = Sched()
+    o = lambda k: k - S_MID                       # noqa: E731  (a word's offset at I0)
+    for r, k in ((4, T_B0), (5, T_K), (6, T_G), (12, S_Y1), (13, S_Y2), (14, S_Y3), (15, S_Y4)):
+        s.ld(r, o(k), 0)
+    s.const(3, 0.0)
+    for j in range(OS):
+        s.ld(0, o(T_Y0 + j), 0)
+        s.sub(0, 3, 0)                           # Open303 negates the oscillator
+        # HP1: (x c0 + x1 c1) + y1 c2
+        s.ld(7, 0, 1)
+        s.mul(8, 0, 7)
+        s.ld(1, o(S_H1X), 0)
+        s.st(o(S_H1X), 0, 0)
+        s.ld(7, 1, 1)
+        s.mul(9, 1, 7)
+        s.add(8, 8, 9)
+        s.ld(2, o(S_H1Y), 0)
+        s.ld(7, 2, 1)
+        s.mul(9, 2, 7)
+        s.add(0, 8, 9)
+        s.st(o(S_H1Y), 0, 0)
+        # the feedback: u = fbHP(k y4)
+        s.mul(1, 15, 5)
+        s.ld(7, 3, 1)
+        s.mul(8, 1, 7)
+        s.ld(2, o(S_FX1), 0)
+        s.st(o(S_FX1), 0, 1)
+        s.ld(7, 4, 1)
+        s.mul(9, 2, 7)
+        s.add(8, 8, 9)
+        s.ld(2, o(S_FY1), 0)
+        s.ld(7, 5, 1)
+        s.mul(9, 2, 7)
+        s.add(1, 8, 9)
+        s.st(o(S_FY1), 0, 1)
+        s.sub(8, 0, 1)                           # y0 = x - u
+        # y1 += 2 b0 (y0 - y1 + y2)
+        s.sub(9, 8, 12)
+        s.add(0, 9, 13)
+        s.mul(9, 0, 4)
+        s.add(9, 9, 9)
+        s.add(12, 12, 9)
+        # y2 += b0 (y1 - 2 y2 + y3)
+        s.add(10, 13, 13)
+        s.sub(10, 12, 10)
+        s.add(1, 10, 14)
+        s.mul(11, 1, 4)
+        s.add(13, 13, 11)
+        # y3 += b0 (y2 - 2 y3 + y4)
+        s.add(10, 14, 14)
+        s.sub(10, 13, 10)
+        s.add(2, 10, 15)
+        s.mul(11, 2, 4)
+        s.add(14, 14, 11)
+        # y4 += b0 (y3 - 2 y4)
+        s.add(10, 15, 15)
+        s.sub(0, 14, 10)
+        s.mul(11, 0, 4)
+        s.add(15, 15, 11)
+        # 2 g y4
+        s.mul(0, 15, 6)
+        s.add(0, 0, 0)
+        s.st(o(T_Y0 + j), 0, 0)
+    for r, k in ((12, S_Y1), (13, S_Y2), (14, S_Y3), (15, S_Y4)):
+        s.st(o(k), 0, r)
+    s.emit(p)
+
+
 def _sample(p: Prog, L: C.Layout) -> None:
     """One sample at I4."""
     _control(p, L)
@@ -739,15 +868,21 @@ def _sample(p: Prog, L: C.Layout) -> None:
     p.if_(4, "GE", 12, dc)
     _sv(p, T_OSN, 5)
 
-    def one(j: int):
-        _osc(p, L)
-        p.fconst(12, 0.0)
-        p.fop(4, 12, "-", 4)                     # Open303 negates the oscillator
-        _onepole(p, 4, HP1, S_H1X, S_H1Y)
-        _ladder(p, 4)
-        _sv(p, T_Y0 + j, 4)
-    for j in range(OS):                          # (perf: unrolled; the decimator runs after the four)
-        one(j)
+    if FILT4:
+        for j in range(OS):                      # the four oscillator samples, then the filters over the four
+            _osc(p, L)
+            _sv(p, T_Y0 + j, 4)
+        _filt4(p)
+    else:
+        def one(j: int):
+            _osc(p, L)
+            p.fconst(12, 0.0)
+            p.fop(4, 12, "-", 4)                 # Open303 negates the oscillator
+            _onepole(p, 4, HP1, S_H1X, S_H1Y)
+            _ladder(p, 4)
+            _sv(p, T_Y0 + j, 4)
+        for j in range(OS):                      # (perf: unrolled; the decimator runs after the four)
+            one(j)
     _ellip4(p)                                   # F4 = the last sample's output (the others are dropped)
     _onepole(p, 4, AP, S_APX, S_APY)
     _onepole(p, 4, HP2, S_H2X, S_H2Y)

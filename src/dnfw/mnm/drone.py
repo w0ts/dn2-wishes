@@ -523,8 +523,110 @@ SRC = ((0, ((1, D_CA0), (3, D_CB0))), (1, ((0, D_C1),)), (2, ((3, D_CA2), (1, D_
        (3, ((2, D_C1),)))
 
 
+EAR_SCHED = True                                 # (perf, 2026-11-12) _ear_sched; False = _ear_body as before
+I0_AT = 75                                       # I0 = the slot's word I0_AT while a half runs (_half_i0)
+T_O = 86                                         # the four generators' outputs until they become E_PREV
+K_ONE, K_Q0 = 90, 91                             # 1.0 and SIN_Q[0] (_half_i0)
+
+
+def _half_i0(p: Prog) -> None:
+    """I0 = the slot's word I0_AT (D_CA0 .. D_G1 and T_O within its -32..31); K_ONE, K_Q0. Clobbers R8, R9."""
+    p.geti(8, 3)
+    p.iconst(9, p.ioff(3, 4 * (C.K.S0 + I0_AT)))
+    p.iop(8, 8, "+", 9)
+    p.seti(0, 8, "I0 = the slot's word I0_AT")
+    for k, x in ((K_ONE, 1.0), (K_Q0, SIN_Q[0])):
+        p.fconst(8, x)
+        p.sti(k - I0_AT, 0, 8)
+
+
+def _ear_sched(p: Prog) -> None:
+    """_ear_body's operations, the same ones on the same operands (so bit for bit its result), scheduled
+    (dnfw.mnm.sched): the generators in two register sets, so one's loads and integer steps ride on the other's
+    computes; the slot's words through I0 (_half_i0), the sine's first coefficient and 1.0 from slot words too
+    (K_ONE, K_Q0), each generator's output in T_O until all four have read the previous ones; its phase step
+    moved up (it reads nothing the sine writes). The soft knee as before."""
+    from .sched import Sched
+    s = Sched()
+    o = lambda k: k - I0_AT                      # noqa: E731
+    s.const(7, 0.0)
+    s.const(12, SIN_Q[1])
+    s.const(13, SIN_Q[2])
+    s.const(14, SIN_Q[3])
+    s.raw(lambda q: q.iconst(9, -31), (), (9,))
+    for g, srcs in SRC:
+        a, b, c, d, ph = (0, 1, 2, 3, 8) if g % 2 == 0 else (4, 5, 6, 10, 11)
+        for j, (src, w) in enumerate(srcs):
+            x, k = (a, b) if j == 0 else (c, d)
+            s.ld(x, E_PREV + src, 1)
+            s.ld(k, o(w), 0)
+            s.mul(x, x, k)
+        if len(srcs) > 1:
+            s.add(a, a, c)
+        s.raw(lambda q, a=a: q.trunc(a, a), (a,), (a,))
+        s.ld(ph, E_PH + g, 1)
+        s.raw(lambda q, a=a, ph=ph: q.iop(a, ph, "+", a), (ph, a), (a,))
+        s.raw(lambda q, a=a: q.float_(a, a, 9), (a, 9), (a,))     # s = 2 x phase, -1..1
+        s.ld(b, E_ST + g, 1)
+        s.raw(lambda q, b=b, ph=ph: q.iop(ph, ph, "+", b), (ph, b), (ph,))
+        s.st(E_PH + g, 1, ph)
+        s.mul(b, a, a)                           # sin(pi s) = s (1 - s^2) Q(s^2)
+        s.ld(d, o(K_ONE), 0)
+        s.sub(d, d, b)
+        s.ld(c, o(K_Q0), 0)
+        s.mul(c, c, b)
+        s.add(c, c, 12)
+        s.mul(c, c, b)
+        s.add(c, c, 13)
+        s.mul(c, c, b)
+        s.add(c, c, 14)
+        s.mul(c, c, d)
+        s.mul(c, c, a)                           # y
+        s.mul(b, c, c)                           # CHAR: y (1 + h - h y^2)
+        s.ld(d, o(D_H), 0)
+        s.mul(b, b, d)
+        s.ld(a, o(D_H1), 0)
+        s.sub(a, a, b)
+        s.mul(a, c, a)
+        s.st(o(T_O + g), 0, a)
+        s.add(7, 7, a)
+    for g in range(4):
+        s.ld(2 + (g & 1), o(T_O + g), 0)
+        s.st(E_PREV + g, 1, 2 + (g & 1))
+    s.const(12, 0.25)
+    s.mul(7, 7, 12)                              # the mean
+    s.ld(0, E_DCI, 1)                            # the DC block: x - x1 + y1 (1 - 2^-9)
+    s.st(E_DCI, 1, 7)
+    s.sub(1, 7, 0)
+    s.ld(2, E_DCO, 1)
+    s.const(13, 1.0 - 2.0 ** -9)
+    s.mul(2, 2, 13)
+    s.add(1, 1, 2)
+    s.const(14, 2.0 ** -16)
+    s.add(1, 1, 14)                              # Optimist's floored dco >> 9: +1/2 LSB a sample
+    s.st(E_DCO, 1, 1)
+    s.ld(0, E_LOW, 1)                            # TONE's one-pole
+    s.sub(1, 1, 0)
+    s.ld(2, o(D_G1), 0)
+    s.mul(1, 1, 2)
+    s.add(0, 0, 1)
+    s.const(15, -(2.0 ** -16))
+    s.add(0, 0, 15)                              # its floored product: -1/2 LSB a sample
+    s.st(E_LOW, 1, 0)
+    s.emit(p)
+    p.fconst(12, 0.0)                            # soft_knee(x, 16000)
+    p.fop(1, 12, "-", 0)
+    p.fop(1, 1, "MAX", 0)
+    p.fconst(12, KNEE)
+    p.if_(1, "GT", 12, lambda: _knee(p))
+    p.sti(E_Y, 1, 0)
+
+
 def _ear_body(p: Prog) -> None:
     """One ear, one sample (drone_ear), the ear's words at I1: E_Y = its output."""
+    if EAR_SCHED:
+        _ear_sched(p)
+        return
     p.fconst(7, 0.0)
     for g, srcs in SRC:
         for j, (s, w) in enumerate(srcs):
@@ -610,6 +712,8 @@ def _ear(p: Prog, word: int) -> None:
 
 def half(p: Prog, L: C.Layout) -> None:
     """16 samples at I4 (and, BEAT on, 16 side samples)."""
+    if EAR_SCHED:
+        _half_i0(p)
     _half_ctl(p)
     _half_steps(p, L)
     _base(p, L, 0, 0)
