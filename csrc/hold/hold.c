@@ -38,8 +38,9 @@ u32 hold_rel D = 0;                                     /* latches let go, their
 
 static int hold_on(int t)
 {
+    extern volatile u32 dt_sw[];                         /* the test channel's switch HOLD (csrc/devtest/whitelist.c) */
     u8 *kit = KIT_POINTER;
-    if (t < 0 || t > 15 || !kit)
+    if (t < 0 || t > 15 || !kit || !dt_sw[0])
         return 0;
     const u8 *snd = kit + SOUND_BASE + SOUND_STRIDE * (u32)t;
     if ((signed char)snd[SOUND_TYPE] != DRONE_TYPE)

@@ -49,6 +49,11 @@
  *                words there, VERIFY_CHUNK a block (docs/timing-model.md)
  *  26 DROP    u8 folder -> v0.35: an empty library folder (not INCOMING or RECORDED) removed;
  *                status 1 if it is not empty or not there (lib.c, with 16..23)
+ *  32 TLM     -> 2026-11-11: the telemetry frame (docs/device-tests.md), 32 words, read only: the build
+ *                id, the DSP and ColdFire loads, the heap, the load labels, the insert skips, the
+ *                HOLD counters, the A2 filter counts, each slot's cost
+ *  33..42    2026-11-11: the test channel (csrc/devtest/devtest.c, docs/remote-ui-protocol.md): BUILDINFO,
+ *                SWITCH, PEEK, COUNTERS, TRACE, STATE, SCREEN, ARM, KEY; a test build only
  *  27 ENTRY   u8 slot -> v0.35: its 16-byte pool entry (base, frames, rate, format word, little
  *                endian), its 8-byte short name, u32 the pool's DSP address
  *
@@ -87,6 +92,9 @@ _Static_assert(SMP_MIRROR_BYTES >= 0x10000u + 3u * 0x10000u, "the stages fit in 
 #define TDM_TX(h) ((volatile u32 *)(0x4E6E8100u + ((u32)(h) << 11)))
 #define TDM_RX(h) ((volatile u32 *)(0x4E6E7100u + ((u32)(h) << 11)))
 
+#ifndef TLM_BUILD
+#define TLM_BUILD 0x00470001u                 /* the telemetry frame's build id: 0.47, frame format 1 */
+#endif
 #define PROTO 7                                 /* v0.40: FOLDER IN (30), TREE (31): folders in folders; v0.35: DROP (26); v0.31: the library (16..23); v0.22: 400 MB, the recordings' area a hole */
 #define BLK_READ  ((int (*)(u32, u32, void *))0x4012C87Au)          /* (sector, bytes, buf) -> 0 ok */
 #define BLK_WRITE ((int (*)(u32, u32, const void *))0x4012CA60u)
@@ -102,7 +110,7 @@ _Static_assert(SMP_MIRROR_BYTES >= 0x10000u + 3u * 0x10000u, "the stages fit in 
 #define STORE_MAGIC_V1 0x444E3250u                                  /* 'DN2P' (v0.13..v0.15) */
 #define STORE_MAGIC 0x444E3251u                                     /* 'DN2Q' (v0.16) */
 #define RQ_MAX 600
-#define TX_MAX 160
+#define TX_MAX 192                              /* 2026-11-11: 160-byte replies (the test channel's SCREEN chunks) */
 
 #define CHUNK 0x10000u                          /* 64 KB */
 #define CHUNK_WORDS (CHUNK / 4u)
@@ -147,8 +155,8 @@ _Static_assert(SLICE_AREA + SLAREA_BYTES <= REC_END && SLICE_AREA % 512u == 0, "
 static u8 rq[RQ_MAX] __attribute__((section(".data")));
 /* v0.40: the longest reply, LIST's four entries, is 132 bytes (4 + 4 + 4 x 31): rp was 96 and
  * LIST ran on into rq (read before, so harmless, but never meant). Packed, 132 fits TX_MAX */
-static u8 rp[132] __attribute__((section(".data")));
-_Static_assert(6u + 132u + (132u + 6u) / 7u + 1u <= TX_MAX, "the longest reply packs into tx");
+static u8 rp[160] __attribute__((section(".data")));   /* 2026-11-11: 160, the test channel's (devtest.c) */
+_Static_assert(6u + 160u + (160u + 6u) / 7u + 1u <= TX_MAX, "the longest reply packs into tx");
 static u8 tx[TX_MAX] __attribute__((section(".data")));
 static u32 hdr[128] __attribute__((section(".data"), aligned(16)));   /* one sector */
 int smp_booted __attribute__((section(".data"))) = 0;
@@ -351,6 +359,12 @@ int smp_skipped_any(void)                       /* any voice, or an insert block
     return smp_ins_skip_at && (int)(periods - smp_ins_skip_at) < 750;
 }
 
+/* 2026-11-11 (the telemetry frame, SysEx 32): the DSP's per-slot cost / 16 (units 24..39) and the A2
+ * filter pass's voices filtered and left dry (units 40, 41), as the last idle packet sent them */
+volatile u16 smp_tlm_cost[16] __attribute__((section(".data"))) = {0};
+volatile u16 smp_tlm_nfil __attribute__((section(".data"))) = 0;
+volatile u16 smp_tlm_ndry __attribute__((section(".data"))) = 0;
+
 /* track T's playhead as a fraction x POS_ONE, or -1: none (nothing playing, or no news from
  * the DSP for a while) */
 /* v0.30: the DSP sends a position per VOICE (its slot's state), not per track; with the
@@ -548,6 +562,10 @@ void smp_tdm(u32 h)
             smp_ins_skips = v[23];
             smp_ins_skip_at = periods | 1u;
         }
+        for (int t = 0; t < 16; t++)            /* 2026-11-11: units 24..41, the telemetry frame's */
+            smp_tlm_cost[t] = v[24 + t];
+        smp_tlm_nfil = v[40];
+        smp_tlm_ndry = v[41];
         smp_blown_mask |= v[19];                /* v0.34: the output guard's record */
         if (v[22] != smp_blown_count) {
             smp_blown_count = v[22];
@@ -2754,8 +2772,24 @@ static const u8 sx_hdr[6] = {0xF0, 0x00, 0x20, 0x3C, 0x7D, 0x01};
 
 /* from the SysEx router (hooks.S, smp_rx_hook): MSG F0..F7, LEN bytes, from SOURCE.
  * Anything not ours, or not from USB, is left to the router as it was. */
+/* no jump table: gcc makes one of the command chain, and its 16 bit offsets sit in .text, where the ColdFire
+ * check (cbuild's scale 8 test over the disassembly) reads an offset pair as a scaled index instruction */
+/* 2026-11-11 (the User: the load labels while flashing are "not relevant and scary"): FRAMES | 1 when the last
+ * large Elektron SysEx that is not ours arrived (an OS upgrade from Transfer is a stream of them, the RPC's
+ * OsUpgradeWrite; a sample or project transfer too); meter.c shows no load label within 2 s of one */
+volatile u32 smp_bulk_at __attribute__((section(".data"))) = 0;
+#define BULK_BYTES 128u
+
+int smp_bulk_recent(void)
+{
+    return smp_bulk_at && (int)(FRAMES - smp_bulk_at) < 3000;
+}
+
+__attribute__((optimize("no-jump-tables")))
 void smp_rx(const u8 *msg, u32 len, u32 source)
 {
+    if (len >= BULK_BYTES && msg[1] == 0x00 && msg[2] == 0x20 && msg[3] == 0x3C && msg[4] != 0x7D)
+        smp_bulk_at = FRAMES | 1u;
     if (source != 2 && source != 4)
         return;
     if (len < 10 || len > 7 + (RQ_MAX * 8) / 7)
@@ -2912,6 +2946,39 @@ void smp_rx(const u8 *msg, u32 len, u32 source)
     } else if (cmd == 29) {                     /* v0.39: ERASE STATUS (erase.c's smp_er_status) */
         extern u32 smp_er_status(u8 *rp, u32 r);
         r = smp_er_status(rp, r);
+    } else if (cmd == 32 && n >= 3) {           /* 2026-11-11: TLM -> the telemetry frame, 32 words (read only) */
+        extern void mtr_tlm(u32 *w);
+        extern volatile u32 hold_count, hold_drops, hold_seq;
+        extern int ins_full_any(void);
+        u32 w[32];
+        for (int k = 0; k < 32; k++)
+            w[k] = 0;
+        w[0] = 0x544C4D31u;                     /* 'TLM1' */
+        w[1] = TLM_BUILD;
+        w[2] = FRAMES;
+        w[3] = periods;
+        mtr_tlm(w + 4);                         /* 4..14: D, C, heap, labels and their ages */
+        u32 sk = 0, cost = 0, voices = 0;
+        for (int t = 0; t < 16; t++) {
+            if (smp_skipped(t))
+                sk |= 1u << t;
+            u32 c = smp_tlm_cost[t];
+            cost += c;
+            voices += c != 0;
+            w[24 + (t >> 1)] |= c << ((t & 1) ? 0 : 16);     /* two slots to a word, slot 0 high */
+        }
+        w[15] = sk | (u32)(ins_full_any() != 0) << 16;
+        w[16] = smp_ins_skips;
+        w[17] = smp_ins_skip_at ? periods - smp_ins_skip_at : 0xFFFFFFFFu;
+        w[18] = hold_count;
+        w[19] = hold_drops;
+        w[20] = hold_seq;
+        w[21] = (u32)smp_tlm_nfil | (u32)smp_tlm_ndry << 16;
+        w[22] = cost << 4;
+        w[23] = voices;
+        for (int k = 0; k < 32; k++) {
+            put32(rp + r, w[k]); r += 4;
+        }
     } else if (cmd == 24) {                     /* v0.34: DIAG -> the DSP's guard record and load */
         put32(rp + r, smp_blown_count); r += 4;
         put32(rp + r, smp_blown_info); r += 4;
@@ -2941,6 +3008,9 @@ void smp_rx(const u8 *msg, u32 len, u32 source)
             scan_seq = smp_command(CMD_SCAN, get32(rq + 3), get32(rq + 7), 0, 0);
             rp[r++] = scan_seq >> 8; rp[r++] = scan_seq;
         }
+    } else if (cmd >= 33 && cmd <= 42 && cmd != 39) {   /* 2026-11-11: the test channel (csrc/devtest, a test build) */
+        extern u32 dt_rx(u32 cmd, const u8 *rq, u32 n, u8 *rp, u32 r, u8 *st);
+        r = dt_rx(cmd, rq, n, rp, r, &rp[3]);
     } else {
         rp[3] = 2;
     }

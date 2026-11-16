@@ -1,0 +1,21 @@
+{
+  "velocity": 40,
+  "note_hold_s": 1.5,
+  "min_level_db": -60.0,
+  "max_peak": 0.99,
+  "max_clicks": 0,
+  "max_click_rate_per_s": 0.5,
+  "filter_diff_db": 6.0,
+  "filter_pair_diff_db": 3.0,
+  "resonance_gain_db": 6.0,
+  "hold_persist_db": 6.0,
+  "hold_decay_db": 30.0,
+  "glide_min_s": 0.08,
+  "glide_max_s": 3.0,
+  "jump_max_s": 0.05,
+  "echo_min_count": 1,
+  "reverb_extra_s": 0.3,
+  "reverb_min_s": 0.5,
+  "insert_diff_db": 3.0,
+  "pitch_tolerance_cents": 60
+}

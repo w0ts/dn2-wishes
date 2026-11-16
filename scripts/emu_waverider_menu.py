@@ -2211,6 +2211,8 @@ def main() -> int:
     # the kernel's 128 KB limit on one argument)
     steps_text = pathlib.Path(a.steps[1:]).read_text() if a.steps.startswith("@") else a.steps
     onpc_hooks = []
+    dt_log: list = []
+    dt_results: dict = {}
     for step in [s.strip() for s in steps_text.split(",") if s.strip()]:
         step_now["name"] = step
         if step == "func-src":
@@ -2323,6 +2325,77 @@ def main() -> int:
             uc.hook_del(hs)
             (path.parent / (path.name + ".replies.json")).write_text(json.dumps(sent))
             print(f"  sysex: {len(msgs)} message(s), {len(sent)} repl(ies), {total:,} instructions")
+        elif step.startswith("dt:"):
+            # 2026-11-11, the test channel (csrc/devtest, docs/remote-ui.md) through the stock SysEx router as the
+            # MIDI task would call it: dt:arm, dt:press:FUNC+SRC, dt:turn:A:+5[:push], dt:screen:NAME (the readout
+            # against the front buffer read here and the last frame the panel captured), dt:state:NAME
+            sys.path.insert(0, str(HERE.parent / "tools" / "dn2tools" / "src"))
+            from dn2tools import keys as DK, protocol as DP, screen as DS
+            parts = step.split(":")
+
+            def dt_call(cmd, args=b""):
+                got = []
+
+                def at_send(uc_, address, size, user):
+                    sp = uc.reg_read(K.UC_M68K_REG_A7)
+                    b, n, _ab, _port = struct.unpack(">4I", bytes(uc.mem_read(sp + 4, 16)))
+                    got.append(bytes(uc.mem_read(b, n)) if 0 < n < 4096 else b"")
+                h = uc.hook_add(UC_HOOK_CODE, at_send, begin=SYSEX_SENDER, end=SYSEX_SENDER)
+                msg = DP.encode(0x7000 + len(dt_log), cmd, args)
+                machine.write(SENTINEL + 0x1000, msg)
+                guest_call(SYSEX_ROUTER, SENTINEL + 0x1000, len(msg), 2)
+                uc.hook_del(h)
+                r = DP.decode(got[-1]) if got else None
+                dt_log.append({"cmd": cmd, "args": args.hex(), "status": None if r is None else r.status,
+                               "data": None if r is None else r.data.hex()})
+                return r
+            if parts[1] == "arm":
+                ask = dt_call(DP.ARM, DP.args_arm_ask())
+                ok = ask is not None and ask.status == 0
+                conf = dt_call(DP.ARM, DP.args_arm_confirm(struct.unpack(">I", ask.data[:4])[0])) if ok else None
+                dt_results["arm"] = {"asked": ok, "armed": bool(conf and conf.status == 0 and conf.data[0])}
+            elif parts[1] in ("press", "turn"):
+                if parts[1] == "press":
+                    evs, total = DK.chord_events(parts[2])
+                else:
+                    evs, total = DK.turn_events(DK.encoder_of(parts[2]), int(parts[3]), push=len(parts) > 4)
+                r = dt_call(DP.KEY, DP.args_key(evs))
+                dt_results.setdefault("keys", []).append({"step": step, "status": None if r is None else r.status,
+                                                          "ms": total})
+            elif parts[1] == "screen":
+                name = parts[2]
+                chunks = [dt_call(DP.SCREEN, DP.args_screen(0, fresh=True))]
+                chunks += [dt_call(DP.SCREEN, DP.args_screen(k)) for k in range(1, 8)]
+                sc = [DP.parse_screen(c.data) for c in chunks if c is not None and c.status == 0]
+                readout = b"".join(c.data for c in sc) if len(sc) == 8 else b""
+                glass = machine.read(machine.long(0x402A10CC), 1024)   # BACK: the frame on the glass since the last swap
+                cap = bytes(panel.capture.frames[-1]) if panel.capture and panel.capture.frames else b""
+                png_dir.mkdir(parents=True, exist_ok=True)
+                if readout:
+                    DS.write_png(readout, png_dir / f"{name}.readout.png")
+                shots[name] = panel.screen(name)
+                dt_results.setdefault("screens", {})[name] = {
+                    "chunks": len(sc), "whole": all(c.whole for c in sc), "same_seq": len({c.seq for c in sc}) == 1,
+                    "hash_ok": bool(readout) and DP.fnv1a(readout) == sc[0].hash,
+                    "readout_vs_glass_px": DS.differ(readout, glass) if readout else None,
+                    "readout_vs_capture_px": DS.differ(readout, cap) if readout and cap else None,
+                    "lit_px": sum(bin(b).count("1") for b in readout)}
+                print(f"  dt screen {name}: {dt_results['screens'][name]}")
+            elif parts[1] == "raw":                  # dt:raw:CMD:HEXARGS, the host's checks bypassed (the firmware's own)
+                r = dt_call(int(parts[2]), bytes.fromhex(parts[3]) if len(parts) > 3 else b"")
+                dt_results.setdefault("raw", []).append({"step": step, "status": None if r is None else r.status,
+                                                         "data": None if r is None else r.data.hex()})
+            elif parts[1] == "state":
+                st, co, tr = dt_call(DP.STATE), dt_call(DP.COUNTERS, DP.args_counters()), dt_call(DP.TRACE, DP.args_trace(0))
+                bi = dt_call(DP.BUILDINFO)
+                dt_results.setdefault("states", {})[parts[2]] = {
+                    "buildinfo": None if bi is None or bi.status else DP.parse_buildinfo(bi.data).__dict__,
+                    "state": None if st is None or st.status else {k: v for k, v in DP.parse_state(st.data).__dict__.items()},
+                    "counters": None if co is None or co.status else DP.parse_counters(co.data),
+                    "trace": None if tr is None or tr.status else [e.__dict__ for e in DP.parse_trace(tr.data)[2]]}
+                print(f"  dt state {parts[2]}: {json.dumps(dt_results['states'][parts[2]], default=str)[:600]}")
+            else:
+                raise SystemExit(f"unknown dt step {step!r}")
         elif step.startswith("seq:"):
             # v0.38: seq:N, N sequencer ticks (PLAY pressed first: the trigs, the arp and its
             # notes run). The sequencer's timer ISR (0x400d99de, vector 121) never fires here
@@ -2506,6 +2579,7 @@ def main() -> int:
               "screen_frames": panel.frames() - frames_at_reset[0],
               "panel_writers": panel_writers, "items": items,
               "alive": alive, "fault_reports": reported, "stack_frees": stack_frees[:10],
+              "devtest": dt_results, "devtest_log": dt_log,
               "isr": None if ssi is None else {
                   "frame_instructions": a.isr_frame, "delivered": isr["delivered"],
                   "vector170": ssi.vector170, "vector191": ssi.vector191, "requests": ssi.requests,

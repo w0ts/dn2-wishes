@@ -1,0 +1,18 @@
+{
+  "name": "dn2test",
+  "tracks": {
+    "1": {"machine": "ANALOG2", "filter": "SVF"},
+    "2": {"machine": "ANALOG2", "filter": "LADR"},
+    "3": {"machine": "ANALOG2", "filter": "OTA"},
+    "4": {"machine": "ANALOG2", "filter": "DIOD"},
+    "5": {"machine": "ANALOG2", "filter": "MS20"},
+    "6": {"machine": "DRONE", "hold": true},
+    "7": {"machine": "DRONE", "glide": true, "key": "DRONE"},
+    "8": {"machine": "ANALOG2", "insert": "XDLY"},
+    "9": {"machine": "ANALOG2", "insert": "FDN8"},
+    "10": {"machine": "PLAITS", "key": "PLAITS:WS"},
+    "11": {"machine": "TB303", "key": "TB303"},
+    "12": {"machine": "SOPHIE", "key": "SOPHIE"},
+    "13": {"machine": "ANALOG2", "reference": true}
+  }
+}

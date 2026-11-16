@@ -37,6 +37,7 @@ typedef unsigned char u8;
 
 extern int smp_func_held;
 extern int smp_dsp_load(void);
+extern volatile u32 smp_load_peak;
 
 /* The meter's state, in its own block of RAM above BSS (METER_RAM, 256 B, declared by
  * dnfw.mods.waverider.ram), never in the code chunk: hooks.S's counters change at every
@@ -186,7 +187,11 @@ static u32 over(u32 bit, int v, int on, int off)    /* a level with hysteresis: 
 
 static u32 icons_live(u32 f)            /* the icons to show now (bits), the force ones included */
 {
-    u32 ev = (smp_skipped_any() ? 1u : 0u)
+    extern int smp_bulk_recent(void);   /* 2026-11-11: none while an OS upgrade (or a transfer) arrives (link.c) */
+    if (smp_bulk_recent())
+        return 0;
+    extern volatile u32 dt_sw[];        /* the test channel's switch LABELS (csrc/devtest/whitelist.c) */
+    u32 ev = !dt_sw[1] ? 0u : (smp_skipped_any() ? 1u : 0u)
            | (over(1u, smp_dsp_load(), ICON_DSP_PCT, ICON_DSP_OFF) ? 1u : 0u)
            | (over(2u, mtr_cpu, ICON_CPU_PM, ICON_CPU_OFF) ? 2u : 0u)
            | (ins_full_any() || heap_pct() >= ICON_HEAP_PCT ? 4u : 0u);
@@ -247,6 +252,36 @@ void mtr_poll(void *screen)
         SET_DIRTY(screen);
     }
     held_was = held;
+}
+
+/* The telemetry frame's share (link.c, SysEx 32 TLM; docs/device-tests.md): the figures above as
+ * 11 words, read only (nothing here is written, none of the icon logic runs: icons_live stamps
+ * and moves hysteresis, this only reads what it left):
+ *   w[0] D now, permille (0xFFFFFFFF: no figure)   w[1] D peak, percent (0xFFFFFFFF: none)
+ *   w[2] C now, permille (0xFFFFFFFF: none)        w[3] C peak, percent
+ *   w[4] heap used, bytes   w[5] heap total   w[6] heap walk faults
+ *   w[7] label bits: lit now (bit 0 D, 1 C, 2 M), the hysteresis bits << 8, the forced << 16
+ *   w[8..10] frames since each label's last event (D, C, M), 0xFFFFFFFF never */
+void mtr_tlm(u32 *w)
+{
+    u32 f = FRAMES;
+    if (MTR[MTR_MAGIC_W] != MTR_MAGIC) {            /* the meter has not run yet (before the first poll) */
+        for (int k = 0; k < 11; k++)
+            w[k] = 0xFFFFFFFFu;
+        w[7] = 0;
+        return;
+    }
+    int d = smp_dsp_load();
+    w[0] = d < 0 ? 0xFFFFFFFFu : smp_load_peak;
+    w[1] = dpk < 0 ? 0xFFFFFFFFu : (u32)dpk;
+    w[2] = mtr_cpu < 0 ? 0xFFFFFFFFu : (u32)mtr_cpu;
+    w[3] = cpk < 0 ? 0xFFFFFFFFu : (u32)cpk;
+    w[4] = mtr_heap_ok ? (mtr_heap_tot > mtr_heap ? mtr_heap_tot - mtr_heap : 0u) : 0xFFFFFFFFu;
+    w[5] = mtr_heap_ok ? mtr_heap_tot : 0xFFFFFFFFu;
+    w[6] = mtr_heap_faults;
+    w[7] = (MTR[MTR_ICON_SHOWN] & 7u) | (MTR[MTR_ICON_HYS] & 7u) << 8 | (MTR[MTR_ICON_FORCE] & 7u) << 16;
+    for (int k = 0; k < 3; k++)
+        w[8 + k] = MTR[MTR_ICON_AT_D + k] ? f - MTR[MTR_ICON_AT_D + k] : 0xFFFFFFFFu;
 }
 
 /* 3 x 5 glyphs, rows top to bottom, bit 2 the left column */

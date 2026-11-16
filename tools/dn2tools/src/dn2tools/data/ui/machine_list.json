@@ -1,0 +1,6 @@
+{
+  "name": "machine_list",
+  "about": "FUNC+SRC opens the machine list, encoder A with its push moves the selection, NO closes it; a snap at each stage",
+  "steps": ["snap:0-page", "FUNC+SRC", "wait:0.3", "expect:changed", "snap:1-list", "push:A:+2", "wait:0.3", "expect:changed",
+            "snap:2-moved", "NO", "wait:0.3", "expect:changed", "snap:3-closed"]
+}

@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dn2tools"
+version = "0.1.0"
+description = "dn2-wishes: test the Digitone II on the unit over USB: telemetry, switches, screen mirror, key driver, audio checks (a test build)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "AGPL-3.0-or-later"}
+dependencies = ["mido>=1.3", "python-rtmidi>=1.5", "numpy>=1.24"]
+
+[project.optional-dependencies]
+audio = ["sounddevice>=0.4"]
+dev = ["pytest>=7"]
+
+[project.scripts]
+dn2ui = "dn2tools.cli.dn2ui:main"
+dn2test = "dn2tools.cli.dn2test:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+dn2tools = ["data/*.json", "data/ui/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

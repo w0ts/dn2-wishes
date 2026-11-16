@@ -359,6 +359,7 @@ int wr_poll(void *screen)
     jmp_poll();                                 /* DIRECT JUMP's setting, read and written (csrc/jump) */
     rec_poll();
     { extern void hold_poll(void); hold_poll(); }   /* DRONE's HOLD latch (csrc/hold) */
+    { extern void dt_poll(void); dt_poll(); }       /* the test channel's keys (csrc/devtest, a test build) */
     wr_names();
 #if FLT_SETS
     flt_names();                                /* the A2 filter machines' FLTR names */

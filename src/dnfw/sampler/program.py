@@ -2692,7 +2692,47 @@ def tdm_tx(p: Prog, L: Layout) -> None:
         p.ld(6, G.INS_SKIPS)                   # 2026-11-10: unit 23, the insert blocks passed through
         p.iop(6, 6, "AND", 12)                 # for time, the count (the title bar's DSP label, csrc/meter)
         p.st(SM.LINK_BUF + 4 * 23, 6)
+        # 2026-11-11 (autotest, docs/device-tests.md): units 24..39, each slot's last cost (PERC or sample, the larger) / 16
+        # (a voice's pass in cycles; 0 for a slot not rendering), units 40, 41, the A2 filter pass's
+        # counts of voices filtered and left dry (cumulative, low 16 bits). Read only: the telemetry
+        # frame (SysEx 32) reports them; nothing else reads them.
         p.iconst(0, 24)
+        p.st(K["u"], 0)
+
+        def slot_cost():
+            p.ld(0, K["u"])
+            p.lsh(1, 0, 2)
+            p.iconst(12, G.COST_PERC - 4 * 24)
+            p.iop(1, 12, "+", 1)
+            p.seti(1, 1)
+            p.ldi(6, 0, 1)
+            p.lsh(1, 0, 2)                     # the sample slot's cost beside it: a slot is on one or the other
+            p.iconst(12, G.COST_SMP - 4 * 24)
+            p.iop(1, 12, "+", 1)
+            p.seti(1, 1)
+            p.ldi(7, 0, 1)
+            p.iop(6, 6, "MAX", 7)
+            p.lsh(6, 6, -4)
+            p.iconst(12, 0xFFFF)
+            p.iop(6, 6, "AND", 12)
+            p.lsh(1, 0, 2)
+            p.iconst(12, SM.LINK_BUF)
+            p.iop(1, 12, "+", 1)
+            p.seti(1, 1)
+            p.sti(0, 1, 6)
+            p.iconst(12, 1)
+            p.iop(0, 12, "+", 0)
+            p.st(K["u"], 0)
+        p.loop(K["v"], 16, slot_cost)
+        from ..a2f import program as A2         # lazy: a2f.program imports the layers above
+        p.iconst(12, 0xFFFF)
+        p.ld(6, A2.C["nfil"])
+        p.iop(6, 6, "AND", 12)
+        p.st(SM.LINK_BUF + 4 * 40, 6)
+        p.ld(6, A2.C["ndry"])
+        p.iop(6, 6, "AND", 12)
+        p.st(SM.LINK_BUF + 4 * 41, 6)
+        p.iconst(0, 42)
         p.st(K["u"], 0)
 
         def zero():
@@ -2706,7 +2746,7 @@ def tdm_tx(p: Prog, L: Layout) -> None:
             p.iconst(12, 1)
             p.iop(0, 12, "+", 0)
             p.st(K["u"], 0)
-        p.loop(K["v"], SM.TX_UNITS - 1 - 24, zero)
+        p.loop(K["v"], SM.TX_UNITS - 1 - 42, zero)
         _tx_out(p, K)
 
     def busy():
