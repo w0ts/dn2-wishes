@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-SEED0, SEED1 = 0x57495348, 0x4E324D58           # 'WISH', 'N2MX'
+SEED0, SEED1 = (int.from_bytes(t, "big") for t in (b"WISH", b"N2MX"))   # as csrc/wishes/tlv.c's TAG4s
 MAX = 488                                       # a record's bytes: what one +Drive cell holds
 STORED = 359                                    # a stored sound
 LANE = (36, 44, 52, 60, 68, 76, 84)             # the link's words: head, h0 hi, h0 lo, h1 hi, h1 lo, length, check
