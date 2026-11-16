@@ -61,6 +61,23 @@ MNM_LEVEL = 0.25                         # a Monomachine machine's full scale on
 MNM_LEVELS: dict[str, float] = {"DRONE": 0.7,   # 2026-11-09: DRONE peaks 1.5..1.8 at gain 1 (half MD_LEVEL; by ear later)
                                 "SID 6581": 5.4, "DPRO-WAVE": 11.5, "DPRO-DDRW": 0.95, "DPRO-DENS": 2.0,
                                 "VO-6": 16.5}
+# 2026-11-12 (the User: "compare the engine levels, they should match approx, don't boost out of the blue"): each
+# engine at its defaults measured as v0.22 measured MD_LEVEL (the amp stage's input, note 60, 227 ms; the table and
+# method: test/test_engine_levels.py, docs/levels.md), then moved into its band only when outside it: a held synth's
+# RMS within +-2 dB of stock WaveTone's (-26.4 dB), a hit's peak within +-2 dB of the stock synths' mean peak
+# (-17.3 dB). dB on top of the level the engine had (MNM_LEVELS, else MD_LEVEL); PLAITS by model (plaits_level)
+LEVEL_DB: dict[str, float] = {"ANALOG2": -3.2, "SOPHIE": +3.8, "TB303": +5.4,
+                              "DPRO-WAVE": +4.1, "DPRO-DDRW": +2.9, "DPRO-DENS": +6.6}
+PLAITS_LEVEL_DB: dict[str, float] = {"WS": -2.8, "": -2.8,      # "" the retired choice, which plays WS
+                                     "SWRM": +2.5, "MDAL": +2.2, "SD": +2.6, "HH": +4.0, "BD": +9.7, "STRG": +9.7}
+
+
+def _db(x: float) -> float:
+    return 10.0 ** (x / 20.0)
+
+
+for _n, _d in LEVEL_DB.items():
+    MNM_LEVELS[_n] = MNM_LEVELS.get(_n, MD_LEVEL) * _db(_d)
 # v0.26: the DSP's room for the Monomachine voices. They never go quiet (as on the
 # Monomachine, a voice plays until the next note), and one costs as much as two to ten of
 # the Machinedrum's, so each block they are rendered in track order while their cost (the
@@ -590,6 +607,9 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
         for name, lev in ((n, v) for n, v in MNM_LEVELS.items() if n in _mnm_types.NAMES):   # v0.27: the machine's own level (2026-11-09: only those built)
             p.iconst(12, _mnm_types.NAMES.index(name) + 1)
             p.if_(0, "EQ", 12, lambda lev=lev: (p.fconst(1, lev), p.st(C["lev"], 1)), kind="i")
+        if "PLAITS" in _mnm_types.NAMES:
+            p.iconst(12, _mnm_types.NAMES.index("PLAITS") + 1)
+            p.if_(0, "EQ", 12, lambda: plaits_level(p, L), kind="i")
         p.ld(9, C["t"])
         p.lsh(12, 9, 2)
         p.iconst(11, NOTE_CELLS)
@@ -675,6 +695,28 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
 
 
 OUT_LIMIT = 8.0                                # v0.33: our voices' samples, at most (+- 18 dBFS)
+
+
+def plaits_level(p: Prog, L: M.Layout) -> None:
+    """2026-11-12: a PLAITS voice's level by its model (PLAITS_LEVEL_DB), the model as the engine chooses it from
+    MODL (p7): its knob trunc(p7 x 127 + 0.5) (dnfw.md.voice.inputs), x N >> 7 (dnfw.mnm.plaits.dsp_model).
+    Once a block, nothing a sample. Clobbers R1, R5, R12 (R0, the machine, kept)."""
+    from ..mnm import plaits as PLT
+    C = L.C
+    p.ld(5, C[f"p{PLT.MODL_K}"])
+    p.fconst(12, 127.0)
+    p.fop(5, 5, "*", 12)
+    p.fconst(12, 0.5)
+    p.fop(5, 5, "+", 12)
+    p.trunc(5, 5)
+    p.iconst(12, PLT.N_MODELS)
+    p.mul_ssi(5, 5, 12)
+    p.lsh(5, 5, -7)
+    for m, name in enumerate(PLT.MODELS):
+        if PLAITS_LEVEL_DB.get(name):
+            p.iconst(12, m)
+            p.if_(5, "EQ", 12, lambda lev=MD_LEVEL * _db(PLAITS_LEVEL_DB[name]): (p.fconst(1, lev), p.st(C["lev"], 1)),
+                  kind="i")
 
 
 def _vel_word(p: Prog, L: M.Layout) -> None:
