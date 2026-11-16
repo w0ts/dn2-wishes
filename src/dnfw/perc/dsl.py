@@ -449,6 +449,9 @@ class Prog:
         self.e(f"I{i} = R{s};", note)
         if bias is not None:
             self.ibias[i] = bias
+        else:
+            self.ibias.pop(i, None)             # a plain Ii = Rs is an unbiased base (2026-11-10, the merge with
+                                                # ports: the A2 models point I3 at their own tables)
         if self.run:
             self.i[i] = self.r[s]
 

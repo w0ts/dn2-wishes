@@ -32,6 +32,8 @@ def expand(par: bytes, par2: bytes | None = None) -> bytes:
 def call(m: Mem, par: bytes, left, right, route, regs=None, par2=None):
     for k, v in enumerate(expand(par, par2)):              # the pre pass's unpacked table
         m.put(D.TABLE + 4 * k, v)
+    for k, v in enumerate(D.flags(expand(par, par2))):     # and its flags (perf, 2026-11-10)
+        m.put(D.FLAGS + 4 * k, v)
     for k in range(8):
         m.put(D.ROUTE + 4 * k, (route[2 * k] & 0xFFFF) | (route[2 * k + 1] & 0xFFFF) << 16)
     for s in range(D.TRACKS):

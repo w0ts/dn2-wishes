@@ -60,10 +60,23 @@ assert PACK_OFFSET + 4 * PACK_WORDS == 0x1000 and RECORDS * FIELDS * 7 == 32 * P
 # code, then its state
 BUS_STATE = 0x200BCC00                            # (dnfw.waverider.dsp.INSBUS_STATE_L2)
 BUS_STATE_END = 0x200C0000                        # PERC's code starts here (dnfw.waverider.dsp.PERC_L2_LOAD)
-# the unpacked records, then the last change word: in the pre pass's L2 state (loaded with zeros)
-TABLE = 0x200AFA00
+# the unpacked records, then the last change word: in the pre pass's state (loaded with zeros). 2026-11-11 (perf):
+# L1 (0x2e3000 + 0x600; was L2 0x200AFA00, 4 cycles an access): the pre and post passes' state and scratch are in
+# L1 0x2e3000..0x2e4050, in the zeros that were PING's state (dnfw.waverider.dsp.INS_STATE_DM, POST_STATE_DM)
+TABLE = 0x2E3600
 TABLE_BYTES = 4 * (RECORDS * FIELDS + 1)
-assert TABLE + TABLE_BYTES <= 0x200B0000
+# 2026-11-10 (perf): after them, three flags the pre pass's unpack sets when the records change: any
+# record of a BUILT (pre), POST, BUS type. Each pass skips its 32 records' walk when its flag is 0
+# (every record OFF to it: the walk would do nothing). A harness that writes TABLE writes FLAGS too.
+FLAGS = TABLE + TABLE_BYTES
+FLAG_WORDS = 3
+assert FLAGS + 4 * FLAG_WORDS <= 0x2E3A40
+
+
+def flags(table: bytes | list[int]) -> list[int]:
+    """the FLAGS words for the unpacked records TABLE (32 x 8 fields): any BUILT, any POST, any BUS"""
+    types = {int(table[FIELDS * r]) & ((1 << TYPE_BITS) - 1) for r in range(RECORDS)}
+    return [int(bool(types & set(g))) for g in (BUILT, POST, BUS)]
 # the routing's per-track blocks (docs/link-research.md §5, §7: 0x1c1f1e sums each voice slot's stereo
 # block, x 14.125, into the block of the track the slot plays): L 32 floats at + 0x100 t, R at + 0x80
 BUS_BLOCKS = 0x258F68

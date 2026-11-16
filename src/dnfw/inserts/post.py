@@ -18,7 +18,7 @@ from ..perc.dsl import Mem, Prog
 from . import design as D
 from . import program as PR
 
-STATE = 0x200B1000               # L2, after the code (dnfw.waverider.dsp.POST_STATE_L2)
+STATE = 0x2E3A40                 # L1 (perf, 2026-11-11; was L2 0x200B1000): dnfw.waverider.dsp.POST_STATE_DM
 STATE_WORDS = 8                  # per slot: words 0..5 the insert's, 6 the last track, 7 the last M.SEL
 STATE_BYTES = D.RECORDS * 4 * STATE_WORDS   # 2026-11-10: per voice slot and insert slot (i = 2 s + j)
 WL = STATE + STATE_BYTES         # CHOR's wet, 32 + 32 words
@@ -549,6 +549,11 @@ def run(p: Prog) -> None:
 
 
 def body(p: Prog) -> None:
+    p.ld(0, D.FLAGS + 4)                         # (perf, 2026-11-10) no POST record: nothing to walk
+    p.ifz(0, "NE", lambda: _walk(p))
+
+
+def _walk(p: Prog) -> None:
     p.iconst(0, 0)
     p.st(C["i"], 0)
     p.iconst(0, D.RECORDS)

@@ -4136,6 +4136,12 @@ def step_mnm(init, sound, machines, blocks) -> dict:
         f"the budget: of four SID tracks the first {fits} play, the rest are silent":
             None not in budget and all(v > 0.01 for v in budget[:fits]) and all(v == 0.0 for v in budget[fits:]),
     }
+    if "DRONE" in runs:                          # 2026-11-10 (the User: DRONE crackles): a click detector, block boundaries
+        ds = perc_series(runs["DRONE"], 0)       # (measured on 96 blocks: the largest boundary step 0.038, the note-on's one-off 0.42 at sample 70)
+        steps = [abs(ds[b * BLOCK] - ds[b * BLOCK - 1]) for b in range(3, len(ds) // BLOCK)]
+        checks["DRONE: no click at a block boundary after the onset (|x[n] - x[n-1]| <= 0.1 where a block starts, blocks 3..)"] = (
+            runs["DRONE"]["ok"] and bool(steps) and max(steps) <= 0.1)
+        n["drone_boundary_steps_max"] = round(max(steps), 4) if steps else None
     if "DRONE_held" in runs:                     # 2026-11-10: legato glides, a released note jumps
         hs, rs = perc_series(runs["DRONE_held"], 0), perc_series(runs["DRONE_released"], 0)
         # (from the note-off on, the released voice's amp releases and PERC's rest may hush it: the

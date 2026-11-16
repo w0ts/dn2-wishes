@@ -154,7 +154,7 @@ def exact(A: int, F: int, knobs, pre: int = 0) -> dict:
 def init(p: Prog, L: C.Layout) -> None:
     """Every word 0 but the copies' constants, the noise's seed and 'no last cutoff'."""
     _ri(p, 0, "I3")
-    p.iconst(12, 4 * (C.K.S0))
+    p.iconst(12, p.ioff(3, 4 * (C.K.S0)))
     p.iop(0, 12, "+", 0)
     p.seti(2, 0)
     p.iconst(1, 0)
@@ -662,7 +662,7 @@ def _jobs(p: Prog, L: C.Layout) -> None:
 
         def copy():                              # copy k = job + 1: osc 1 + a spr + c
             _ri(p, 0, "I3")
-            p.iconst(12, 4 * (C.K.S0 + K_A + 1))
+            p.iconst(12, p.ioff(3, 4 * (C.K.S0 + K_A + 1)))
             p.iop(0, 12, "+", 0)
             p.lsh(1, 6, 2)
             p.ipass(12, 0)
@@ -905,9 +905,10 @@ def _filter(p: Prog, L: C.Layout) -> None:
     _sv(p, D_GA, 0)
     p.ld(0, W[WN["bv"]])
     p.st(X.C["buf"], 0)
+    b3 = p.ibias.get(3)                          # the voice's I3 bias (shrink), put back with it below
     _ri(p, 0, "I3")
     p.st(W[WN["i3"]], 0)
-    p.iconst(12, 4 * (C.K.S0 + S_Z))
+    p.iconst(12, p.ioff(3, 4 * (C.K.S0 + S_Z)))
     p.iop(0, 12, "+", 0)
     p.st(X.C["zp"], 0)
     p.iconst(9, 0)
@@ -925,7 +926,7 @@ def _filter(p: Prog, L: C.Layout) -> None:
     p.ifz(9, "NE", clear)
     M.half(p, X)
     p.ld(0, W[WN["i3"]])
-    p.seti(3, 0)
+    p.seti(3, 0, bias=b3)                        # the models point I3 at their own tables: the voice's biased one back
 
 
 def _out(p: Prog, L: C.Layout) -> None:

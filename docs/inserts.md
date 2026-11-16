@@ -86,7 +86,7 @@ K1..K6 (0..127). 32 x 8 bytes do not fit `0xf18..0x1000` (232 bytes), so they ar
 (`dnfw.inserts.design.pack`, `ins.c ins_words`, held to each other by `test/test_inserts_c.py`): word 0 the
 change word (`ins_gen`), word 1 zero (GATER's clock word, no writer yet), then 8 groups of 7 words, each 4 records' 32 fields: word w holds
 fields 4w .. 4w+3 in its bits 0..27, fields 28..31 are the 7 words' top nibbles. The pre pass unpacks them
-into its table (`design.TABLE`, L2 `0x200afa00`, 32 x 8 words) whenever the change word moved; the three
+into its table (`design.TABLE`, L2 `0x200afb00`, 32 x 8 words) whenever the change word moved; the three
 passes read the table. At power-on the pool's directory and the table are zeros: every insert OFF until
 the ColdFire's first send. A slot whose FDN8 / XDLY found no instance (FULL) is sent as OFF.
 

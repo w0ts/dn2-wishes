@@ -172,6 +172,8 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
             m2.poke(r.state, D.ROUTE + 4 * k, (2 * k) | (2 * k + 1) << 16)
         for k, v in enumerate(D.records(bytes(rows))):   # the unpacked records (no change word moved)
             m2.poke(r.state, D.TABLE + 4 * k, v)
+        for k, v in enumerate(D.flags(D.records(bytes(rows)))):   # its flags (perf, 2026-11-10)
+            m2.poke(r.state, D.FLAGS + 4 * k, v)
         how = fx.run(r, 3_000_000, fx.Fixups(), stop_at=[dsp.PING_SW])
         cost[name] = (how[0], how[2])
     numbers["the pass alone: instructions a block (stop, count)"] = cost

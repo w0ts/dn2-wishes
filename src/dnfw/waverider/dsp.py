@@ -146,10 +146,10 @@ STOCK_DELAY_SW = 0xB8482C
 # the range proven on units; XDLY's branch ends its span here), their state after the code. smp.asm's
 # tail JUMPs to wr_ins, which JUMPs on to PING.
 INS_L2_LOAD = 0x200ADA00                     # 2026-11-10 (0x200AE000 until the four ports)
-INS_L2_SPAN = 0x1A00                         # the code; then the state (dnfw.inserts.program.STATE; 0x1800 until
+INS_L2_SPAN = 0x1B00                         # the code; then the state (dnfw.inserts.program.STATE; 0x1800 until
                                              # 2026-11-10: two slots' state and the unpacked records need the room)
 INS_SW = 0xB80000 + (INS_L2_LOAD - 0x20000000) // 2          # 0xbd7000
-INS_STATE_L2 = INS_L2_LOAD + INS_L2_SPAN                     # 0x200af800
+INS_STATE_DM = 0x2E3000                                      # 2026-11-11 (perf): L1, in the zeros after the shared tail (was L2 0x200af400)
 # the stereo inserts after the pan (docs/inserts.md "After the pan", dnfw.inserts.post): their code in
 # L2 after the inserts' state (below the sample machines' span), their state after the code, their rings
 # in DDR. The engine's call of the FX sends (sw 0x1c3054) gets wr_inpost as its target; wr_inpost JUMPs on
@@ -157,13 +157,14 @@ INS_STATE_L2 = INS_L2_LOAD + INS_L2_SPAN                     # 0x200af800
 POST_L2_LOAD = 0x200B0000
 POST_L2_SPAN = 0x1000                        # the code; then the state (dnfw.inserts.post.STATE)
 POST_SW = 0xB80000 + (POST_L2_LOAD - 0x20000000) // 2        # 0xbd8000
-POST_STATE_L2 = POST_L2_LOAD + POST_L2_SPAN                  # 0x200b1000
 # 2026-11-09: DRONE's BEAT side blocks at 0x200b1800 (dnfw.inserts.post.SIDE_L2, 0x900 B); the A2 filter
 # machines' pass (dnfw.a2f.program): its code, then its state
 A2F_L2_LOAD = 0x200B2400
 A2F_L2_SPAN = 0x3400                          # the code; then the state (dnfw.a2f.program.STATE)
-A2F_STATE_L2 = A2F_L2_LOAD + A2F_L2_SPAN      # 0x200b5800, up to 0x800 B (SMP_L2_LOAD 0x200b6000)
+A2F_STATE_DM = REGION[0]                      # 2026-11-11 (perf): the state in L1, the free 2 KB at the region's start
+                                              # (was L2 0x200b5800: every word an L2 access, 4 cycles)
 A2F_SW = 0xB80000 + (A2F_L2_LOAD - 0x20000000) // 2
+POST_STATE_DM = 0x2E3A40                                     # L1 too (was L2 0x200b1000): to 0x2e4044
 SENDS_SITE_SW = 0x1C3054                     # the engine: CJUMP 0x1c1738 (DB), then its two pushes
 SENDS_SITE_STOCK = bytes.fromhex("04181c003817")
 # 2026-11-10: the bus inserts (docs/inserts.md "On the track's bus", dnfw.inserts.bus): FDN8 and XDLY per
@@ -219,6 +220,16 @@ REC_GAIN_DM = SMP_DEC_DM + 16 * 48                         # 0x2e0080, 2 words
 # shipped, and are kept only for the retired generators (gen_ping/gran_asm's helpers).
 PING_CODE_DM, PING_CODE_SPAN = 0x2E0500, 0x1800
 PING_SW = PING_CODE_DM // 2                                  # 0x170280
+# 2026-11-10 (stock-hotspots item 2, docs/stock-hotspots.md): the stock engine's 16 mono track buffers
+# (128 B each, 32 floats) from DDR to L1: trackbuf.asm, run once from entry_mark.asm's first pass,
+# copies them to TRACKBUF_DM (the 2 KB PING's state held, zeros in the stream) and re-points the two
+# tables that hold their addresses. Its code is in the free span between ping.asm's tail and there.
+TRACKBUF_CODE_DM = 0x2E1000
+TRACKBUF_SW = TRACKBUF_CODE_DM // 2                          # 0x170800
+TRACKBUF_DM, TRACKBUF_BYTES = 0x2E1D00, 16 * 128             # to 0x2e2500
+TRACKBUF_DDR = 0x804ACF90                                    # where the stock puts them
+TRACKAUX_DM, TRACKAUX_DDR, TRACKAUX_BYTES = 0x2E1C00, 0x804ACE90, 0x100   # the extra 256 B just below them
+TRACKAUX_PTR = 0x254AA0                                      # the one word that holds its address
 PING_STATE_DM = PING_CODE_DM + PING_CODE_SPAN                # 0x2e1d00
 PING_T_DM = PING_STATE_DM + 16 * 128                         # 0x2e2500: t, then scratch
 # GRAN (v0.10): PING's and SHFT's tables moved to DDR, so GRAN's code takes theirs
@@ -345,7 +356,7 @@ def objects() -> dict[str, bytes]:
     spec = _code()
     return {name: sharc_object.load_bytes(bytes.fromhex(spec[name]["object_parcels_be"]))
             for name in ("perc", "smp", "entry_jump", "idle_load", "idle_jump", "block_count",
-                         "entry_mark", "emark_jump", "lookup_ptr", "ping",
+                         "entry_mark", "emark_jump", "lookup_ptr", "ping", "trackbuf",
                          "pvmix", "pvmix_jump", "fdn8", "xdly", "inserts", "inspost", "insbus", "a2f")
             if name in spec}
 
@@ -366,6 +377,17 @@ def pvmix_object() -> bytes:
     return code[:-len(PVMIX_SITE_STOCK)] + site + after
 
 
+def _a2f_state_span(obj) -> tuple[str, int, bytes]:
+    """the region's first 2 KB: the A2 filters' state and mix tables when that pass is built (2026-11-11,
+    perf: they were in L2), else free since v0.11 (Waverider's reader and osc 2; zeros)"""
+    if "a2f" not in obj:
+        return ("free since v0.11 (Waverider's reader and osc 2; zeros)", REGION[0], b"")
+    from ..a2f import program as a2f_program
+    st = a2f_program.state_bytes()
+    assert a2f_program.STATE == A2F_STATE_DM and len(st) <= 0x800 and A2F_STATE_DM + 0x800 <= STATE_DM
+    return ("the A2 filters' state and mix tables (L1)", A2F_STATE_DM, st)
+
+
 def spans() -> list[tuple[str, int, bytes]]:
     """(what, load address, payload) of every block this adds, in stream order.
 
@@ -374,7 +396,7 @@ def spans() -> list[tuple[str, int, bytes]]:
     at least 64 bytes of zeros (a zero word is a NOP)."""
     obj = objects()
     raw = [
-        ("free since v0.11 (Waverider's reader and osc 2; zeros)", REGION[0], b""),
+        _a2f_state_span(obj),
         ("state: save area, PERC scratch, idle_load's counters (zeros)", STATE_DM, bytes(STATE_BYTES)),
         ("PERC state: 16 voices x 128 bytes (zeros)", PERC_STATE_DM, bytes(16 * PERC_STATE_STRIDE)),
         ("idle_load.asm (wr_idle)", IDLE_DM, obj["idle_load"]),
@@ -391,6 +413,9 @@ def spans() -> list[tuple[str, int, bytes]]:
         # machine of ours returns through it). PING's state span went with it; the stub pads
         # with zeros to REGION's end, so those bytes still load as zeros.
         ("ping.asm (wr_ping: the shared tail)", PING_CODE_DM, obj["ping"]),
+        ("trackbuf.asm (wr_trackbuf: the stock track buffers to L1, once)", TRACKBUF_CODE_DM, obj["trackbuf"]),
+        ("the stock track buffers in L1 (zeros; 256 B extra block, then 16 x 128 B)", TRACKAUX_DM,
+         bytes(TRACKAUX_BYTES + TRACKBUF_BYTES)),
         ("FDN8 state: its words, the LFOs' phases, the stock buffers' chunk table", FDN8_STATE_DM, _fdn8_state()),
         ("XDLY state: its words (zeros)", XDLY_STATE_DM, _xdly_state()),
         ("Machinedrum / Monomachine voices: 16 slots x 1 KB (zeros; L2 until 2026-11-10)", MD_STATE_DM,
@@ -570,18 +595,18 @@ def l2_spans() -> list[tuple[str, int, bytes]]:
         raise DspError(f"inserts.asm ({len(code)} bytes) leaves fewer than 64 bytes of its L2 span")
     out.append(("inserts.asm (wr_ins), in L2", INS_L2_LOAD, code + bytes(L2_TAIL)))
     from ..inserts import program as ins_program
-    assert ins_program.STATE == INS_STATE_L2
-    out.append(("the inserts' state: 32 voice and insert slots x 32 bytes, the pass's words, the unpacked "
-                "records (zeros)", INS_STATE_L2, ins_program.state_bytes()))
+    assert ins_program.STATE == INS_STATE_DM
     code = obj["inspost"]
     if POST_L2_SPAN - len(code) < L2_TAIL:
         raise DspError(f"inspost.asm ({len(code)} bytes) leaves fewer than 64 bytes of its L2 span")
     out.append(("inspost.asm (wr_inpost), in L2", POST_L2_LOAD, code + bytes(L2_TAIL)))
     from ..inserts import post as ins_post
-    assert ins_post.STATE == POST_STATE_L2
-    assert POST_STATE_L2 + len(ins_post.state_bytes()) <= SMP_L2_LOAD
-    out.append(("the post inserts' state: 32 voice and insert slots x 32 bytes, CHOR's wet, the pass's "
-                "words (zeros)", POST_STATE_L2, ins_post.state_bytes()))
+    assert ins_post.STATE == POST_STATE_DM
+    # both states are zeros in L1, inside the shared tail's zero fill (spans(): ping.asm's payload runs to FDN8's
+    # state), clear of ping.asm's code and of FDN8's state and the Monomachine render scratch
+    assert PING_CODE_DM + 0x400 <= INS_STATE_DM
+    assert INS_STATE_DM + len(ins_program.state_bytes()) <= POST_STATE_DM
+    assert POST_STATE_DM + len(ins_post.state_bytes()) <= MNM_RENDER_DM
     code = obj["insbus"]
     if INSBUS_L2_SPAN - len(code) < L2_TAIL:
         raise DspError(f"insbus.asm ({len(code)} bytes) leaves fewer than 64 bytes of its L2 span")
@@ -595,13 +620,10 @@ def l2_spans() -> list[tuple[str, int, bytes]]:
     if "a2f" in obj:                             # 2026-11-09: the A2 filter machines' pass (dnfw.a2f)
         from ..a2f import program as a2f_program
         code = obj["a2f"]
-        assert a2f_program.STATE == A2F_STATE_L2 and A2F_STATE_L2 + 0x800 <= SMP_L2_LOAD
+        assert a2f_program.STATE == A2F_STATE_DM and A2F_STATE_DM + 0x800 <= STATE_DM
         if A2F_L2_SPAN - len(code) < 64:
             raise DspError(f"a2f.asm ({len(code)} bytes) leaves fewer than 64 bytes of its L2 span")
         out.append(("a2f.asm (wr_a2f), in L2", A2F_L2_LOAD, code + bytes(A2F_L2_SPAN - len(code))))
-        st = a2f_program.state_bytes()
-        assert len(st) <= 0x800
-        out.append(("the A2 filters' state and mix tables", A2F_STATE_L2, st))
     if ins_post._beat_built():                   # 2026-11-09: DRONE's BEAT side blocks (dnfw.mnm.drone)
         assert ins_post.SIDE_L2 + ins_post.SIDE_BYTES <= A2F_L2_LOAD
         out.append(("DRONE's BEAT side blocks: 16 slots x 36 words (zeros)", ins_post.SIDE_L2,

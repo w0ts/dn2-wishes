@@ -86,6 +86,8 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
                             m2.word(st, EMU_STEREO + EMU_STRIDE * s_ + EMU_R + 4 * j) or 0)
             for k, v in enumerate(D.records(par_of(len(caps)))):   # the pre pass's unpacked records
                 m2.poke(st, D.TABLE + 4 * k, v)
+            for k, v in enumerate(D.flags(D.records(par_of(len(caps))))):   # its flags (perf, 2026-11-10)
+                m2.poke(st, D.FLAGS + 4 * k, v)
             cur.clear()
             cur["par"] = par_of(len(caps))
             cur["in"] = stereo(st)
@@ -179,6 +181,8 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
                 m2.poke(r.state, D.ROUTE + 4 * k, (2 * k) | (2 * k + 1) << 16)
             for k, v in enumerate(D.records(bytes(rows))):
                 m2.poke(r.state, D.TABLE + 4 * k, v)
+            for k, v in enumerate(D.flags(D.records(bytes(rows)))):   # its flags (perf, 2026-11-10)
+                m2.poke(r.state, D.FLAGS + 4 * k, v)
             how = fx.run(r, 3_000_000, fx.Fixups(), stop_at=[P.SENDS_SW])
             res = (how[0], how[2])
             if how[0] != "stop":

@@ -183,99 +183,73 @@ def split_w(p: Prog, k: int, kh: int) -> None:
     ss(p, kh + 1, 3)
 
 
+def _unsplit(p: Prog, d: int, h: int, lo: int, sh: int = 0) -> None:
+    """2026-11-10 (perf): Rd = (Fh 2^12 + Flo) << SH, the integer whose halves split() made
+    (both exact integers as floats). Clobbers R12 (d not 12)."""
+    p.trunc(d, h)
+    p.lsh(d, d, 12 + sh)
+    p.trunc(12, lo)
+    if sh:
+        p.lsh(12, 12, sh)
+    p.iop(d, 12, "+", d)
+
+
+# 2026-11-10 (perf): the 56300's products through the SHARC's own fixed-point multiplier. SSF
+# keeps floor(x y / 2^31) of the operands' exact 64-bit product, SSI its low 32 bits (dsl.mul_ssf /
+# mul_ssi, on the unit since v0.42's PLAITS); with each operand shifted up as far as it stays a
+# 32-bit signed word, one SSF is floor(A B / 2^k) for the k needed. Bit for bit the old 12-bit-halves
+# float products (equal over every operand class: perf scratch eqtest.py), in a third of the steps.
+
 def xfloor(p: Prog, d: int, e: int, ch: int, cl: int, sh: int) -> None:
     """Rd = floor(Re C / 2^sh), exactly: Re a signed 24-bit integer, C = Fch 2^12 + Fcl
-    (0 <= C < 2^24, halves as floats), 12 < sh <= 24. Clobbers R1-R3, R12, R13."""
-    p.ash(1, e, -12)
-    p.iconst(12, 4095)
-    p.iop(2, e, "AND", 12)
-    p.iconst(12, 0)
-    p.float_(1, 1, 12)
-    p.float_(2, 2, 12)
-    p.fop(3, 1, "*", ch)                       # eh ch
-    p.fop(1, 1, "*", cl)                       # eh cl
-    p.fop(13, 2, "*", ch)                      # el ch
-    p.fop(2, 2, "*", cl)                       # el cl
-    for r in (3, 1, 13, 2):
-        p.trunc(r, r)
-    p.iop(13, 13, "+", 1)                      # m
-    p.lsh(2, 2, -12)
-    p.iop(13, 13, "+", 2)
-    p.ash(13, 13, -(sh - 12))
-    p.lsh(3, 3, 24 - sh)
-    p.iop(d, 13, "+", 3)
+    (0 <= C < 2^24, halves as floats), 16 <= sh <= 23. Clobbers R1, R2, R12."""
+    assert 16 <= sh <= 23 and e not in (1, 12) and cl != 1
+    _unsplit(p, 1, ch, cl, 23 - sh)            # C 2^(23 - sh) < 2^31
+    p.lsh(2, e, 8)                             # Re 2^8: |.| <= 2^31
+    p.mul_ssf(d, 1, 2)                         # floor(Re C 2^(31 - sh) / 2^31)
 
 
 def xprod(p: Prog, ah: int, al: int, b: int, sh: int) -> None:
     """R9:R10 = floor(A Rb / 2^sh) as (high, low 24 bits), exactly: A = Fah 2^12 + Fal
-    (0 <= A < 2^24), Rb a signed 24-bit integer, 0 <= sh <= 12. With A = 2a, sh = 0 this is
-    the 56300's accumulator after mpy(a, b): A1 = R9, A0 = R10. Clobbers R1-R3, R12."""
-    p.ash(1, b, -12)
-    p.iconst(12, 4095)
-    p.iop(2, b, "AND", 12)
-    p.iconst(12, 0)
-    p.float_(1, 1, 12)
-    p.float_(2, 2, 12)
-    p.fop(9, ah, "*", 1)                       # q = ah bh
-    p.fop(1, al, "*", 1)                       # al bh
-    p.fop(10, ah, "*", 2)                      # ah bl
-    p.fop(2, al, "*", 2)                       # n = al bl
-    for r in (9, 1, 10, 2):
-        p.trunc(r, r)
-    p.iop(1, 10, "+", 1)                       # m (|m| < 2^25)
-    p.iconst(12, (1 << (12 + sh)) - 1)
-    p.iop(10, 1, "AND", 12)
-    p.lsh(10, 10, 12 - sh)
-    if sh:
-        p.lsh(2, 2, -sh)
-    p.iop(10, 10, "+", 2)
-    if sh:
-        p.iconst(12, (1 << sh) - 1)
-        p.iop(3, 9, "AND", 12)
-        p.lsh(3, 3, 24 - sh)
-        p.iop(10, 10, "+", 3)
-        p.ash(9, 9, -sh)
-    p.ash(1, 1, -(12 + sh))
-    p.iop(9, 9, "+", 1)
-    p.lsh(3, 10, -24)
-    p.iop(9, 9, "+", 3)
-    p.iconst(12, M24)
-    p.iop(10, 10, "AND", 12)
+    (0 <= A < 2^24), Rb a signed 24-bit integer, 0 <= sh <= 7. With A = 2a, sh = 0 this is
+    the 56300's accumulator after mpy(a, b): A1 = R9, A0 = R10. Clobbers R1, R2, R12."""
+    assert 0 <= sh <= 7 and b not in (1, 2, 9, 12) and al != 1
+    _unsplit(p, 1, ah, al)
+    if sh < 7:
+        p.lsh(2, b, 7 - sh)                    # Rb 2^(7 - sh): |.| < 2^30
+        p.mul_ssf(9, 1, 2)                     # floor(A Rb / 2^(24 + sh))
+    else:
+        p.mul_ssf(9, 1, b)
+    p.mul_ssi(10, 1, b)                        # A Rb's low 32 bits (24 + sh <= 31 of them count)
+    p.lsh(10, 10, 8 - sh)
+    p.lsh(10, 10, -8)                          # bits sh .. sh + 23
 
 
 def xround(p: Prog, d: int, ah: int, al: int, b: int) -> None:
     """Rd = hi(rnd(mpy(a, Rb))) exactly, a >= 0 given as the halves of A = 2a (Fah 2^12 +
     Fal), Rb a signed 24-bit integer: round(A Rb / 2^24), a tie to even. d may be b.
     Clobbers R1-R3, R12, R13."""
-    p.ash(1, b, -12)
-    p.iconst(12, 4095)
-    p.iop(2, b, "AND", 12)
-    p.iconst(12, 0)
-    p.float_(1, 1, 12)
-    p.float_(2, 2, 12)
-    p.fop(3, ah, "*", 1)                       # q
-    p.fop(1, al, "*", 1)
-    p.fop(13, ah, "*", 2)
-    p.fop(2, al, "*", 2)                       # n
-    for r in (3, 1, 13, 2):
-        p.trunc(r, r)
-    p.iop(13, 13, "+", 1)                      # m
-    p.ash(1, 13, -12)
-    p.iconst(12, 4095)
-    p.iop(13, 13, "AND", 12)
-    p.lsh(13, 13, 12)
-    p.iop(13, 13, "+", 2)                      # low = (m & 4095) 2^12 + n  (< 2^25)
-    p.iconst(12, 0x800000)
-    p.iop(2, 13, "+", 12)
-    p.lsh(2, 2, -24)
-    p.ipass(12, 1)
-    p.iop(1, 12, "+", 2)                       # (m >> 12) + carry
-    p.ipass(12, 3)
-    p.iop(d, 12, "+", 1)
+    assert b not in (1, 2, 3, 12) and al != 1
+    _unsplit(p, 1, ah, al)                     # A < 2^25
+    xround_i(p, d, 1, b)
+
+
+def xround_i(p: Prog, d: int, a: int, b: int) -> None:
+    """xround with A = 2a an integer in Ra (0 <= A < 2^25), not halves (perf, 2026-11-10: where the
+    integer is at hand, or kept as one). Clobbers R2, R3, R12, R13."""
+    assert a not in (2, 3, 12, 13) and b not in (2, 3, 12, 13)
+    p.lsh(2, b, 7)                             # Rb 2^7: |.| < 2^30
+    p.mul_ssf(3, a, 2)                         # q = floor(A Rb / 2^24)
+    p.mul_ssi(13, a, b)
     p.iconst(12, M24)
-    p.iop(13, 13, "AND", 12)
-    p.iconst(12, 0x800000)
-    p.if_(13, "EQ", 12, lambda: (p.iconst(12, -2), p.iop(d, d, "AND", 12)), kind="i")
+    p.iop(13, 13, "AND", 12)                   # r = A Rb mod 2^24
+    p.iconst(12, 1)
+    p.iop(2, 3, "AND", 12)
+    p.iop(13, 13, "+", 2)
+    p.iconst(12, 0x7FFFFF)
+    p.iop(13, 13, "+", 12)
+    p.lsh(13, 13, -24)                         # 1 iff r > 2^23, or r = 2^23 and q odd
+    p.iop(d, 13, "+", 3)
 
 
 def ld(p: Prog, d: int, k: int, ix: int = 3) -> None:
@@ -390,8 +364,7 @@ def pair(p: Prog, L: K.Layout, o: dict, ix: int = 3) -> None:
     if "menv" in o:
         ld(p, 11, o["menv"], ix)
         p.lsh(11, 11, 1)
-        split(p, 11, 5, 6)
-        xround(p, 7, 5, 6, 7)                  # msig = hi(rnd(mpy(menv, mo)))
+        xround_i(p, 7, 11, 7)                  # msig = hi(rnd(mpy(menv, mo))) (perf: no halves)
         if not o.get("menv_shared"):
             menv_dec(p, o, ix)
     # the carrier: inc_c = (mpy(mf, MOD) << 3 + f) >> 8, mf = hi(rnd(mpy(msig, f)))
@@ -1251,12 +1224,10 @@ class EFMCY:
     @staticmethod
     def render(p: Prog, L: K.Layout) -> None:
         o = CY
-        for k, kk in ((10, o["w10"]), (12, o["w12"])):
+        for k, kk in ((10, o["w10"]), (12, o["w12"])):  # (perf: kept as the integer 2w, not halves)
             w(p, 1, k)
             p.lsh(1, 1, 1)
-            split(p, 1, 2, 3)
-            ss(p, kk, 2)
-            ss(p, kk + 1, 3)
+            ss(p, kk, 1)
         split_w(p, 11, o["mdec"])
         split_w(p, 5, o["dec"])
         hp_coefs(p, 13, o["hpe"], o["hpd"])
@@ -1271,11 +1242,9 @@ class EFMCY:
             p.sti(K.S0 + o["mph"], 1, 13)
             sine_i(p, L, 7, 4, 11)
             s(p, 5, o["w10"])
-            s(p, 6, o["w10"] + 1)
-            xround(p, 7, 5, 6, 7)              # round(MOD * sine)
+            xround_i(p, 7, 5, 7)               # round(MOD * sine)
             s(p, 5, o["env2"])
-            s(p, 6, o["env2"] + 1)
-            xround(p, 7, 5, 6, 7)              # * the mod env (rounded)
+            xround_i(p, 7, 5, 7)               # * the mod env (rounded)
             cy_base(p, L)
             p.ldi(11, K.S0 + o["fb"], 1)
             p.iop(7, 11, "+", 7)               # b = fb + mod
@@ -1291,8 +1260,7 @@ class EFMCY:
             p.iop(11, 11, "+", 7)
             ss(p, o["sum"], 11)
             s(p, 5, o["w12"])
-            s(p, 6, o["w12"] + 1)
-            xround(p, 7, 5, 6, 7)              # fb = round(FB * sine)
+            xround_i(p, 7, 5, 7)               # fb = round(FB * sine)
             cy_base(p, L)
             p.sti(K.S0 + o["fb"], 1, 7)
             p.ld(13, L.C["b"])
@@ -1306,17 +1274,14 @@ class EFMCY:
             p.st(L.C["b"], 13)
             s(p, 11, o["menv"])
             p.lsh(11, 11, 1)
-            split(p, 11, 2, 3)
-            ss(p, o["env2"], 2)
-            ss(p, o["env2"] + 1, 3)
+            ss(p, o["env2"], 11)
             p.loop(L.C["n2"], 4, op)
             edec(p, o["menv"], o["mdec"])
             s(p, 7, o["sum"])
             p.ash(7, 7, -2)                    # the mix
             s(p, 11, o["amp"])
             p.lsh(11, 11, 1)
-            split(p, 11, 5, 6)
-            xround(p, 7, 5, 6, 7)
+            xround_i(p, 7, 11, 7)
             ss(p, TMP, 7)
             edec(p, o["amp"], o["dec"])
             s(p, 1, TMP)

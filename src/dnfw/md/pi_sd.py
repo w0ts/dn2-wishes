@@ -327,8 +327,12 @@ class _PI:
         C, rs = L.C, cls.RS
         K.delay_base(p, L, 0)
         p.st(C["g"], 0)
-        p.iconst(12, 4 * SCRW)
-        p.iop(0, 12, "+", 0)
+        if L.pi_scr is None:
+            p.iconst(12, 4 * SCRW)
+            p.iop(0, 12, "+", 0)
+        else:                                      # (perf: L1, shared; core.Layout.pi_scr)
+            assert 256 <= K.PI_SCR_WORDS
+            p.iconst(0, L.pi_scr)
         p.st(C["h"], 0)
 
         # the strike's envelopes and pitch
@@ -740,6 +744,15 @@ class _PI:
         p.iop(1, 12, "+", 1)
         p.seti(2, 1)
 
+        # (perf, 2026-11-10) the limiter's bounds held in F13, F14 through the modes (the loops
+        # take R0, R12 only): the same MIN, MAX, without loading them each time
+        p.fconst(13, TOP)
+        p.fconst(14, -1.0)
+
+        def sat_r(x):
+            p.fop(x, x, "MIN", 13)
+            p.fop(x, x, "MAX", 14)
+
         def mode():
             p.ldpost(8, 1)
             p.ldpost(9, 1)
@@ -751,7 +764,7 @@ class _PI:
             def res():
                 p.ldi(6, X60, 5)
                 p.fpass(7, 4)
-                K.sat(p, 7)
+                sat_r(7)
                 p.fop(11, 5, "*", 8)
                 p.fop(4, 4, "+", 11)
                 p.fop(11, 7, "*", 9)
@@ -761,10 +774,10 @@ class _PI:
                 p.fpass(5, 7)
                 p.ldi(6, X40, 5)
                 p.fop(6, 6, "+", 4)
-                K.sat(p, 6)
+                sat_r(6)
                 p.sti(X40, 5, 6)
             _each(p, L, res)
-            K.sat(p, 4)
+            sat_r(4)
             p.sti(0, 2, 4)
             p.sti(1, 2, 5)
             p.ldpost(12, 2)

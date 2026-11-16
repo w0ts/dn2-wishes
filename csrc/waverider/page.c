@@ -181,6 +181,28 @@ static const char *flt_stock_long[FLT_NAMED] __attribute__((section(".data")));
 static const char *flt_stock_short[FLT_NAMED] __attribute__((section(".data")));
 static int flt_on __attribute__((section(".data"))) = -2;   /* -2: not yet run */
 
+/* the same records' formatters (the header's value as a knob turns, the SYN-held cells): in Hz, ms, %, the modes'
+ * names (csrc/waverider/md_page.c mu_flt, dnfw.mnm.units FLT_UNITS); stock's go back with the names */
+extern const char *mu_flt(int w, int k);
+static const unsigned short flt_fmt_ids[] = FLT_UNIT_IDS;
+#define NFFMT ((int)(sizeof flt_fmt_ids / sizeof flt_fmt_ids[0]))
+#define RECORD_FMT_AT(id) (*(void **)(0x401F83A4u + 60u * (id) + 0x34u))
+static void *flt_stock_fmt[NFFMT] __attribute__((section(".data")));
+static void flt_fmt(int w, int v, char *buf)
+{
+    int k = (v >> 8) & 0xFF;
+    const char *t = mu_flt(w, k > 127 ? 127 : k);
+    int n = 0;
+    while (t && t[n] && n < 7) {
+        buf[n] = t[n];
+        n++;
+    }
+    buf[n] = 0;
+}
+#define FFN(w) static void flf##w(int v, char *b) { flt_fmt(w, v, b); }
+FFN(0) FFN(1) FFN(2) FFN(3) FFN(4) FFN(5) FFN(6) FFN(7) FFN(8)
+static void (*const flt_fmts[NFFMT])(int, char *) = {flf0, flf1, flf2, flf3, flf4, flf5, flf6, flf7, flf8};
+
 /* -> which of flt_filters the active track's filter is (0..FLT_SETS-1), or -1 */
 static int flt_active(void)
 {
@@ -210,6 +232,11 @@ static void flt_names(void)
         const char *sh = on >= 0 ? flt_named_short[on][k] : 0;
         NAME_LONG(id) = l ? l : flt_stock_long[k];
         NAME_SHORT(id) = sh ? sh : flt_stock_short[k];
+    }
+    for (int k = 0; k < NFFMT; k++) {
+        if (flt_on == -2)
+            flt_stock_fmt[k] = RECORD_FMT_AT(flt_fmt_ids[k]);
+        RECORD_FMT_AT(flt_fmt_ids[k]) = on >= 0 ? (void *)flt_fmts[k] : flt_stock_fmt[k];
     }
     flt_on = on;
 }

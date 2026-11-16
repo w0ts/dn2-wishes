@@ -266,6 +266,7 @@ static const u8 GLYPH[][5] = {
     {5, 5, 5, 5, 7},    /* 20 U */
     {6, 5, 6, 5, 5},    /* 21 R */
     {2, 5, 7, 5, 5},    /* 22 A */
+    {1, 1, 1, 0, 1},    /* 23 ! (1 wide) */
 };
 
 static int gi(char ch)
@@ -285,6 +286,7 @@ static int gi(char ch)
     case 'U': return 20;
     case 'R': return 21;
     case 'A': return 22;
+    case '!': return 23;
     default: return 17;
     }
 }
@@ -295,12 +297,12 @@ static const u8 WIDE_M[5] = {17, 27, 21, 17, 17};
 
 static int letter_w(char ch)
 {
-    return ch == 'M' ? 5 : 3;
+    return ch == 'M' ? 5 : ch == '!' ? 1 : 3;
 }
 
 static void icons_draw(void *canvas)
 {
-    static const char *const WORD[3] = {"DSP", "CPU", "RAM"};
+    static const char *const WORD[4] = {"DSP", "CPU", "RAM", "!"};   /* one ! for the group, at its left */
     u32 lit = MTR[MTR_ICON_SHOWN];
     if (!lit)
         return;
@@ -308,18 +310,19 @@ static void icons_draw(void *canvas)
         for (int xx = ICON_TEMPO_X0; xx <= ICON_X1; xx++)
             SET_PIXEL(canvas, xx, y, 1);
     int x = ICON_X1 + 1;
-    for (int k = 2; k >= 0; k--) {
-        if (!(lit >> k & 1u))
+    for (int j = 0; j < 4; j++) {
+        int k = j < 3 ? 2 - j : 3, nl = k == 3 ? 1 : 3;
+        if (k < 3 && !(lit >> k & 1u))
             continue;
         int w = 1;
-        for (int i = 0; i < 3; i++)
+        for (int i = 0; i < nl; i++)
             w += letter_w(WORD[k][i]) + 1;     /* each letter and the column after it */
         x -= w + 1;
         for (int c = -1; c <= w; c++)          /* the bar's colour round it, the tempo under it hidden */
             for (int y = ICON_Y0 - 1; y <= ICON_Y0 + 7; y++)
                 SET_PIXEL(canvas, x + c, y, c < 0 || c == w || y < ICON_Y0 || y > ICON_Y0 + 6);
         int lx = x + 1;
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < nl; i++) {
             char ch = WORD[k][i];
             int lw = letter_w(ch);
             const u8 *g = ch == 'M' ? WIDE_M : GLYPH[gi(ch)];

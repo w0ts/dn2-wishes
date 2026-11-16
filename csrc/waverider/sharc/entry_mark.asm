@@ -30,6 +30,10 @@
 //   0x2de144  save: R10
 //   0x2de148  save: I0
 //   0x2de14c  save: I1
+//
+// 2026-11-10 (stock-hotspots item 2): on that same first pass, after the twin copy, a JUMP to
+// trackbuf.asm (sw 0x170800), which moves the stock engine's 16 track buffers from DDR to L1 and
+// jumps back to the restore of I0 and I1 (sw 0x16f6b1).
 
 .SECTION/PM seg_pmco;
 
@@ -40,7 +44,7 @@ wr_emark.:
       DM(0x2de144) = R10;
       R10 = 0x54574e31;                 // TWIN_MAGIC ("TWN1")
       COMP(R9, R10);
-      IF EQ JUMP 0x16f6b4;                   // -> wr_emark_done.
+      IF EQ JUMP 0x16f6b7;                   // -> wr_emark_done.
       DM(0x2de148) = I0;
       DM(0x2de14c) = I1;
       R9 = 0x2001e888;                  // A
@@ -56,6 +60,7 @@ wr_emark_copy.:
       IF NE JUMP 0x16f6a2;                   // -> wr_emark_copy.
       R10 = 0x54574e31;
       DM(0x2de140) = R10;               // TWIN
+      JUMP 0x170800;                    // trackbuf.asm: the track buffers to L1; it returns to the restore below
       I0 = DM(0x2de148);
       I1 = DM(0x2de14c);
 .GLOBAL wr_emark_done.;

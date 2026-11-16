@@ -82,7 +82,8 @@ The User: "a little shark/cpu/memory icon blinking when we are over dsp/cpu/memo
 title bar"; drawn icons were tried and refused ("they dont work... what about CPU / DSP / RAM ?"). So, on
 every page (stock's and ours) while FUNC is up, the title bar's right end shows a word in a black box for
 each limit hit, while it is and a second after (`ICON_HOLD`), blinking at 2 Hz; the lit ones packed to
-the right, over the tempo, which comes back when they go. FUNC held: the meter's corner covers them.
+the right, over the tempo, which comes back when they go; one `!` in its own black box at the group's left
+while any is lit (something is over its limit). FUNC held: the meter's corner covers them.
 
 | label | lit when | from |
 |---|---|---|

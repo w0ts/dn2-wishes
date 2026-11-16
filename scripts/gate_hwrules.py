@@ -38,6 +38,7 @@ def ranges() -> list[tuple[int, int, str]]:
            (dsp.SMP_SW, dsp.SMP_SW + len(obj["smp"]) // 2, "smp.asm"),
            (dsp.PVMIX_SW, dsp.PVMIX_SW + len(dsp.pvmix_object()) // 2, "pvmix.asm"),
            (dsp.PING_SW, dsp.PING_SW + len(obj["ping"]) // 2, "ping.asm"),
+           (dsp.TRACKBUF_SW, dsp.TRACKBUF_SW + len(obj["trackbuf"]) // 2, "trackbuf.asm"),
            (dsp.INS_SW, dsp.INS_SW + len(obj["inserts"]) // 2, "inserts.asm"),
            (dsp.POST_SW, dsp.POST_SW + len(obj["inspost"]) // 2, "inspost.asm"),
            (dsp.INSBUS_SW, dsp.INSBUS_SW + len(obj["insbus"]) // 2, "insbus.asm"),

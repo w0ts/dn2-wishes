@@ -125,11 +125,28 @@ def _clamp(p: Prog, x: int, top: int, bot: int) -> None:
 
 
 def _dbase(p: Prog, L: K.Layout, d: int, word: int) -> None:
-    """Rd = the delay area's word WORD (an address), from C['c'] (the area's base)."""
+    """Rd = the delay area's word WORD (an address), from C['c'] (the area's base); the block
+    scratch's words (>= SCR_H) at core.Layout.pi_scr when set (perf, 2026-11-10: L1)."""
+    sb = K.pi_scr_base(L)
+    if word >= SCR_H and sb is not None:
+        assert SCR_MUL + 24 - SCR_H <= K.PI_SCR_WORDS
+        p.iconst(d, sb + 4 * word)
+        return
     p.ld(d, L.C["c"])
     if word:
         p.iconst(12, 4 * word)
         p.iop(d, 12, "+", d)
+
+
+def _sbase(p: Prog, L: K.Layout, d: int, word: int = 0) -> None:
+    """Rd = the base the block scratch's word offsets (>= SCR_H) count from, plus WORD's bytes: the
+    delay area's (C['c']) or, perf 2026-11-10, core.pi_scr_base (L1, a constant)."""
+    sb = K.pi_scr_base(L)
+    if sb is not None:
+        p.iconst(d, sb + 4 * word)
+        return
+    assert not word
+    p.ld(d, L.C["c"])
 
 
 # -- the two machines' differences --------------------------------------------------------
@@ -487,7 +504,7 @@ def _render(p: Prog, L: K.Layout) -> None:
                 _q(p, 4, 11)
                 p.ld(0, C["k"])
                 p.lsh(0, 0, 2)
-                p.ld(12, C["c"])
+                _sbase(p, L, 12)
                 p.iop(0, 12, "+", 0)
                 p.seti(2, 0)
                 p.sti(SCR_MUL + 8 * arr, 2, 4)
@@ -551,7 +568,7 @@ def _render(p: Prog, L: K.Layout) -> None:
         p.lsh(0, 0, 2)
         p.ipass(12, 1)
         p.iop(0, 12, "+", 0)                        # 12 k (bytes of three words)
-        p.ld(12, C["c"])
+        _sbase(p, L, 12)
         p.iop(0, 12, "+", 0)
         p.seti(2, 0)
         p.sti(SCR_CO, 2, 14)
@@ -578,9 +595,12 @@ def _render(p: Prog, L: K.Layout) -> None:
         p.lsh(0, 0, 2)
         p.ipass(12, 1)
         p.iop(0, 12, "+", 0)
-        p.ld(12, C["c"])
-        p.iop(0, 12, "+", 0)
-        p.iconst(12, 4 * SCR_CO)
+        if K.pi_scr_base(L) is None:
+            p.ld(12, C["c"])
+            p.iop(0, 12, "+", 0)
+            p.iconst(12, 4 * SCR_CO)
+        else:
+            _sbase(p, L, 12, SCR_CO)
         p.iop(0, 12, "+", 0)
         p.seti(5, 0)
         p.ldi(6, 0, 5)

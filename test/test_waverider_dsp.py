@@ -268,10 +268,10 @@ def test_the_region_is_written_end_to_end_and_code_is_nop_padded():
     assert all(e == a for e, a in zip(ends, at[1:]))           # no unwritten gap
     obj = dsp.objects()
     code_spans = [x for x in sp if "asm" in x[0]]
-    assert len(code_spans) == 4       # (the type lookup is data, not code; v0.26: RESONATOR, CZ gone; v0.27: GRAN)
+    assert len(code_spans) == 5       # (2026-11-10: + trackbuf.asm)  # (the type lookup is data, not code; v0.26: RESONATOR, CZ gone; v0.27: GRAN)
     # v0.11: Waverider's reader, loop and osc 2 are gone (their room is zeros); PERC is in L2
     for (what, _, payload), code in zip(code_spans, (obj["idle_load"], obj["block_count"], obj["entry_mark"],
-                                                     obj["ping"])):
+                                                     obj["ping"], obj["trackbuf"])):
         assert payload[:len(code)] == code
         assert len(payload) - len(code) >= 64 and not any(payload[len(code):]), what
 

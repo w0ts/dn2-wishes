@@ -89,6 +89,7 @@ def main(argv=None) -> int:
             count = assemble("block_count", dsp.COUNT_SW, work)
             emark = assemble("entry_mark", dsp.EMARK_SW, work)
             ping = assemble("ping", dsp.PING_SW, work)
+            trackbuf = assemble("trackbuf", dsp.TRACKBUF_SW, work)
             pvmix = assemble("pvmix", dsp.PVMIX_SW, work)
             fdn8 = assemble("fdn8", dsp.FDN8_SW, work)
             xdly = assemble("xdly", dsp.XDLY_SW, work)
@@ -108,6 +109,7 @@ def main(argv=None) -> int:
             count = committed("block_count")
             emark = committed("entry_mark")
             ping = committed("ping")
+            trackbuf = committed("trackbuf")
             pvmix = committed("pvmix")
             fdn8 = committed("fdn8")
             xdly = committed("xdly")
@@ -132,6 +134,7 @@ def main(argv=None) -> int:
             "emark_jump": ejump,
             "lookup_ptr": lptr,
             "ping": {k: v for k, v in ping.items() if k != "instruction_offsets"},
+            "trackbuf": {k: v for k, v in trackbuf.items() if k != "instruction_offsets"},
             "pvmix": {k: v for k, v in pvmix.items() if k != "instruction_offsets"},
             "pvmix_jump": pjump,
             "fdn8": {k: v for k, v in fdn8.items() if k != "instruction_offsets"},

@@ -76,6 +76,18 @@ class Layout:
                 self.T[name] = shipped + TABLE_LAYOUT[name][0] - base
         self.ready = ready
         self.C = {w: scratch + 4 * k for k, w in enumerate(SC_WORDS)}
+        # 2026-11-10 (perf): the P-I machines' block scratch (their delay area's words 1536..), when
+        # set, at PI_SCR_WORDS words here (L1, shared: perc.machines.Layout); None: in the delay area
+        self.pi_scr: int | None = None
+
+
+PI_SCR_WORDS = 384                             # (the render scratch's XB and YB rows)
+
+
+def pi_scr_base(L: Layout) -> int | None:
+    """the address the P-I block scratch's word 1536 + k is at, less 4 (1536 + k)... as a
+    base for word offsets >= 1536 (None: the slot's delay area)"""
+    return None if L.pi_scr is None else L.pi_scr - 4 * 1536
 
 
 SC_WORDS = ("n1", "n2", "n3", "a", "b", "c", "d", "e", "f", "g", "h", "k", "fill", "tmp", "mdb",
@@ -258,50 +270,31 @@ def mpy_floor(p: Prog, d: int, a: int, b: int) -> None:
     floor(A B / 2^23) / 2^23 for the words A = Fa 2^23, B = Fb 2^23 (Fa, Fb >= 0, exact Q23
     values). Where a product feeds back on itself block after block (an envelope), the
     56300's truncation is what sets how fast it falls, and a float product does not
-    truncate; this does, with 12-bit halves whose partial products a float holds exactly.
-    Clobbers R0-R3, R12-R15 (d, a, b not among them)."""
-    def split(x, hi, lo):
-        p.fconst(12, 2.0 ** 23)
-        p.fop(hi, x, "*", 12)
-        p.trunc(hi, hi)                       # the word, an integer
-        p.iconst(12, 4095)
-        p.iop(lo, hi, "AND", 12)
-        p.lsh(hi, hi, -12)
-    split(a, 0, 1)                            # ah, al
-    split(b, 2, 3)                            # bh, bl
-    for r in (0, 1, 2, 3):
-        p.iconst(12, 0)
-        p.float_(r, r, 12)
-    p.fop(13, 0, "*", 3)                      # ah bl
-    p.fop(14, 1, "*", 2)                      # al bh
-    p.trunc(13, 13)
-    p.trunc(14, 14)
-    p.iop(13, 13, "+", 14)                    # m
-    p.fop(14, 1, "*", 3)                      # al bl
-    p.trunc(14, 14)
-    p.lsh(14, 14, -12)
-    p.iop(13, 13, "+", 14)
-    p.lsh(13, 13, -11)                        # floor((m 2^12 + n) / 2^23)
-    p.fop(14, 0, "*", 2)                      # ah bh
-    p.trunc(14, 14)
-    p.lsh(14, 14, 1)
-    p.iop(13, 13, "+", 14)
+    truncate; this does. 2026-11-10 (perf): the fixed-point multiplier's SSF on the words
+    shifted up 4 bits each (efm.xfloor), bit for bit the old 12-bit-halves float products.
+    Clobbers R0, R1, R12, R13 (d, a, b not among them)."""
+    assert not {a, b} & {0, 1, 12, 13}
+    p.fconst(12, 2.0 ** 23)
+    p.fop(0, a, "*", 12)
+    p.trunc(0, 0)                             # A
+    p.fop(1, b, "*", 12)
+    p.trunc(1, 1)                             # B
+    p.lsh(0, 0, 4)
+    p.lsh(1, 1, 4)
+    p.mul_ssf(13, 0, 1)                       # floor(A B 2^8 / 2^31)
     p.iconst(12, -23)
     p.float_(d, 13, 12)
 
 
 def mpyf_any(p: Prog, d: int, a: int, b: int) -> None:
-    """Fd = mpy_floor(Fa, Fb) through trx1.mpyf's one shared copy (F9 = floor(F10 F11)),
-    or inline inside another subroutine (v0.24: the DSP's 1 MiB upload buffer). Clobbers
-    R0-R3, R9-R15, I12."""
-    if p.in_sub:
-        mpy_floor(p, d, a, b)
-        return
-    assert b != 10
-    p.fpass(10, a)
-    p.fpass(11, b)
-    p.call("trx1_mpyf", lambda: mpy_floor(p, 9, 10, 11))
-    p.fpass(d, 9)
+    """Fd = mpy_floor(Fa, Fb), inline (2026-11-10, perf: now shorter than trx1.mpyf's shared
+    copy and its call). Clobbers R0-R3, R9-R15, I12 (as before; uses fewer)."""
+    if {a, b} & {0, 1, 12, 13}:
+        assert b != 10
+        p.fpass(10, a)
+        p.fpass(11, b)
+        a, b = 10, 11
+    mpy_floor(p, d, a, b)
 
 
 # -- the tables in DDR ------------------------------------------------------------------

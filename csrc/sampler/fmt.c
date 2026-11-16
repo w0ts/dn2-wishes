@@ -491,6 +491,33 @@ static void *stock_fmt[NFMT] __attribute__((section(".data")));
 static int fmt_saved __attribute__((section(".data"))) = 0;
 
 void smp_fine(int kind);
+/* 2026-11-10 (the User: no bare 0..127): the header's value as a Monomachine-style machine's control turns
+ * in its unit or choice name (csrc/waverider/md_page.c mu_value), the sixteen controls' records' formatters
+ * swapped with the active track's machine as the sample machines' are */
+extern const char *mu_value(int mi, int j, int k);
+extern int mu_has(int mi, int j);
+static int mf_mi __attribute__((section(".data"))) = -1;
+static void mf(int j, int v, char *buf)
+{
+    int k = mnm_kn(j, (v >> 8) & 0xFF);
+    const char *t = mf_mi >= 0 ? mu_value(mf_mi, j, k) : 0;
+    if (!t) {
+        put_num(buf, k);
+        return;
+    }
+    int n = 0;
+    while (t[n] && n < 7) {
+        buf[n] = t[n];
+        n++;
+    }
+    buf[n] = 0;
+}
+#define MFN(j) static void mf##j(int v, char *b) { mf(j, v, b); }
+MFN(0) MFN(1) MFN(2) MFN(3) MFN(4) MFN(5) MFN(6) MFN(7) MFN(8) MFN(9) MFN(10) MFN(11) MFN(12) MFN(13) MFN(14) MFN(15)
+static void (*const mnm_fmts[MNM_J])(int, char *) = {mf0, mf1, mf2, mf3, mf4, mf5, mf6, mf7, mf8, mf9, mf10,
+                                                       mf11, mf12, mf13, mf14, mf15};
+static void *mnm_stock[MNM_J] __attribute__((section(".data")));
+static int mnm_saved __attribute__((section(".data"))) = 0;
 
 /* from wr_names, when the active track's machine changes: KIND as is_wr answers it
  * (SMP_KIND0.. for the sample machines) */
@@ -517,7 +544,27 @@ void smp_formats(int kind)
             f = (void *)fmt_fns[k];
         RECORD_FMT(fmt_ids[k]) = f;
     }
-    smp_fine(kind);
+    {
+        int mi = mnm_index(kind);                   /* the Monomachine-style machines' controls in their units */
+        if (!mnm_saved) {
+            for (int j = 0; j < MNM_J; j++)
+                mnm_stock[j] = RECORD_FMT(mnm_rid[j]);
+            mnm_saved = 1;
+        }
+        mf_mi = mi;
+        for (int j = 0; j < MNM_J; j++) {
+            int rid = mnm_rid[j], own = 0;
+            for (int k = 0; k < NFMT; k++)
+                if (fmt_ids[k] == rid)
+                    own = 1;                        /* the loop above's (the sample machines', TUNE) */
+            if (mi >= 0 && mu_has(mi, j) && !(own && mnm_stock[j] != RECORD_FMT(rid) && 0))
+                RECORD_FMT(rid) = (void *)mnm_fmts[j];
+            else if (!own)
+                RECORD_FMT(rid) = mnm_stock[j];
+        }
+    }
+    smp_fine(kind);                             /* last: STRT/LEN/LOOP (239, 258, 257) are also Monomachine-style
+                                                 * records; on a sample machine the fine controls' word wins */
 }
 
 /* v0.48 (impbox, the owner: "exact dt2"): STRT, LEN and LOOP as the DT2's own controls.

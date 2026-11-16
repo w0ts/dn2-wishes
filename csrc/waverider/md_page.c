@@ -246,6 +246,155 @@ static int mnm_k(void *view, int j)             /* knob 0..127, as the DSP and p
     return (v * 254 + top) / (2 * top);
 }
 
+/* 2026-11-10 (the User: no parameter of ours shows a bare 0..127): a control's value in its unit, at most
+ * four characters (the cell's label): dnfw.mnm.units, the curve through 17 points 8 knobs apart (the last
+ * one at 127). Hz: NNHz, then 0.1k .. 9.9k, NNk; ms: NNms, then 0.1s .. 9.9s, NNs; hundredths of a Hz
+ * (BEAT): .NNH, N.NH, then Hz as above; cents NNc, N.Nc; percent NN%, signed +NN% */
+static int ucat(char *b, int n, int v)                  /* v >= 0, up to 3 digits */
+{
+    if (v >= 100) b[n++] = (char)('0' + v / 100 % 10);
+    if (v >= 10) b[n++] = (char)('0' + v / 10 % 10);
+    b[n++] = (char)('0' + v % 10);
+    return n;
+}
+
+static const char *const gt_patn[16] = {"16TH", "8TH", "4TH", "HALF", "OFF8", "OF16", "DOT8", "DOT4",
+                                        "TRN1", "TRN2", "TRN3", "TRN4", "GALP", "RGAL", "CLAV", "TRSL"};
+static const char *const mode5[5] = {"LP12", "LP24", "BP", "HP", "NTCH"};
+static const char *const gt_rate[8] = {"1/2", "1/4", "1/8", "1/8T", "1/16", "16T", "1/32", "1/64"};
+
+static const char *unit_text_of(int kind, int curve, int k)
+{
+    static char ub[8] __attribute__((section(".data")));
+    if (!(kind & 127))
+        return 0;
+    if ((kind & 0x80) && k == 0) {
+        ub[0] = 'O'; ub[1] = 'F'; ub[2] = 'F'; ub[3] = 0;
+        return ub;
+    }
+    kind &= 127;
+    if (kind == MU_PATN)
+        return gt_patn[(k * 16) >> 7];
+    if (kind == MU_RATE)
+        return gt_rate[(k * 8) >> 7];
+    if (kind == MU_MODE)
+        return mode5[(k * 5) >> 7];
+    if (kind == MU_VOIC) {                          /* CHOR's voices: 1 + trunc(3.99 p) */
+        int vv = 1 + (k * 399 / 127) / 100;
+        ub[0] = 'V'; ub[1] = (char)('0' + (vv > 4 ? 4 : vv)); ub[2] = 0;
+        return ub;
+    }
+    if (kind == MU_OCT) {
+        ub[0] = k < 64 ? '1' : '2'; ub[1] = 'o'; ub[2] = 'c'; ub[3] = 't'; ub[4] = 0;
+        return ub;
+    }
+    const short *cv = mnm_curves[curve];
+    int i = k >> 3, den = i == 15 ? 7 : 8;
+    int v = cv[i] + (cv[i + 1] - cv[i]) * (k - 8 * i) / den;       /* the curve's value */
+    int n = 0;
+    if (kind == MU_PCT) {
+        n = ucat(ub, 0, (k * 100 + 63) / 127);
+        ub[n++] = '%';
+    } else if (kind == MU_SPCT) {
+        int d = (k - 64) * 100 / 64;
+        d = d > 99 ? 99 : d < -99 ? -99 : d;
+        ub[n++] = d < 0 ? '-' : '+';
+        n = ucat(ub, n, d < 0 ? -d : d);
+        ub[n++] = '%';
+    } else if (kind == MU_MS10) {                   /* tenths of a millisecond */
+        if (v < 10) {
+            ub[0] = '.'; ub[1] = (char)('0' + v); ub[2] = 'm'; ub[3] = 's'; ub[4] = 0;
+            return ub;
+        }
+        v = (v + 5) / 10;                           /* ms */
+        if (v < 100) {
+            n = ucat(ub, 0, v);
+            ub[n++] = 'm'; ub[n++] = 's';
+        } else {
+            int t = (v + 50) / 100;                 /* tenths of a second */
+            n = ucat(ub, 0, t / 10);
+            ub[n++] = '.'; ub[n++] = (char)('0' + t % 10); ub[n++] = 's';
+        }
+    } else if (kind == MU_PCTC) {
+        n = ucat(ub, 0, v);
+        ub[n++] = '%';
+    } else if (kind == MU_DB) {
+        if (v < 0) { ub[n++] = '-'; v = -v; }
+        n = ucat(ub, n, v);
+        ub[n++] = 'd'; ub[n++] = 'B';
+    } else if (kind == MU_C) {
+        n = ucat(ub, 0, k);
+        ub[n++] = 'c';
+    } else if (kind == MU_C10) {
+        n = ucat(ub, 0, v / 10);
+        ub[n++] = '.';
+        ub[n++] = (char)('0' + v % 10);
+        ub[n++] = 'c';
+    } else {
+        if (kind == MU_HZ100) {
+            if (v < 100) {                              /* .NNH */
+                ub[0] = '.'; ub[1] = (char)('0' + v / 10); ub[2] = (char)('0' + v % 10); ub[3] = 'H'; ub[4] = 0;
+                return ub;
+            }
+            if (v < 1000) {                             /* N.NH */
+                int t = (v + 5) / 10;
+                ub[0] = (char)('0' + t / 10); ub[1] = '.'; ub[2] = (char)('0' + t % 10); ub[3] = 'H'; ub[4] = 0;
+                return ub;
+            }
+            v = (v + 50) / 100;                         /* Hz */
+            kind = MU_HZ;
+        }
+        if (kind == MU_HZ) {
+            if (v < 100) {
+                n = ucat(ub, 0, v);
+                ub[n++] = 'H'; ub[n++] = 'z';
+            } else if (v < 9950) {
+                int t = (v + 50) / 100;                 /* tenths of a kHz */
+                n = ucat(ub, 0, t / 10);
+                ub[n++] = '.'; ub[n++] = (char)('0' + t % 10); ub[n++] = 'k';
+            } else {
+                n = ucat(ub, 0, (v + 500) / 1000);
+                ub[n++] = 'k';
+            }
+        } else {                                        /* MU_MS */
+            if (v < 100) {
+                n = ucat(ub, 0, v);
+                ub[n++] = 'm'; ub[n++] = 's';
+            } else if (v < 9950) {
+                int t = (v + 50) / 100;
+                n = ucat(ub, 0, t / 10);
+                ub[n++] = '.'; ub[n++] = (char)('0' + t % 10); ub[n++] = 's';
+            } else {
+                n = ucat(ub, 0, (v + 500) / 1000);
+                ub[n++] = 's';
+            }
+        }
+    }
+    ub[n] = 0;
+    return ub;
+}
+
+static const char *mnm_unit_text(int mi, int j, int k)
+{
+    return unit_text_of(mnm_unit[mi][j], mnm_unit_curve[mi][j], k);
+}
+
+/* the A2 filter machines' FLTR records (page.c): which 0..8 of FLT_UNIT_IDS, knob 0..127 */
+const char *mu_flt(int w, int k)
+{
+    if (w < 0 || w >= (int)sizeof flt_unit)
+        return 0;
+    return unit_text_of(flt_unit[w], flt_unit_curve[w], k > 127 ? 127 : k < 0 ? 0 : k);
+}
+
+/* the inserts' knobs (csrc/inserts/ins.c, SYN held): type 0..12, knob 0..5, 7 the MIX; 0 a knob with no unit yet */
+const char *mu_ins(int type, int knob, int k)
+{
+    if (type < 0 || type > 12 || knob < 0 || knob > 7)
+        return 0;
+    return unit_text_of(ins_unit[type][knob], ins_unit_curve[type][knob], k > 127 ? 127 : k);
+}
+
 static int mnm_choice_count(int n)
 {
     return n == MNM_PCH ? mnm_pch_idx[127] + 1 : n;
@@ -331,6 +480,29 @@ void mnm_pop_offer(void *view, int mi)
     }
 }
 
+/* the header's value as a control turns, and the SYN-held cells, for the formatter swap (csrc/sampler/fmt.c
+ * smp_formats): control J (0..15) of machine MI at knob K: its unit, or its choice's name; 0 for a stock text */
+const char *mu_value(int mi, int j, int k)
+{
+    if (mi < 0 || mi >= MNM_N || j < 0 || j >= MNM_J)
+        return 0;
+    int w = mnm_widget[mi][j], n = mnm_choices[mi][j];
+    if (w == MW_EMPTY)
+        return 0;
+    if (w == MW_KNOB || !n)
+        return mnm_unit_text(mi, j, k);
+    int cnt = mnm_choice_count(n), ch = mnm_choice_of(n, k);
+    return mnm_value_text(mi, j, ch > cnt - 1 ? cnt - 1 : ch);
+}
+
+int mu_has(int mi, int j)
+{
+    if (mi < 0 || mi >= MNM_N || j < 0 || j >= MNM_J)
+        return 0;
+    int w = mnm_widget[mi][j];
+    return w != MW_EMPTY && (mnm_unit[mi][j] & 127 ? 1 : (w != MW_KNOB && mnm_choices[mi][j] ? 1 : 0));
+}
+
 int mnm_page_draw(void *view, void *c, int mi, int page)
 {
     if (!ok() || mi < 0 || mi >= MNM_N)
@@ -355,8 +527,13 @@ int mnm_page_draw(void *view, void *c, int mi, int page)
         extern int smp_values_held(void);
         if (smp_values_held()) {                   /* v0.35: SYN held: the value (O14): a knob's */
             if (w == MW_KNOB || !n) {           /* number, a choice's name */
-                fmt_int(vb, k, 0);
-                name = vb;
+                const char *u = mnm_unit_text(mi, j, k);       /* 2026-11-10: in its unit */
+                if (u) {
+                    name = u;
+                } else {
+                    fmt_int(vb, k, 0);
+                    name = vb;
+                }
             } else {
                 int cnt = mnm_choice_count(n), ch = mnm_choice_of(n, k);
                 name = mnm_value_text(mi, j, ch > cnt - 1 ? cnt - 1 : ch);

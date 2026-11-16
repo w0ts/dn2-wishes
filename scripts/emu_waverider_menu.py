@@ -2448,7 +2448,32 @@ def main() -> int:
         elif step.startswith("frame:"):
             name = step[6:]
             before = built["n"]
+            # 2026-11-10: DNFW_PCS="0x40026afc,..": how often each address ran during this frame's ISR
+            pcs = [int(x, 0) for x in os.environ.get("DNFW_PCS", "").split(",") if x.strip()]
+            hits = {pc: 0 for pc in pcs}
+
+            regs_seen = {}
+
+            def at_pc(_uc, address, _size, _user):
+                hits[address] = hits.get(address, 0) + 1
+                if len(regs_seen.setdefault(address, [])) < 4:       # the registers of the first hits
+                    rr_ = {r + str(i): _uc.reg_read(getattr(K, f"UC_M68K_REG_{r}{i}")) for r in "DA" for i in range(8)}
+                    fp_ = rr_["A6"]                                  # the ISR's frame: fp@(-176) .. fp@(-144), long words
+                    rr_["FP"] = [int.from_bytes(bytes(_uc.mem_read(fp_ - 176 + 4 * k, 4)), "big") for k in range(8)]
+                    regs_seen[address].append(rr_)
+            hooks_pc = [uc.hook_add(UC_HOOK_CODE, at_pc, begin=pc, end=pc) for pc in pcs]
+            # DNFW_WATCH="0x80005e84,0x80005e85": writes to these addresses during the ISR: (pc, address, value)
+            watch = [int(x, 0) for x in os.environ.get("DNFW_WATCH", "").split(",") if x.strip()]
+            wrote = []
+            if watch:
+                from unicorn import UC_HOOK_MEM_WRITE as _MW
+
+                def at_w(_uc, _acc, address, size, value, _user):
+                    wrote.append((f"{_uc.reg_read(K.UC_M68K_REG_PC):#x}", f"{address:#x}", size, f"{value & 0xFFFFFFFF:#x}"))
+                hooks_pc.append(uc.hook_add(_MW, at_w, begin=min(watch), end=max(watch)))
             ran = guest_call(ISR, want_count=True)
+            for h_ in hooks_pc:
+                uc.hook_del(h_)
             frame = machine.read(FRAME, FRAME_BYTES)
             png_dir.mkdir(parents=True, exist_ok=True)
             out = png_dir / f"{name}.frame_be.bin"
@@ -2461,7 +2486,10 @@ def main() -> int:
                 b"".join(machine.read(kit + 52 + SOUND_STRIDE * t, SOUND_STRIDE) for t in range(16)))
             words = [struct.unpack_from(">H", frame, FRAME_MACHINE + 2 * t)[0] for t in range(16)]
             frames[name] = {"file": str(out), "builder_ran": built["n"] - before,
-                            "isr_instructions": ran, "machine_words": words}
+                            "isr_instructions": ran, "machine_words": words,
+                            "pc_hits": {f"{k:#x}": v for k, v in hits.items()}, "writes": wrote[:40],
+                            "pc_regs": {f"{k:#x}": [{r: (f"{x:#x}" if isinstance(x, int) else [f"{y:#x}" for y in x]) for r, x in d.items()} for d in v]
+                                        for k, v in regs_seen.items()}}
             print(f"  frame {name}: the builder ran {built['n'] - before} time(s) in {ran:,} "
                   f"instructions; machine words {words}")
         else:

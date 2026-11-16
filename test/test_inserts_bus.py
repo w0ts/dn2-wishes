@@ -49,6 +49,8 @@ def table(rows: dict) -> bytes:
 def call(m: Mem, par: bytes, left, right, regs):
     for k, v in enumerate(par):
         m.put(D.TABLE + 4 * k, v)
+    for k, v in enumerate(D.flags(par)):                    # the pre pass's flags (perf, 2026-11-10)
+        m.put(D.FLAGS + 4 * k, v)
     for t in range(D.TRACKS):
         for j in range(D.BLOCK):
             m.put(D.BUS_BLOCKS + 0x100 * t + 4 * j, fbits(left[t][j]))

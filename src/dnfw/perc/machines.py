@@ -172,6 +172,11 @@ class Layout:
         from ..mnm import core as MNC
         self.md.mnm = MNC.Layout(self, mnm_scratch, mnm_tables,
                                  render=mnm_render)                     # v0.43: render scratch in L1
+        # 2026-11-10 (perf): the P-I machines' block scratch (pi_sd / pi_bd, words 1536.. of a slot's
+        # DDR delay area) in the render scratch's XB, YB rows instead: L1, shared, as every voice
+        # renders alone and no machine reads those rows before writing them in its block
+        # (perf scratch rowfirst.py / pifirst.py)
+        self.md.pi_scr = self.md.mnm.XB if mnm_render is not None else None
 
 
 # -- primitives -----------------------------------------------------------------------------

@@ -75,7 +75,7 @@ XDLY_ENTRIES = ["dlt_poll", "dlt_cell", "dlt_state", "dlt_placed", "dlt_seen"]
 INS_ENTRIES = ["ins_pop", "ins_draw", "ins_visible", "ins_words", "ins_gen", "ins_up", "ins_sel", "ins_selv", "ins_mod", "ins_kv", "ins_hdr_tail",
                "ins_inst", "ins_edits", "ins_pj_write_hook", "ins_store_poll", "ins_wr_ring", "ins_wr_head",
                "ins_st_writes", "ins_st_loads", "ins_st_fails"]
-HOLD_ENTRIES = ["hold_note_hook", "hold_len", "hold_keys", "hold_poll", "hold_seq", "hold_key", "hold_count", "hold_drops"]   # DRONE's HOLD (csrc/hold)
+HOLD_ENTRIES = ["hold_note_hook", "hold_final_hook", "hold_final", "hold_len", "hold_keys", "hold_poll", "hold_seq", "hold_key", "hold_count", "hold_drops", "hold_rel"]   # DRONE's HOLD (csrc/hold)
 LINK_ENTRIES = LINK_ENTRIES + SLIDE_ENTRIES + METER_ENTRIES + FDN8_ENTRIES + XDLY_ENTRIES + INS_ENTRIES + HOLD_ENTRIES
 
 

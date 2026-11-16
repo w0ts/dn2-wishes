@@ -228,34 +228,17 @@ def umulq(p: Prog, a: int, b: int, k: int) -> None:
 
 def _wmul_body(p: Prog, k: int = 23, flag: bool = False) -> None:
     # R4 = floor(R5 R6 / 2^k) through the limiter: sat(mpy(a, b)) (k 23), or of 2 mpy (k 22)
-    p.ash(7, 5, -12)
-    p.ash(8, 6, -12)
-    p.iconst(12, 4095)
-    p.iop(5, 5, "AND", 12)
-    p.iop(6, 6, "AND", 12)
-    p.iconst(12, 0)
-    for r in (5, 6, 7, 8):
-        p.float_(r, r, 12)
-    p.fop(13, 7, "*", 8)                     # ah bh
-    p.fop(14, 7, "*", 6)
-    p.fop(9, 5, "*", 8)
-    p.fop(14, 14, "+", 9)                    # ah bl + al bh (< 2^24: exact)
-    p.fop(9, 5, "*", 6)                      # al bl
-    p.trunc(13, 13)
-    p.trunc(14, 14)
-    p.trunc(9, 9)
+    # 2026-11-10 (perf): the fixed-point multiplier's SSF on the operands shifted up 31 - k bits in
+    # all (the product exact in its 64 bits: efm.xfloor); SSI's low word for the flag. Bit for bit
+    # the old 12-bit-halves float products (perf scratch eqtest.py).
+    s1 = (31 - k + 1) // 2
+    p.lsh(7, 5, s1)
+    p.lsh(8, 6, 31 - k - s1)
+    p.mul_ssf(4, 7, 8)
     if flag:                                 # R3: nonzero iff the floor dropped something
-        p.iconst(12, 4095)
-        p.iop(3, 9, "AND", 12)
-    p.lsh(9, 9, -12)
-    p.iop(14, 14, "+", 9)
-    if flag:
-        p.iconst(12, (1 << (k - 12)) - 1)
-        p.iop(12, 14, "AND", 12)
-        p.iop(3, 3, "OR", 12)
-    p.ash(14, 14, -(k - 12))
-    p.lsh(13, 13, 24 - k)
-    p.iop(4, 13, "+", 14)
+        p.mul_ssi(3, 5, 6)
+        p.iconst(12, (1 << k) - 1)
+        p.iop(3, 3, "AND", 12)
     if k == 23:
         p.iconst(12, 0x7FFFFF)
         p.iop(4, 4, "MIN", 12)
@@ -263,59 +246,48 @@ def _wmul_body(p: Prog, k: int = 23, flag: bool = False) -> None:
 
 def wmul(p: Prog) -> None:
     """R4 = sat(mpy(R5, R6)), exactly. Clobbers R3-R10, R12-R15, I1."""
-    p.call("trx_wmul", lambda: _wmul_body(p))
+    _wmul_body(p)                       # (perf: inline, shorter than the call)
 
 
 def wmulr(p: Prog) -> None:
     """wmul, and R3 nonzero iff the product had bits below the word (it was not exact)."""
-    p.call("trx_wmulr", lambda: _wmul_body(p, 23, True))
+    _wmul_body(p, 23, True)                       # (perf: inline, shorter than the call)
 
 
 def wmul4(p: Prog) -> None:
     """R4 = floor(4 mpy(R5, R6)) as a word (no limiter), exactly."""
-    p.call("trx_wmul21", lambda: _wmul_body(p, 21))
+    _wmul_body(p, 21)                       # (perf: inline, shorter than the call)
 
 
 def wmul2(p: Prog) -> None:
     """R4 = floor(2 mpy(R5, R6)) as a word (no limiter), exactly."""
-    p.call("trx_wmul22", lambda: _wmul_body(p, 22))
+    _wmul_body(p, 22)                       # (perf: inline, shorter than the call)
 
 
 def _term(p: Prog, ch: int, cl: int, first: bool) -> None:
-    """The accumulators R9 (hh), R10 (mid), R15 (ll) += the coefficient at I1 + ch, cl
-    (its 12-bit pieces, floats) times the word R4."""
-    p.ash(5, 4, -12)
-    p.iconst(12, 4095)
-    p.iop(6, 4, "AND", 12)
-    p.iconst(12, 0)
-    p.float_(5, 5, 12)
-    p.float_(6, 6, 12)
-    p.ldi(7, ch, 1)
-    p.ldi(8, cl, 1)
-    p.fop(13, 7, "*", 5)
-    p.fop(14, 7, "*", 6)
-    p.fop(7, 8, "*", 5)
-    p.fop(14, 14, "+", 7)
-    p.fop(8, 8, "*", 6)
-    p.trunc(13, 13)
-    p.trunc(14, 14)
-    p.trunc(8, 8)
+    """The accumulators R9 (the products' floors / 2^22) and R10 (their low words, mod 2^32) +=
+    the coefficient at I1 + ch (as c 2), I1 + cl (as c) times the word R4 (_pieces).
+    2026-11-10 (perf): SSF / SSI, the product exact (was 12-bit float pieces). Clobbers R5-R8, R13."""
+    p.lsh(5, 4, 8)                           # x 2^8
+    p.ldi(6, ch, 1)                          # c 2
+    p.ldi(8, cl, 1)                          # c
     if first:
-        p.ipass(9, 13)
-        p.ipass(10, 14)
-        p.ipass(15, 8)
+        p.mul_ssf(9, 5, 6)                   # floor(x c / 2^22)
+        p.mul_ssi(10, 4, 8)                  # x c mod 2^32
     else:
-        p.iop(9, 13, "+", 9)
-        p.iop(10, 14, "+", 10)
-        p.iop(15, 15, "+", 8)
+        p.mul_ssf(7, 5, 6)
+        p.iop(9, 9, "+", 7)
+        p.mul_ssi(13, 4, 8)
+        p.iop(10, 10, "+", 13)
 
 
 def _sum22(p: Prog) -> None:
-    """R9 = floor(the accumulated sum / 2^22) (the products' sum, << 1, through A1)."""
-    p.lsh(15, 15, -12)
-    p.iop(10, 10, "+", 15)
-    p.ash(10, 10, -10)
-    p.lsh(9, 9, 2)
+    """R9 = floor(the accumulated sum / 2^22) (the products' sum, << 1, through A1): the floors'
+    sum Q plus the carry of the remainders, which are (low words - Q 2^22) mod 2^32 (< 3 2^22).
+    Clobbers R10, R14."""
+    p.lsh(14, 9, 22)
+    p.iop(10, 10, "-", 14)
+    p.lsh(10, 10, -22)
     p.iop(9, 9, "+", 10)
 
 
@@ -676,16 +648,11 @@ def _coefs_body(p: Prog, L: K.Layout) -> None:
 
 
 def _pieces(p: Prog, k: int, r: int) -> None:
-    """S[k], S[k + 1] = the word Rr's 12-bit pieces (high signed), as floats.
-    Clobbers R12-R14."""
-    p.ash(13, r, -12)
-    p.iconst(12, 4095)
-    p.iop(14, r, "AND", 12)
-    p.iconst(12, 0)
-    p.float_(13, 13, 12)
-    p.float_(14, 14, 12)
+    """S[k], S[k + 1] = the coefficient word Rr as _term reads it: Rr 2, Rr (perf, 2026-11-10;
+    were its 12-bit pieces as floats). Clobbers R13."""
+    p.lsh(13, r, 1)
     ss(p, k, 13)
-    ss(p, k + 1, 14)
+    ss(p, k + 1, r)
 
 
 def set_hp1(p: Prog, L: K.Layout, off: int) -> None:

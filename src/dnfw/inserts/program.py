@@ -29,7 +29,7 @@ from ..perc import guard as G
 from ..perc.dsl import Mem, Prog
 from . import design as D
 
-STATE = 0x200AF400               # L2: 32 x 32 bytes of state, after the code (dnfw.waverider.dsp)
+STATE = 0x2E3000                 # L1 (perf, 2026-11-11; was L2 0x200AF400): 32 x 32 bytes of state (dnfw.waverider.dsp.INS_STATE_DM)
 STATE_BYTES = D.RECORDS * 4 * D.STATE_WORDS
 SCRATCH = STATE + STATE_BYTES    # the pass's own words
 TABLE = D.TABLE                  # the unpacked records (design.TABLE), and the last change word seen
@@ -49,10 +49,10 @@ assert PAT_TAB + 4 * len(D.GT_PAT) <= TABLE
 
 
 def state_bytes() -> bytes:
-    """the state and the pass's words (zeros), GATER's tables, then the unpacked records and the last
-    change word (zeros)"""
+    """the state and the pass's words (zeros), GATER's tables, then the unpacked records, the last
+    change word and the skip flags (zeros)"""
     head = bytes(RATE_TAB - STATE) + struct.pack(f"<{len(TABLE_WORDS)}I", *TABLE_WORDS)
-    return head + bytes(TABLE + D.TABLE_BYTES - STATE - len(head))
+    return head + bytes(D.FLAGS + 4 * D.FLAG_WORDS - STATE - len(head))
 
 
 def fuzz(p: Prog) -> None:
@@ -1066,14 +1066,45 @@ def unpack(p: Prog, C: dict) -> None:
                 p.iop(1, 1, "AND", 12)
                 p.stpost(0, 1)
         p.loop(C["gn"], D.RECORDS * D.FIELDS // 32, group)
+        set_flags(p)
     p.ld(0, D.GEN)
     p.ld(1, TABLE + 4 * D.RECORDS * D.FIELDS)
     p.if_(0, "NE", 1, go, kind="i")
 
 
+def set_flags(p: Prog) -> None:
+    """D.FLAGS from the records just unpacked (design.flags), 2026-11-10 (perf). Clobbers R0, R1,
+    R5-R7, R11, R12, I4"""
+    p.iconst(1, TABLE)
+    p.seti(4, 1)
+    for r in (5, 6, 7):
+        p.iconst(r, 0)
+
+    def rec():
+        p.ldi(0, 0, 4)
+        p.iconst(12, (1 << D.TYPE_BITS) - 1)
+        p.iop(0, 0, "AND", 12)
+        for r, group in ((5, D.BUILT), (6, D.POST), (7, D.BUS)):
+            for typ in group:
+                p.iconst(12, typ)
+                p.if_(0, "EQ", 12, lambda r=r: p.iconst(r, 1), kind="i")
+        p.geti(1, 4)
+        p.iconst(12, 4 * D.FIELDS)
+        p.iop(1, 12, "+", 1)
+        p.seti(4, 1)
+    p.loop_r(11, D.RECORDS, rec, one=12)
+    for k, r in enumerate((5, 6, 7)):
+        p.st(D.FLAGS + 4 * k, r)
+
+
 def body(p: Prog) -> None:
     G.ins_start(p)
     unpack(p, C)
+    p.ld(0, D.FLAGS)                             # (perf) no BUILT record: nothing to walk
+    p.ifz(0, "NE", lambda: _walk(p))
+
+
+def _walk(p: Prog) -> None:
     p.iconst(0, 0)
     p.st(C["i"], 0)
 

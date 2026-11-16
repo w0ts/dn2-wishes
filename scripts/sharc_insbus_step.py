@@ -104,6 +104,8 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
                     m2.poke(st, D.BUS_BLOCKS + 0x100 * t + D.BUS_R + 4 * j, fb(np.float32(x * 0.7)))
             for k, v in enumerate(par_of(b)):
                 m2.poke(st, D.TABLE + 4 * k, v)
+            for k, v in enumerate(D.flags(par_of(b))):   # its flags (perf, 2026-11-10)
+                m2.poke(st, D.FLAGS + 4 * k, v)
             cur.clear()
             cur["par"] = par_of(b)
             cur["in"] = blocks_of(st)
@@ -180,6 +182,8 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
             r = (out["state"] if r is None else r).fresh_call(dsp.INSBUS_SW, regs={})
             for k, v in enumerate(par):
                 m2.poke(r.state, D.TABLE + 4 * k, v)
+            for k, v in enumerate(D.flags(par)):   # its flags (perf, 2026-11-10)
+                m2.poke(r.state, D.FLAGS + 4 * k, v)
             for t in range(16):
                 for j in range(64):
                     m2.poke(r.state, D.BUS_BLOCKS + 0x100 * t + 4 * j, fb(np.float32(0.1 * ((j % 7) - 3))))

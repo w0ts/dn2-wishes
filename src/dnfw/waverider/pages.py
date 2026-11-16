@@ -189,6 +189,7 @@ MNM_PAGE = PARAM_IDS
 # 2026-11-09: a machine with PNAMES2 (DRONE, ANALOG 2) has a second page on PERC's page-2 records (the
 # Machinedrum's track-FX records and TYPE, which PERC applies only to its own machines): 16 controls
 MNM_PAGE2 = (*FX_IDS, TYPE_ID)
+from ..mnm import units as _mnm_units
 MNM_RECS = tuple(_perc.PARAMS) + tuple(_perc.FX_PARAMS) + (_perc.TYPE_REC + (0, 127),)   # (rid, slot, lo, top) x 16
 
 
@@ -274,6 +275,13 @@ def mnm_c_header() -> str:
     labels = ", ".join("{" + ", ".join(q + (sh if sh != "---" and sh not in MNM_UNPORTED else "-") + q
                                        for sh in mnm_pnames(M)) + "}" for M in _mnm.CF_MACHINES)
     pidx = _pch_names()[0]
+    _UNITS = _mnm_units.tables(_mnm.CF_MACHINES, mnm_pnames)
+    _ik, _ia, _ic = _mnm_units.ins_tables()
+    _base = len(_UNITS[2])
+    _UNITS = (_UNITS[0], _UNITS[1], _UNITS[2] + _ic)
+    _fk, _fa, _fc = _mnm_units.flt_tables(len(_UNITS[2]))
+    _UNITS = (_UNITS[0], _UNITS[1], _UNITS[2] + _fc)
+    _ia = [[(x + _base) if k & 127 and x < len(_ic) and _ic else x for x, k in zip(r, kr)] for r, kr in zip(_ia, _ik)]
     lines = [
         f"#define MNM_N {len(_mnm.CF_MACHINES)}",
         # the machine's name in the track box (MACHINE SEL's long name, in capitals; a reserved
@@ -313,6 +321,16 @@ def mnm_c_header() -> str:
         f"#define MNM_RETIRED(mi, j, c) {mnm_retired()}",
         "enum { MW_KNOB, MW_EMPTY, MW_GRID, MW_SLIDE, MW_VU, MW_SWITCH, MW_SEMIS, MW_CENTS };",
         f"static const unsigned char mnm_widget[MNM_N][MNM_J] = {{{arr([[MNM_WIDGET.get((M.NAME, sh), 1 if sh == '---' or sh in MNM_UNPORTED else 0) for sh in mnm_pnames(M)] for M in _mnm.CF_MACHINES])}}};",
+        # 2026-11-10: the value readout's units (dnfw.mnm.units): kind (bit 7: 0 reads OFF), curve, the curves
+        "enum { MU_RAW, MU_PCT, MU_SPCT, MU_HZ, MU_HZ100, MU_MS, MU_C10, MU_C, MU_DB, MU_OCT, MU_PATN, MU_RATE, MU_PCTC, MU_MODE, MU_MS10, MU_VOIC };",
+        f"static const unsigned char mnm_unit[MNM_N][MNM_J] = {{{arr(_UNITS[0])}}};",
+        f"static const unsigned char mnm_unit_curve[MNM_N][MNM_J] = {{{arr(_UNITS[1])}}};",
+        f"static const short mnm_curves[{len(_UNITS[2])}][17] = {{{arr(_UNITS[2])}}};",
+        f"static const unsigned char flt_unit[{len(_fk)}] = {{{', '.join(map(str, _fk))}}};",
+        f"static const unsigned char flt_unit_curve[{len(_fk)}] = {{{', '.join(map(str, _fa))}}};",
+        f"#define FLT_UNIT_IDS {{{', '.join(map(str, _mnm_units.FLT_IDS))}}}",
+        f"static const unsigned char ins_unit[13][8] = {{{arr(_ik)}}};",
+        f"static const unsigned char ins_unit_curve[13][8] = {{{arr(_ia)}}};",
     ]
     return "\n".join(lines) + "\n"
 

@@ -96,6 +96,7 @@ u32 ins_edits __attribute__((section(".data"))) = 0;    /* moves on every edit b
 int ins_up __attribute__((section(".data"))) = 0;       /* the INSERT page up: 0 none, 1 or 2 its slot */
 static int ins_inited __attribute__((section(".data"))) = 0;
 static int title_due __attribute__((section(".data"))) = 0;  /* draws left to rename stock's "FX" */
+static int touched __attribute__((section(".data"))) = -1;   /* the knob last turned on this INSERT page (0..5, 7 MIX): its value in its unit */
 
 /* every slot to its defaults: OFF, MIX 127, every insert's knobs as DEFAULT (power-on, a NEW project) */
 void ins_defaults(void)
@@ -255,7 +256,9 @@ static void turn(int knob, int delta)
         }
     } else if (knob == 8) {
         ins_mod[t][j] = (u8)clamp(ins_mod[t][j] + delta, 0, 127);
+        touched = 7;
     } else {
+        touched = knob - 2;
         int y = ins_sel[t][j];
         if (y && LABEL[y][knob - 2][0])
             ins_kv[t][j][y][knob - 2] = (u8)clamp(ins_kv[t][j][y][knob - 2] + delta, 0, 127);
@@ -423,6 +426,8 @@ int ins_visible(void)
 }
 
 #include "../waverider/widgets.h"       /* stock 1.12's own widgets (docs/widgets.md) */
+extern int smp_values_held(void);                         /* SYN held (csrc/sampler) */
+extern const char *mu_ins(int type, int knob, int k);     /* the value in its unit (csrc/waverider/md_page.c) */
 
 static void fill(void *c, int x0, int y0, int x1, int y1, int on)
 {
@@ -448,6 +453,11 @@ static const char *ins_name(int i, int arg)
 void ins_draw(void *c)
 {
     init();
+    static int last_up __attribute__((section(".data"))) = 0;
+    if (ins_up != last_up) {                    /* another INSERT page: no knob touched yet */
+        last_up = ins_up;
+        touched = -1;
+    }
     int t = UI_TRACK & 15, j = (ins_up - 1) & 1, y = ins_sel[t][j];
     fill(c, 22, 0, 127, 53, 0);                 /* the places; stock's title bar and left panel stay */
     wg_choice(c, 0, NAME[y]);
@@ -457,9 +467,13 @@ void ins_draw(void *c)
         if (!LABEL[y][k][0])
             continue;
         wg_knob(c, k + 1, ins_kv[t][j][y][k]);
-        wg_label(c, k + 1, LABEL[y][k]);
+        const char *vt = (smp_values_held() || k == touched) ? mu_ins(y, k, ins_kv[t][j][y][k]) : 0;   /* the knob turned last (or SYN held): its value in its unit */
+        wg_label(c, k + 1, vt ? vt : LABEL[y][k]);
     }
     wg_knob(c, 7, ins_mod[t][j]);
-    wg_label(c, 7, "MIX");
+    {
+        const char *vt = (smp_values_held() || touched == 7) ? mu_ins(y, 7, ins_mod[t][j]) : 0;
+        wg_label(c, 7, vt ? vt : "MIX");
+    }
     PAGE_DOTS(0, c, PAGES, ins_up, 7);          /* FX 2/3 or 3/3 */
 }

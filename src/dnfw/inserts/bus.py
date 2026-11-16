@@ -340,6 +340,11 @@ def slot(p: Prog) -> None:
 
 
 def body(p: Prog) -> None:
+    p.ld(0, D.FLAGS + 8)                         # (perf, 2026-11-10) no BUS record: nothing to walk
+    p.ifz(0, "NE", lambda: _walk(p))
+
+
+def _walk(p: Prog) -> None:
     p.iconst(0, 0)
     p.st(C["fds"], 0)
     p.st(C["xds"], 0)

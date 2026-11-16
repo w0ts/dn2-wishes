@@ -106,11 +106,7 @@ def env_mul(p: Prog, x: int, dd: int, t: int, u: int, v: int) -> None:
 def mpyf(p: Prog, d: int, a: int, b: int) -> None:
     """Fd = core.mpy_floor(Fa, Fb) (Fa, Fb >= 0), through one shared copy (a leaf
     subroutine: F9 = floor(F10 F11)). Clobbers R0-R3, R9-R15, I12."""
-    assert b != 10
-    p.fpass(10, a)
-    p.fpass(11, b)
-    p.call("trx1_mpyf", lambda: K.mpy_floor(p, 9, 10, 11))
-    p.fpass(d, 9)
+    K.mpyf_any(p, d, a, b)                   # (perf: inline)
 
 
 def smpy(p: Prog, d: int, a: int, b: int, sg: int) -> None:
@@ -125,8 +121,7 @@ def smpy(p: Prog, d: int, a: int, b: int, sg: int) -> None:
     p.fop(10, 10, "MAX", a)
     K.mul_k(p, 11, b, -1.0)
     p.fop(11, 11, "MAX", b)
-    p.call("trx1_mpyf", lambda: K.mpy_floor(p, 9, 10, 11))
-    p.fpass(d, 9)
+    K.mpy_floor(p, d, 10, 11)                # (perf: inline)
     p.ifz(sg, "LT", lambda: (K.mul_k(p, d, d, -1.0), K.add_k(p, d, d, -Q)), kind="f")
 
 

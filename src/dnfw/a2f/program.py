@@ -46,9 +46,16 @@ from ..perc.dsl import Mem, Prog
 from . import design as DS
 from . import models as M
 
-A2F_COST = 45_000                 # cycles a voice slot's pass is expected to need (measured: about 30,000 instructions in the runner; the unit's L2/DDR costs more)
+ONE_VOICE = False                 # 2026-11-11 (perf, main): every A2 voice is filtered, the ADMIT models admitted against the frame deadline (COST_BY_MODEL); 2026-11-10 it was True (one voice, the newest note's, while a voice cost 17-36 % of a frame: it ran all 16 slots, and its state was in L2). True: one voice a block
+# cycles a voice's pass is expected to take, by model (SVF LADR OTA DIOD MS20): the runner's instructions
+# + 4 x L2 + 10 x DDR accesses, one voice with the machine's defaults (2026-11-10, HOLD6): 72.6k+, 109.7k+, 115k+, 135k+26k L2, 102k+
+COST_BY_MODEL = {"SVF": 8_000, "LADR": 9_500, "OTA": 10_000, "DIOD": 12_000, "MS20": 9_000}
+# 2026-11-10 (the User: on HOLD7 the filters do "nothing", warmth only): is the deadline starving them? The runner's
+# unit-like clock (silent frame 416k, tail 193k) admits every model, but the unit's tail is unknown. The models that fit
+# a frame beside the silent load (silent 64 % + at most 26 %) run without the deadline test; DIOD (36 %) keeps it
+ADMIT = {"SVF": 0, "LADR": 0, "OTA": 0, "DIOD": 1, "MS20": 0}
 LOAD = 0x200B2400                 # L2: the code (the coordinator's room, to 0x200b5800)
-STATE = 0x200B5800                # L2: 16 slots x 64 bytes, then the pass's words, the models', the tables
+STATE = 0x2DD600                  # L1 (perf, 2026-11-11: was L2 0x200B5800, 4 cycles an access): 16 slots x 64 bytes, then the pass's words, the models', the tables
 SLOT_WORDS = 16
 SLOT_BYTES = 4 * SLOT_WORDS
 Z1, C01, Z2, C02, LVL, STG, TAG, TRK = 0, 4, 5, 9, 10, 11, 12, 13      # a slot's words
@@ -76,7 +83,8 @@ DEC_A1 = math.log2(5000.0)
 
 _NAMES = ["s", "cnt", "tr", "sp", "rec", "lvlA", "lvlB", "kmod", "dmod", "bufb", "fp", "fcnt", "hcnt",
           "g0", "gA", "gB", "cA", "cB", "step", "coef", "ok",
-          "f1b", "f1r", "f1m", "f1z", "f2b", "f2r", "f2m", "f2z"]
+          "f1b", "f1r", "f1m", "f1z", "f2b", "f2r", "f2m", "f2z",
+          "ps", "ptr", "pcnt", "first", "pick", "cost", "nfil", "ndry", "quiet"]
 SCRATCH = STATE + 16 * SLOT_BYTES
 C = {n: SCRATCH + 4 * k for k, n in enumerate(_NAMES)}
 MSCRATCH = SCRATCH + 4 * len(_NAMES)
@@ -284,6 +292,25 @@ def _cut(p: Prog, d: int, lvl: str) -> None:
     _clamp(p, d, 0.0, 127.0)
 
 
+def _quiet(p: Prog, X: M.Ctx) -> None:
+    """C["quiet"] = the OR of the filter's four state words and the slot buffer's 32 (zero bits): 0 when the
+    buffer is all +0.0 and the states are zeros, so the filter's output is the same zeros and its states stay
+    zeros (every model's offsets are products and sums of the input and the states). Clobbers R0, R8, R9, R11,
+    R12, I3."""
+    p.ld(8, X.C["zp"])
+    p.seti(3, 8)
+    p.iconst(9, 0)
+
+    def word():
+        p.ldpost(0, 3)
+        p.iop(9, 9, "OR", 0)
+    p.loop_r(11, 4, word)
+    p.ld(8, C["bufb"])
+    p.seti(3, 8)
+    p.loop_r(11, 2 * M.N, word)
+    p.st(C["quiet"], 9)
+
+
 def _filter(p: Prog, X: M.Ctx) -> None:
     """one filter (its words at fp) over the slot's buffer"""
     p.ld(8, C["fp"])
@@ -346,13 +373,15 @@ def _filter(p: Prog, X: M.Ctx) -> None:
     p.st(X.C["buf"], 0)
     p.iconst(0, 2)
     p.st(C["hcnt"], 0)
+    _quiet(p, X)
 
     def half():
         p.ld(0, C["g0"])
         p.st(X.C["gs"], 0)
         p.ld(0, C["gA"])
         p.st(X.C["ge"], 0)
-        M.half(p, X)
+        p.ld(0, C["quiet"])
+        p.ifz(0, "NE", lambda: M.half(p, X))     # (perf, 2026-11-11) a silent input and a state of zeros stay zero: nothing to run
         p.ld(0, C["gA"])
         p.st(C["g0"], 0)
         p.ld(0, C["gB"])
@@ -366,6 +395,111 @@ def _filter(p: Prog, X: M.Ctx) -> None:
     p.iconst(9, 16)
     p.iop(8, 8, "+", 9)
     p.st(C["fp"], 8)
+
+
+def _admit(p: Prog, run) -> None:
+    """RUN() if the pass of the slot (its cost in C["cost"], cycles) is expected to end before the guard's
+    INS_DEADLINE, or no deadline is known yet (the runner, the model); else INS_SKIPS + 1 and the slot
+    left dry. (dnfw.perc.guard.ins_admit with the bound from a word.) Clobbers R8-R10 before RUN."""
+    if p.run:
+        run()
+        return
+    go = p.label("a2go")
+    done = p.label("a2done")
+    p.ld(10, G.INS_DEADLINE)
+    p.e("R10 = PASS R10;")
+    p.jump("EQ", go)
+    p.e("R8 = EMUCLK;")
+    p.ld(9, G.MARK0)
+    p.e("R8 = R8 - R9;", "into the frame")
+    p.ld(9, C["cost"])
+    p.e("R8 = R8 + R9;", "and this model's bound")
+    p.ld(9, G.INS_DEADLINE)
+    p.e("COMP(R8, R9);")
+    p.jump("LE", go)
+    p.ld(8, G.INS_SKIPS)
+    p.iconst(9, 1)
+    p.e("R8 = R8 + R9;")
+    p.st(G.INS_SKIPS, 8)
+    p.jump("", done)
+    p.place(go)
+    run()
+    p.place(done)
+
+
+def _is_a2(p: Prog, X: M.Ctx, sname: str, trname: str) -> None:
+    """R5 = the model + 1 the slot C[sname] plays (0: none), its track in C[trname]"""
+    _half16(p, 3, ROUTE, sname)
+    p.st(C[trname], 3)
+    p.iconst(5, 0)
+    p.iconst(12, 15)
+
+    def plays():
+        _half16(p, 4, FTYPE, trname)
+        p.iconst(12, TYPE0)
+        p.iop(4, 4, "-", 12)
+        for m in X.models:
+            i = M.MODELS.index(m)
+            p.iconst(6, i)
+            p.if_(4, "EQ", 6, lambda i=i: p.iconst(5, i + 1), kind="i")
+    p.if_(3, "LE", 12, plays, kind="i")
+
+
+def _pick(p: Prog, X: M.Ctx) -> None:
+    """C["pick"] = the slot + 1 whose filters run this block: the newest note's (a trig of its track this
+    block), else the last pick while it still plays a filter machine, else the first such slot; 0: none"""
+    p.iconst(0, 0)
+    p.st(C["ps"], 0)
+    p.st(C["first"], 0)
+    p.iconst(0, 16)
+    p.st(C["pcnt"], 0)
+
+    def one():
+        _is_a2(p, X, "ps", "ptr")
+
+        def yes():
+            p.ld(0, C["first"])
+
+            def set_first():
+                p.ld(8, C["ps"])
+                p.iconst(9, 1)
+                p.iop(8, 8, "+", 9)
+                p.st(C["first"], 8)
+            p.ifz(0, "EQ", set_first)
+            p.ld(8, C["ptr"])                    # its track's trig bit (frame +34, bit t)
+            p.iconst(9, 16)
+            p.iop(8, 8, "+", 9)
+            p.iconst(7, 0)
+            p.iop(6, 7, "-", 8)
+            p.ld(0, TRIGW)
+            lshr(p, 0, 0, 6)
+            p.iconst(12, 1)
+            p.iop(0, 0, "AND", 12)
+
+            def newest():
+                p.ld(8, C["ps"])
+                p.iconst(9, 1)
+                p.iop(8, 8, "+", 9)
+                p.st(C["pick"], 8)
+            p.ifz(0, "NE", newest)
+        p.ifz(5, "NE", yes)
+        p.ld(8, C["ps"])
+        p.iconst(9, 1)
+        p.iop(8, 8, "+", 9)
+        p.st(C["ps"], 8)
+    M.mloop(p, C["pcnt"], one)
+    # the last pick must still play a filter machine
+    p.ld(0, C["pick"])
+
+    def check():
+        p.iconst(9, 1)
+        p.iop(0, 0, "-", 9)
+        p.st(C["ps"], 0)
+        _is_a2(p, X, "ps", "ptr")
+        p.ifz(5, "EQ", lambda: (p.iconst(0, 0), p.st(C["pick"], 0)))
+    p.ifz(0, "NE", check)
+    p.ld(0, C["pick"])
+    p.ifz(0, "EQ", lambda: (p.ld(8, C["first"]), p.st(C["pick"], 8)))
 
 
 def _slot(p: Prog, X: M.Ctx) -> None:
@@ -404,26 +538,54 @@ def _slot(p: Prog, X: M.Ctx) -> None:
         p.if_(6, "NE", 5, lambda: p.iconst(9, 1), kind="i")
         p.if_(7, "NE", 8, lambda: p.iconst(9, 1), kind="i")
         p.ifz(9, "NE", lambda: _fresh(p, 5))
-        p.ld(8, C["ok"])
-        p.iconst(12, -1)
-        p.iop(8, 8, "+", 12)
-        p.st(X.C["model"], 8)
-        _controls(p, X)
-        p.ld(0, C["sp"])
-        p.seti(2, 0)
-        _envelope(p)
-        p.ld(0, C["s"])
-        p.lsh(1, 0, 2)
-        p.iconst(12, BUFFERS)
-        p.iop(1, 12, "+", 1)
-        p.seti(1, 1)
-        p.ldi(0, 0, 1)
-        p.st(C["bufb"], 0)
-        p.iconst(0, C["f1b"])
-        p.st(C["fp"], 0)
-        p.iconst(0, 2)
-        p.st(C["fcnt"], 0)
-        M.mloop(p, C["fcnt"], lambda: _filter(p, X))
+
+        def work():
+            p.ld(8, C["ok"])
+            p.iconst(12, -1)
+            p.iop(8, 8, "+", 12)
+            p.st(X.C["model"], 8)
+            _controls(p, X)
+            p.ld(0, C["sp"])
+            p.seti(2, 0)
+            _envelope(p)
+            p.ld(0, C["s"])
+            p.lsh(1, 0, 2)
+            p.iconst(12, BUFFERS)
+            p.iop(1, 12, "+", 1)
+            p.seti(1, 1)
+            p.ldi(0, 0, 1)
+            p.st(C["bufb"], 0)
+            p.iconst(0, C["f1b"])
+            p.st(C["fp"], 0)
+            p.iconst(0, 2)
+            p.st(C["fcnt"], 0)
+            M.mloop(p, C["fcnt"], lambda: _filter(p, X))
+            p.ld(8, C["nfil"])                   # voices filtered, cumulative (the diagnostic page)
+            p.iconst(9, 1)
+            p.iop(8, 8, "+", 9)
+            p.st(C["nfil"], 8)
+
+        def dry():
+            p.ld(8, C["ndry"])
+            p.iconst(9, 1)
+            p.iop(8, 8, "+", 9)
+            p.st(C["ndry"], 8)
+
+        def admitted():
+            p.ld(8, C["ok"])
+            for m in X.models:
+                i = M.MODELS.index(m)
+                p.iconst(9, i + 1)
+                p.if_(8, "EQ", 9, lambda m=m: (p.iconst(10, COST_BY_MODEL[m] if ADMIT[m] else 0), p.st(C["cost"], 10)), kind="i")
+            _admit(p, work)
+        if ONE_VOICE:
+            p.ld(8, C["s"])
+            p.iconst(9, 1)
+            p.iop(8, 8, "+", 9)
+            p.ld(7, C["pick"])
+            p.if_(8, "EQ", 7, admitted, dry, kind="i")
+        else:
+            admitted()
     p.ifz(5, "EQ", off, on)
 
 
@@ -439,9 +601,15 @@ def body(p: Prog, X: M.Ctx) -> None:
     p.iconst(0, 16)
     p.st(C["cnt"], 0)
     G.ins_start(p)                               # 2026-11-10: this pass's time apart (the guard's INS_ACC), out of the stock's tail
+    if ONE_VOICE:
+        _pick(p, X)
+    p.iconst(0, 0)
+    p.st(C["s"], 0)
+    p.iconst(0, 16)
+    p.st(C["cnt"], 0)
 
     def each():
-        G.ins_admit(p, A2F_COST, lambda: _slot(p, X))   # a slot's filters only if they are expected to end before the frame's deadline
+        _slot(p, X)                              # (a slot's filters run only when picked and expected to end before the frame's deadline)
         p.ld(8, C["s"])
         p.iconst(9, 1)
         p.iop(8, 8, "+", 9)

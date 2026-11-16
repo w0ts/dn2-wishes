@@ -513,6 +513,8 @@ HOLD_NOTE_SITE = 0x40026AFC             # the ISR's note-on gate store (csrc/hol
 HOLD_NOTE_STOCK = "20020680000005cc278c0c00"   # move.l %d2,%d0 ; addi.l #1484,%d0 ; move.l %a4,(%a3,%d0.l*4)
 HOLD_KEYS_SITE = 0x40026F6A             # lea 0x4002a3a6,%a2: the ISR's "a key is held on track t" (released if not)
 HOLD_KEYS_STOCK = "45f94002a3a6"
+HOLD_FINAL_SITE = 0x40027092            # jsr 0x4002b12e after the ISR's note-off word is composed (0x4002708e)
+HOLD_FINAL_STOCK = "4eb94002b12e"
 POLL_SITE = 0x4002E464                  # jsr 0x4011d5d4 (isDirty), its argument the screen
 # v0.38: per-project pools (csrc/sampler/pools.c, hooks.S, docs/project-pools.md): the OS's
 # project LOAD 0x40042E6E (its entry, its success where it sets the slot, its exit) and NEW
@@ -724,6 +726,8 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
          "DRONE's HOLD: a note's gate length through hold_len", bytes.fromhex(HOLD_NOTE_STOCK))
     edit(HOLD_KEYS_SITE, bytes.fromhex("45f9") + _long(csyms["hold_keys"]),
          "DRONE's HOLD: a latched track's keys count as held", bytes.fromhex(HOLD_KEYS_STOCK))
+    edit(HOLD_FINAL_SITE, bytes.fromhex("4eb9") + _long(csyms["hold_final_hook"]),
+         "DRONE's HOLD: the frame's note-off word without the latched voices", bytes.fromhex(HOLD_FINAL_STOCK))
     edit(POLL_SITE, bytes.fromhex("4eb9") + _long(csyms["wr_poll"]),
          "the UI loop's redraw test: wr_poll asks for a redraw while a modulation marker on "
          "Waverider's page would move, then answers as stock", POLL_STOCK)
@@ -974,7 +978,7 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
                  "ins_pop", "ins_draw", "ins_visible", "ins_words", "ins_gen", "ins_up", "ins_sel", "ins_selv", "ins_mod", "ins_kv",
                  "ins_hdr_tail"):   # the sample link's state (v0.15)
         layout[name] = csyms[name]
-    for name in ("hold_seq", "hold_count", "hold_len", "hold_keys", "hold_poll"):   # DRONE's HOLD (csrc/hold)
+    for name in ("hold_seq", "hold_count", "hold_len", "hold_keys", "hold_poll", "hold_final", "hold_rel"):   # DRONE's HOLD (csrc/hold)
         layout[name] = csyms[name]
     layout["mtr_ram"] = pages.METER_RAM      # the system meter's state block (csrc/meter/meter.c MTR_*)
     # v0.45: PING removed (owner, 2026-11-08). 2026-11-10: its mechanism (the FLTR list, names, LOAD
