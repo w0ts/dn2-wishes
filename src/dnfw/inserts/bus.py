@@ -78,8 +78,12 @@ FD_SEND = WORDS_L1 + 4 * len(_NAMES)              # the send FX's words, while i
 XD_SEND = FD_SEND + 4 * FD_WORDS
 WORDS_L1_END = XD_SEND + 4 * XD_WORDS
 assert WORDS_L1_END <= WORDS_L1_LIMIT
-XD_STORE = (HEAD_END + XD_STRIDE - 1) // XD_STRIDE * XD_STRIDE
-END = XD_STORE + D.XDLY_INSTANCES * XD_STRIDE
+XD_L2 = (HEAD_END + XD_STRIDE - 1) // XD_STRIDE * XD_STRIDE   # (where the XDLY stores were, in L2: kept, so nothing
+END = XD_L2 + D.XDLY_INSTANCES * XD_STRIDE                     # after them moves)
+# 2026-11-13 (lever 5; the arbiter: L1 F2 0x2e1750..0x2e1980): the XDLY instances' stores in L1 (every block copies
+# an instance's 35 words in and out: 2 L2 accesses a word), packed at their words' size; zeros at power-on (dsp)
+XD_STORE, XD_L1_STRIDE = 0x2E1750, 4 * XD_WORDS
+assert XD_STORE + D.XDLY_INSTANCES * XD_L1_STRIDE <= 0x2E1980
 # perf (2026-11-11): the FDN8 instances' stores in L1 (every block copies an instance's words in and out: 2
 # L2 accesses a word), in the 5 KB free after the post pass's state (post.py ends at 0x2e4044; MNM_RENDER_DM
 # starts at 0x2e5400), 156 words an instance, no gaps
@@ -374,7 +378,7 @@ def unit_xdly(p: Prog) -> None:
             p.iconst(0, 1)
             p.st(C["xds"], 0)
         p.ifz(0, "EQ", keep_send)
-        store_area(p, "own", XD_STORE, XD_STRIDE)
+        store_area(p, "own", XD_STORE, XD_L1_STRIDE)
         copy(p, XP.STATE, "own", XP.DYN_WORDS)
 
         def fresh():                             # a new engine: zeros, its two lines

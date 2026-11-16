@@ -171,22 +171,28 @@ def run(M5, snap, m2mach, m5img, stock_img) -> dict:
            "knob moves, SIZE 127)"] = exact
     checks["TYPE FDN8: the tail is heard (not a run of zeros)"] = heard > 3000
     checks["TYPE FDN8: every R, I0-I3 and I5 register the bus left is back at the return"] = regs_back
-    ring = [M5.m2.word(rb.state, dsp.FDN8_RING_DDR + 4 * k) or 0 for k in range(FD.RING_WORDS)]
-    checks["TYPE FDN8: the ring, word for word, as the reference's"] = ring == [fb(x) for x in ref.ring]
+    ring = FP.ring_view(lambda a: M5.m2.word(rb.state, a), dsp.FDN8_RING_DDR,
+                        M5.m2.word(rb.state, FP.C["p4"]) or 0, FP.DIFF_SEND_L2)   # (2026-11-13: diffusers in L2)
+    checks["TYPE FDN8: the ring, word for word, as the reference's (its diffusers' words from their L2 ring)"] = (
+        ring == [fb(x) for x in ref.ring])
     if FP.QUIET_GATE:
         # 2026-11-11 (perf): the quiet gate's skip path, on the state after the run (qn set as if QUIET_BLOCKS
         # silent blocks had passed; the tail in the ring is left as it is): the wet is zeros, only the LFOs'
         # phases move, the ring is untouched; a block with an input runs again (qn back to 0)
         tw_q, _, _, par_q = seq[-1]
         ph0 = [M5.m2.word(rb.state, FP.C[f"ph{k}"]) or 0 for k in range(8)]
+        ddr0 = [M5.m2.word(rb.state, dsp.FDN8_RING_DDR + 4 * k) or 0 for k in range(FD.RING_WORDS)]
+        l2_0 = [M5.m2.word(rb.state, FP.DIFF_SEND_L2 + 4 * k) or 0 for k in range(FP.DIFF_WORDS)]
         rq, hq, oq, entry_q, _ = call(M5, rb, tw_q, [0.0] * 32, [0.0] * 32, par_q, {FP.C["qn"]: FP.QUIET_BLOCKS})
         ph1 = [M5.m2.word(rq.state, FP.C[f"ph{k}"]) or 0 for k in range(8)]
         ring_q = [M5.m2.word(rq.state, dsp.FDN8_RING_DDR + 4 * k) or 0 for k in range(FD.RING_WORDS)]
+        l2_q = [M5.m2.word(rq.state, FP.DIFF_SEND_L2 + 4 * k) or 0 for k in range(FP.DIFF_WORDS)]
         keep_q = {f"R{k}" for k in range(16)} | {"I0", "I1", "I2", "I3", "I5"}
         checks["FDN8 quiet gate: a silent block with qn at QUIET_BLOCKS writes a wet of zeros, moves only the "
                "LFOs' phases (by LFO_INC), leaves the ring word for word"] = (
             hq[0] == "stop" and all(w == 0 for w in oq[0] + oq[1])
-            and ph1 == [(a + FD.LFO_INC[k]) & 0xFFFFFFFF for k, a in enumerate(ph0)] and ring_q == ring)
+            and ph1 == [(a + FD.LFO_INC[k]) & 0xFFFFFFFF for k, a in enumerate(ph0)]
+            and ring_q == ddr0 and l2_q == l2_0)            # (the ring and, 2026-11-13, the diffusers' L2 ring)
         checks["FDN8 quiet gate: the skip path gives back every R, I0-I3 and I5 register as it came"] = not any(
             rq.state.uregs.get(k) != entry_q.get(k) for k in entry_q if str(k) in keep_q)
         rq2, hq2, oq2, _, _ = call(M5, rb, tw_q, [0.3] * 32, [0.2] * 32, par_q, {FP.C["qn"]: FP.QUIET_BLOCKS})

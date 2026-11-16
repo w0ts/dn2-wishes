@@ -194,6 +194,19 @@ A removed knob's stored value stays in the record and goes to the DSP unchanged,
 same; the page just cannot change it (a NEW insert starts at its DEFAULT: HARM 100, SUB LEV 100, RING 100,
 SUB DRY 0). The place is left empty.
 
+### Lever 5: FDN8's diffusers and XDLY's stores in faster memory (2026-11-13)
+
+The User un-parked it; option (a): the arbiter's L2 in the Monomachine scratch (0x200a4000..0x200a6000) holds the
+**four diffusers of the send (TYPE FDN8) and of the bus's FDN8 instance 0**, a 1,024-word ring each (aligned to its
+size: their accesses keep one AND and one OR, as in the ring; the diffusers' 606-word span wraps in it as in the ring,
+so their offsets do not change; `fdn8.program.diff_ring`, `DIFF_*`). The mask and base around the diffuser accesses
+are swapped every sample (+4 instructions): every other instance, and LONG, swaps in its own ring's, the same words.
+An L2 ring starts from zeros with the instance (`switch`, 1,024 stores in the clearing block). The **bus XDLY
+instances' stores** move from L2 to the arbiter's L1 F2 0x2e1750..0x2e1980 (packed, zeros at power-on). Model, the
+shared scale: bus FDN8 instance 0 28,735 -> 27,342 a block (-1,393), instances 1..7 +139; the clearing block +5.5k
+(the L2 zeroing, once). The runner's and the tests' "ring word for word" read the diffusers from L2
+(`fdn8.program.ring_view`). Not taken: the User's 64 KB L2 margin (all 9 sets).
+
 ### AUTO: the distortions' level follows the dry (2026-11-12)
 
 The User: "the drive post gain is hard to control when the gain/drive is on max. Could we have an 'auto adjust

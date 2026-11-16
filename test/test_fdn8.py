@@ -95,7 +95,7 @@ def test_model_is_the_reference():
             loud += sum(1 for w in want[0] + want[1] if w & 0x7FFFFFFF)
     assert loud > 3000                              # the tail is heard, not a run of zeros
     # and the ring, word for word
-    ring = [m.get(P.RING + 4 * k) for k in range(D.RING_WORDS)]
+    ring = P.ring_view(m.get, P.RING, m.get(P.C["p4"]), P.DIFF_SEND_L2)   # (2026-11-13: the send's FDN8 diffusers in L2)
     assert ring == [fbits(x) for x in r.ring]
 
 
@@ -117,7 +117,7 @@ def test_long_is_the_reference():
         if b >= 90 and not isinstance(want, str):
             heard += sum(1 for w in want[0] + want[1] if w & 0x7FFFFFFF)
     assert r.cur == 2 and heard > 3000
-    ring = [m.get(P.RING + 4 * k) for k in range(D.RING_WORDS)]
+    ring = P.ring_view(m.get, P.RING, m.get(P.C["p4"]), None)   # (LONG: its diffusers in the ring)
     assert ring == [fbits(x) for x in r.ring]
 
 

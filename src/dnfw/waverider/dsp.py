@@ -498,6 +498,7 @@ def spans() -> list[tuple[str, int, bytes]]:
 
 def _raw_spans() -> list[tuple[str, int, bytes]]:
     """spans()' blocks before their padding: (what, DM address, payload), in address order"""
+    from ..inserts import bus as ins_bus
     obj = objects()
     return [
         _a2f_state_span(obj),
@@ -522,6 +523,8 @@ def _raw_spans() -> list[tuple[str, int, bytes]]:
         ("DPRO's interpolator table in L1 (zeros, filled by the build)", MNM_INTERP_DM, bytes(MNM_INTERP_BYTES)),
         ("the inserts' per-type skip counts (zeros), each pass's least room (none seen; 2026-11-12, round 13)",
          INS_TSKIP_DM, bytes(64) + (0x7FFFFFFF).to_bytes(4, "little") * 4),
+        ("the bus XDLY instances' stores in L1 (zeros; 2026-11-13, lever 5: dnfw.inserts.bus.XD_STORE)",
+         ins_bus.XD_STORE, bytes(ins_bus.D.XDLY_INSTANCES * ins_bus.XD_L1_STRIDE)),
         ("the stock track buffers in L1 (zeros; 256 B extra block, then 16 x 128 B)", TRACKAUX_DM,
          bytes(TRACKAUX_BYTES + TRACKBUF_BYTES)),
         *_ins_state_spans(),

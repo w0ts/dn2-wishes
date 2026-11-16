@@ -430,7 +430,8 @@ COST = {FUZZ: 6_100, TAPE: 8_200, FOLD: 6_700, HARM: 5_100, CHOR: 13_000, WIDE: 
         # 512 KB ring for 32 blocks, 4,096 DDR writes each (FDN8_MEASURED). The bound must never be under a
         # block's cost, or the guard lets it run past the deadline: 1.2 x the clearing block (64,000, r11f). Since
         # 2026-11-12 a steady block's (1.2 x FDN8_MEASURED steady); a clearing block is charged FDN8_COST_CLEAR
-        FDN8: 34_200, XDLY: 20_000,
+        FDN8: 34_700, XDLY: 20_000,                # (34,200 until lever 5, 2026-11-13: + 139 a block, the diffusers'
+                                                   # ring swapped in and out, on an instance whose diffusers stay in DDR)
         # SUB DIST GATER RING (2026-11-10, ins47): not run on the runner yet, so the model's steps of one
         # unit (2,143 / 2,946 / 1,610 / 1,836) x 1.2 (the runner read up to 20 % over the model) x 1.5
         SUB: 3_900, DIST: 5_900, GATER: 2_900, RING: 3_400,
@@ -441,9 +442,10 @@ COST = {FUZZ: 6_100, TAPE: 8_200, FOLD: 6_700, HARM: 5_100, CHOR: 13_000, WIDE: 
 # docs/dsp-cost.md), one instance less the pass with none: a clearing block (its first 32) and a steady one.
 # test_inserts_bus measures the clearing block again and holds COST[FDN8] >= 1.2 x it (53,073 / 32,606 until the bus
 # pass's scratch, own words and send set-aside moved to L1, 2026-11-12; the bound is left as it was)
-FDN8_MEASURED = {"clearing": 49_433, "steady": 28_410}
+FDN8_MEASURED = {"clearing": 54_965, "steady": 28_874}   # (lever 5, 2026-11-13: the clearing block zeros instance 0's L2
+                                                         # diffuser ring, 1,024 words; 49,433 / 28,410 before)
 # 2026-11-12 (main: on the unit the skips rose 1,579 -> 40,041 a minute with 64,000 on every block): the bus pass
 # charges a block by what it will run (bus.fdn8_bound): COST[FDN8] a steady block, FDN8_COST_CLEAR one that clears
 # the ring (its first 32), each 1.2 x its measure
-FDN8_COST_CLEAR = 60_000
+FDN8_COST_CLEAR = 66_000
 assert COST[FDN8] >= 1.2 * FDN8_MEASURED["steady"] and FDN8_COST_CLEAR >= 1.2 * FDN8_MEASURED["clearing"]

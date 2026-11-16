@@ -43,13 +43,26 @@ TYPE_WORD = 0x25CEB4             # the frame image's k 48 (Reverb FX Routing), l
 STOCK_REVERB = 0xB836BC
 STOCK_STATE = R.STOCK_STATE
 MASK4 = D.RING_MASK << 2
+# 2026-11-13 (lever 5, main: option a; the arbiter's L2 in the Monomachine scratch): the four diffusers of the send (TYPE
+# FDN8, not LONG) and of the bus's instance 0 in L2 rings of their own, 1,024 words (4 cycles an access, not DDR's 10).
+# The diffusers' offsets do not change: their span (DIFF_LO .. DIFF_HI past p, 606 words) wraps in 1,024 words as in the
+# ring (a multiple of it), so ring word i is diffuser ring word i % 1024. Only the mask and base around their accesses
+# differ (dmask, dbase; diff_ring); every other instance (and LONG) keeps them in its ring: the same code, the same words
+DIFF_WORDS = 1024
+DIFF_SEND_L2 = 0x200A4000
+DIFF_BUS0_L2 = DIFF_SEND_L2 + 4 * DIFF_WORDS
+DIFF_LO, DIFF_HI = D.RB_A[0], D.RB_A[-1] + D.A48[-1]
+BUS0_RING = 0x82800000                            # the bus's FDN8 instance 0's ring (dnfw.inserts.design.FDN8_RING_DDR)
+assert DIFF_HI - DIFF_LO + 1 <= DIFF_WORDS and D.RING_WORDS % DIFF_WORDS == 0
+assert DIFF_SEND_L2 % (4 * DIFF_WORDS) == 0 and DIFF_BUS0_L2 + 4 * DIFF_WORDS <= 0x200A6550   # aligned; the allotment
 
 _NAMES = (["ring", "mode", "im", "cur", "clr", "pos", "force", "p4", "pd4", "xw", "gd1", "gd2", "gh", "ah", "al", "hs", "ls",
            "dq", "io", "par", "went", "qin", "qn", "t0", "t1", "t2", "t3", "t4", "t5", "t6", "t7"]
           + [f"{n}{k}" for n in ("ph", "ro", "eta", "ap", "lp", "c", "g", "f") for k in range(8)]
           + [f"last{k}" for k in range(6)] + [f"pr{k}" for k in range(6)]
           + [f"sv{k}" for k in range(16)] + ["svi0", "svi1", "svi2", "svi3", "svi4", "svi12", "sva"]
-          + ["xsd", "xf", "xwl", "xwr", "gdx1", "gdx2"] + [f"gx{k}" for k in range(8)])   # 2026-11-11: the second page, after the words an instance swaps
+          + ["xsd", "xf", "xwl", "xwr", "gdx1", "gdx2"] + [f"gx{k}" for k in range(8)]   # 2026-11-11: the second page, after the words an instance swaps
+          + ["dmask", "dbase"])                  # 2026-11-13: the diffusers' ring (diff_ring), set every block
 C = {n: STATE + 4 * k for k, n in enumerate(_NAMES)}
 assert len(C) == len(_NAMES), "a state word named twice"
 DYN_WORDS = (C["sv0"] - STATE) // 4               # an instance's words: STATE .. sv0 (then ACT's)
@@ -482,6 +495,8 @@ def sample(p: Prog) -> None:
     p.ldi(0, 0, 4)                               # x
     p.ld(5, C["gdx1"])
     p.ld(6, C["gdx2"])
+    p.ld(9, C["dmask"])                          # the diffusers' ring (diff_ring)
+    p.ld(10, C["dbase"])
     for k in range(4):
         g = 5 if k < 2 else 6
         p.ld(14, A[f"db{k}"])
@@ -494,6 +509,8 @@ def sample(p: Prog) -> None:
         p.sti(0, 4, 2)
         p.fop(3, g, "*", 2)
         p.fop(0, 1, "-", 3)
+    p.iconst(9, MASK4)                           # the ring again
+    p.ld(10, C["ring"])
     p.st(C["xw"], 0)
     p.iconst(15, 4)
     for k in range(8):
@@ -715,11 +732,45 @@ def _fdn8_block(p: Prog) -> None:
     lfo(p)
     extras(p)
     io_ptrs(p)
+    diff_ring(p)
     p.ld(8, C["p4"])
     p.iconst(9, MASK4)
     p.ld(10, C["ring"])
     p.loop_r(11, D.BLOCK, lambda: sample(p))
     p.st(C["p4"], 8)
+
+
+def diff_ring(p: Prog) -> None:
+    """C['dmask'], C['dbase']: the diffusers' ring this block: the send's or the bus instance 0's L2 ring (TYPE FDN8,
+    C['cur'] 1), else this instance's own ring (MASK4, C['ring']). Clobbers R0-R2, R12"""
+    p.iconst(0, MASK4)
+    p.st(C["dmask"], 0)
+    p.ld(1, C["ring"])
+    p.st(C["dbase"], 1)
+
+    def fdn():
+        def l2(base):
+            return lambda: (p.iconst(0, 4 * DIFF_WORDS - 1), p.st(C["dmask"], 0), p.iconst(0, base), p.st(C["dbase"], 0))
+        p.iconst(2, RING)
+        p.if_(1, "EQ", 2, l2(DIFF_SEND_L2), kind="i")
+        p.iconst(2, BUS0_RING)
+        p.if_(1, "EQ", 2, l2(DIFF_BUS0_L2), kind="i")
+    p.ld(0, C["cur"])
+    p.iconst(2, 1)
+    p.if_(0, "EQ", 2, fdn, kind="i")
+
+
+def ring_view(get, ring: int, p4: int, l2: int | None) -> list[int]:
+    """the ring's words as the reference holds them (ref.Ref.ring), from memory GET: the ring at RING, its diffusers' words
+    (the 606 past the stored p, one sample on from the last block's) from the L2 ring L2 when the instance last ran FDN8
+    with one (diff_ring), else the ring's"""
+    words = [get(ring + 4 * k) or 0 for k in range(D.RING_WORDS)]
+    if l2 is not None:
+        p = (p4 >> 2) & D.RING_MASK
+        for off in range(DIFF_LO + 1, DIFF_HI + 2):
+            i = (p + off) & D.RING_MASK
+            words[i] = get(l2 + 4 * (i % DIFF_WORDS)) or 0
+    return words
 
 
 def silence(p: Prog) -> None:
@@ -800,6 +851,19 @@ def switch(p: Prog) -> None:
         p.st(C["ls"], 0)
         p.iconst(0, 1)
         p.st(C["force"], 0)
+        diff_ring(p)                             # 2026-11-13: an L2 diffuser ring starts from zeros, as the ring
+        p.ld(0, C["dbase"])
+        p.ld(1, C["ring"])
+
+        def zero_l2():
+            p.seti(4, 0)
+            p.fconst(0, 0.0)
+
+            def sixteen():
+                for _ in range(16):
+                    p.stpost(4, 0)
+            p.loop_r(11, DIFF_WORDS // 16, sixteen)
+        p.if_(0, "NE", 1, zero_l2, kind="i")
 
     def to_stock():
         p.iconst(0, R.STOCK_WORDS)

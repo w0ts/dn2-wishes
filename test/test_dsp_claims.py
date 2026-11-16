@@ -50,6 +50,8 @@ CLAIMS = [
     ("F2: opt-mnm's DPRO interp table", 0x2E1200, 0x2E1700, ("dnfw.mnm", "dnfw.waverider.dsp"), True),
     ("F2: the inserts' per-type skip counts, each pass's room (opt-host, round 13)", 0x2E1700, 0x2E1750,
      ("dnfw.perc.guard", "dnfw.waverider.dsp.INS_TSKIP_DM"), True),
+    ("F2: the bus XDLY instances' stores (opt-inserts, lever 5, 2026-11-13)", 0x2E1750, 0x2E1980,
+     ("dnfw.inserts.bus",), True),
     ("the stock track buffers in L1", 0x2E1C00, 0x2E2500,
      ("dnfw.waverider.dsp.TRACKAUX_DM", "dnfw.waverider.dsp.TRACKBUF_DM"), True),
     ("F4: SIMD voice pairs' words and snapshots (the arbiter, 2026-11-12)", 0x2E2500, 0x2E3000,
@@ -75,7 +77,7 @@ CLAIMS = [
     ("juno-chorus: jsend.asm", 0x200A1800, 0x200A2800, ("dnfw.waverider.dsp", "dnfw.inserts"), True),
     ("perc-layout 2b: init bodies", 0x200A2800, 0x200A4000, ("dnfw.waverider.dsp", "dnfw.perc"), True),
     ("the Monomachine L2 scratch", 0x200A4000, 0x200A8000,
-     ("dnfw.perc.program", "dnfw.waverider.dsp.MNM_SCRATCH_L2", "dnfw.inserts.design.POST_AUX_L2",
+     ("dnfw.perc.program", "dnfw.waverider.dsp.MNM_SCRATCH_L2", "dnfw.inserts.design.POST_AUX_L2", "dnfw.fdn8.program",
       "dnfw.inserts.design.POST_GW_L2", "dnfw.inserts.design.POST_AUX_END"), True),
     ("the DPRO tables", 0x200A8000, 0x200A9000, ("dnfw.waverider.dsp.MNM_DT_L2",), True),
     ("the main mix's tap", 0x200A9000, 0x200A9200, ("dnfw.sampler.machines", "dnfw.waverider.dsp.MAIN_TAP_L2"), True),
@@ -97,6 +99,7 @@ CLAIMS = [
 # constants that are bounds, retired names or harness layouts, not areas (with why)
 NOT_AREAS = {
     "dnfw.waverider.dsp.L2_IMAGE_END": "a bound: the stock image's end",
+    "dnfw.perc.guard.INS_TEL_END": "a bound: the inserts' telemetry's end (the XDLY stores, lever 5, start there)",
     "dnfw.waverider.dsp.L2_NOCACHE": "a bound: the non-cacheable window",
     "dnfw.waverider.dsp.DM_CACHE_32K": "a bound: a 32 KB DM cache's floor",
     "dnfw.waverider.dsp.MD_STATE_L2": "retired 2026-11-10 (the room is left unused)",
