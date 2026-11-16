@@ -677,9 +677,18 @@ def main() -> int:
                                            + ["--machine-max", str(last)]
                                            if dsp_changed else [])
         # v0.27: SHFT (7) and GRAN (8) removed: 7 and 8 load as Multi-Mode now; v0.45: PING (6)
-        # removed too, so the LOAD bound is stock again and every type above 5 loads as Multi-Mode
-        types += ["--filter-type", "2"] + (["--filter-type", "6", "--filter-type", "7",
-                                            "--filter-type", "8", "--filter-max", "5"]
+        # removed too, so the LOAD bound is stock again and every type above 5 loads as Multi-Mode.
+        # 2026-11-11: the A2 filter machines (dnfw.a2f, 2026-11-10) raise the bound again on purpose
+        # (a2f.coldfire LOAD_BOUND: -1..the last built type kept): each built type must come back as
+        # itself, the first type past them as Multi-Mode; 6 (PING's, not built) is inside the bound
+        # and LOAD turns it into Multi-Mode (a2f.coldfire flt_load, the User's choice)
+        from dnfw.a2f import coldfire as _fc
+        fmax = _fc.NEW_FILTERS[-1] if _fc.NEW_FILTERS else 5
+        ftypes = sorted({6, 7, 8, *_fc.NEW_FILTERS, fmax + 1})
+        types += ["--filter-type", "2"] + ([x for t in ftypes for x in ("--filter-type", str(t))]
+                                           + ["--filter-max", str(fmax)]
+                                           + [x for t in range(6, fmax) if t not in _fc.NEW_FILTERS
+                                              for x in ("--filter-reset", str(t))]
                                            if dsp_changed else [])
         if "fx_get" in W.SPEC.get("layout", {}):   # v0.51: FLEX REC's settings in the sound, through SAVE/LOAD
             types += ["--fx-roundtrip"]
@@ -822,7 +831,7 @@ def main() -> int:
                         if good:
                             c = r["commands"]
                             why = (f"ERASE MOD DATA: NO at each question and LEFT erase nothing; three YES: "
-                                   f"{c['trims']} TRIM calls (CMD35/36/38), only in the four regions and "
+                                   f"{c['trims']} TRIM calls (CMD35/36/38), only in the mod's regions (the inserts' records with them, 2026-11-11) and "
                                    f"covering them exactly, headers first, no write after the first; stock areas "
                                    f"and gaps byte-identical, every region erased and verified ({r['reads']} reads); "
                                    f"link 28 likewise (0xFF card); a kept sector and a TRIM error fail at their "

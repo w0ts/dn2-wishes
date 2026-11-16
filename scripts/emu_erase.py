@@ -21,7 +21,7 @@ Scenarios (each from a fresh machine):
   list, FUNC + YES), then +DRIVE, RIGHT: the menu; YES, NO at the first question; RIGHT,
   YES, YES, NO at the second; LEFT out of the menu: after each, not one command but reads,
   the +Drive byte for byte as it was. Then RIGHT, YES, YES, YES: ERASED. Checked: TRIM
-  ranges inside the four regions only, covering each exactly; not one write from the
+  ranges inside the regions only, covering each exactly; not one write from the
   first TRIM on (nor after, a setting changed); every byte outside the regions as it was;
   every sector of the regions read back erased; the verify's reads inside the regions; the
   screens; YES closes. The +Drive's state after selected TRIM calls is kept for **boot**.
@@ -75,6 +75,7 @@ SET = 0x6FF000
 HI, HI_END = 0x6FF800, 0x6FF805                 # v0.43: the library's folders 64..127 (lib.c)
 LIB0, LIB_DATA = 0x700000, 0x700105
 XA, XA_END = 0x6F0000, 0x6F0701                 # v0.45: the library's entries 2,048..16,383 (lib.c LIB_X_AT)
+INS0, INS_END = 0x6E0400, 0x6E0502             # 2026-11-11: the inserts' records (inserts/store.c), 129 x 2 copies
 STACK_TOP, SENTINEL = 0x46A20000, 0x46A20400
 RESULT = SENTINEL + 0x800               # what a stubbed driver entry returns (the hook sets it)
 PRSSTAT = 0xFC0CC024                    # the eSDHC's present state: bit 24 DAT0 (v0.41)
@@ -91,7 +92,7 @@ def check(name, ok, detail=""):
 
 
 def regions(dev):
-    return [(POOL0, POOL_END), (PL0, PL_END), (XA, XA_END), (SET, SET + 1), (HI, HI_END), (LIB0, dev)]
+    return [(POOL0, POOL_END), (PL0, PL_END), (INS0, INS_END), (XA, XA_END), (SET, SET + 1), (HI, HI_END), (LIB0, dev)]
 
 
 def in_regions(s, n, dev):
@@ -282,11 +283,11 @@ def fill(disk, rng):
     def junk():
         return bytes(rng.randrange(1, 255) for _ in range(512))
     mod = [POOL0, POOL0 + 1, POOL0 + 2, POOL0 + 777, 0x6C8000, PL0, PL0 + 1, PL0 + 2, 0x6D00FF, 0x6D0100, 0x6D0101,
-           0x6D0100 + 256 * 7, 0x6D0100 + 256 * 257, 0x6E02FF, XA, XA + 1, XA + 1792, SET, HI, HI + 4, LIB0, LIB0 + 1, LIB0 + 256, 0x700104, LIB_DATA,
+           0x6D0100 + 256 * 7, 0x6D0100 + 256 * 257, 0x6E02FF, INS0, INS0 + 1, INS0 + 256, INS_END - 1, XA, XA + 1, XA + 1792, SET, HI, HI + 4, LIB0, LIB0 + 1, LIB0 + 256, 0x700104, LIB_DATA,
            LIB_DATA + 1, disk.dev - 2049, disk.dev - 1] + [s for s in (0x800000, 0x1000000) if s < disk.dev]
     mod += [rng.randrange(POOL0, POOL_END) for _ in range(60)] + [rng.randrange(LIB0, disk.dev) for _ in range(60)]
     other = [0x0, 0x800, 0x1000, 0x2000, 0x58000, 0x457FFF, 0x458000, 0x500000, 0x5D7FFF, 0x5D8000, 0x5FFFFF,
-             0x6C8001, 0x6CFFFF, 0x6E0300, 0x6EFFFF, 0x6F0701, 0x6FEFFF, 0x6FF001, 0x6FF7FF, 0x6FF805, 0x6FFFFF]
+             0x6C8001, 0x6CFFFF, 0x6E0300, 0x6E03FF, INS_END, 0x6EFFFF, 0x6F0701, 0x6FEFFF, 0x6FF001, 0x6FF7FF, 0x6FF805, 0x6FFFFF]
     other += [rng.randrange(0, 0x600000) for _ in range(60)]
     for s in mod + other:
         disk.put(s, junk())
@@ -418,7 +419,8 @@ def run_ui(a, lay, SMx):
 
     # the erase, with the +Drive kept after selected TRIM calls (the boot scenario's)
     keep = {1: "after the pool's header", 12: "inside the lists", 34: "after the lists",
-            36: "after every header", 200: "inside the pool's frames", 2000: "inside the library's frames"}
+            36: "after every header", 39: "after the inserts' records",     # 39: 2026-11-11
+            200: "inside the pool's frames", 2000: "inside the library's frames"}
     kept = {}
 
     def on_trim(k, s, n):
@@ -449,7 +451,7 @@ def run_ui(a, lay, SMx):
     report["commands"] = {"trims": len(trims), "writes": len(writes), "reads": len(reads),
                           "cmd35": sum(1 for c, _ in disk.cmds if c == 35), "cmd38": sum(1 for c, _ in disk.cmds if c == 38),
                           "first_trims": [f"{s:#x}+{n}" for s, n in trims[:6]], "last_trim": f"{trims[-1][0]:#x}+{trims[-1][1]}" if trims else None}
-    check("every TRIM inside one of the four regions, never below 0x600000, at most 2,048 sectors",
+    check("every TRIM inside one of the regions, never below 0x600000, at most 2,048 sectors",
           trims and all(in_regions(s, n, DEVICE) and s >= POOL0 and 1 <= n <= 2048 for s, n in trims),
           f"{len(trims)} TRIM calls")
     cover = sorted(trims)
@@ -461,14 +463,15 @@ def run_ui(a, lay, SMx):
             merged.append(["OVERLAP", s])
         else:
             merged.append([s, s + n])
-    want = [[POOL0, POOL_END], [PL0, PL_END], [XA, XA_END], [SET, SET + 1], [HI, HI_END], [LIB0, DEVICE]]
-    check("the TRIMs cover exactly the six regions (v0.43: folders 64..127's; v0.45: the library's extension), each sector once",
+    want = [[POOL0, POOL_END], [PL0, PL_END], [INS0, INS_END], [XA, XA_END], [SET, SET + 1], [HI, HI_END], [LIB0, DEVICE]]
+    check("the TRIMs cover exactly the seven regions (v0.43: folders 64..127's; v0.45: the library's extension; 2026-11-11: the inserts' records), each sector once",
           merged == want, f"{[[hex(x) if isinstance(x, int) else x for x in m] for m in merged]}")
     order = [s for s, _ in trims[:36]]
-    check("headers first: the pool's, the lists' region, the settings, the library's headers, then the frames",
+    check("headers first: the pool's, the lists' region, the settings, the library's headers, the inserts' records "
+          "(2026-11-11), then the frames",
           order[0] == POOL0 and order[1] == PL0 and SET in order[:36] and LIB0 in order[:36]
           and trims[35] == (LIB0, LIB_DATA - LIB0) and trims[36] == (HI, HI_END - HI)
-          and trims[37] == (XA, XA_END - XA) and trims[38][0] == POOL0 + 1,
+          and trims[37] == (XA, XA_END - XA) and trims[38] == (INS0, INS_END - INS0) and trims[39][0] == POOL0 + 1,
           str([hex(x) for x in order[:3]]))
     check("not one write from the first TRIM on", first_t is not None and not [x for x in log[first_t:] if x[0] == "W"],
           f"{len(writes)} write(s) in all")
@@ -534,7 +537,7 @@ def sysex(machine, uc, K, cmd, payload, seq=7):
 
 
 def covered(trims, dev):
-    """v0.41: the TRIMs that went through cover exactly the four regions (a range may be sent
+    """v0.41: the TRIMs that went through cover exactly the regions (a range may be sent
     again only after it failed, so each still once)"""
     merged = []
     for s, n in sorted(trims):

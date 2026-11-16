@@ -57,7 +57,7 @@ SECTIONS
   .text : {{ KEEP(*(.text.entry)) *(.text .text.*) }}
   __text_end = .;
   .rodata : ALIGN(4) {{ *(.rodata .rodata.*) }}
-  .data : ALIGN(4) {{ *(.data .data.*) }}
+  .data : ALIGN(4) {{ __data_start = .; *(.data .data.*) }}
   . = ALIGN(4);
   __image_end = .;
   .bss (NOLOAD) : ALIGN(4) {{ __bss_start = .; *(.bss .bss.*) . = ALIGN(4); __bss_end = .; }}

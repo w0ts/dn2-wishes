@@ -174,6 +174,8 @@ def main() -> int:
                    help="v0.51: SAVE and LOAD a FLEX sound with FLEX REC's settings in its words "
                         "(rectrig.c fx_set: slots 38, 46, 40, 32, 37, 27, v0.52 33 MUTE SRC; SRC's low byte the mark 0xF1); "
                         "every word must come back as it went")
+    p.add_argument("--filter-reset", type=int, action="append", default=[],
+                   help="a filter type inside --filter-max that LOAD still turns into 0 (2026-11-11: 6, PING's)")
     p.add_argument("--filter-max", type=int, default=5,
                    help="the highest filter type the build's LOAD keeps (5 stock; 6 with PING, v0.27..v0.44)")
     args = p.parse_args()
@@ -300,6 +302,20 @@ def main() -> int:
     # the intro called the stamp. So after the engine, compare every chunk's
     # image against the image file; one with an init may rewrite its own data,
     # so its difference is reported but not failed on.
+    # 2026-11-11: the waverider page renderer keeps its run-time variables (every D_ variable) in its own
+    # `.data`, inside the chunk, and nothing zeroes a BSS there (dnfw.waverider.coldfire refuses one); the
+    # inserts' hook writes two of them during a project write. Where the repo's layout describes exactly
+    # this chunk (same load address, same bytes), only the code and rodata before `c_data_start` are held
+    # to the loaded copy; its `.data` changes are reported, not failed on. Any other chunk: as before.
+    data_at = {}
+    try:
+        wl = json.loads((pathlib.Path(__file__).resolve().parents[1] / "src/dnfw/mods/waverider_code.json").read_text())
+        cc = wl.get("c_chunk") or {}
+        lay = wl.get("layout") or {}
+        if "c_data_start" in lay:
+            data_at[cc["load"]] = (bytes.fromhex(cc["code"]), lay["c_data_start"])
+    except (OSError, ValueError, KeyError):
+        pass
     image = open(f"{build}/section_3_MAIN_OS.bin", "rb").read()
     clobbered = []
     for cid, data in platform.split(image)[1]:
@@ -307,9 +323,16 @@ def main() -> int:
             continue
         code = area.CodeChunk.unpack(data)
         have = bytes(after.uc.mem_read(code.load, len(code.image)))
-        diff = sum(a != b for a, b in zip(have, code.image))
+        known = data_at.get(code.load)
+        held = len(code.image)
+        if known and known[0] == code.image and code.load <= known[1] <= code.load + len(code.image):
+            held = known[1] - code.load
+        diff = sum(a != b for a, b in zip(have[:held], code.image[:held]))
+        ddiff = sum(a != b for a, b in zip(have[held:], code.image[held:]))
         print(f"  CODE at 0x{code.load:08x}: {'intact' if not diff else f'{diff:,} B changed'}"
-              + (" (has an init)" if code.init and diff else ""))
+              + (" (has an init)" if code.init and diff else "")
+              + (f"; its .data from 0x{code.load + held:08x}: {ddiff:,} B written (run-time variables)"
+                 if held < len(code.image) else ""))
         if diff and not code.init:
             clobbered.append(code.load)
     if clobbered:
@@ -412,7 +435,7 @@ def main() -> int:
         got = bytes(after.uc.mem_read(back + FILTER_TYPE, 1))[0]
         machine_same = bytes(after.uc.mem_read(back + MACHINE_TYPE, 1))[0] == s[MACHINE_TYPE] or \
             s[MACHINE_TYPE] > args.machine_max
-        want = v if 0 <= v <= args.filter_max else 0
+        want = v if 0 <= v <= args.filter_max and v not in args.filter_reset else 0
         ok = on_disk == v and got == want and machine_same
         print(f"  {'ok  ' if ok else 'FAIL'}  filter type {v}: saved {on_disk}, loaded {got} "
               f"(want {want}); machine type {'kept' if machine_same else 'changed'}")

@@ -997,6 +997,12 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     for name in ("scope_up", "scope_taps", "scope_ring", "scope_pos", "smp_rx_sh"):   # AMP page 2's scope (csrc/scope)
         layout[name] = csyms[name]
     layout["mtr_ram"] = pages.METER_RAM      # the system meter's state block (csrc/meter/meter.c MTR_*)
+    # 2026-11-11: where the page renderer's writable data starts and its image ends (its `.data`: every D_
+    # variable, written at run time), so the engine gate holds the code and rodata before it to the loaded copy
+    layout["c_data_start"], layout["c_image_end"] = csyms["__data_start"], csyms["__image_end"]
+    # 2026-11-11: the Monomachine-style machines' unit formatters (csrc/sampler/fmt.c mnm_fmts, "no bare 0..127"),
+    # so a gate can tell them from v0.47's signed TUNE formatter on record 240
+    layout["mnm_fmts"] = csyms["mnm_fmts"]
     # v0.45: PING removed (owner, 2026-11-08). 2026-11-10: its mechanism (the FLTR list, names, LOAD
     # bound, slot_to_id, descriptor, curve) composed again for the A2 filter machines 7..11 only
     # (dnfw.a2f.coldfire), in what was PING's chunk; none built: all stock, as v0.45

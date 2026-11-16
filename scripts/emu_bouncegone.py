@@ -369,6 +369,9 @@ def main() -> int:
     # semitones. Ours (the User, 2026-11-10, "as in b6"; csrc/sampler/fmt.c MNM_TUNE_MONO): no
     # Monomachine machine ships, and SOPHIE / PLAITS / TB303's TUNE spans +-24 semitones, so all of
     # it is off: record 240's text stays stock's and FUNC + turn on TUNE does not snap by 32.
+    # 2026-11-11: since 2026-11-10 (the User: no bare 0..127) a Monomachine-style machine's records show their
+    # unit through fmt.c's own formatters (mnm_fmts: PLAITS' TUNE in semitones is record 240's), so the text is
+    # stock's or one of those on every machine; v0.47's signed TUNE formatter is neither and still fails here.
     if "smp_quant" in lay:
         REC240 = 0x401F83A4 + 60 * 240
         stock_t = machine.long(REC240 + 0x34)
@@ -377,9 +380,12 @@ def main() -> int:
             call(lay["smp_formats"], kind)
             texts[name] = machine.long(REC240 + 0x34)
         call(lay["smp_formats"], 0)
-        check("ours: record 240's text is stock's on every machine (v0.47's signed TUNE is off)",
-              all(v == stock_t for v in texts.values()),
-              ", ".join(f"{k} {v:#x}" for k, v in texts.items()) + f"; stock {stock_t:#x}")
+        units = {machine.long(lay["mnm_fmts"] + 4 * j) for j in range(16)} if "mnm_fmts" in lay else set()
+        check("ours: record 240's text is stock's or our unit formatter (fmt.c mnm_fmts) on every machine "
+              "(v0.47's signed TUNE is off)",
+              all(v == stock_t or v in units for v in texts.values()) and stock_t not in units,
+              ", ".join(f"{k} {v:#x}" + (" (unit)" if v in units else "") for k, v in texts.items())
+              + f"; stock {stock_t:#x}")
         snd = SENTINEL + 0x200                               # a sound: type SOPHIE (20), TUNE (slot 29) in tune
         machine.write(snd, bytes(0x100))
         machine.write(snd + 0xDE, bytes([20]))

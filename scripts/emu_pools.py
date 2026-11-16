@@ -31,7 +31,7 @@ What it checks, in order (each a key of the result's "facts"):
 10. the image changed behind our back: kept, into the owner's list;
 11. a power cut after each sector of a pool change's writes, and of a switch's: every
     power-on after it finds a whole pool, the right owner's, and no list lost;
-12. every sector written lies in the pool image or the lists' region, none past the device;
+12. every sector written lies in the pool image, the lists' region or the inserts' records (2026-11-11), none past the device;
     and the image, at the end, is one v0.37 reads as it reads its own (downgrade);
 12b. (v0.40 review) a LOAD that ends with no switch waits half a second for a NEW, whether the
     period it ended in is even or odd (939cbc42 gave the wait up at once on an even one); the
@@ -49,6 +49,8 @@ STUB_OPEN, STUB_TEMP = 0x40042B92, 0x40040190      # the load's +Drive read, its
 NEW_SITE, NEW_AFTER = 0x40042AF0, 0x40042AFA
 STORE_SECTOR = 0x600000
 PL_SB, PL_LISTS, PL_SPAN, PL_END = 0x6D0000, 0x6D0100, 256, 0x6D0100 + 2 * 129 * 256
+INS0, INS_END = 0x6E0400, 0x6E0502      # 2026-11-11: the inserts' records (inserts/store.c): written with each project
+                                        # write stock makes (its own record per slot, record 128 at power-on): this check predates them
 LIB, LIB_DATA = 0x700000, 0x700000 + 1 + 256 + 4
 
 
@@ -639,7 +641,8 @@ def run(cx):
     # 12. where everything was written, and the image as v0.37 reads it ------------------------------
     written = sorted(disk)
     outside = [hex(s) for s in written if not (STORE_SECTOR <= s < STORE_SECTOR + 1 + SM.POOL_BYTES // 512
-                                               or PL_SB <= s < PL_END or LIB <= s < LIB_DATA + 64)]
+                                               or PL_SB <= s < PL_END or LIB <= s < LIB_DATA + 64
+                                               or INS0 <= s < INS_END)]
     hdr = struct.unpack(">5I", disk[STORE_SECTOR][:20])
     d = image_dir()
     v037 = (hdr[0] == 0x444E3251 and hdr[4] == (~hdr[0] ^ hdr[2] ^ hdr[3]) & 0xFFFFFFFF

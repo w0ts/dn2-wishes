@@ -77,6 +77,10 @@ NAME_SITES = (                          # (bound site, base instruction, column)
 
 LOAD_BOUND = 0x400DD420                 # moveb #7,%d2: filter types -1..5 kept
 LOAD_BOUND_STOCK = bytes.fromhex("143c0007")
+# 2026-11-11 (the User: a type-6 sound, PING's, loads as Multi-Mode as on stock): the filter byte's
+# `and.l %d1,%d0 ; move.b %d0,%a2@(223)` (6 bytes) jsr's to flt_load, which does the same but 6 -> 0
+LOAD_STORE = 0x400DD43C
+LOAD_STORE_STOCK = bytes.fromhex("c081154000df")
 
 SLOT_SITE = 0x400DC1FA                  # moveq #5,%d2 ; cmp.l %a1,%d2 ; bcs.s 0x400dc1c2
 SLOT_STOCK = bytes.fromhex("7405b48965c2")
@@ -165,6 +169,19 @@ ping_graph:
     bcs.s   2f
     jmp     {GRAPH_CASES:#010x}
 2:  jmp     {GRAPH_NONE:#010x}
+
+| The stored-sound LOAD's filter byte, from {LOAD_STORE:#010x} by jsr (in place of `and.l %d1,%d0 ;
+| move.b %d0,%a2@(223)`): d0 is the stored type, d1 0xFF when it is inside the LOAD bound (else 0);
+| both are reloaded right after. A type the bound keeps but no machine is (6, PING's until v0.45)
+| loads as Multi-Mode, as stock loads every type past 5 (2026-11-11).
+flt_load:
+    and.l   %d1,%d0
+    moveq   #6,%d1
+    cmp.l   %d1,%d0
+    bne.s   1f
+    moveq   #0,%d0
+1:  move.b  %d0,%a2@(223)
+    rts
 ping_code_end:
 
     .align 2
@@ -179,7 +196,7 @@ name_removed_short:
     .align 2
 ping_names:
 """
-LABELS = (("ping_slot", "ping_over", "ping_graph", "ping_code_end", "ping_list", "ping_list_end")
+LABELS = (("ping_slot", "ping_over", "ping_graph", "flt_load", "ping_code_end", "ping_list", "ping_list_end")
           + tuple(f"name_{c}_{t}" for t in NEW_FILTERS for c in ("long", "short"))
           + ("name_removed_long", "name_removed_short", "ping_names"))
 
@@ -252,6 +269,9 @@ def compose(content: bytearray, edit, assemble) -> dict:
     edit(LOAD_BOUND, bytes([0x14, 0x3C, 0, NEW_FILTERS[-1] + 2]),
          f"stored-sound LOAD: filter types -1..{NEW_FILTERS[-1]} are kept (stock keeps -1..5; "
          "anything else loads as Multi-Mode)", LOAD_BOUND_STOCK)
+
+    edit(LOAD_STORE, bytes.fromhex("4eb9") + _long(layout["flt_load"]),
+         "stored-sound LOAD: the filter byte through flt_load (6, not built, loads as Multi-Mode)", LOAD_STORE_STOCK)
 
     # 4. slot_to_id and the FLTR page descriptor: 6 reads Multi-Mode's
     edit(SLOT_SITE, bytes.fromhex("4ef9") + _long(layout["ping_slot"]),

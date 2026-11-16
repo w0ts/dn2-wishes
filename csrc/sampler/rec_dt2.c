@@ -172,7 +172,7 @@ static void main_page(void *c, int heard)
     if (rec_rlen <= 0)
         D_TEXT(c, F_VAL, 48, 15, 2, "%s", "MAX");
     else
-        D_TEXT(c, F_VAL, 48, 15, 2, "%d STEPS", rec_rlen);
+        D_TEXT(c, F_VAL, 48, 15, 2, "%d STP", rec_rlen);      /* 2026-11-11: "128 STEPS" was 2 px wider than its column */
     u32 f = rlen_frames();
     D_TEXT(c, F_VAL, 48, 9, 2, "%02d:%02d", (int)(f / 48000u), (int)(f % 48000u / 480u));
     D_TEXT(c, F_LBL, 48, 0, 2, "%s", "R.LEN");

@@ -202,7 +202,17 @@ def test_ddr_spans_are_clear_of_the_stock_image_and_the_engine():
     at = dsp.dm_to_load(dsp.MD_STATE_DM)
     assert not any(l1[at]) and len(l1[at]) >= 16 * MDK.MD_STRIDE
     assert dsp.MD_STATE_DM + 16 * MDK.MD_STRIDE <= dsp.REGION[1] <= dsp.DM_CACHE_16K - 0x1000
-    assert not any(l2[dsp.MNM_SCRATCH_L2]) and dsp.MD_STATE_L2 + 16 * MDK.MD_STRIDE <= dsp.MNM_SCRATCH_L2
+    # 2026-11-11: zeros but for ANALOG2's filter mix tables (dsp._mnm_scratch, 2026-11-09), exactly those floats
+    scratch = bytearray(l2[dsp.MNM_SCRATCH_L2])
+    from dnfw.mnm import machines as MMx
+    if "ANALOG2" in MMx.NAMES:
+        import struct as _st
+        from dnfw.mnm import analog2 as A2
+        words = A2.table_words()
+        n = 4 * len(words)
+        assert bytes(scratch[A2.TABLES_OFF:A2.TABLES_OFF + n]) == _st.pack(f"<{len(words)}f", *words)
+        scratch[A2.TABLES_OFF:A2.TABLES_OFF + n] = bytes(n)
+    assert not any(scratch) and dsp.MD_STATE_L2 + 16 * MDK.MD_STRIDE <= dsp.MNM_SCRATCH_L2
     assert 0x20088400 <= dsp.MD_STATE_L2 and dsp.MNM_SCRATCH_L2 + dsp.MNM_SCRATCH_BYTES <= 0x200B0000
     # v0.43: the Monomachine render scratch in L1, after GRAN's state, inside the region (zeros
     # at boot: the region's tail is padding), its bookkeeping still in L2
