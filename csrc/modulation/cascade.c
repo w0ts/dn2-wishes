@@ -28,7 +28,8 @@
  * Bounded: the shadow and the carry are clamped to 0..0x7f00 like every LFO write, and restart
  * every frame; what carries over frames is each LFO's phase, whose step 2(SPD - 0x4000) x rate >>
  * (11 - MULT) stays under 2^31 with MULT clamped to 0..23 (0x40137b34), and its fade, saturated to
- * 0..0x3fffffff (0x40137ca8). WAVE is clamped to 0..6. The evaluator has no division, and is
+ * 0..0x3fffffff (0x40137ca8). WAVE is clamped by the evaluator, to 0..6 (0..13 with lfowaves, whose waves a
+ * cascade into WAVE reaches: scripts/emu_lfowaves.py). The evaluator has no division, and is
  * integer and fractional MAC only (docs/modulation-more.md).
  */
 typedef unsigned int u32;

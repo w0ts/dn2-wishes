@@ -195,6 +195,8 @@ def compile_page(header: str, *, base: int) -> tuple[bytes, dict[str, int], int]
         import os
         if PG.stock_units_on():
             defines["DN2_STOCK_UNITS"] = 1            # the stock records' units (md_page.c, page.c): a build option
+        if PG.lfo4_on():
+            defines["DN2_LFO4"] = 1                   # lfo4's side in our code (page.c; docs/lfo-112-port.md): an option
         if os.environ.get("DNFW_SMP_STORE_TEST"):
             # an emulator-only build: the +Drive region inside the emulator's 15 MB device
             # (never shipped: scripts/gen_waverider_code.py refuses to write it)

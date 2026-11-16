@@ -93,8 +93,9 @@ def main() -> int:
     sys.addaudithook(hook)
     from dnfw.cli.main import main as dnfw
     tmp = outdir / "_rebuild.syx"
-    rc = dnfw(["mods", "apply", str(ROOT.parent / "Digitone_II_OS1.11.syx"), "--mod", "waverider",
-               "-o", str(tmp)])
+    from dnfw.mods import SHIPPED                # the patcher's own list (dn2patch.build): waverider, lfowaves
+    rc = dnfw(["mods", "apply", str(ROOT.parent / "Digitone_II_OS1.11.syx"),
+               *[x for mid in SHIPPED for x in ("--mod", mid)], "-o", str(tmp)])
     if rc not in (0, None) or not tmp.is_file():
         print("the rebuild stopped")
         return 1

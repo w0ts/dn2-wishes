@@ -36,6 +36,11 @@ a firmware the device accepts.
 from dataclasses import dataclass, field
 
 
+# The mods a shipped build applies, in order, to stock (the patcher's build, tools/patcher/dn2patch.py, and the
+# gate's rebuild, scripts/ship_gate.py). 2026-11-14 (the User: "Port both"): lfowaves joins on OS 1.12; lfo4
+# waits for its port (docs/lfo-112-port.md) and goes after lfowaves when it comes.
+SHIPPED = ("waverider", "lfowaves")
+
 # The pseudo-section of RAM a mod uses outside the image: an Extent in it is an
 # absolute address range at run time, compared like any other (`ram()`).
 RAM = -1

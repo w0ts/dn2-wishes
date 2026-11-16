@@ -549,6 +549,14 @@ def mnm_mono_lines() -> list[str]:
     ]
 
 
+def lfo4_on() -> bool:
+    """2026-11-14 (the User: "Port both", "we can always disable lfo4"): our code's side of lfo4 (the moved parameter
+    table and LFO state, the destination masks, the stored-sound hooks: docs/lfo-112-port.md section 4) is built only
+    with DN2_LFO4 set (to anything but 0 or empty) when the code is generated; off, the code is today's"""
+    import os
+    return os.environ.get("DN2_LFO4", "") not in ("", "0")
+
+
 def stock_units_on() -> bool:
     """2026-11-11 (the User: proper values on stock pages too, "gate it with a compile option at first"): the stock
     records' units are built only with DN2_STOCK_UNITS set (to anything but 0 or empty) when the code is generated"""

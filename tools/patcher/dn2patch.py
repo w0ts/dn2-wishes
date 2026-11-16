@@ -112,7 +112,8 @@ def build(dn2: str, dt2: str, md: str, out: str, mnm: str | None = None) -> str:
     else:                                        # (v0.24, v0.25: none)
         os.environ["MNM_OS"] = str(WORK / "no-mnm")
     from dnfw.cli.main import main
-    rc = main(["mods", "apply", dn2, "--mod", "waverider", "-o", out])
+    from dnfw.mods import SHIPPED                # waverider, then lfowaves (2026-11-14)
+    rc = main(["mods", "apply", dn2, *[x for mid in SHIPPED for x in ("--mod", mid)], "-o", out])
     if rc not in (0, None) or not pathlib.Path(out).is_file():
         raise PatchError("the build stopped (see the log); is that DN2 OS 1.12?")
     return hashlib.sha256(pathlib.Path(out).read_bytes()).hexdigest()

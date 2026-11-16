@@ -52,10 +52,10 @@ import wavetables as wt
 
 MAIN_OS = 3
 BASE = 0x40000400
-AREA_VA = 0x4030B980            # the end of stock MAIN OS: where the blob is appended
+AREA_VA = 0x4030C980            # the end of stock MAIN OS: where the blob is appended
 RUNTIME_VA = 0x46780000         # where the boot stub copies it
 MAGIC = b"LFOW"
-BOOT_CAVE, BOOT_CAVE_CAP = 0x402CF52C, 896
+BOOT_CAVE, BOOT_CAVE_CAP = 0x402CFA6C, 896
 
 INIT_VA, CLEAR_VA = 0x4000045C, 0x400004B2
 CALLS_VA = 0x4000053E
@@ -106,7 +106,7 @@ def compose(stock: bytes, frames: list | None = None, log=print) -> dict:
     relocated table), which the browser reads from the user's own file.
     """
     if BASE + len(stock) != AREA_VA:
-        raise SystemExit("MAIN OS is not stock 1.11's length")
+        raise SystemExit("MAIN OS is not stock 1.12's length")
     content = bytearray(stock)
     frames = frames or [make() for _, _, make in wt.TABLES]
     fills = []
@@ -136,9 +136,9 @@ def compose(stock: bytes, frames: list | None = None, log=print) -> dict:
 
     # ---- the blob's code, assembled at its runtime address
     shapes.ENTRIES = ENTRIES          # the formatter bound and the no-phase test read it
-    text = (shapes.source(fn_vas[0x4020B340], 0, names_va, long_names_va, never_va, 0, 0)
+    text = (shapes.source(fn_vas[0x4020B7F8], 0, names_va, long_names_va, never_va, 0, 0)
             + wt.generator_source(table_vas)
-            + glyph.source(glyph_sets, fn_vas[0x4020B340], len(WAVES), label_table,
+            + glyph.source(glyph_sets, fn_vas[0x4020B7F8], len(WAVES), label_table,
                            state_reset=shapes.NOISE_RAM + 8 * glyph.NOISE_GLYPH_KEY))
     code, offsets = shapes.assemble_stubs(text, code_va, LABELS)
     data.extend(code)
@@ -156,7 +156,7 @@ def compose(stock: bytes, frames: list | None = None, log=print) -> dict:
     fill(long_names_va, shapes.read_longs(content, ui.LONG_NAMES, STOCK_ENTRIES) + long_vas)
     for old in shapes.STOCK_TABLES:
         fills.append((fn_vas[old], old, STOCK_ENTRIES))
-        extra = [offsets[w[2]] for w in WAVES] if old == 0x4020B340 else [0] * len(WAVES)
+        extra = [offsets[w[2]] for w in WAVES] if old == 0x4020B7F8 else [0] * len(WAVES)
         fill(fn_vas[old], shapes.read_longs(content, old, STOCK_ENTRIES) + extra)
 
     blob = MAGIC + struct.pack(">I", 8 + len(data)) + bytes(data)

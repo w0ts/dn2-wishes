@@ -26,7 +26,7 @@ The code is assembled ahead of time (`scripts/gen_lfo_waves_code.py` ->
    `CODE` chunk loaded at `0x46780000`, where it was assembled to run.
 
 The build this was packaged from installed its own start-up hook and a 46-byte
-stub at `0x402cf52c` that copied the blob to `0x46780000` and did nothing else
+stub at `0x402cfa6c` that copied the blob to `0x46780000` and did nothing else
 (`scripts/build_lfo_waves.py`, `boot_source`). The platform loader makes the
 same copy, so those edits are left out (`STUB`) and the cave stays free; the
 rest of the edits, and the blob, are the passed build's.
@@ -54,7 +54,7 @@ SPEC = json.loads((pathlib.Path(__file__).with_name("lfowaves_code.json")).read_
 TABLE_BYTES = 7 * 32
 RUNTIME_VA = SPEC["runtime_va"]
 # The packaged build's own copy stub, replaced by the platform loader.
-STUB = (0x402CF52C, 46)
+STUB = (0x402CFA6C, 46)
 NOISE_RAM, NOISE_BYTES = 0x46740000, 1024 * 8     # NOIS per-LFO state
 TILE_RAM, TILE_BYTES = 0x46750000, 7 * 112         # a rendered glyph tile per new wave
 # Bytes in the blob that only look like RAM above BSS (`dnfw.mods.ramcheck`):
@@ -119,7 +119,7 @@ def apply(firmware, tables: list[bytes | None] | None = None) -> Result:
         have = bytes(content[at:at + len(e["stock"]) // 2]).hex()
         if have != e["stock"]:
             hint = ("; lfo4 widens this bound: apply lfowaves first, then lfo4"
-                    if e["va"] == SHORT_NAME else "; this mod is for unmodified Digitone II 1.11")
+                    if e["va"] == SHORT_NAME else "; this mod is for unmodified Digitone II 1.12")
             raise ModError(f"0x{e['va']:08x} is not stock ({have[:24]}...){hint}")
 
     blob = bytearray.fromhex(SPEC["blob"])

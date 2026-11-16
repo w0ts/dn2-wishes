@@ -2,7 +2,7 @@
 
     python scripts/gen_lfo_waves_code.py
 
-Runs `build_lfo_waves.compose` on the user's own stock 1.11 image and writes what
+Runs `build_lfo_waves.compose` on the user's own stock 1.12 image and writes what
 it changed as data -- the same pattern as `gen_bootscreen_code.py`:
 
 - `edits`: every in-image run the build changes, with the **stock bytes it
@@ -61,7 +61,7 @@ def main() -> int:
         fills.append({"offset": off, "from_va": source_va, "count": count})
 
     code = {
-        "os": "Digitone II 1.11",
+        "os": "Digitone II 1.12",
         "stock_length": n,
         "area_va": waves.AREA_VA,
         "runtime_va": waves.RUNTIME_VA,

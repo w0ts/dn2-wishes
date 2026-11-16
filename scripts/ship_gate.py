@@ -79,6 +79,10 @@ failure:
 6m2. **LIVE SELECT** (`emu_waverider_menu.py`, csrc/msel/msel.c, docs/live-select.md): a moved cursor commits
    nothing until it has rested, then the machine under it; NO puts the machine and the whole sound back byte for
    byte and closes; YES keeps the previewed machine; with the setting off, MACHINE SEL is stock's.
+6m3. **LFO waveforms** (`emu_lfowaves.py`, `dnfw.mods.lfowaves`, docs/lfo-112-port.md): against the same build with
+   lfowaves taken out, LFO1 on each wave through the frame's evaluator: stock's seven unchanged, each new one moving
+   its destination with its own shape; the cascade carries an LFO into another's WAVE past 6; the WAVE formatter
+   names the new waves and the LFO page draws every wave differently, stock's as before.
 6s. **DIRECT JUMP** (`emu_jump.py` run on the coupled emulator by `emu_jump_coupled.py`, docs/jump.md): the sequencer ticked through stock's own ISR;
    off is stock's state every tick; on, every track goes on from its own step (Elektron's rule); a cue
    that is not the PTN view's stays stock's; the setting persists in its sector; rapid fire (83 cues). Every run
@@ -214,6 +218,7 @@ TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platfo
          "test/test_sampler_relatch.py", "test/test_pools.py",
          "test/test_gate_cache_foreign.py",                 # v0.48: the cache's cross-worktree guard and its control
          "test/test_slides.py",
+         "test/test_lfowaves_112.py",                       # lfowaves on 1.12, SHIPPED, the DN2_LFO4 option
          "test/test_modulation.py",                           # 2026-11-11: the lists, the cascade, the moving controls
          "test/test_moving_ours.py",                          # 2026-11-12: the moving controls on our own pages
          "test/test_libtree.py", "test/test_web_tool.py",   # v0.40: nested folders (the model, the page's levels)
@@ -286,6 +291,7 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("fineswap", "STRT/LEN/LOOP fine records swapped in and out (ColdFire)"),
        ("fineknob", "STRT's knob against stock's fine FREQ (ColdFire)"),
        ("modulation", "modulation: the destination lists, the LFO cascade, the moving controls (ColdFire)"),
+       ("lfowaves", "LFO waveforms: the seven new waves modulating and drawn (ColdFire)"),
        ("link16", "sample link (ColdFire)"),
        ("pools", "per-project pools (ColdFire)"),
        ("erase", "ERASE MOD DATA (ColdFire)"),
@@ -565,11 +571,13 @@ def main() -> int:
             rb = work / "rebuilt.syx"
             # 2026-11-14 (main: the 1.12 gate's blind spots): every 1.12 build is NOBOOT (scripts/noboot.py: stock's
             # intro, no stamp), so an image without the boot screen is rebuilt the NOBOOT way; still byte for byte
+            from dnfw.mods import SHIPPED            # noqa: PLC0415  (waverider, lfowaves: the patcher's own list)
             from dnfw.mods import waverider as Wr   # noqa: PLC0415
             nb = hasattr(Wr, "_boot") and not has_bootscreen(sec3)
             pre = f"import sys; sys.path.insert(0, {str(HERE)!r}); import noboot; noboot.install(); " if nb else ""
+            mods_ = [x for mid in SHIPPED for x in ("--mod", mid)]
             rc_b, out_b = run("rebuild", [sys.executable, "-c", pre + "from dnfw.cli.main import main; main()", "mods",
-                                          "apply", a.stock, "--mod", "waverider", "-o", rb], logs,
+                                          "apply", a.stock, *mods_, "-o", rb], logs,
                               env={"PYTHONPATH": str(ROOT / "src")})
             same_b = rc_b == 0 and rb.exists() and read_image(rb) == build_bytes
             how = "dnfw mods apply (NOBOOT, scripts/noboot.py)" if nb else "dnfw mods apply"
@@ -3142,6 +3150,23 @@ def main() -> int:
         later("modulation", "modulation: the destination lists, the LFO cascade, the moving controls (ColdFire)",
               "modulation: the destination lists, the LFO cascade, the moving controls (ColdFire)",
               [mo_cmd, sorted(EMU_ENV.items())], mo_body)
+
+        # 6m3. lfowaves (2026-11-14, the User: "Port both"; docs/lfo-112-port.md): when the shipped build carries it
+        from dnfw.mods import SHIPPED as SHIPPED_MODS   # noqa: PLC0415  (the patcher's list)
+        if "lfowaves" in SHIPPED_MODS:
+            lw_js = work / "lfowaves.json"
+            lw_cmd = [a.venv, "-u", "scripts/emu_lfowaves.py", "--build", a.build, "--snapshot", snap, "--json", lw_js]
+
+            def lw_body(tdir):
+                rc, out = run("lfowaves", lw_cmd, logs, env=EMU_ENV, trace=tdir)
+                last = out.strip().splitlines()[-1] if out.strip() else ""
+                if rc != 0 or not last.startswith("PASS"):
+                    return False, "\n".join(l for l in out.splitlines() if "FAIL" in l)[-900:] or out[-900:]
+                return True, ("stock's seven waves unchanged; STEP PULS NOIS TRAP WTB1 WTB2 WTB3 each moving its "
+                              "destination with its own shape, reachable through the cascade, named and drawn")
+            later("lfowaves", "LFO waveforms: the seven new waves modulating and drawn (ColdFire)",
+                  "LFO waveforms: the seven new waves modulating and drawn (ColdFire)",
+                  [lw_cmd, sorted(EMU_ENV.items())], lw_body)
 
         # the setup is done: from here on, nothing may import a module of ours (cached())
         setup_mods |= repo_modules()

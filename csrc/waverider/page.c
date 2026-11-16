@@ -23,6 +23,14 @@
  */
 #include "wr_gen.h"
 
+/* DN2_LFO4 (a generation option, default off; dnfw.waverider.pages.lfo4_on): our code's side of lfo4 -- the
+ * parameter table and the LFO state it moves, the destination masks, the stored-sound hooks it shares with the
+ * wishes record (docs/lfo-112-port.md, section 4). lfo4 itself is not on OS 1.12 yet, so a build that asks for
+ * it stops here instead of shipping half of it. Off, this file is as it was. */
+#if DN2_LFO4
+#error "DN2_LFO4: lfo4 is not ported to OS 1.12 yet (docs/lfo-112-port.md); generate without DN2_LFO4"
+#endif
+
 typedef unsigned int u32;
 typedef unsigned char u8;
 

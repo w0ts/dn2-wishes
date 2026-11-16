@@ -55,9 +55,9 @@ Both hooks are `jmp`, not `jsr`, so the stack the generator reads is untouched.
 
 | at | replaces | does |
 |---|---|---|
-| `0x401379fa` | evaluator A's `lea <fn table>,%a0` | loads our table **and** `%a4@(78)` into `%d1` |
-| `0x4013760c` | evaluator B's frame save + `jsr %a1@` | the same, from `%a4@(44)`, then calls and returns |
-| `0x4013788e` | the `SPH` read that sets the start phase | zeroes it when `WAVE >= 7` |
+| `0x40137cda` | evaluator A's `lea <fn table>,%a0` | loads our table **and** `%a4@(78)` into `%d1` |
+| `0x401378ec` | evaluator B's frame save + `jsr %a1@` | the same, from `%a4@(44)`, then calls and returns |
+| `0x40137b6e` | the `SPH` read that sets the start phase | zeroes it when `WAVE >= 7` |
 
 `NOI` uses the same argument for its colour, which was the owner's second
 suggestion: *"For the phs control in noise we could use that job to change the
@@ -94,15 +94,15 @@ MAIN_OS = 3
 BASE = 0x40000400
 
 # One of the three 896-byte runs that pass both of `dnfw cave scan`'s checks.
-CAVE = 0x402CF52C
+CAVE = 0x402CFA6C
 CAVE_CAP = 896
 # v5 outgrew one run: the data (names, state, tables) moves to the second verified
 # 896-byte run, the one lfo-wavetable uses for its table, and the code keeps the first.
-DATA_CAVE = 0x402D0664
+DATA_CAVE = 0x402D0BA4
 DATA_CAVE_CAP = 896
 
-STOCK_NAMES = 0x401D3574            # TRI SIN SQR SAW EXP RMP RND
-STOCK_TABLES = (0x4020B2EC, 0x4020B308, 0x4020B324, 0x4020B340)
+STOCK_NAMES = 0x401D3984            # TRI SIN SQR SAW EXP RMP RND
+STOCK_TABLES = (0x4020B7A4, 0x4020B7C0, 0x4020B7DC, 0x4020B7F8)
 STOCK_ENTRIES = 7
 NEW_NAMES = (b"STP\x00", b"PLS\x00", b"NOI\x00", b"TRP\x00")
 NEW_LONG_NAMES = (b"STEP\x00", b"PULS\x00", b"NOIS\x00", b"TRAP\x00")
@@ -112,30 +112,30 @@ ENTRIES = STOCK_ENTRIES + len(NEW_NAMES)
 # value and both start values are zero, as `SAW`'s are; the generator pointers
 # are filled in once the stubs are assembled.
 TABLE_EXTRAS = {
-    0x4020B2EC: [0, 0, 0, 0],          # per-waveform hold value
-    0x4020B308: [0, 0, 0, 0],          # start value, positive phase
-    0x4020B324: [0, 0, 0, 0],          # start value, negative phase
-    0x4020B340: [None, None, None, None],  # the generator function pointers
+    0x4020B7A4: [0, 0, 0, 0],          # per-waveform hold value
+    0x4020B7C0: [0, 0, 0, 0],          # start value, positive phase
+    0x4020B7DC: [0, 0, 0, 0],          # start value, negative phase
+    0x4020B7F8: [None, None, None, None],  # the generator function pointers
 }
 
 # Plain repoints: every `lea`/`pea` that names a table and is not itself hooked.
 REPOINTS = {
-    0x4020B2EC: ((0x401374DE, b"\x41\xf9"), (0x401378E2, b"\x41\xf9")),
-    0x4020B308: ((0x40137514, b"\x43\xf9"), (0x40137916, b"\x43\xf9")),
-    0x4020B324: ((0x40137508, b"\x41\xf9"), (0x4013790C, b"\x43\xf9")),
-    0x4020B340: ((0x401375EE, b"\x43\xf9"),),   # A's site is a hook, below
+    0x4020B7A4: ((0x401377BE, b"\x41\xf9"), (0x40137BC2, b"\x41\xf9")),
+    0x4020B7C0: ((0x401377f4, b"\x43\xf9"), (0x40137bf6, b"\x43\xf9")),
+    0x4020B7DC: ((0x401377e8, b"\x41\xf9"), (0x40137BEC, b"\x43\xf9")),
+    0x4020B7F8: ((0x401378CE, b"\x43\xf9"),),   # A's site is a hook, below
 }
 
 # LFO1/2/3 `Waveform`, maximum field.  6 -> 9, so indices 7, 8 and 9 are
 # reachable.
-WAVE_MAX_FIELDS = (0x401F9224, 0x401F947C, 0x401F96D4)
+WAVE_MAX_FIELDS = (0x401F9634, 0x401F988C, 0x401F9AE4)
 STOCK_WAVE_MAX = 6
 
 HOOKS = (
     # (address, stock bytes, stub label)
-    (0x401379FA, b"\x41\xf9\x40\x20\xb3\x40", "a_call"),
-    (0x4013760C, b"\x2f\x41\x00\x30\x4e\x91", "b_call"),
-    (0x4013788E, b"\x75\x6c\x00\x4e\x9e\x80", "no_phase"),
+    (0x40137CDA, b"\x41\xf9\x40\x20\xb7\xf8", "a_call"),   # (1.12: the fn table 0x4020B7F8)
+    (0x401378EC, b"\x2f\x41\x00\x30\x4e\x91", "b_call"),
+    (0x40137B6E, b"\x75\x6c\x00\x4e\x9e\x80", "no_phase"),
     (ui.SHORT_FMT, ui.FMT_ENTRY_STOCK, "fmt_short"),
     (ui.LONG_FMT, ui.FMT_ENTRY_STOCK, "fmt_long"),
 )
@@ -144,11 +144,11 @@ LABELS = ("step", "pulse", "noise", "trap", "a_call", "b_call", "no_phase",
 SPH_LABELS = ["STPS", "WDTH", "TYPE", "SLOP"]   # owner-approved
 
 # The sound ParameterSet's vtable slot 92 (format a record's value), v6's hook.
-SOUND_SET_V92 = 0x401DB858
-# MIDI tracks' LFO page formats through MidiParameterSet (vtable 0x401db994), whose
+SOUND_SET_V92 = 0x401DBC68
+# MIDI tracks' LFO page formats through MidiParameterSet (vtable 0x401dbda4), whose
 # slot 92 holds the same stock method. v6-v9 wrapped only the sound set's, so on a
 # MIDI track SPH stayed a plain number (owner, 2026-09-17). v10 wraps both.
-MIDI_SET_V92 = 0x401DB9F0
+MIDI_SET_V92 = 0x401DBE00
 STOCK_V92 = 0x40036692
 NEVER_FMT = b"%d.--\x00"
 
@@ -161,7 +161,7 @@ NOISE_SEED = 0x2545F491
 # the boot-screen area at 0x46710000.
 NOISE_RAM = 0x46740000
 
-STOCK = pathlib.Path("00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
+STOCK = pathlib.Path("00_Resources/00_Firmware/Digitone_II_OS1.12_dist.zip")   # (2026-11-14: OS 1.12, ported by port_os112)
 # v2: the first build ran every new index as RND and named it ERR (`lfo_wave_ui`).
 # v11: v10 plus TRAP (SPH = edge slope, label SLOP), moved here from the wavetable build.
 OUT = pathlib.Path("00_Resources/02_Builds/lfo-waveshapes11_DN2_1.11.syx")
@@ -373,16 +373,16 @@ noise:
 | ---- SPH's value text: `colour.loop` when this LFO's WAVE is NOIS --------
 | v5 put this in the `Start Phase` records' formatter, which is handed only
 | (value, dest), and found WAVE through two globals read under the emulator: the
-| active-track byte 0x42431a6c and the engine mirror. On the instrument SPH still
+| active-track byte 0x42432a6c and the engine mirror. On the instrument SPH still
 | showed a plain number -- the track byte is inside a heap-allocated struct, so its
 | address is not fixed across projects. [SUPERSEDED]
 |
-| v6 wraps the sound ParameterSet's format method instead (vtable 0x401db7fc,
+| v6 wraps the sound ParameterSet's format method instead (vtable 0x401dbc0c,
 | slot 92, stock 0x40036692), which is called as (this, record, value, dest). For
 | the three SPH records it asks the object itself for WAVE -- `this->vfunc40(this,
 | record - 2)` -- exactly as the firmware's own sibling method 0x4003660c does when
 | it checks SPH against WAVE == RND. No globals. Records: WAVE 79/89/99, SPH
-| 81/91/101 (table 0x401f7f94, 60 bytes a record).
+| 81/91/101 (table 0x401f83a4, 60 bytes a record).
 fmt_v92:
     move.l  %sp@(8),%d0             | record
     cmpi.l  #81,%d0
@@ -413,7 +413,7 @@ fmt_v92:
     addq.l  #1,%d1                  | loop length in cycles, 1..31
     move.l  %d1,%sp@-
     move.l  %d0,%sp@-
-    pea     0x40210bce              | "%d.%02d", the firmware's own
+    pea     0x40211086              | "%d.%02d", the firmware's own
     move.l  %sp@(28),%sp@-          | dest: arg 4, past three pushes
     jsr     0x40000e82
     lea     %sp@(16),%sp
@@ -454,7 +454,7 @@ a_call:
     mvs.b   %a4@(78),%d1            | SPH, slot 8*lfo+6
     andi.l  #0x7f,%d1
     or.l    %d0,%d1                 | the instance key above SPH's seven bits
-    jmp     0x40137a00
+    jmp     0x40137ce0
 
 | ---- evaluator B: the same, then make the call and come back ------------
 | Entered by jmp, so the stack is exactly what the generator expects.
@@ -468,7 +468,7 @@ b_call:
     andi.l  #0x7f,%d1
     or.l    %d0,%d1
     jsr     %a1@
-    jmp     0x40137612
+    jmp     0x401378f2
 
 | key: %a1 = &SPH -> %d0 = ((addr >> 1) & 1023) << 8. %d0 is free at both sites.
 | Slots are 202 bytes a track and 16 an LFO, so 101*dt + 8*dl never reaches
@@ -488,7 +488,7 @@ no_phase:
     bra.s   2f
 1:  mvs.w   %a4@(78),%d2
 2:  sub.l   %d0,%d7                 | the displaced instruction
-    jmp     0x40137894
+    jmp     0x40137b74
 """ + ui.formatter_source(ENTRIES - 1, short_names, long_names) 
 
 
@@ -533,7 +533,7 @@ def main() -> int:
 
     print("part 1 -- the generators and the hook stubs")
     payload, offsets = assemble_stubs(
-        source(table_vas[0x4020B340], state_va, names_va, long_names_va, never_va, glyph_sets, label_table), stub_va)
+        source(table_vas[0x4020B7F8], state_va, names_va, long_names_va, never_va, glyph_sets, label_table), stub_va)
     used = (stub_va - CAVE) + len(payload)
     if used > CAVE_CAP:
         raise SystemExit(f"cave overflows: {used} > {CAVE_CAP}")
@@ -542,7 +542,7 @@ def main() -> int:
     # into the data cave after the data.
     glyph_code_va = (cursor + 3) & ~3
     glyph_code, glyph_offsets = assemble_stubs(
-        glyph.source(glyph_sets, table_vas[0x4020B340], len(SPH_LABELS), label_table,
+        glyph.source(glyph_sets, table_vas[0x4020B7F8], len(SPH_LABELS), label_table,
                      state_reset=NOISE_RAM + 8 * glyph.NOISE_GLYPH_KEY),
         glyph_code_va, glyph.LABELS)
     data_used = glyph_code_va + len(glyph_code) - DATA_CAVE
@@ -554,7 +554,7 @@ def main() -> int:
           f"data cave {data_used}/{DATA_CAVE_CAP}")
     for label in LABELS + glyph.LABELS:
         print(f"  {label:<9} {offsets[label]:#010x}")
-    TABLE_EXTRAS[0x4020B340] = [offsets["step"], offsets["pulse"],
+    TABLE_EXTRAS[0x4020B7F8] = [offsets["step"], offsets["pulse"],
                                 offsets["noise"], offsets["trap"]]
 
     print(f"part 2 -- the {ENTRIES}-entry copies")

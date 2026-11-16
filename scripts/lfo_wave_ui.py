@@ -10,24 +10,24 @@ seems to sound similar to a random wave"*
 ## 1. Both evaluators clamp WAVE to 6 before dispatching
 
 ```
-A 0x40137876  mvs.b %a4@(76),%d3      B 0x40137494  mvs.b %a4@(42),%d3
-  0x40137880  moveq #6,%d7              0x401374a8  moveq #6,%d6
-  0x40137882  cmp.l %d3,%d7             0x401374aa  cmp.l %d3,%d6
-  0x40137884  bge.s +2                  0x401374ac  bge.s +2
-  0x40137886  moveq #6,%d3              0x401374ae  moveq #6,%d3
+A 0x40137b56  mvs.b %a4@(76),%d3      B 0x40137774  mvs.b %a4@(42),%d3
+  0x40137b60  moveq #6,%d7              0x40137788  moveq #6,%d6
+  0x40137b62  cmp.l %d3,%d7             0x4013778a  cmp.l %d3,%d6
+  0x40137b64  bge.s +2                  0x4013778c  bge.s +2
+  0x40137b66  moveq #6,%d3              0x4013778e  moveq #6,%d3
 ```
 
 So every index above 6 ran as **RND**, the one waveform dispatched by value
 rather than through the function table. That is what the owner heard. The
 scratch register is reloaded straight after in both (`moveq #11,%d7` at
-`0x4013788c`; `move.l %a0,%d6` at `0x401374b6`), so raising both immediates is
+`0x40137b6c`; `move.l %a0,%d6` at `0x40137796`), so raising both immediates is
 the whole fix.
 
 ## 2. The value text comes from two formatters with their own bound and table
 
-The `Waveform` records' formatter (`+0x28` of records `0x401f91e4`, `...943c`,
-`...9694`) is `0x400e34ac`; a short-name twin is `0x4000766c` (via
-`0x401d176c`, `0x401d1988`). Both are:
+The `Waveform` records' formatter (`+0x28` of records `0x401f95f4`, `...943c`,
+`...9694`) is `0x400e3610`; a short-name twin is `0x4000766c` (via
+`0x401d1b7c`, `0x401d1d98`). Both are:
 
 ```
 link  %fp,#-28
@@ -37,7 +37,7 @@ copy 28 bytes (7 name pointers) from a table to the frame, sprintf(dest, "%s", n
 
 The earlier build repointed the short table's `pea` and nothing else, so the
 bound still said 6 and the page said `ERR`. The names the page shows are the
-long table at `0x401fd5c0` (`TRI SINE SQR SAW EXPO RAMP RAND`).
+long table at `0x401fd9d0` (`TRI SINE SQR SAW EXPO RAMP RAND`).
 
 Rather than grow two stack frames, both functions are replaced at entry by a
 frameless stub with the same contract: `(value, dest)` in, `sprintf` tail.
@@ -51,21 +51,21 @@ is not read.
 from __future__ import annotations
 
 SPRINTF = 0x40000E82
-PCT_S = 0x40219C2D          # "%s"
-ERR = 0x40210C9E            # "ERR"
+PCT_S = 0x4021A0E5          # "%s"
+ERR = 0x40211156            # "ERR"
 
 SHORT_FMT = 0x4000766C
-LONG_FMT = 0x400E34AC
+LONG_FMT = 0x400E3610
 FMT_ENTRY_STOCK = bytes.fromhex("4e56ffe47006")   # link %fp,#-28 ; moveq #6,%d0
 
-SHORT_NAMES = 0x401D3574    # TRI SIN SQR SAW EXP RMP RND
-LONG_NAMES = 0x401FD5C0     # TRI SINE SQR SAW EXPO RAMP RAND
+SHORT_NAMES = 0x401D3984    # TRI SIN SQR SAW EXP RMP RND
+LONG_NAMES = 0x401FD9D0     # TRI SINE SQR SAW EXPO RAMP RAND
 STOCK_ENTRIES = 7
 
 # (address, stock opcode byte) of each `moveq #6` in the two clamps.
 CLAMPS = (
-    (0x40137880, 0x7E), (0x40137886, 0x76),   # evaluator A
-    (0x401374A8, 0x7C), (0x401374AE, 0x76),   # evaluator B
+    (0x40137b60, 0x7E), (0x40137b66, 0x76),   # evaluator A
+    (0x40137788, 0x7C), (0x4013778E, 0x76),   # evaluator B
 )
 
 LABELS = ("fmt_short", "fmt_long")

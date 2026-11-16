@@ -11,7 +11,8 @@ and nothing of Elektron's is ever published.
 
 - `tools/patcher/dn2patch.py` is the entry: it takes the files as Elektron ship
   them (.syx, or inside their .zip; the MD as .syx or the 8 MB flash .bin), and runs
-  `dnfw mods apply ... --mod waverider`, the gated builds' own recipe.
+  `dnfw mods apply ...` with every mod of `dnfw.mods.SHIPPED` (waverider, then lfowaves from 2026-11-14),
+  the gated builds' own recipe.
   - The MD's .syx is rebuilt into the flash image: 112-byte messages, each 64 bytes at
     the address in its bytes 9-14 (one nibble each), 16 bits in three 7-bit bytes. The
     syx carries the whole compressed chain from 0x4000, which is all the build reads

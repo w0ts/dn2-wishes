@@ -6,25 +6,25 @@ glyph just show the random wave"*). Read under the emulator, not guessed:
 
 ## How the stock page draws it
 
-`WAVE` is read once, at `0x4010e1f4`, and passed with SPH, MODE, SPD and DEP to
-the composite widget `0x4010dc82(this, bmp, 0, 1, WAVE, SPH, MODE, SPD, DEP)` --
+`WAVE` is read once, at `0x4010e4d4`, and passed with SPH, MODE, SPD and DEP to
+the composite widget `0x4010df62(this, bmp, 0, 1, WAVE, SPH, MODE, SPD, DEP)` --
 found by a stack scan on the record getter `0x4003713c` whenever its record
 argument was 79 (`guirun --stack-when`). Inside it:
 
 ```
-0x4010dc8e  moveq #6,%d6 ... 0x4010dcb0 moveq #6,%d5   | WAVE clamped to 6
-0x4010dd2a  %d2 = SPH, or 0 for RND                    | the tile's phase shift
-0x4010dd42  memcpy(fp-7, 0x4020544c, 7)                | a flag per waveform
-0x4010dd58  move.b %fp@(-7,%d5:l),%d1                  | ...indexed by WAVE
-0x4010deba  %d6 = 12 * WAVE + 0x44507b68               | the glyph set
-            0x40115ca8(set, variant, 0)                | -> a Bitmap
-            0x401157fc(bmp, glyph, x, y, 0)            | blitted 3-4 times
+0x4010df6e  moveq #6,%d6 ... 0x4010df90 moveq #6,%d5   | WAVE clamped to 6
+0x4010e00a  %d2 = SPH, or 0 for RND                    | the tile's phase shift
+0x4010e022  memcpy(fp-7, 0x40205904, 7)                | a flag per waveform
+0x4010e038  move.b %fp@(-7,%d5:l),%d1                  | ...indexed by WAVE
+0x4010e19a  %d6 = 12 * WAVE + 0x44508b68               | the glyph set
+            0x40115f88(set, variant, 0)                | -> a Bitmap
+            0x40115adc(bmp, glyph, x, y, 0)            | blitted 3-4 times
 ```
 
 A glyph set is a `std::vector<Bitmap>` -- begin, end, capacity -- filled lazily
 from seven static vectors on first draw. Each stock set holds **four** 28 x 15
 tiles (normal, time-reversed, flipped, both), chosen by the signs of SPD and DEP.
-A `Bitmap` is 28 bytes: vtable `0x4020650c`, width, height, stride, pixel data,
+A `Bitmap` is 28 bytes: vtable `0x402069c4`, width, height, stride, pixel data,
 **mask** (every stock glyph points at a 15-row all-ones mask), and a spare word.
 Bitmaps are stored **flipped vertically** relative to the panel.
 
@@ -48,7 +48,7 @@ width, step count -- and for SPH to be renamed on the new waveforms.
   records 81/91/101 it asks the object for WAVE (records 79/89/99) and returns the
   new waveform's label. (Stock RND gets `SLEW` differently -- a separate record,
   80, sharing SPH's slot.)
-- **One tile, not four:** `0x40115b5e` clamps the variant to the set's last
+- **One tile, not four:** `0x40115e3e` clamps the variant to the set's last
   element. A new waveform's glyph does not mirror for negative SPD or DEP.
 """
 
@@ -57,9 +57,9 @@ from __future__ import annotations
 import struct
 
 W, H = 28, 15
-BITMAP_VTABLE = 0x4020650C
-FULL_MASK = 0x402B8D90          # a stock 28 x 15 all-ones mask (TRI's)
-STOCK_SETS = 0x44507B68
+BITMAP_VTABLE = 0x402069C4
+FULL_MASK = 0x402B92D0          # a stock 28 x 15 all-ones mask (TRI's)
+STOCK_SETS = 0x44508B68
 FIRST_NEW = 7                   # the first index past the stock waveforms
 NOISE_GLYPH_KEY = 1023          # an instance key no real LFO slot hashes to
 
@@ -67,11 +67,11 @@ NOISE_GLYPH_KEY = 1023          # an instance key no real LFO slot hashes to
 # tenants: lfo4-tick6a 0x46700000.., boot screen 0x46710000, NOI state 0x46740000.
 TILE_RAM = 0x46750000
 
-CLAMPS = ((0x4010DC8E, 0x7C), (0x4010DCB0, 0x7A))    # moveq #6,%d6 / moveq #6,%d5
-FLAG_SITE = 0x4010DD58
+CLAMPS = ((0x4010DF6E, 0x7C), (0x4010DF90, 0x7A))    # moveq #6,%d6 / moveq #6,%d5
+FLAG_SITE = 0x4010E038
 FLAG_STOCK = bytes.fromhex("123658f941ec0033")       # move.b fp@(-7,d5); lea a4@(51),a0
-SET_SITE = 0x4010DED0
-SET_STOCK = bytes.fromhex("068644507b68")            # addi.l #0x44507b68,%d6
+SET_SITE = 0x4010E1B0
+SET_STOCK = bytes.fromhex("068644508b68")            # addi.l #0x44508b68,%d6
 # SPH's label is the record's short name, read through getShortName(this, record)
 # at 0x400372da -- the page's knob labels (0x40016adc) and the value header
 # (0x40064622) both call it. [WRONG — corrected] v8's first two builds wrapped
@@ -128,7 +128,7 @@ def source(sets_va: int, fn_table: int, count: int, label_table: int,
         ])
     return f"""
 | ---- [MOD] glyph: render the new waveform's tile from its own generator ----
-| Reached by jsr at 0x4010dd58 with %d5 = WAVE (clamped), %d2 = SPH 0..127.
+| Reached by jsr at 0x4010e038 with %d5 = WAVE (clamped), %d2 = SPH 0..127.
 glyph_flag:
     cmpi.l  #{FIRST_NEW},%d5
     bcc.s   10f
