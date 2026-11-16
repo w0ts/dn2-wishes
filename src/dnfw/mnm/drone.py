@@ -17,7 +17,10 @@ CHAR (sine -> 1.5 x - 0.5 x^3), DRIFT (each generator's slow triangle, up to +-6
 0.05 .. 40 Hz), DTUNE (Optimist's track DETUNE: the generators {-3 -1 1 3} x up to ~6.7 cents).
 Page 2 (`core.page2`): q0 GLID (0 off, else Optimist's TIME_MS index q0 x 127: 1 ms .. 10 s),
 q1 GLTY (index trunc(2 q1): 0 RATE = GLID is the time an octave takes, 1 TIME = GLID is the time
-of any glide; default 0.5 = TIME), q2..q5 unused, q6 HOLD (index trunc(2 q6), default OFF; the latch
+of any glide; default 0.5 = TIME), q2 OCT (2026-11-11, the User: -3..+3 octaves, trunc(7 q2) - 3, default
+0.5 = 0, so a project saved before it plays as it did; 12 x OCT semitones are added to the note before the
+glide: a trig glides into a new octave as into any note, a turn between trigs moves the pitch at once),
+q3..q5 unused, q6 HOLD (index trunc(2 q6), default OFF; the latch
 itself is the ColdFire's: csrc/hold/hold.c). The glide is legato (2026-11-10, the User's brief, no new
 control): a note glides only when its trig comes while the slot's gate is still open (no note-off since
 the last note: a key still down, an overlapping trig, or a HOLD latch); a separate note jumps.
@@ -68,7 +71,7 @@ from ..perc.dsl import Prog
 NAME, ID = "DRONE", 67
 PNAMES = ("SPRD", "CPL", "TOPO", "CHAR", "DRFT", "TONE", "BEAT", "DTUN")
 DEFAULTS = (0, 12, 0, 18, 32, 76, 0, 24)         # Optimist's defaults; DTUNE: STILL AIR's 24
-PNAMES2 = ("GLID", "GLTY", "---", "---", "---", "---", "HOLD")
+PNAMES2 = ("GLID", "GLTY", "OCT", "---", "---", "---", "HOLD")
 DEFAULTS2 = (0.0, 0.5, 0.5, 0.5, 0.0, 1.0, 0.0)  # q0..q6 as 0..1 (PERC's records' defaults)
 
 SIDE_L2 = 0x200B1800                             # the slots' side blocks (the coordinator's)
@@ -117,7 +120,7 @@ def _k(p: Prog, d: int, a: int, op: str, x: float) -> None:
 
 
 def exact(A: int, F: int, knobs, pre: int = 0) -> dict:
-    """no Monomachine increments: DRONE takes its pitch from VW pitch (pitch below)"""
+    """no Monomachine increments: DRONE takes its pitch from VW pitch and OCT (pitch below)"""
     return {}
 
 
@@ -170,7 +173,7 @@ def _glide_start(p: Prog, L: C.Layout) -> None:
     C.page2(p, L, 6, 1)
 
     def time_():
-        C.vw(p, 1, "pitch")                      # (the target again: _exp2p clobbered R1)
+        _target(p, L)                            # (the target again: _exp2p clobbered R1)
         p.iconst(12, 0)
         p.float_(4, 5, 12)
         from ..perc import machines as PM
@@ -204,10 +207,29 @@ def _glide_start(p: Prog, L: C.Layout) -> None:
     _sv(p, S_GST, 3)
 
 
+def _target(p: Prog, L: C.Layout) -> None:
+    """F1 = the note: VW pitch + 12 x OCT (q2: trunc(7 q2) - 3, -3..+3; OCT 0 adds 0.0, so the
+    pitch is bit for bit as before). One subroutine. Clobbers R12, R14, I12."""
+    def body():
+        C.vw(p, 1, "pitch")
+        C.page2(p, L, 14, 2)
+        _k(p, 14, 14, "*", 7.0)
+        p.trunc(14, 14)
+        p.iconst(12, 6)
+        p.iop(14, 14, "MIN", 12)
+        p.iconst(12, -3)
+        p.iop(14, 14, "+", 12)
+        p.iconst(12, 0)
+        p.float_(14, 14, 12)
+        _k(p, 14, 14, "*", 12.0)
+        p.fop(1, 1, "+", 14)
+    p.call("drone_target", body)
+
+
 def _pitch_glide(p: Prog, L: C.Layout) -> None:
-    """S_CUR (semitones) from VW pitch: a trig jumps to it or starts a glide; otherwise its
-    moves pass straight through; the glide steps once a block (voice.c)."""
-    C.vw(p, 1, "pitch")
+    """S_CUR (semitones) from the note (_target): a trig jumps to it or starts a glide; otherwise
+    its moves pass straight through; the glide steps once a block (voice.c)."""
+    _target(p, L)
     _ld(p, 0, S_TRG)
 
     def on_trig():
@@ -237,7 +259,7 @@ def _pitch_glide(p: Prog, L: C.Layout) -> None:
         p.iconst(12, 1)
         p.if_(0, "EQ", 12, on_trig, lambda: (p.iconst(0, 1), _sv(p, S_TRG, 0), follow()), kind="i")
     p.ifz(0, "NE", pending, follow)
-    C.vw(p, 1, "pitch")                          # (the glide's set-up clobbers F1)
+    _target(p, L)                                # (the glide's set-up clobbers F1)
     _sv(p, S_TGT, 1)
     _ld(p, 2, S_CUR)                             # one step towards T (S_GST 0: there)
     _ld(p, 3, S_GST)

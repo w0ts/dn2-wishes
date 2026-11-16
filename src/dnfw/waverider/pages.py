@@ -138,7 +138,7 @@ MNM_LONG = {"TUNE": "Tune", "---": "Unused",
             # DRONE (docs/drone.md)
             "SPRD": "Spread", "CPL": "Couple", "TOPO": "Topology", "CHAR": "Character", "DRFT": "Drift",
             "TONE": "Tone", "BEAT": "Binaural Beat", "DTUN": "Detune", "GLID": "Glide Time",
-            "GLTY": "Glide Type", "HOLD": "Hold",
+            "GLTY": "Glide Type", "HOLD": "Hold", "OCT": "Octave",
             # ANALOG2 (docs/analog2.md)
             "DTN": "Detune", "MIX": "Osc Mix", "NOIS": "Noise", "DRV": "Drive", "KTR": "Key Track",
             "SWRM": "Swarm", "SEMI": "Osc2 Semi", "SDTN": "Swarm Spread", "SYNC": "Hard Sync",
@@ -163,7 +163,9 @@ MNM_CHOICES = {
                 "SYNC": ("OFF", "ON"), "SWRM": ("OFF", "1", "2", "3", "4", "5", "6"), "SEMI": 49,
                 "FLT": tuple(m[0] + md.replace("NTCH", "NT") for m in ("SVF", "LADR", "OTA", "DIOD", "MS20")
                              for md in ("L12", "L24", "BP", "HP", "NTCH"))},
-    "DRONE": {"TOPO": ("PAIR", "CHN", "RING"), "GLTY": ("RATE", "TIME"), "HOLD": ("OFF", "ON")},
+    "DRONE": {"TOPO": ("PAIR", "CHN", "RING"), "GLTY": ("RATE", "TIME"), "HOLD": ("OFF", "ON"),
+              # 2026-11-11, the User: an octave knob, -3..+3 (dnfw.mnm.drone q2), in its unit
+              "OCT": ("-3oc", "-2oc", "-1oc", "0oct", "+1oc", "+2oc", "+3oc")},
     "PLAITS": {"MODL": _mnm_plaits.MODELS, "TUNE": 49, "FINE": 128},   # TUNE, FINE: steps (MW_SEMIS, MW_CENTS)      # 2026-11-09: every engine ported (dnfw.mnm.plaits)
 }
 # v0.27: the controls the Monomachine draws as other than a knob (owner, 2026-10-27; 0 a knob,
@@ -172,7 +174,7 @@ MNM_CHOICES = {
 # removed machines used 2..4; md_page.c keeps their drawing)
 MNM_WIDGET = {("SOPHIE", "MODL"): 5, ("PLAITS", "MODL"): 5,
               ("DRONE", "TOPO"): 5, ("ANALOG2", "WAVE"): 5, ("ANALOG2", "WAV2"): 5, ("ANALOG2", "SYNC"): 5,
-              ("ANALOG2", "SWRM"): 5, ("ANALOG2", "FLT"): 5, ("ANALOG2", "SEMI"): 6, ("DRONE", "GLTY"): 5, ("DRONE", "HOLD"): 5,
+              ("ANALOG2", "SWRM"): 5, ("ANALOG2", "FLT"): 5, ("ANALOG2", "SEMI"): 6, ("DRONE", "GLTY"): 5, ("DRONE", "HOLD"): 5, ("DRONE", "OCT"): 5,
               # 2026-11-09: 6 MW_SEMIS, the step - n / 2 as +7 / -12 / 0 (the User, build #3: semitones,
               # not the note name); 7 MW_CENTS, the step - n / 2 as +12c / -30c
               ("PLAITS", "TUNE"): 6, ("PLAITS", "FINE"): 7}   # 2026-11-09: md_page.c draws a choice as a

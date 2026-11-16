@@ -3963,7 +3963,11 @@ def mnm_words(k: int, knobs=None) -> dict:
     own defaults), on PERC's eight parameter records (as page.c's mnm_knob reads them)"""
     from dnfw.mnm import machines as MM
     knobs = MM.DEFAULTS[MM.NAMES[k]] if knobs is None else knobs
-    return {slot: PL.knob_word(x, top, lo) for (_rid, slot, lo, top), x in zip(PM.PARAMS, knobs)}
+    words = {slot: PL.knob_word(x, top, lo) for (_rid, slot, lo, top), x in zip(PM.PARAMS, knobs)}
+    if MM.NAMES[k] == "DRONE":                   # 2026-11-11: q2 OCT at the start MACHINE SEL writes (octave 0;
+        _rid, slot, lo, top = PM.FX_PARAMS[2]    # a page-2 word left 0 would be OCT -3)
+        words[slot] = PL.knob_word(MM.MACHINES[k].DEFAULTS2[2], top, lo)
+    return words
 
 
 def _slim(run: dict) -> dict:
@@ -4019,6 +4023,24 @@ def step_mnm(init, sound, machines, blocks) -> dict:
             return fb
         runs["DRONE_held"] = _slim(run_blocks(init, drone_leg(False), 24))
         runs["DRONE_released"] = _slim(run_blocks(init, drone_leg(True), 24))
+
+        # 2026-11-11: DRONE's OCT (q2, EQF 0..100: 50 is 0, 65 +1, 35 -1), note 72 on at block 1: octave
+        # 0, +1, -1; a turn to +1 at block 12 with no trig (112 blocks: the generators' increments follow
+        # their targets in ~23 ms, Optimist's drone_follow, so the pitch slides up in ~70 ms); and a held
+        # note whose second trig (block 12, the same note, GLID on) comes with OCT +1 (bit-exact only)
+        def drone_oct(v0, v1=None, glide=False):
+            def fb(b):
+                f = base_frame(sound, machines, t0=types[dk], overrides=mnm_words(dk), note=0x4800, trigger=False)
+                if b == 1 or (glide and b == 12):
+                    f.put(FR.TRIG_NOTE, 1)
+                f.param(0, 34, (v0 if v1 is None or b < 12 else v1) << 8)   # q2 OCT
+                if glide:
+                    f.param(0, 26, 64 << 8)              # q0 GLID
+                return f.to_bytes()
+            return fb
+        for name, args, nb in (("0", (50,), 24), ("+1", (65,), 24), ("-1", (35,), 24), ("turn", (50, 65), 112),
+                               ("glide", (50, 65, True), 24)):
+            runs[f"DRONE_oct{name}"] = _slim(run_blocks(init, drone_oct(*args), nb))
     # 2026-11-09: every PLAITS model (MODL's choices past WS, which the default runs), triggered at
     # block 1 and again at block 4, its HARM/TIMB/MORP off-centre; and a track whose MODL changes
     # every two blocks through the models (each entry runs the model's init), bit-exact as above
@@ -4162,6 +4184,19 @@ def step_mnm(init, sound, machines, blocks) -> dict:
         n_drone = {"held_peaks": [round(V.peak(hs[b * BLOCK:(b + 1) * BLOCK]), 4) for b in range(24)],
                    "released_peaks": [round(V.peak(rs[b * BLOCK:(b + 1) * BLOCK]), 4) for b in range(24)]}
         n["drone_legato"] = n_drone
+    if "DRONE_oct0" in runs:                     # 2026-11-11: OCT moves the pitch by octaves
+        def ups(name, b0, b1):                   # rising zero crossings in blocks b0..b1-1
+            s = perc_series(runs[name], 0)[b0 * BLOCK:b1 * BLOCK]
+            return sum(1 for a, b in zip(s, s[1:]) if a < 0.0 <= b)
+        z = {k: ups(f"DRONE_oct{k}", 4, 24) for k in ("0", "+1", "-1")}
+        zt = (ups("DRONE_octturn", 4, 12) / 8.0, ups("DRONE_octturn", 80, 112) / 32.0)   # a block's, before / 68 blocks after
+        oct_ok = all(runs[f"DRONE_oct{k}"]["ok"] for k in ("0", "+1", "-1", "turn", "glide"))
+        checks["DRONE: OCT +1 doubles the note's rising zero crossings, -1 halves them (each within 25 %); "
+               "a turn to +1 between trigs doubles them once the increments have followed (from 68 blocks on)"] = (
+            oct_ok and z["0"] > 0
+            and 1.5 <= z["+1"] / z["0"] <= 2.5 and 0.375 <= z["-1"] / z["0"] <= 0.625
+            and zt[0] > 0 and 1.5 <= zt[1] / zt[0] <= 2.5)
+        n["drone_octave_ups"] = {"oct": z, "turn": zt}
     dynr = runs["dynamic"]
 
     def dpk(b, t):
