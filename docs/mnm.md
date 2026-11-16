@@ -185,7 +185,7 @@ The wait is safe: every ColdFire boot (power-on, the restart after a flash, a re
 the menu) starts `smp_tables` at 0 and sends the tables, then READY, once the +Drive is up
 and the DSP's RAM check has answered (or four seconds passed): the path a power-on has
 always taken. A stale word from this same build matches and decodes at once, from bytes
-that are this build's. Runner cases: `scripts/sharc_table_ready.py`.
+that are this build's. Runner cases: `scripts/sharc_table_ready.py`, the SHARC runner's step `tableready` (a gate part of its own).
 
 What ships: the Machinedrum's host pitch table and zpack, which now also carries the
 Monomachine's tables after the sine (`TABLE_LAYOUT["mnm"]`, starting a block). They are

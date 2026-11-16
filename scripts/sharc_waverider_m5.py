@@ -27,6 +27,8 @@ dispatch, per-track chain), as Milestone 4 does. Steps, each PASS/FAIL
    type-5 run tracks 1-15 match a stock run; the stock filter types likewise.
 4o. **stockout** (2026-11-12, `sharc_stockout_step.py`) -- with stock machines only, what leaves the engine (main mix,
    tracks' routed and panned blocks, FX returns, TDM slots 0-13, Overbridge records) is the stock image's, every block.
+4t. **tableready** (2026-11-12, `sharc_table_ready.py`) -- the tables' READY with this build's checksum: another build's
+   ready word waits, the same build's decodes at once, a cold DDR waits; JUNO plays after each (docs/mnm.md).
 5. **frame** (with --frame/--frame-be/--frames) -- a caller's frame(s), used verbatim
    every block; every type-5 track bit-exact to the model.
 6-7. **PING, SHFT, GRAN** -- removed (SHFT, GRAN v0.27; PING v0.45); their step functions are kept only where shared.
@@ -564,7 +566,7 @@ def main(argv=None):
     p.add_argument("--frame-be", help="a frame as the ColdFire holds it at 0x80005e60 (16-bit BE)")
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
-    p.add_argument("--steps", default="decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,flexlevel,mainrec,recwhole,pvmix,fdn8,xdly,jsend,inserts,insall,a2f,inspost,insbus,mainmix,insorder,tdm,twin,stock,stockout,mnm,frame")   # v0.27: shft, gran removed; v0.45: ping removed   # voice: PERC
+    p.add_argument("--steps", default="decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,flexlevel,mainrec,recwhole,pvmix,fdn8,xdly,jsend,inserts,insall,a2f,inspost,insbus,mainmix,insorder,tdm,twin,stock,stockout,tableready,mnm,frame")   # v0.27: shft, gran removed; v0.45: ping removed   # voice: PERC
     p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
@@ -853,6 +855,13 @@ def main(argv=None):
             results["4o_stockout"] = so_step.run(sys.modules[__name__], snap, m2mach, m5, stock_img, sound, machines)
             gc.collect()
             show(results["4o_stockout"])
+
+        if "tableready" in steps:
+            print("\nstep 4t: the tables' READY with this build's checksum (cases a, b, c; 2026-11-12)")
+            tr_step = importlib.import_module("sharc_table_ready")
+            results["4t_tableready"] = tr_step.run(sys.modules[__name__], snap, m2mach, m5, stock_img, sound, machines)
+            gc.collect()
+            show(results["4t_tableready"])
 
         if "shft" in steps:
             print("\nstep 7: SHFT")
