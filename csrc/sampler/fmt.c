@@ -25,6 +25,12 @@ typedef unsigned char u8;
 #define SOUND_VALUES 0x14                       /* its values, a 16-bit word a slot */
 #define MNM_TUNE_J 7                            /* TUNE: knob H on every Monomachine machine */
 #define MNM_TUNE_REC 240u                       /* its record (perc_param_ids[7]) */
+/* Ours (the User, 2026-11-10: TUNE "as in b6"): v0.47's TUNE (the signed header, FUNC + turn by
+ * semitones) is for the Monomachine's own machines, whose TUNE spans +-2 semitones (32 knob steps
+ * each). None of them ships here (SID, the DPRO machines and VO-6 were removed 2026-11-08), and
+ * SOPHIE, PLAITS and TB303 name their knob H TUNE too but span +-24 semitones (about 2.7 knob steps
+ * each): v0.47's header would read knob units and FUNC + turn would jump an octave. So it is off. */
+#define MNM_TUNE_MONO 0
 #define RECORD_FMT(id) (*(void **)(0x401F83A4u + 60u * (id) + 0x34u))
 #define RECORD_LO(id) (((const int *)(0x401F83A4u + 60u * (id)))[2] >> 8)
 
@@ -184,7 +190,7 @@ static int func_kind(u8 *s, int slot, u32 id)
     if (mi >= 0) {
         for (int j = 0; j < 8; j++)
             if (mnm_slot[j] == slot) {
-                if (j == MNM_TUNE_J && mnm_labels[mi][j][0] == 'T' && mnm_labels[mi][j][1] == 'U')
+                if (MNM_TUNE_MONO && j == MNM_TUNE_J && mnm_labels[mi][j][0] == 'T' && mnm_labels[mi][j][1] == 'U')
                     return F_TUNE;              /* v0.47: by semitones (the owner) */
                 return mnm_choices[mi][j] ? F_CHOICE : F_NONE;
             }
@@ -499,7 +505,7 @@ void smp_formats(int kind)
     for (int k = 0; k < NFMT; k++) {
         void *f = stock_fmt[k];
         if (fmt_ids[k] == MNM_TUNE_REC) {       /* v0.47: on a Monomachine machine's track only */
-            RECORD_FMT(fmt_ids[k]) = mnm_index(kind) >= 0 ? (void *)fmt_fns[k] : f;
+            RECORD_FMT(fmt_ids[k]) = MNM_TUNE_MONO && mnm_index(kind) >= 0 ? (void *)fmt_fns[k] : f;
             continue;
         }
         int grid_only = fmt_ids[k] == SMP_GRID_REC;

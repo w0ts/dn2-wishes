@@ -134,7 +134,10 @@ def test_rows_5_to_12_of_the_name_table(applied):
     # v0.26: 6, 7 (and 14..) the Monomachine's machines (RESONATOR's and CZ's until v0.25)
     assert CF.MACHINE_NAMES[5] == ("Perc", "PRC") and CF.MACHINE_NAMES[13] == ("Slice", "SLC")
     assert CF.MACHINE_NAMES[6] == CF.MACHINE_NAMES[7] == ("Removed", "---")   # SID, DPRO-WAVE: removed, reserved
-    assert 6 not in CF.LIST_NEW and 7 not in CF.LIST_NEW and 17 in CF.LIST_NEW
+    # ours in MACHINE SEL (SOPHIE 20, PLAITS 18, TB303 19); BOUNCE (17) as upstream lists it (v0.47: hidden)
+    from dnfw.mnm import machines as MM
+    assert 6 not in CF.LIST_NEW and 7 not in CF.LIST_NEW and all(t in CF.LIST_NEW for t in MM.TYPES)
+    assert (SMB.BOUNCE_TYPE in CF.LIST_NEW) == SMB.BOUNCE_LISTED
     for row in CF.NEW_TYPES:
         lo, sh = (n.encode() + b"\0" for n in CF.MACHINE_NAMES[row])
         long_ptr, short_ptr = _clong(table + 12 * row), _clong(table + 12 * row + 4)

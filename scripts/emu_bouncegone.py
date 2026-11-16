@@ -365,58 +365,38 @@ def main() -> int:
         put32(lay["rec_overlay"], 0)
         put32(lay["smp_overlay_dirty"], 1)
         type_put(T, BOUNCE)
-    # v0.47: the Monomachine's TUNE (knob H, record 240): its header text a signed knob
-    # (-64..+63, 0 in tune), not stock's percentage; FUNC + turn steps by semitones (32)
+    # v0.47 made the Monomachine's TUNE (knob H, record 240) a signed knob with FUNC + turn by
+    # semitones. Ours (the User, 2026-11-10, "as in b6"; csrc/sampler/fmt.c MNM_TUNE_MONO): no
+    # Monomachine machine ships, and SOPHIE / PLAITS / TB303's TUNE spans +-24 semitones, so all of
+    # it is off: record 240's text stays stock's and FUNC + turn on TUNE does not snap by 32.
     if "smp_quant" in lay:
         REC240 = 0x401F83A4 + 60 * 240
         stock_t = machine.long(REC240 + 0x34)
-        call(lay["smp_formats"], 2)                          # SID 6581 (type 6, kind 2)
-        f_t = machine.long(REC240 + 0x34)
-        tt = []
-        for v in (0, 25, 50, 75, 100):
-            machine.write(SENTINEL + 0x100, bytes(16))
-            call(f_t, v << 8, SENTINEL + 0x100)
-            tt.append(machine.read(SENTINEL + 0x100, 8).split(b"\0")[0].decode("latin-1"))
-        check("v0.47: the Monomachine's TUNE reads -64..+63, 0 in tune (not a percentage)",
-              f_t != stock_t and tt == ["-64", "-32", "0", "+31", "+63"], f"{tt}")
-        call(lay["smp_formats"], 1)                          # PERC (record 240 is its PD1)
-        f_p = machine.long(REC240 + 0x34)
+        texts = {}
+        for name, kind in (("SID (reserved)", 2), ("SOPHIE", 16), ("PLAITS", 14), ("TB303", 15), ("PERC", 1), ("stock", 0)):
+            call(lay["smp_formats"], kind)
+            texts[name] = machine.long(REC240 + 0x34)
         call(lay["smp_formats"], 0)
-        f_s = machine.long(REC240 + 0x34)
-        check("v0.47: record 240's text is stock's on PERC and stock machines", f_p == stock_t and f_s == stock_t,
-              f"perc {f_p:#x}, stock {f_s:#x}, want {stock_t:#x}")
-        snd = SENTINEL + 0x200                               # a sound: type SID, TUNE (slot 29) in tune
+        check("ours: record 240's text is stock's on every machine (v0.47's signed TUNE is off)",
+              all(v == stock_t for v in texts.values()),
+              ", ".join(f"{k} {v:#x}" for k, v in texts.items()) + f"; stock {stock_t:#x}")
+        snd = SENTINEL + 0x200                               # a sound: type SOPHIE (20), TUNE (slot 29) in tune
         machine.write(snd, bytes(0x100))
-        machine.write(snd + 0xDE, bytes([6]))
+        machine.write(snd + 0xDE, bytes([20]))
         TSLOT = 29
 
-        def func_turn(d, v):
+        def turn(d, v, func):
             put16(snd + 0x14 + 2 * TSLOT, v)
-            put32(lay["smp_func_held"], 1)
+            put32(lay["smp_func_held"], 1 if func else 0)
             put32(lay["smp_knob_d"], d & 0xFFFFFFFF)
             put32(lay["smp_knob_at"], machine.long(FRAMES))
             r = call(lay["smp_quant"], snd, TSLOT, (v + (0x100 if d > 0 else -0x100)) & 0xFFFF, 240)[0] & 0xFFFF
             put32(lay["smp_func_held"], 0)
             return r
-
-        def kn(v):
-            c = v >> 8
-            return (c * 254 + 100) // 200 - 64
-        v, up, down = 50 << 8, [], []
-        for _ in range(3):
-            v = func_turn(1, v)
-            up.append(kn(v))
-        for _ in range(5):
-            v = func_turn(-1, v)
-            down.append(kn(v))
-        check("v0.47: FUNC + turn on the Monomachine's TUNE steps by semitones (+1 semitone is the knob "
-              "+33 or +31: the record has no +32)", up == [33, 63, 63] and down == [31, 0, -32, -64, -64],
-              f"up {up}, down {down}")
-        put16(snd + 0x14 + 2 * TSLOT, 50 << 8)
-        put32(lay["smp_knob_d"], 1)
-        put32(lay["smp_knob_at"], machine.long(FRAMES))
-        plain = call(lay["smp_quant"], snd, TSLOT, 51 << 8, 240)[0] & 0xFFFF
-        check("v0.47: without FUNC, TUNE turns as before (the value as written)", plain == 51 << 8, f"{plain:#x}")
+        got = {(d, f): turn(d, 50 << 8, f) for d in (1, -1) for f in (False, True)}
+        check("ours: FUNC + turn on SOPHIE's TUNE does not snap by semitones of 32 (v0.47's step is off)",
+              all(abs((r >> 8) - 50) <= 2 for r in got.values()),
+              ", ".join(f"d{d:+d}{' FUNC' if f else ''}: {r >> 8}" for (d, f), r in got.items()))
     ok = all(c["ok"] for c in report["checks"].values())
     report["ok"] = ok
     if a.json:
