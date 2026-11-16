@@ -53,6 +53,7 @@ def test_release_tails_are_stolen_first_and_the_dsp_room_decides():
     pre = re.search(r"void load_pre\(.*?\n}\n", LOAD_C, re.S).group(0)
     assert "u32 keep = cand & tails ? tails : held;" in pre           # a release tail first, else a held voice
     assert "smp_tlm_cost[v] > LOAD_TAIL" in pre                       # a tail: the DSP still reports it busy
+    assert LD.TAIL * 16 == 2000                                        # over the idle slots, under every release tail
     room = re.search(r"static int room_now\(.*?\n}\n", LOAD_C, re.S).group(0)
     assert "smp_room_now[3]" in room and "ROOM_FRESH" in room          # the bus pass's room, the last packet's
     assert "- (int)load_busins - (int)load_pend" in room

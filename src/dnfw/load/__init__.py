@@ -24,8 +24,11 @@ OURS = 310_000                    # what our voices, inserts and FX get of the 6
 FIXED = 2_317 + 953 + 8_115       # PERC's entry, the slot loop and smp's loop with no voice (runner, host cut, 2026-11-12)
 AVAIL = OURS - FIXED
 VOICES = 16
-TAIL = 8000 // 16                 # the DSP's per-slot cost telemetry (cycles / 16) over which a released voice still sounds
-                                  # (link.c TLM_SOUNDING: idle 1,300..1,500, a held note 16,000..28,000, a release 2,300..3,300)
+TAIL = 2000 // 16                 # the DSP's per-slot cost telemetry (cycles / 16) over which a released voice still sounds
+                                  # (link.c TLM_SOUNDING: idle 1,300..1,500, a held note 16,000..28,000, a release 2,300..3,300).
+                                  # 2026-11-13: 8,000 until then, over some tails: the coupled T12 proof's JUNO tails measured
+                                  # ~8,500, so one dipped under and was not stolen (its one guard skip); 2,000 sits over
+                                  # the idle slots (the unit's T12 kit: 1,104..1,248) and under every release measured
 # the stock machines a voice (runner, scripts/sharc_cost.py --steps stock, 2026-11-12: the whole block with the track on
 # the machine less on MIDI), by machine type
 STOCK = {0: 14_626, 1: 9_980, 2: 10_998, 3: 5_228, 4: 0}

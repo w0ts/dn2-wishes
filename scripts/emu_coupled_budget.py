@@ -35,7 +35,8 @@ Coupled = importlib.import_module("emu_coupled").Coupled
 SN = importlib.import_module("emu_coupled_stocknote")             # its keys, KIT and the smoother model
 
 LOAD_SYMS = ("load_checks", "load_over", "load_keyups", "load_tails", "load_by_room", "load_last_free", "load_last_need")
-TAIL_UNITS = 8000 // 16                                           # dnfw.load.TAIL: a slot still sounding
+from dnfw import load as _LD                                      # noqa: E402
+TAIL_UNITS = _LD.TAIL                                             # a slot still sounding, as the budget reckons it
 
 
 def main() -> int:

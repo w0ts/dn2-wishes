@@ -95,3 +95,10 @@ Checked: `scripts/emu_load_budget.py` 13 of 13 (9: released tails and little roo
 alone takes a free slot; 10: plenty of room: stock's result; 11: no room reported: as before; 12: a measured cost over
 the table decides). Not checked: the coupled emulator run of the unit's 16 notes (it needs a time model: the coupled
 harness has no DSP clock, so no deadline and no room), and the unit.
+
+**2026-11-13, the coupled proof** (`scripts/emu_coupled_budget.py`: both processors, the DSP given a clock by
+`emu_coupled.dsp_clock`, idle D calibrated to the unit's 0.69; T12's sound, 16 short notes): guard voice skips and
+insert-block skips, r3 (no fix) 14 / 368 with no steal; budgetfix 7 / 39 with 11 tails stolen; with the guard's FLOOR
+kept free (`room_asked`) 1 / 1 with 14 stolen. Stock-only notes: no check, the same slots and load as without the fix.
+The last skip came from a JUNO tail (~8,500) dipping under `LOAD_TAIL` (8,000): now 2,000 (idle slots 1,100..1,500,
+releases 2,300 and up).
