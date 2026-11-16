@@ -166,7 +166,8 @@ TRK_STRIDE = 0x100                         # + 0x100 k, R at + 0x80 (Overbridge'
 TRK_ROUTE = 0x257898                       # k = the s16 at TRK_ROUTE + 2t (the ColdFire's slot map)
 TRK_GAIN = 11.627                          # 0x1c244d's gain into that buffer, between triggers
 REC_STAGE = 0x2DF800                       # 32 floats of the block being recorded (dnfw.waverider.dsp)
-REC_GAIN = 0x2E0080                        # v0.50: a FLEX take's GAIN index (0 none) and factor (dnfw.waverider.dsp)
+REC_GAIN = 0x2DF7F4                        # v0.50: a FLEX take's GAIN index (0 none) and factor (dnfw.waverider.dsp;
+                                           # the scratch words 'rgain', 'rgfac' since the v0.52 merge, was 0x2e0080)
 # v0.50 (impbox: FLEX takes far quieter than their source): measured on the SHARC runner
 # (2026-11-12, step 3f flexlevel: track 0 ONESHOT looping at its defaults, each track routed to
 # its own slot, RMS past the amp envelope's attack). A take of TRK1 made with the RECORDER's

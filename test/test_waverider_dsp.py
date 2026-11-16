@@ -174,8 +174,8 @@ def test_ddr_spans_are_clear_of_the_stock_image_and_the_engine():
     # host's pitch table, zpack) are not in the image: the ColdFire sends them at power-on.
     # v0.45: PING's tables went with PING
     # 2026-11-10 (shrink): AMD's sine (v0.31) ships over the link now, with PERC's tan
+    # 2026-11-12: the DT2 reader's coefficients (v0.18) went to L2 and L1
     assert [a for _, a, _ in ddr] == [dsp.PERC_TABLES_DDR,
-                                      dsp.SMP_TABLES_DDR,                       # v0.18: the DT2 reader's
                                       dsp.MD_TABLES_DDR,
                                       dsp.MD_DELAY_DDR,                         # v0.32: P-I's lines, zeroed
                                       dsp.FDN8_RING_DDR,                        # FDN8's ring, zeroed
@@ -183,15 +183,16 @@ def test_ddr_spans_are_clear_of_the_stock_image_and_the_engine():
                                       0x82510000,                               # the post inserts' rings, zeroed
                                       dsp.SMP_POOL_DDR, dsp.SMP_POOL_DDR + 8]   # v0.17: the MD's
     assert not any(ddr[-1][2])
-    # v0.45: PING's tables went: every index one lower than b4's; 2026-11-10: the sine's, one more
-    assert not any(ddr[4][2]) and len(ddr[4][2]) == dsp.FDN8_RING_BYTES       # FDN8: zeros at power-on
-    assert dsp.MD_DELAY_DDR + len(ddr[3][2]) <= dsp.FDN8_RING_DDR
+    # v0.45: PING's tables went: every index one lower than b4's; 2026-11-10: the sine's, one more;
+    # 2026-11-12: the DT2 reader's coefficients, one more
+    assert not any(ddr[3][2]) and len(ddr[3][2]) == dsp.FDN8_RING_BYTES       # FDN8: zeros at power-on
+    assert dsp.MD_DELAY_DDR + len(ddr[2][2]) <= dsp.FDN8_RING_DDR
     assert dsp.FDN8_RING_DDR + 0x80000 <= 0x82500000                         # (FDN8 LONG's 512 KB too)
-    assert not any(ddr[5][2]) and 0x82500000 + len(ddr[5][2]) <= 0x82510000
+    assert not any(ddr[4][2]) and 0x82500000 + len(ddr[4][2]) <= 0x82510000
     from dnfw.mnm import plk                                              # PLAITS' per-voice DDR
-    assert not any(ddr[6][2]) and 0x82510000 + len(ddr[6][2]) <= plk.BIG_DDR <= dsp.SMP_POOL_DDR
-    assert not any(ddr[2][2]) and not any(ddr[3][2])      # the MD's tables (the DSP fills them), P-I's lines
-    assert dsp.MD_TABLES_DDR + len(ddr[2][2]) <= dsp.MD_DELAY_DDR
+    assert not any(ddr[5][2]) and 0x82510000 + len(ddr[5][2]) <= plk.BIG_DDR <= dsp.SMP_POOL_DDR
+    assert not any(ddr[1][2]) and not any(ddr[2][2])      # the MD's tables (the DSP fills them), P-I's lines
+    assert dsp.MD_TABLES_DDR + len(ddr[1][2]) <= dsp.MD_DELAY_DDR
     # v0.32: the voices' working state in L2 (zeros), inside the room proven on units
     from dnfw.perc import live as PL
     L = PL.layout()
@@ -232,6 +233,40 @@ def test_ddr_spans_are_clear_of_the_stock_image_and_the_engine():
     # the stock stream loads DDR to 0x8052fbe0 and init writes up to 0x80530be8
     # (scripts/sharc_ddr_ceiling.py); ours start 16 MB in
     assert min(a for _, a, _ in ddr) >= dsp.DDR_FLOOR > 0x80530BE8
+
+
+def test_the_sample_machines_scratch_fits_its_span():
+    # 2026-11-12: 65 words had grown into a 256 B span, the last ('segnext') on the recorder's
+    # staging block's first word
+    from dnfw.sampler import live as SLv
+    from dnfw.sampler import machines as SMm
+    from dnfw.sampler import program as SP
+    C = SLv.layout().C
+    assert min(C.values()) == dsp.SMP_SCRATCH_DM and len(set(C.values())) == len(SP.SC_WORDS)
+    assert max(C.values()) + 4 <= dsp.SMP_SCRATCH_DM + dsp.SMP_SCRATCH_BYTES == dsp.SMP_STAGE_DM == SMm.REC_STAGE
+    l1 = {a: len(p) for _, a, p in dsp.spans()}
+    assert l1[dsp.dm_to_load(dsp.SMP_SCRATCH_DM)] == dsp.SMP_SCRATCH_BYTES
+    # v0.52 merge: the recorder's GAIN (v0.50, 0x2e0080) moved into this span: SMP_DTAB_DM has that room
+    assert SMm.REC_GAIN == dsp.REC_GAIN_DM == C["rgain"] and C["rgfac"] == SMm.REC_GAIN + 4
+
+
+def test_the_sample_readers_coefficients_are_loaded_where_it_reads_them():
+    # 2026-11-12: the interpolator's rows in L2 (the Machinedrum slots' old room, inside the range
+    # proven on units), the decimator's four and the gain in L1 after the voices' decimators
+    from dnfw.sampler import live as SLv
+    from dnfw.sampler import program as SP
+    L, tb = SLv.layout(), SP.tables_bytes()
+    assert L.T["poly"] == dsp.SMP_TABLES_L2 and L.T["decim"] == dsp.SMP_DTAB_DM and L.T["gain"] == dsp.SMP_DTAB_DM + 16
+    l2 = {a: p for _, a, p in dsp.l2_spans()}
+    assert l2[dsp.SMP_TABLES_L2] == tb[:SP.POLY_BYTES]
+    assert 0x20088400 <= dsp.SMP_TABLES_L2 and dsp.SMP_TABLES_L2 + SP.POLY_BYTES <= dsp.MNM_SCRATCH_L2
+    l1 = {a: p for _, a, p in dsp.spans()}
+    dec = l1[dsp.dm_to_load(dsp.SMP_DEC_DM)]
+    off = dsp.SMP_DTAB_DM - dsp.SMP_DEC_DM
+    assert not any(dec[:off]) and dec[off:off + SP.DTAB_BYTES] == tb[SP.POLY_BYTES:]
+    assert not any(dec[off + SP.DTAB_BYTES:])               # RELATCH's words: zeros at power-on
+    assert dsp.SMP_DTAB_DM + SP.DTAB_BYTES <= dsp.SMP_LINE_DM - 8                   # the line's switch, its tag
+    assert L.line == dsp.SMP_LINE_DM and dsp.SMP_LINE_DM + 4 * SP.LINE_WORDS <= SP.RELATCH
 
 
 def test_perc_code_is_in_l2_above_the_stock_image_and_below_the_uncached_window(stock7, built):
@@ -326,6 +361,9 @@ def test_the_idle_stub_is_placed_and_returns_where_its_source_says():
     # its DM: 0x2de100..0x2de13f, inside the state block, after PERC's scratch, before PERC's state
     from dnfw.perc import machines as PM
     assert dsp.PERC_SCRATCH_DM + 4 * len(PM.SC_WORDS) <= dsp.IDLE_STATE_DM
+    # v0.52 merge: the guard's insert words below its block (perc.guard.INS_LO) lie after PERC's scratch
+    from dnfw.perc import guard as PG
+    assert dsp.PERC_SCRATCH_DM + 4 * len(PM.SC_WORDS) <= PG.INS_LO < PG.INS_LO_END <= PG.GUARD
     assert dsp.IDLE_STATE_DM + dsp.IDLE_STATE_BYTES <= dsp.STATE_DM + dsp.STATE_BYTES == dsp.PERC_STATE_DM
     stores = {c for c in src if c.startswith("DM(")}
     assert stores <= {"DM(0x2de100) = R8;", "DM(0x2de104) = R9;", "DM(0x2de108) = R10;", "DM(0x2de134) = R11;",

@@ -285,3 +285,19 @@ from there and adds its row here and a `_Static_assert` against its neighbours i
 mod rows above (the pool image `0x600000..0x6C8000`, the lists' whole range `0x6D0000..0x6E02FF`, the
 settings sector, the library to the device's end) and nothing below `0x600000`. A new region must be
 added to its job table and `er_inside`, or it survives an erase.
+
+## The DSP (SHARC): where its map lives, and recent claims
+
+Not the ColdFire's RAM, but the same rule: one owner per range. The DSP's map is
+`src/dnfw/waverider/dsp.py` (every L1, L2 and DDR span ours, checked against the stock stream by
+`test_waverider_dsp`); a new span is added there, not here. Claims made on 2026-11-12 (opt-samples,
+the sample reader, `docs/dsp-cost.md`):
+
+| range | what | constant |
+|---|---|---|
+| L2 `0x200a0000..0x200a1800` | the DT2 reader's 256 x 6 interpolator rows (the Machinedrum slots' room, unused since 2026-11-10; `0x200a1800..0x200a4000` still free) | `SMP_TABLES_L2` |
+| L1 `0x2e0080..0x2e0094` | the reader's decimator coefficients and LEV make-up gain | `SMP_DTAB_DM` |
+| L1 `0x2df7f4..0x2df7fc` | the recorder's GAIN index and factor (v0.50; at 0x2e0080 until the v0.52 merge): the sample machines' scratch words `rgain`, `rgfac` | `sampler.machines.REC_GAIN` |
+| L1 `0x2ddff0..0x2ddffc` | the guard's later insert words (INS_DLP, INS_BUSEND, REST_OUT; v0.52 merge: v0.49's words filled the block at 0x2de000), after PERC's scratch (to 0x2ddfe8) | `perc.guard.INS_LO` |
+| L1 `0x2e0098..0x2e0100` | the taps' line: its switch, its tag, then 24 words (to `sampler.program.RELATCH`) | `SMP_LINE_DM` |
+| DDR `0x81218000..0x81219824` | freed (the reader's coefficients until 2026-11-12) | `SMP_TABLES_DDR` |

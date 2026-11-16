@@ -206,19 +206,32 @@ PVMIX_L2_LOAD = SMP_L2_LOAD + SMP_L2_SPAN - 0x400           # v0.25: pvmix.asm (
 PVMIX_SW = 0xB80000 + (PVMIX_L2_LOAD - 0x20000000) // 2
 SMP_STATE_DM, SMP_STATE_STRIDE = 0x2DEF00, 128  # 16 voices x 128 bytes (v0.15)
 SMP_SCRATCH_DM = 0x2DF700                    # after 16 x 128 bytes of state (v0.15)
-SMP_STAGE_DM = SMP_SCRATCH_DM + 0x100        # the recorder's block (dnfw.sampler.machines.REC_STAGE)
+SMP_SCRATCH_BYTES = 0x100                    # dnfw.sampler.program.SC_WORDS must fit (test_waverider_dsp)
+SMP_STAGE_DM = SMP_SCRATCH_DM + SMP_SCRATCH_BYTES   # the recorder's block (dnfw.sampler.machines.REC_STAGE)
 SMP_LINK_DM = SMP_STAGE_DM + 0x80            # the fast link's scratch, then its packet buffer (v0.16)
 SMP_POOL_DDR = 0x84000000                    # the pool's directory, then its frames
 # v0.18: the DT2 reader's coefficients (dnfw.sampler.program.tables_bytes, from the owner's
-# DT2 image) in DDR; each voice's decimator (12 words) in L1, where Waverider's loop was
-SMP_TABLES_DDR = 0x81218000
+# DT2 image) in DDR; each voice's decimator (12 words) in L1, where Waverider's loop was.
+# 2026-11-12 (opt-samples, 16 voices with room to spare): every 96 kHz sample reads a row of six
+# and every output sample the decimator's four, 640 DDR reads a voice-block. The interpolator's
+# 256 x 6 now lie in L2, in the room the Machinedrum slots left (MD_STATE_L2, unused since
+# 2026-11-10), the decimator's four and the gain in L1 after the voices' decimators (the 128 B
+# below RELATCH, free since v0.28)
+SMP_TABLES_DDR = 0x81218000                             # until 2026-11-12
+SMP_TABLES_L2 = 0x200A0000                              # 6,144 B, to 0x200a1800 (MNM_SCRATCH_L2 is 0x200a4000)
 SMP_DEC_DM = SMP_LINK_DM + 0x500                        # 16 x 48 bytes, to 0x2e0080 (W2_RND_DM is 0x2e0100)
+SMP_DTAB_DM = SMP_DEC_DM + 16 * 48                      # 0x2e0080: 20 B (sampler.program.RELATCH is 0x2e0100)
+# 2026-11-12: the reader's taps through an L1 line (sampler.program.LINE_WORDS, 24 words), its tag the word
+# before it, its switch the word before that: in the rest of that room (zeros at power-on; a render sets
+# both before it reads the line)
+SMP_LINE_DM = SMP_DTAB_DM + 0x20                        # 0x2e00a0..0x2e0100
 # W2's random table (dnfw.waverider.live.rnd_table): Waverider is gone (v0.11), but
 # RESONATOR, CZ and GRAN read it here
 W2_RND_DM = 0x2E0100                                         # 256 float32 in [0, 1)
 # v0.50: the recorder's GAIN (dnfw.sampler.machines.REC_GAIN): a buffer take's dB index (0: none,
-# the RECORDER's v0.49 scaling) and its factor, in the gap the decimators leave before W2_RND_DM
-REC_GAIN_DM = SMP_DEC_DM + 16 * 48                         # 0x2e0080, 2 words
+# the RECORDER's v0.49 scaling) and its factor. v0.50 put them at 0x2e0080; v0.52 merge: that room is
+# SMP_DTAB_DM's now, so they are the sample machines' scratch words 'rgain' and 'rgfac' (zeros at load)
+REC_GAIN_DM = SMP_SCRATCH_DM + 0xF4                         # 0x2df7f4, 2 words
 # PING (docs/ping.md): its code (entered from machine5_live's tail), 16 x 128 bytes
 # of state, a few words of scratch, then its tables (dnfw.ping.live.tables_bytes).
 # v0.45: PING removed. Only its code address stays in use (ping.asm, now the shared tail);
@@ -421,11 +434,11 @@ def spans() -> list[tuple[str, int, bytes]]:
         ("entry_mark.asm (wr_emark)", EMARK_DM, obj["entry_mark"]),
         ("machine lookup, 16 types ([-1] guard, then the table; v0.13)", LOOKUP16_DM - 4, lookup16()),
         ("sample machines' state: 16 voices x 128 bytes (zeros)", SMP_STATE_DM, bytes(16 * SMP_STATE_STRIDE)),
-        ("sample machines' scratch (zeros)", SMP_SCRATCH_DM, bytes(0x100)),
+        ("sample machines' scratch (zeros)", SMP_SCRATCH_DM, bytes(SMP_SCRATCH_BYTES)),
         ("the recorder's staging block: 32 floats (zeros)", SMP_STAGE_DM, bytes(0x80)),
         ("the fast link's scratch and packet buffer (zeros; v0.16)", SMP_LINK_DM, bytes(0x500)),
-        ("sample machines' decimators: 16 voices x 48 bytes (zeros; v0.18)", SMP_DEC_DM, bytes(16 * 48)),
-        ("the recorder's GAIN: index, factor (zeros; v0.50)", REC_GAIN_DM, bytes(8)),
+        ("sample machines' decimators: 16 voices x 48 bytes (zeros; v0.18), then the decimator's four"
+         " coefficients and the gain (2026-11-12)", SMP_DEC_DM, bytes(16 * 48) + _smp_tables()[-_smp_dtab():]),
         # v0.45: PING removed: ping.asm is the shared tail alone (still at PING_SW; every
         # machine of ours returns through it). PING's state span went with it; the stub pads
         # with zeros to REGION's end, so those bytes still load as zeros.
@@ -550,8 +563,6 @@ def ddr_spans() -> list[tuple[str, int, bytes]]:
         # is loaded by a span.
         # 2026-11-10 (shrink): AMD's sine and PERC's tan ship over the link (perc.machines.shipped_tail)
         ("PERC tables (exp2; the sample machines read it too)", PERC_TABLES_DDR, _perc_tables()),
-        ("the DT2 sample reader's coefficients (from the owner's DT2 image; v0.18)", SMP_TABLES_DDR,
-         _smp_tables()),
         ("Machinedrum sine and tables (zeros: the DSP decodes them; v0.24)", MD_TABLES_DDR,
          bytes(_md_core().TABLE_LAYOUT[_md_core().SHIPPED][0])),
         # v0.26: what ships (the host's pitch table and zpack) comes over the fast link from
@@ -577,6 +588,12 @@ def _perc_sine() -> bytes:
 def _smp_tables() -> bytes:
     from ..sampler import program as smp_program
     return smp_program.tables_bytes()
+
+
+def _smp_dtab() -> int:
+    from ..sampler import program as smp_program
+    assert len(_smp_tables()) == smp_program.POLY_BYTES + smp_program.DTAB_BYTES
+    return smp_program.DTAB_BYTES
 
 
 def _smp_pool() -> bytes:
@@ -614,6 +631,11 @@ def l2_spans() -> list[tuple[str, int, bytes]]:
                     bytes(MNM_DT_BYTES)))
     out.append(("the main mix's tap for the recorder's MAIN, in L2 (zeros; v0.37)", MAIN_TAP_L2,
                 bytes(MAIN_TAP_BYTES)))
+    # 2026-11-12: the DT2 sample reader's interpolator rows (DDR v0.18 .. 2026-11-11)
+    poly = _smp_tables()[:-_smp_dtab()]
+    assert SMP_TABLES_L2 + len(poly) <= MNM_SCRATCH_L2 and MD_STATE_L2 <= SMP_TABLES_L2
+    out.append(("the DT2 sample reader's interpolator coefficients, in L2 (from the owner's DT2 image)",
+                SMP_TABLES_L2, poly))
     code = obj["fdn8"]
     if FDN8_L2_SPAN - len(code) < L2_TAIL:
         raise DspError(f"fdn8.asm ({len(code)} bytes) leaves fewer than 64 bytes of its L2 span")

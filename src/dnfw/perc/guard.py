@@ -24,7 +24,7 @@ the runner's guard step feeds the clock to make it skip.
 from __future__ import annotations
 
 MARK0 = 0x2DE13C                 # entry_mark.asm: EMUCLK as the handler calls the per-block routine
-GUARD = 0x2DE000                 # free words between PERC's scratch (to 0x2ddfc8) and idle_load's state (0x2de100)
+GUARD = 0x2DE000                 # free words between PERC's scratch (to 0x2ddfe8) and idle_load's state (0x2de100)
 LIMIT = GUARD + 0x00             # cycles after MARK0 by which our voices must be done
 PREV = GUARD + 0x04              # the last frame's MARK0
 SKIPS = GUARD + 0x08             # voices left silent, cumulative
@@ -71,15 +71,20 @@ FRESH = GUARD + 0xE4                # (v0.52 merge: after v0.49's RESERVE .. RES
 # longer lowers the voices' LIMIT; instead each insert runs in a block only if it is expected to end
 # before INS_DEADLINE (cycles after MARK0: P - P/8 - TAIL, the end of the frame less the guard's margin
 # and the stock's own tail), else it passes the sound through for that block (INS_SKIPS counts them)
-REST_OUT = GUARD + 0xF0          # 2026-11-11: the stock's time after the bus pass (the output stage), held at its peak
-INS_BUSEND = GUARD + 0xEC        # 2026-11-11: EMUCLK as the bus pass (the last insert pass) ended
-INS_DLP = GUARD + 0xE8           # 2026-11-11: this pass's deadline (ins_start), 0 when none is known
-INS_DEADLINE = GUARD + 0xE8 + 0xD8
-INS_ACC = GUARD + 0xEC + 0xDC
-INS_T0 = GUARD + 0xF0 + 0xE0
-INS_SKIPS = GUARD + 0xF4 + 0xE4
-END = GUARD + 0xF8 + 0xF4
+INS_DEADLINE = GUARD + 0xE8
+INS_ACC = GUARD + 0xEC
+INS_T0 = GUARD + 0xF0
+INS_SKIPS = GUARD + 0xF4
+END = GUARD + 0xF8
 assert END <= 0x2DE100
+# v0.52 merge: v0.49's four words filled the block, so the later insert words lie in the free words
+# just below it, after PERC's scratch (90 words from 0x2dde80, to 0x2ddfe8; test_waverider_dsp checks)
+INS_LO = GUARD - 0x10
+INS_DLP = INS_LO + 0x00          # 2026-11-11: this pass's deadline (ins_start), 0 when none is known
+INS_BUSEND = INS_LO + 0x04       # 2026-11-11: EMUCLK as the bus pass (the last insert pass) ended
+REST_OUT = INS_LO + 0x08         # 2026-11-11: the stock's time after the bus pass (the output stage), held at its peak
+INS_LO_END = INS_LO + 0x0C
+assert INS_LO_END <= GUARD
 
 
 # 2026-11-09 (the User's choice B): a PLAITS note's first START_BLOCKS blocks are expected at the

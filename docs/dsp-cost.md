@@ -61,6 +61,52 @@ under it too, STRETCH's whole row. The empty run: 15,152 instructions, 943 L2, 4
 `python3 scripts/sharc_waverider_m5.py --image ../Digitone_II_OS1.11.syx --steps cost --tag before`,
 6,693 s; report `out/waverider/m5_report_before.json`.)
 
+## The sample reader's coefficients out of DDR (2026-11-12)
+
+The DT2 reader (ONESHOT, REPITCH, GRID, SLICE, WERP) reads a row of six interpolator coefficients for
+every 96 kHz sample and the decimator's four for every output sample, all from DDR until now: most of
+the 1,253 DDR accesses a block above were those, not the sample's taps. The interpolator's 256 x 6
+(6,144 B) now load into L2 at `dsp.SMP_TABLES_L2` (0x200a0000, the room the Machinedrum slots left on
+2026-11-10, inside the range proven on units); the decimator's four and the LEV make-up gain (20 B)
+into L1 at `dsp.SMP_DTAB_DM` (0x2e0080, the free words after the voices' decimators). The same words,
+the same instructions: the sample machines' WAVs from the runner's `smp` step are byte-identical
+before and after, and every block of every run is bit-exact to the model. One voice, a block, on the
+OS 1.12 bench (`DNFW_COST_ONLY=smp ... --steps cost`, the runner's own estimate):
+
+| machine | instructions | L2 | DDR before -> after | estimate before -> after |
+|---|---|---|---|---|
+| ONESHOT | 6,620 | 0 -> 669 | 1,253 -> 131 | 19,138 -> 10,606 (-45 %) |
+| WERP | 6,951 | 0 -> 669 | 1,253 -> 131 | 19,469 -> 10,937 |
+| REPITCH | 6,829 | 0 -> 669 | 1,253 -> 131 | 19,347 -> 10,815 |
+| GRID | 6,546 | 0 -> 669 | 1,253 -> 131 | 19,064 -> 10,532 |
+| SLICE | 6,580 | 0 -> 669 | 1,254 -> 132 | 19,108 -> 10,576 |
+| STRETCH | 3,464 | 0 | 0 | 2,522 (unchanged: it reads with two taps, no coefficients) |
+
+(Negative counts under the empty run's shown as 0. The DDR left, about 130 a block, is the samples'
+own taps: the test sounds are int16, four words a 96 kHz sample.)
+
+**Then the taps through an L1 line** (`sampler.program.line`, `dsp.SMP_LINE_DM`): when all six taps lie
+inside the window, the render reads them from 24 words copied from the pool, refilled from the taps'
+first word only when they are not all in it, and forgotten at each render (nothing writes the pool
+while a voice renders). At more than `LINE_MAX` (2) frames a 96 kHz sample the line would refill nearly
+every sample, so such a render reads the pool as before. The same words: the WAVs are byte-identical
+again, every block bit-exact to the model, and the model with the line against without it gives the
+same output word for word (60 random cases: the five machines, both formats, play modes, loops,
+pitches, retriggers). Same run as above:
+
+| machine | instructions | DDR (the voice's, total) | estimate after the coefficients -> with the line |
+|---|---|---|---|
+| ONESHOT | 6,620 -> 7,400 | 552 -> 146 | 10,606 -> 7,326 |
+| WERP | 6,951 -> 7,731 | 552 -> 146 | 10,937 -> 7,657 |
+| REPITCH | 6,829 -> 7,609 | 552 -> 146 | 10,815 -> 7,535 |
+| GRID | 6,546 -> 7,326 | 552 -> 146 | 10,532 -> 7,252 |
+| SLICE | 6,580 -> 7,361 | 553 -> 147 | 10,576 -> 7,297 |
+
+(The empty run reads 421 DDR words a block; the voice's own are the run's less nothing, so a sounding
+voice now reads fewer than the empty run counts and the table's DDR column would be negative.) By pitch,
+in the model (ONESHOT, a block, DDR counted as 10): int16 saves 1,621 up to an octave above the
+sample's rate, 1,039 at +2.5 octaves; float32 2,610 .. 1,446; past `LINE_MAX` the switch costs 135.
+
 ## v0.43: the Monomachine render scratch in L1 (2026-11-07)
 
 The Monomachine machines' render scratch (the decimator's input, SID's phases, the coefficients,

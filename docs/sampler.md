@@ -431,7 +431,8 @@ repository: they are derived from Elektron's firmware).
   four outputs late). Its taps wrap inside the loop window, as the DT2's circular
   buffer does, and each 96 kHz sample keeps the DT2 MAC's whole 16-bit steps. The
   coefficients (256 x 6, and the decimator's four) are read from the owner's DT2 image
-  at build time (`dnfw.dt2.rom`, `DT2_SECTION7`) and live in DDR. Against the bit-exact
+  at build time (`dnfw.dt2.rom`, `DT2_SECTION7`) and live in DDR (2026-11-12: in L2 and L1,
+  `docs/dsp-cost.md`). Against the bit-exact
   model of the DT2's code, ONESHOT's output agrees on 639 samples of 640, the last within
   one 96 kHz LSB (`test_sampler.test_oneshot_is_the_dt2s_reader`). The interpolator's
   rows sum to 0.4045 (-7.9 dB), which the DT2 makes up later in its chain; LEV 100 makes

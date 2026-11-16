@@ -41,23 +41,28 @@ SC_WORDS = ("t", "count", "tr", "trig", "sbase", "type", "rate", "kill",
             "pva", "pvn", "pvk", "pvs0", "pvs1", "pvs2", "pvs3", "pvs12", "pvs13", "pvsi", "pvsa",
             "pvl0", "pvln",                 # v0.30: the preview's start and length, the latter + LOOP_BIT to loop
             "sr", "dir", "add", "smode", "nseg", "nin", "nout", "acc", "pass", "lp",   # v0.15; v0.18 kill, add, pass, lp
-            "xfn", "xfa", "xfi", "xfs",                # CFAD: its length, where it starts, 1/length, the shift
+            # (2026-11-12: CFAD's four words, unread since v0.18, went: 65 words had overrun the 256 B span,
+            # 'segnext' sitting on the recorder's staging block, dsp.SMP_STAGE_DM)
             # the recorder: its state (0 idle, 1 armed, 2 recording, 3 full), slot entry,
             # frames so far, their limit, source, threshold, its frames' base, the track
             "rst", "rent", "rpos", "rmax", "rsrc", "rthr", "rbase", "rchan", "rpk",
             "rseq", "rmode",
-            "tr0", "note", "segnext")                  # v0.18: TUNE's transposition alone; the note; WERP's boundary                           # v0.15: the last command's sequence; armed on 0 THRES, 1 PLAY
+            "tr0", "note", "segnext",                  # v0.18: TUNE's transposition alone; the note; WERP's boundary                           # v0.15: the last command's sequence; armed on 0 THRES, 1 PLAY
+            "rgain", "rgfac")                   # v0.50: the recorder's GAIN index and factor (machines.REC_GAIN; v0.52 merge)
 GRAIN = 2048                              # STRETCH's grain, output samples (43 ms); two, half apart
 TEMPO_OFFSET = 216                        # the frame's tempo word: BPM x 120 (docs/modulation-display.md)
 
 
 class Layout:
-    def __init__(self, state: int, scratch: int, pool: int, exp2: int, tables: int = 0, dec: int = 0):
+    def __init__(self, state: int, scratch: int, pool: int, exp2: int, tables: int = 0, dec: int = 0,
+                 dtab: int | None = None, line: int = 0):
         self.state, self.pool, self.exp2, self.dec = state, pool, exp2, dec
+        self.line = line                     # 2026-11-12: the taps' L1 line (LINE_WORDS), its tag the word before; 0: none
         self.C = {w: scratch + 4 * k for k, w in enumerate(SC_WORDS)}
-        # PM.exp2 reads the table through L.T; v0.18: the DT2 reader's tables (tables_bytes)
-        self.T = {"exp2": exp2, "poly": tables, "decim": tables + 4 * POLY_ROWS * POLY_TAPS,
-                  "gain": tables + 4 * POLY_ROWS * POLY_TAPS + 16}
+        # PM.exp2 reads the table through L.T; v0.18: the DT2 reader's tables (tables_bytes);
+        # 2026-11-12: the decimator's four and the gain (its tail, DTAB_BYTES) may lie apart, at DTAB
+        dtab = tables + POLY_BYTES if dtab is None else dtab
+        self.T = {"exp2": exp2, "poly": tables, "decim": dtab, "gain": dtab + 16}
 
 
 # -- v0.18: the DT2's sample reader (docs/sampler.md) -------------------------------------
@@ -66,6 +71,19 @@ class Layout:
 POLY_ROWS, POLY_TAPS = 256, 6
 DEC_WORDS = 12                            # a voice's decimator: 4 even inputs, 4 outputs, 4 odd
 DEC_STRIDE = 4 * DEC_WORDS
+POLY_BYTES = 4 * POLY_ROWS * POLY_TAPS    # tables_bytes()[:POLY_BYTES] the interpolator's rows,
+DTAB_BYTES = 4 * 4 + 4                    # [POLY_BYTES:] the decimator's four, then the gain
+# 2026-11-12 (opt-samples): the taps through an L1 line. A 96 kHz sample whose six taps lie inside
+# the window reads them from LINE_WORDS words copied from the pool; the line is refilled, from the
+# taps' first word, only when they are not all in it, and forgotten at each render (nothing else
+# writes the pool while a voice renders). The same words, so the same output: at the note's pitch a
+# block's 64 ticks read one or two lines (24 to 48 DDR reads) instead of 256 (int16) or 384 (float32)
+# Faster than LINE_MAX frames a 96 kHz sample (two octaves above a sample's own rate at 48 kHz) the
+# line would be refilled nearly every sample: the render reads the taps from the pool as before
+# (its switch the word below the tag)
+LINE_WORDS = 24
+LINE_NONE = 0x40000002                    # the tag no taps' address matches (theirs are word-aligned)
+LINE_MAX = 2.0
 
 
 def tables_bytes() -> bytes:
@@ -1016,7 +1034,7 @@ def _tick(p: Prog, L: Layout) -> None:
         def f32():
             p.lsh(12, 11, 2)
             p.iop(12, 10, "+", 12)
-            p.seti(1, 12)
+            taps_at(p, L, 4 * POLY_TAPS)
             for k in range(POLY_TAPS):
                 p.ldpost(5, 1)
                 p.ldi(6, k, 3)
@@ -1030,7 +1048,7 @@ def _tick(p: Prog, L: Layout) -> None:
             p.iop(13, 12, "AND", 13)         # 2: it is a word's upper half
             p.iconst(14, -4)
             p.iop(12, 12, "AND", 14)
-            p.seti(1, 12)
+            taps_at(p, L, 16)
             for r in range(4):
                 p.ldpost(r, 1)               # four words: eight frames from the aligned one
             p.iconst(8, -31)
@@ -1060,6 +1078,39 @@ def _tick(p: Prog, L: Layout) -> None:
     p.if_(7, "LT", 1, lambda: (p.iconst(12, -1), p.iop(0, 12, "+", 0)))
     p.iconst(12, -15)
     p.float_(7, 0, 12)
+
+
+def taps_at(p: Prog, L: Layout, need: int) -> None:
+    """I1 = where the taps from the pool address R12 are read: the line when this render uses it
+    (2026-11-12), else the pool. Clobbers R0, R2, R9, R15, I1."""
+    if not L.line:
+        p.seti(1, 12)
+        return
+    p.ld(9, L.line - 8)
+    p.ifz(9, "NE", lambda: line(p, L, need), lambda: p.seti(1, 12))
+
+
+def line(p: Prog, L: Layout, need: int) -> None:
+    """2026-11-12: I1 = where the NEED bytes of the pool from R12 (word-aligned) lie in the taps'
+    L1 line, refilled from R12 when they are not all in it. Clobbers R0, R2, R9, R15, I1."""
+    tag = L.line - 4
+    p.ld(9, tag)
+    p.iop(15, 12, "-", 9)                    # d: where they start in the line, if they are in it
+    p.iconst(9, 4 * LINE_WORDS - need)
+    p.iop(9, 9, "-", 15)
+    p.iop(2, 15, "MIN", 9)                   # in it: 0 <= d <= the line less NEED
+
+    def refill():
+        p.st(tag, 12)
+        p.seti(1, 12)
+        for k in range(LINE_WORDS):
+            p.ldpost(0, 1)
+            p.st(L.line + 4 * k, 0)
+        p.iconst(15, 0)
+    p.ifz(2, "LT", refill)
+    p.iconst(9, L.line)
+    p.iop(15, 15, "+", 9)
+    p.seti(1, 15)
 
 
 def decimate(p: Prog, L: Layout, ye: str, yo: str, d: int) -> None:
@@ -1153,6 +1204,14 @@ def render(p: Prog, L: Layout) -> None:
     p.ld(0, C["lev"])
     p.fop(0, 0, "*", 1)
     p.st(C["tmp"], 0)                         # LEV with the make-up (C['lev'] stays: a retrigger renders twice)
+    if L.line:
+        p.iconst(0, LINE_NONE)
+        p.st(L.line - 4, 0)                   # 2026-11-12: the taps' line holds nothing yet
+        p.iconst(0, 0)
+        p.ld(1, C["rate"])
+        p.fconst(12, LINE_MAX)
+        p.if_(1, "LT", 12, lambda: p.iconst(0, 1))
+        p.st(L.line - 8, 0)                   # and is used below LINE_MAX frames a 96 kHz sample
     dec_at(p, L)
 
     def sample():
