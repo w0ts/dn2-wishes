@@ -97,7 +97,6 @@ def main() -> int:
             raise SystemExit(f"emu_jump rapid: {json.dumps({'ok': False, 'halt': c.halt, 'faults': faults})}")
 
     def u8(va): return c.read(va, 1)[0]
-    def u16(va): return struct.unpack(">H", c.read(va, 2))[0]
     def u32(va): return c.long(va)
 
     def sym(name, n=1):
@@ -146,16 +145,8 @@ def main() -> int:
     panel = Keys()
     trace: list[dict] = []
 
-    def pat_index():
-        return (u32(0x42C5B9A0) - J.P0) // J.PSTRIDE
-
     def record(tag=""):
-        import hashlib                          # noqa: PLC0415
-        block = c.read(0x42C5B900, 0x200) + c.read(0x446493D0, 0xF4)
-        row = {"n": len(trace), "tag": tag, "pat": pat_index(), "a91c": u16(0x42C5B91C), "tick": u8(0x42C5B91E),
-               "t6": u32(0x42C5B9D0) * 6 + u32(0x42C5B9D4),
-               "cur": list(c.read(0x42C5B984, 16)), "next": list(c.read(0x42C5B964, 16)),
-               "digest": hashlib.sha256(block).hexdigest()[:16]}
+        row = J.seq_row(c.read, len(trace), tag)
         trace.append(row)
         return row
 

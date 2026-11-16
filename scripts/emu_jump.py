@@ -79,6 +79,23 @@ BLK_READY, BLK_SECTORS = 0x4461C68C, 0x4461C6B0
 SET_SECTOR = 0x6FF000
 CALLS_A_TICK = 4                                         # ISR entries a tick here (measured)
 CUE_STEP, END_STEP = 3, 36
+# the sequencer's state a trace row keeps (record(); emu_jump_coupled.py reads it through seq_row)
+SEQ_STATE, SEQ_STATE_BYTES = 0x42C5B900, 0x200
+SEQ_NODES, SEQ_NODES_BYTES = 0x446493D0, 0xF4
+SEQ_PATTERN = 0x42C5B9A0                                 # the playing pattern: P0 + n * PSTRIDE
+SEQ_A91C, SEQ_TICK = 0x42C5B91C, 0x42C5B91E
+SEQ_GLOBAL, SEQ_SUB = 0x42C5B9D0, 0x42C5B9D4             # the global step, its sixths
+TRACK_CUR, TRACK_NEXT = 0x42C5B984, 0x42C5B964           # each track's step, and its next
+
+
+def seq_row(read, n: int, tag: str = "") -> dict:
+    """one trace row: the sequencer as record() keeps it (READ(va, n) -> bytes)"""
+    def u(va, k):
+        return int.from_bytes(read(va, k), "big")
+    return {"n": n, "tag": tag, "pat": (u(SEQ_PATTERN, 4) - P0) // PSTRIDE, "a91c": u(SEQ_A91C, 2),
+            "tick": u(SEQ_TICK, 1), "t6": u(SEQ_GLOBAL, 4) * 6 + u(SEQ_SUB, 4),
+            "cur": list(read(TRACK_CUR, 16)), "next": list(read(TRACK_NEXT, 16)),
+            "digest": hashlib.sha256(read(SEQ_STATE, SEQ_STATE_BYTES) + read(SEQ_NODES, SEQ_NODES_BYTES)).hexdigest()[:16]}
 
 
 def main() -> int:
@@ -238,14 +255,10 @@ def main() -> int:
     trace = []
 
     def pat_index():
-        return (u32(0x42C5B9A0) - P0) // PSTRIDE
+        return (u32(SEQ_PATTERN) - P0) // PSTRIDE
 
     def record(tag=""):
-        block = m.read(0x42C5B900, 0x200) + m.read(0x446493D0, 0xF4)
-        row = {"n": len(trace), "tag": tag, "pat": pat_index(), "a91c": u16(0x42C5B91C), "tick": u8(0x42C5B91E),
-               "t6": u32(0x42C5B9D0) * 6 + u32(0x42C5B9D4),
-               "cur": list(m.read(0x42C5B984, 16)), "next": list(m.read(0x42C5B964, 16)),
-               "digest": hashlib.sha256(block).hexdigest()[:16]}
+        row = seq_row(m.read, len(trace), tag)
         trace.append(row)
         return row
 
@@ -257,7 +270,7 @@ def main() -> int:
             record(tag)
 
     def global_step():
-        return u32(0x42C5B9D0)
+        return u32(SEQ_GLOBAL)
 
     out = {"scenario": a.scenario, "variant": a.variant, "stock": a.stock}
 
@@ -323,7 +336,7 @@ def main() -> int:
     ticks(3)
     cue_at = len(trace)
     out["cue_global_step"] = global_step()
-    out["cue_tick"] = u8(0x42C5B91E)
+    out["cue_tick"] = u8(SEQ_TICK)
     if a.scenario in ("off", "on"):
         cue_a02()
     elif a.scenario == "pc":
@@ -388,7 +401,7 @@ def rapid(a, m, panel, out, record, trace, sym, faults, isr, u8, u32, press_with
         m.write(pat + SCALE, bytes([sc]))
 
     def pat_index():
-        v = u32(0x42C5B9A0)
+        v = u32(SEQ_PATTERN)
         return (v - P0) // PSTRIDE if v >= P0 else -1
     count = [0]
 
