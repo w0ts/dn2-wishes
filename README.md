@@ -21,11 +21,9 @@ Custom firmware for the Elektron Digitone II, OS 1.12. Built on
 - Modulation matrix.
 - Voice budget: new notes take the voice of an old one before the DSP runs out of time.
 
-## Builds
+## Changelog
 
-Every build, with its status, sha256 and known issues: [CHANGELOG.md](CHANGELOG.md).
-A build is released only when `scripts/ship_gate.py` prints `CLEARED TO FLASH` on that file.
-No build is published yet.
+[CHANGELOG.md](CHANGELOG.md)
 
 ## Recovery
 
