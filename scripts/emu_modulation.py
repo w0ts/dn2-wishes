@@ -675,6 +675,10 @@ def scenario_ours(a, report, sym):
             if drawn and drawn in pages:
                 break
             pages.append(drawn)
+            twice = sorted({rid for _x, _y, _w, rid, _lo, _hi in knobs
+                            if sum(k[3] == rid for k in knobs) > 1})
+            check(f"{name}, page {tap + 1} seen: no control drawn in two places", not twice,
+                  f"records {twice} ({len(knobs)} places, {len(drawn)} controls)")
             busy = {f"{rid}@({x},{y})": px for rid, (x, y, w, lo, hi) in drawn.items() if (px := row_lit(x, y, w))}
             check(f"{name}, page {tap + 1} seen: every knob's line row is free while nothing is modulated", not busy,
                   f"{busy}")

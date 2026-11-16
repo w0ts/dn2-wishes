@@ -42,3 +42,18 @@ def test_flt2_is_a_list():
     assert P.MNM_WIDGET[("ANALOG2", "FLT2")] == 5
     assert len(P.MNM_CHOICES["ANALOG2"]["FLT2"]) == 25
     assert P.mnm_named(P._mnm.CF_MACHINES.index(M))[253] == ("Filter 2 Type", "FLT2")
+
+
+def test_the_c_table_has_a_row_for_every_place():
+    """2026-11-12 (round 10's gate, modulation: MONOMACHINE's page drew WAV1 in all eight places): mnm_order is
+    declared [MNM_N][MNM_J] over CF_ALL, MONOMACHINE's other engines included; a row left out is zeros, control 0
+    at every place. Every row of the generated table is a permutation, the place's own order"""
+    import re
+    head = P.mnm_c_header()
+    n = int(re.search(r"#define MNM_N (\d+)", head).group(1))
+    body = re.search(r"mnm_order\[MNM_N\]\[MNM_J\] = \{(.*?)\};", head).group(1)
+    rows = [[int(x) for x in r.split(",")] for r in re.findall(r"\{([0-9, ]+)\}", body)]
+    assert n == len(P._mnm.CF_ALL) and len(rows) == n
+    for k, (row, m) in enumerate(zip(rows, P._mnm.CF_ALL)):
+        assert sorted(row) == list(range(24)), (k, m.NAME)
+        assert tuple(row) == P.mnm_order(m), (k, m.NAME)
