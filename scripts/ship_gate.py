@@ -160,6 +160,10 @@ MNM_EXC_TREES = {"src/dnfw/mnm": "c27c4179af8142a94794fcafac097b5b99edd267",
 # without the golden runs test_mnm collects only its 8 tests that need none (they skip as a
 # module); its 366 golden cases are not collected at all (measured on v0.39's tree, 2026-11-05)
 MNM_EXC_REST = 8
+# dn2-wishes (the User, 2026-11-11, "Skip it, report it"): upstream's Monomachine golden runs are not available to
+# the fork (not on the Mac nor gpufarm), and the exception above covers only v0.39's DSP image. Without them the unit
+# step runs every other test and reports the golden cases as not checked, instead of refusing every v0.48 build.
+NO_MNM_GOLDEN = -1
 TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platform.py",
          "test/test_waverider_mod.py", "test/test_waverider_dsp.py",
          "test/test_waverider_pages.py",                    # v0.45: test_ping_coldfire/_live dropped with PING
@@ -2646,7 +2650,11 @@ def main() -> int:
             last = out.strip().splitlines()[-1] if out.strip() else ""
             # "586 passed, 1 skipped in 512.3s (0:08:32)": the counts, as serial pytest prints them
             ok = rc == 0 and re.search(r"\b\d+ passed\b", last) is not None
-            if ok and exc is not None:
+            if ok and exc == NO_MNM_GOLDEN:
+                last += (" [MNM golden: not checked (no MNM golden). dn2-wishes, the User 2026-11-11: upstream's "
+                         "Monomachine golden runs are not available to the fork, so test_mnm's golden cases are not "
+                         "collected; every other test counts as before]")
+            elif ok and exc is not None:
                 m = re.search(r"\b(\d+) skipped\b", last)
                 skipped = int(m.group(1)) if m else 0
                 if skipped != exc + 1 or exc != MNM_EXC_REST:
@@ -2668,8 +2676,7 @@ def main() -> int:
             if golden.is_dir():
                 return None
             if hashlib.sha256(sec7).hexdigest() != MNM_EXC_SEC7:
-                return ("the Monomachine golden runs are missing and this build's DSP image is not "
-                        "v0.39's: the owner's exception (2026-11-05) does not cover it")
+                return NO_MNM_GOLDEN                # dn2-wishes (the User, 2026-11-11): not checked, reported
             for path, want in MNM_EXC_TREES.items():
                 got = subprocess.run(["git", "rev-parse", f"HEAD:{path}"], cwd=ROOT,
                                      capture_output=True, text=True).stdout.strip()
