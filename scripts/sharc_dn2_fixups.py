@@ -92,9 +92,14 @@ post-fix), or replaces the step outright:
       by `R2 = DM(I5, 7) (lw)` at 0x1c99f3 a slot each); at x 8 slot t read
       slot 2t's, slots 1..15 played 4 to 18 dB low and slot 0's smoother
       never took the track's LEVEL (0.787 at 100): slot 0 now reads ~2 dB
-      lower, as the frame says. A byte-space index (DDR) keeps x 8: at x 4
-      the engine init left the stock delay's DDR state silent (the xdly
-      step's "heard" check: 384 -> 12). The pre-modify's address keeps x 8.
+      lower, as the frame says. The pre-modify's address keeps x 8.
+      2026-11-15 (opt-host, G14 DDR): through a DDR index too. The stock
+      chorus's init (L2 sw 0xb84ece, `DM(I4, -13) = R2 (lw)`) steps from
+      channel 1's 7-word state to channel 2's, and the chorus walks them 28
+      bytes apart (sw 0xb84a1f, MODIFY(I2, 28)); at x 8 channel 2 landed
+      before channel 1 (0x8045a674..0x8045a68c instead of 0x8045a6a8..) and
+      the chorus's R pass read non-audio state (R return 0.89 on silence).
+      PRM p.6-10: (lw) scales as (nw), not by 8, in byte space.
 
 Two accelerations, each measured against the emulated code it replaces:
 
@@ -154,8 +159,8 @@ def cond_of(f) -> int:
 
 # the warm snapshot (sharc_waverider_voice.py's engine init) depends on these fixups: its file name carries this, so
 # a snapshot built under older ones is never taken (G13 changed what the init leaves in slots 1..15)
-INIT_REV = "_g14f"
-# a bisection aid: DNFW_FIXUPS_OFF=G12,G13a,G13b,G14 runs those as before them (a snapshot built so is named apart)
+INIT_REV = "_g14h"
+# a bisection aid: DNFW_FIXUPS_OFF=G12,G13a,G13b,G13d,G14,G14d runs those as before them (a snapshot built so is named apart)
 OFF = {x for x in os.environ.get("DNFW_FIXUPS_OFF", "").split(",") if x}
 if OFF:
     INIT_REV += "_off_" + "_".join(sorted(OFF))
@@ -167,14 +172,19 @@ def blank_modify(f) -> bool:
 
 
 def l1_target(s, f) -> bool:
-    """G13's scope: the MODIFY's I + M, unscaled, is inside L1's byte image (G4's region): the one space the runner
-    keeps as bytes. L2 and DDR the runner maps through its own x 4 alias, which the stock FX use consistently: there
-    its scaling stays (a value not concrete too)"""
+    """G13's scope: the MODIFY's I + M, unscaled, is inside L1's byte image (G4's region), or I is in DDR
+    (2026-11-15, G13 DDR). L2 keeps the runner's scaling (a value not concrete too)"""
     bank = 8 if f.get("g") else 0
     iv = s.uregs.get(16 + ((F(f, "is[2:2]") << 2) | F(f, "is[1:0]")) + bank)
     mv = s.uregs.get(32 + F(f, "m") + bank)
     if not (isinstance(iv, Const) and isinstance(mv, Const)):
         return False
+    if DDR_LO <= iv.value < DDR_HI and "G13d" not in OFF:
+        # 2026-11-15 (opt-host, G13 DDR): DDR too. The stock chorus's R pass takes its ring pointer as
+        # I4 = MODIFY(I0, M4 = 128) (L2 sw 0xb84a16): 128 bytes on from L's, inside the ring; at x 4 it read the
+        # filter states past the ring's end (base + 0x1204) as samples. Tried alone on 2026-11-14 it left the stock
+        # reverb's clear undone; that run still had G14's x 8 through DDR, which misplaced the init's own steps.
+        return True
     return NW_LO * 4 <= (iv.value + mv.value) & 0xFFFFFFFF < NW_HI * 4
 
 
@@ -205,6 +215,7 @@ MR_PAIRS = (("MRF", "MSF"), ("MRB", "MSB"))     # PEx / PEy multiplier result re
 LOOP_ABORT_FORMS = {"8a_rel", "8a_abs"}
 WATCH = COND_UNSUPPORTED | LOOP_ABORT_FORMS | {"3a", "4a", "4b", "3b", "15b", "13a", "17a", "17b", "2b", "7b"}
 NW_LO, NW_HI = 0x240000 // 4, 0x3A0000 // 4
+DDR_LO, DDR_HI = 0x80000000, 0xA0000000    # external memory (DDR), byte space (G14 DDR)
 # PCs whose parcel digikit reads as a 32-bit Type 2b and selache as a 16-bit 2c
 AS_2C = {0x1C0E13, 0x1C4F4A}
 
@@ -430,9 +441,9 @@ class Fixups:
             code = F(f, "ureg")
         addr = iv.value if F(f, "u") else (iv.value + mod * 8) & 0xFFFFFFFF
         # G14: a post-modify's update through an index into L1's normal-word space (its byte image, as G4 maps it)
-        # counts normal words (x 4), not long words (x 8); a byte-space index (DDR) keeps the runner's x 8
+        # or into DDR counts normal words (x 4), not long words (x 8)
         ireg, new_i = 16 + F(f, "i"), (iv.value + mod * 4) & 0xFFFFFFFF
-        in_nw = NW_LO * 4 <= iv.value < NW_HI * 4
+        in_nw = NW_LO * 4 <= iv.value < NW_HI * 4 or (DDR_LO <= iv.value < DDR_HI and "G14d" not in OFF)
 
         def index(r):                           # G14: the post-modify's own update, in normal words
             if F(f, "u") and in_nw and "G14" not in OFF:
