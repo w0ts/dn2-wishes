@@ -1,0 +1,78 @@
+"""PLAITS's tables (dnfw.engines.plaits.plaits), in the Monomachine-style table run after the Monomachine's own
+(dnfw.mnm.tables, dnfw.mnm.core.Layout.PL): WS's five shapes (5 x 257) and the fold (516), Plaits'
+resources/lookup_tables.py formulas (MIT, THIRD-PARTY.md); 2026-11-09, FM's (dnfw.engines.plaits.plaits_fm):
+lut_fm_frequency_quantizer / 64 (130) and the 4x downsampler's FIR (7). A leaf module, as dnfw.mnm.tables.
+"""
+
+from __future__ import annotations
+
+import math
+
+# (name, words) in Layout's order (dnfw.mnm.core.Layout.PL)
+PL_TABLES = (("ws", 5 * 257), ("fold", 516), ("fm", 130 + 7))
+
+
+# -- the tables (plaits/resources/lookup_tables.py's formulas), as zpack carries them ------------
+def _ws_shapes() -> list[list[int]]:
+    """Plaits' ws_inverse_tan, ws_inverse_sin, ws_linear, ws_bump, ws_double_bump: 257 int16
+    each (Tides' waveshaper, mirrored about the middle)."""
+    n = 128
+    xs = [k / n for k in range(n + 1)]
+    tan_ = [math.atan(8 * math.cos(math.pi * x)) for x in xs]
+    scale = max(tan_)
+    fade = [min(1.0, 4.0 - 4.0 * x) for x in xs]
+    shapes = (
+        [math.acos(math.tan(scale * (1.0 - 2.0 * x)) / 8.0) / math.pi for x in xs],
+        [math.acos(1 - 2 * x) / math.pi for x in xs],
+        xs,
+        [(1.0 - math.cos(math.pi * x * 1.5)) * (1.0 - math.cos(math.pi * f)) / 4.5
+         for x, f in zip(xs, fade)],
+        [math.sin(math.pi * x * 1.5) for x in xs])
+
+    def flip(v):
+        return [int(round(y * 32767.0)) for y in [-y for y in v[n:0:-1]] + list(v)]
+    return [flip(v) for v in shapes]
+
+
+def _fold() -> list[float]:
+    """Plaits' lut_fold: 516 points, the bipolar fold normalised to 1."""
+    n = 512
+    x = [k / (n / 2.0) - 1.0 for k in range(n + 4)]
+    x[-1] = x[-2]
+    v = [math.sin(8 * math.pi * u) * math.exp(-u * u * 4) ** 2
+         + math.atan(3 * u) * (1 - math.exp(-u * u * 4) ** 2) for u in x]
+    m = max(abs(y) for y in v)
+    return [y / m for y in v]
+
+
+def _fm() -> list[float]:
+    """FM's table (dnfw.engines.plaits.plaits_fm.table, kept here: this module is a leaf): lookup_tables.py's
+    fm_frequency_quantizer (its ratios, three points each, the widest gaps halved to 128, two
+    more) / 64, then the 4x downsampler's FIR as f0 f1 f2 f3 f2 f1 f0."""
+    r = [0.5, 0.5 * 2 ** (16 / 1200.0), math.sqrt(2) / 2, math.pi / 4, 1.0, 2 ** (16 / 1200.0),
+         math.sqrt(2), math.pi / 2, 7.0 / 4, 2, 2 * 2 ** (16 / 1200.0), 9.0 / 4, 11.0 / 4,
+         2 * math.sqrt(2), 3, math.pi, math.sqrt(3) * 2, 4, math.sqrt(2) * 3, math.pi * 3 / 2, 5,
+         math.sqrt(2) * 4, 8]
+    scale = []
+    for x in r:
+        scale += [12 * math.log2(x)] * 3
+    while len(scale) < 128:
+        d = [b - a for a, b in zip(scale, scale[1:])]
+        gap = d.index(max(d))
+        scale = scale[:gap + 1] + [(scale[gap] + scale[gap + 1]) / 2] + scale[gap + 1:]
+    scale += [scale[-1], scale[-1]]
+    fir = (0.02442415, 0.09297315, 0.16712938, 0.21547332)
+    return [x / 64.0 for x in scale] + [fir[k] for k in (0, 1, 2, 3, 2, 1, 0)]
+
+
+def _q23(y: float) -> int:
+    return max(-(1 << 23), min((1 << 23) - 1, int(round(y * (1 << 23)))))
+
+
+def plaits_words() -> tuple[int, ...]:
+    """PL_TABLES' words (signed Q23, the fill's FLOAT w BY -23): the shapes x 256 (exact),
+    the fold rounded (its 1.0 as the largest Q23 word)."""
+    out = [y * 256 for row in _ws_shapes() for y in row]
+    out += [_q23(y) for y in _fold()]
+    out += [_q23(y) for y in _fm()]
+    return tuple(out)

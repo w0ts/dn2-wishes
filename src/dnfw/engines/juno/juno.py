@@ -37,7 +37,7 @@ import math
 
 from ..analog2 import analog2 as A2
 from ...mnm import core as C
-from ...mnm.tables import T_D, T_G1Q, T_ID8, T_K8, T_NZ4, T_PULL2, T_SUB
+from .tables import T_D, T_G1Q, T_ID8, T_K8, T_NZ4, T_PULL2, T_SUB
 from ..tb303.tb303 import _exp2p
 from ..analog2.filters import models as M
 from ...perc.dsl import Prog

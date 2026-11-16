@@ -20,28 +20,23 @@ F = note x 2048 / 12 + TUNE x 683 / 128 (TUNE 64: in tune), 0..0x5800; A = 2^(F 
 from __future__ import annotations
 
 from . import core as C
-from ..engines.analog2 import analog2
 from . import ddrw, dens, sid, vo6, wave
-from ..engines.drone import drone
-from ..engines.juno import juno
-from ..engines.plaits import plaits
-from ..engines.sophie import sophie
-from ..engines.tb303 import tb303
+from ..engines import machines as _ours    # our engines (src/dnfw/engines): their modules, types and parts
 from ..md import core as K
 from ..perc.dsl import Prog
 from ..builder import selection as _sel
 
 # in the order of PERC's machine index (dnfw.perc.program MNM_TYPES): the Monomachine's own five
 # after the others (2026-11-11), so every machine already here keeps its index
-ALL_MODULES = (sophie, plaits, tb303, drone, analog2, sid, wave, ddrw, dens, vo6, juno)
+_MNM_OS = ((sid, 6, "MNM_SID"), (wave, 6, "MNM_DPRO_WAVE"), (ddrw, 6, "MNM_DPRO_DDRW"), (dens, 6, "MNM_DPRO_DENS"),
+           (vo6, 6, "MNM_VO6"))
+_ALL = _ours.BEFORE + _MNM_OS + _ours.AFTER
+ALL_MODULES = tuple(M for M, _t, _p in _ALL)
 # their types: ALL_TYPE_SLOTS below (20, 18, 19, 21, 22, 6, 7, 14, 15, 16, 23); 2026-11-12: JUNO last, so every
 # machine already here keeps its index
 # the builder (docs/builder.md): a machine left out of this build is emitted nowhere and its type
 # is RESERVED below
-PART = {"SOPHIE": "MNM_SOPHIE", "PLAITS": "MNM_PLAITS", "TB303": "MNM_TB303", "DRONE": "MNM_DRONE",
-        "ANALOG2": "MNM_ANALOG2", "JUNO": "MNM_JUNO",
-        "SID 6581": "MNM_SID", "DPRO-WAVE": "MNM_DPRO_WAVE", "DPRO-DDRW": "MNM_DPRO_DDRW",
-        "DPRO-DENS": "MNM_DPRO_DENS", "VO-6": "MNM_VO6"}
+PART = {M.NAME: part for M, _t, part in _ALL}
 MODULES = tuple(M for M in ALL_MODULES if _sel.on(PART[M.NAME]))
 # the Monomachine's own machines (the kernel's pitch words F, A, pre: `_pitch`)
 MNM_OS_NAMES = ("SID 6581", "DPRO-WAVE", "DPRO-DDRW", "DPRO-DENS", "VO-6")
@@ -242,9 +237,7 @@ MONO_TYPE = 6
 MONO_ENGN = "ENGN"                       # the engine's control
 MONO_ENGINE_K = 7                        # its place: page 1 H (PERC's eighth record, PD1: 0..100)
 MONO_TUNE_J = 15                         # the engine's eighth (TUNE): page 2 H (PERC's TYPE record, 0..127)
-ALL_TYPE_SLOTS = (20, 18, 19, 21, 22, 6, 6, 6, 6, 6, 23)   # 20: SOPHIE (docs/sophie.md), 18: PLAITS, 19: TB303,
-                                                       # 2026-11-10: 21 DRONE, 22 ANALOG2; 6: MONOMACHINE's five;
-                                                       # 2026-11-12: 23 JUNO
+ALL_TYPE_SLOTS = tuple(t for _M, t, _p in _ALL)          # ours (dnfw.engines.machines), 6: MONOMACHINE's five
 # the four engines' former types (2026-11-11): a project's track on one stays there, silent, its page empty
 RETIRED = {7: "DPRO-WAVE", 14: "DPRO-DDRW", 15: "DPRO-DENS", 16: "VO-6"}
 TYPE_SLOTS = tuple(t for M, t in zip(ALL_MODULES, ALL_TYPE_SLOTS) if M in MODULES)   # each voice's type
