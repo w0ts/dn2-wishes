@@ -3,13 +3,12 @@ on five voice slots, the engine's call of the FX sends (sw 0x1c3054) landing in 
 (dnfw.waverider.dsp.POST_SW), which JUMPs on to the sends (0x1c1738). Each voice slot's stereo block
 (design.STEREO) captured at both entries.
 
-**The emulator and the voice chain's stereo.** The voice chain writes each slot's stereo block with
-`I1 = MODIFY(I0, M4)`, I0 = 0, M4 = 0x257ee8 + 0x100 s (sw 0x1c9af6 .. 0x1c9b21); the emulator scales that
-modifier by 4 (byte-space address scaling) and puts the block at 0x95fba0 + 0x400 s, while the FX sends
-(0x1c179d .., 0x1c1884) and the routing (0x1c1fb0) read 0x257ee8 + 0x100 s unscaled: in the runner they
-never meet (measured 2026-11-09). On the unit they do (CHOR and WIDE heard working on b5 d071dbc,
-2026-11-09), so this step copies each slot's block from where the emulator wrote it to where the sends
-read it, at wr_inpost's entry, as the unit has it, before the pass runs.
+**The voice chain's stereo.** The voice chain writes each slot's stereo block with `I1 = MODIFY(I0, M4)`,
+I0 = 0, M4 = 0x257ee8 + 0x100 s (sw 0x1c9af6 .. 0x1c9b21), where the FX sends (0x1c179d .., 0x1c1884) and the
+routing (0x1c1fb0) read it. Until 2026-11-14 the runner scaled that blank modifier by 4 and put the block at
+0x95fba0 + 0x400 s, so this step copied it across at wr_inpost's entry; the runner's G13
+(scripts/sharc_dn2_fixups.py: MODIFY's blank width selector is bytes) puts it where the unit has it, and the
+copy is gone (it copied the now-empty 0x95fba0 over the voices).
 
 1. Every insert OFF: every slot's block at the sends' entry is the block at wr_inpost's entry, and every
    register the engine passed (R0..R15, I0..I4, I12) is back as it came.
@@ -34,7 +33,6 @@ from dnfw.inserts import postref as R
 from dnfw.waverider import dsp
 import sharc_f32 as F32
 
-EMU_STEREO, EMU_STRIDE, EMU_R = 0x95FBA0, 0x400, 0x200       # where the emulator puts the voice chain's write
 KEEP = [f"R{k}" for k in range(16)] + [f"I{i}" for i in P.SAVE_I]
 
 
@@ -82,13 +80,11 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
 
         def at_post(r):
             st = r.state
-            quiet = silent is not None and silent(len(caps))
-            for s_ in range(16):                     # the unit's stereo blocks (see the docstring)
-                for j in range(32):
-                    m2.poke(st, D.STEREO + D.STEREO_STRIDE * s_ + 4 * j,
-                            0 if quiet else m2.word(st, EMU_STEREO + EMU_STRIDE * s_ + 4 * j) or 0)
-                    m2.poke(st, D.STEREO + D.STEREO_STRIDE * s_ + D.STEREO_R + 4 * j,
-                            0 if quiet else m2.word(st, EMU_STEREO + EMU_STRIDE * s_ + EMU_R + 4 * j) or 0)
+            if silent is not None and silent(len(caps)):   # silent input: the voices' blocks zeroed where the sends read
+                for s_ in range(16):
+                    for j in range(32):
+                        m2.poke(st, D.STEREO + D.STEREO_STRIDE * s_ + 4 * j, 0)
+                        m2.poke(st, D.STEREO + D.STEREO_STRIDE * s_ + D.STEREO_R + 4 * j, 0)
             for k, v in enumerate(D.records(par_of(len(caps)))):   # the pre pass's unpacked records
                 m2.poke(st, D.TABLE + 4 * k, v)
             for k, v in enumerate(D.flags(D.records(par_of(len(caps))))):   # its flags (perf, 2026-11-10)

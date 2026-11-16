@@ -3371,7 +3371,7 @@ def step_mainrec(init, sound, machines, blocks) -> dict:
             return base_frame(sound, machines, t0=0, trigger=b == 1).to_bytes()
         return base_frame(sound, machines, t0=ONE, trigger=b == n + 5,
                           overrides=smp_words({SM.SAMP_REC: slot + 1})).to_bytes()
-    state, taps, dac, played, halt = init, [], [], [], None
+    state, taps, taken, dac, played, halt = init, [], [], [], [], None
     page_l = 0x2C0478
     for b in range(n + 8):
         cur["b"] = b
@@ -3383,6 +3383,7 @@ def step_mainrec(init, sound, machines, blocks) -> dict:
         if b >= n + 5:
             played += smp_series(rr, 0)
         st0 = rr["state"]
+        taken.append([V.bits_f32(m2.word(st0.state, SM.MIX_BUF + 4 * k) or 0) for k in range(64)])
         idx = m2.word(st0.state, 0x268A38) or 0
         r = st0.fresh_call(dsp.PVMIX_SITE_SW, regs={"R4": page_l + (idx << 8), "R13": 4})
         how = fx.run(r, 400000, fx.Fixups(), stop_at=[0x1C9D3F])
@@ -3426,8 +3427,14 @@ def step_mainrec(init, sound, machines, blocks) -> dict:
                     diffs.append(abs(heard - mx[32 * b + k] - got[f] * PV_LEVEL))
         pv_ok = max(diffs) < 1e-4 and max(abs(x) for x in got[:64]) > 0.05
     f32 = lambda x: V.bits_f32(bits(x))         # noqa: E731  (as the DSP holds it)
-    tap_ok = ok and all(all(t[k] == f32(mixL[32 * b + k]) and t[32 + k] == f32(mixR[32 * b + k])
-                            for k in range(32)) for b, t in enumerate(taps))
+    # the tap is MIX_BUF as the master-mix call takes it, bit for bit. That is the poked mix after the stock's
+    # 32-sample master stage (sw 0x1c30be, in place over MIX_BUF: 1/0.7 then 0.7 in its linear range, so +-1 ULP
+    # on some samples). Before G13/G14 the runner ran that stage with I4 = I6 = 0 and the tap equalled the poke.
+    def dev(b, t, k):
+        return abs(t[k] - f32((mixL if k < 32 else mixR)[32 * b + k % 32]))
+    mix_dev = max((dev(b, t, k) for b, t in enumerate(taps) for k in range(64)), default=1.0)
+    off_blocks = sorted({b for b, t in enumerate(taps) for k in range(64) if dev(b, t, k) >= 1e-6})
+    tap_ok = ok and len(taken) == len(taps) and all(t == w for t, w in zip(taps, taken)) and mix_dev < 1e-6
     back = max((abs(x) for x in played), default=0.0)
     checks = {
         "every block ran, through the per-block routine and the driver's master-mix call": ok,
@@ -3442,7 +3449,7 @@ def step_mainrec(init, sound, machines, blocks) -> dict:
     }
     return {"ok": all(checks.values()), "checks": checks,
             "numbers": {"halt": halt, "entry": [hex(w) for w in words], "back_peak": round(back, 4),
-                        "blocks": len(taps)}}
+                        "blocks": len(taps), "tap_vs_poked_max": mix_dev, "tap_off_blocks": off_blocks}}
 
 
 def step_recwhole(init, sound, machines, blocks, n=None) -> dict:

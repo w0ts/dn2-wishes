@@ -76,6 +76,15 @@ post-fix), or replaces the step outright:
       (32 bits) carries the same selector at the same bits (39, 23), which
       the runner's table leaves undecoded and scales as normal-word: read
       from the raw parcel (the init's I1 += M4 at 0x1c8ca6, blank).
+      Only where I + M (unscaled) lands in L1's byte image (G4's region):
+      L2 and DDR the runner maps through its own x 4 alias, consistent for
+      the stock FX, and there its scaling stays. A one-fix-off bisection
+      (2026-11-14) showed G13 outside L1 (L2, DDR) leaves the stock reverb's
+      state uncleared (a fresh stock reverb on silence peaked 169, 0.0
+      without) and the stock delay's clear undone, while in L1 it is needed:
+      the voice chain's stereo blocks (I1 = MODIFY(I0 = 0, M4 = 0x257ee8 +
+      0x100 s), where the sends read them on the unit: CHOR and WIDE heard),
+      and the stock delay's clear (7b; peak 58k on silence without).
   G14 (2026-11-14) a long-word access's post-modify (Types 4b/3b, G3)
       through an index into L1's normal-word space (its byte image, as G4
       maps it) moves the index by normal words, x 4, not x 8: the per-track
@@ -145,7 +154,7 @@ def cond_of(f) -> int:
 
 # the warm snapshot (sharc_waverider_voice.py's engine init) depends on these fixups: its file name carries this, so
 # a snapshot built under older ones is never taken (G13 changed what the init leaves in slots 1..15)
-INIT_REV = "_g14d"
+INIT_REV = "_g14f"
 # a bisection aid: DNFW_FIXUPS_OFF=G12,G13a,G13b,G14 runs those as before them (a snapshot built so is named apart)
 OFF = {x for x in os.environ.get("DNFW_FIXUPS_OFF", "").split(",") if x}
 if OFF:
@@ -155,6 +164,18 @@ if OFF:
 def blank_modify(f) -> bool:
     """G13: a Type 7a MODIFY whose width selector (w, l) is (0, 0): no (nw) or (sw)"""
     return not f.get("w") and not f.get("l")
+
+
+def l1_target(s, f) -> bool:
+    """G13's scope: the MODIFY's I + M, unscaled, is inside L1's byte image (G4's region): the one space the runner
+    keeps as bytes. L2 and DDR the runner maps through its own x 4 alias, which the stock FX use consistently: there
+    its scaling stays (a value not concrete too)"""
+    bank = 8 if f.get("g") else 0
+    iv = s.uregs.get(16 + ((F(f, "is[2:2]") << 2) | F(f, "is[1:0]")) + bank)
+    mv = s.uregs.get(32 + F(f, "m") + bank)
+    if not (isinstance(iv, Const) and isinstance(mv, Const)):
+        return False
+    return NW_LO * 4 <= (iv.value + mv.value) & 0xFFFFFFFF < NW_HI * 4
 
 
 def width_7b(insn) -> int:
@@ -255,7 +276,8 @@ class Fixups:
             return None
         f = insn.fields
         pc = s.pc_sw
-        blank = t == "7a" and blank_modify(f) and getattr(s, "assume_nw32", False) and "G13a" not in OFF
+        blank = t == "7a" and blank_modify(f) and getattr(s, "assume_nw32", False) and "G13a" not in OFF \
+            and l1_target(s, f)
         if in_simd and t not in SIMD_NATIVE and t not in ("17a", "17b"):
             if t in MEM_NO_COMPANION and not self.is_long(t, f) and not ("G12" in OFF and t in BY_WIDTH):
                 return ("replace", lambda r: self.two_pass(r, insn, memory=True))
@@ -266,7 +288,8 @@ class Fixups:
                 return ("replace", lambda r: self.two_pass(r, insn, unscaled=blank))
         if blank and cond_of(f) == 31:
             return ("replace", lambda r: self.unscaled(r, insn))
-        if t == "7b" and getattr(s, "assume_nw32", False) and "G13b" not in OFF:
+        if t == "7b" and getattr(s, "assume_nw32", False) and "G13b" not in OFF \
+                and l1_target(s, f):
             scale = width_7b(insn)
             if scale != 4:
                 return ("replace", lambda r: self.modify_7b(r, insn, scale))

@@ -76,7 +76,14 @@ RATE, BLOCK = 48000, 32
 UNPACK = 0x1C2712               # the per-block routine: frame unpack + dispatch + ...
 UNPACK_RETURN = 0x1C3156        # its final RETURN
 UNPACK_CALLER = 0x1C9FC2        # where sw 0x1c9e76 resumes after it
-RX_BASE, RX_PAGE = 0x2C0478, 0x2C08E8     # the frame source R12, and the stack argument
+# the frame source R12 (a page of RX_STRIDE each), and the stack argument. 2026-11-14 (opt-host): RX_BASE was
+# 0x2C0478 + (page << 8), the codec DAC page (256 B): the 2,688-byte frame poked there ran over the ADC pages and the
+# TDM TX ring from 0x2C08E8, so the stock output stage (sw 0x1c244d) wrote track audio over the frame's tail, and
+# the engine read it back as field +0xa7c (sw 0x1c309c): a non-zero track 1 sample there set the output loop's
+# gain to 0 (sw 0x1c30bc) and zeroed MIX_BUF (mainrec, blocks 16-17). Now two pages 0x1000 apart at the start of L1
+# block 2, which no stock or firmware code or data uses (docs/memory-map.md: a harness-only row). The unit's own
+# R12 here is not measured.
+RX_BASE, RX_STRIDE, RX_PAGE = 0x300000, 0x1000, 0x2C08E8
 RX_INDEX = 0x268A38             # the double-buffer index both are offset by
 UNPACK_LOCAL = 0x284800         # a scratch stand-in for the caller's 10-word local
 AMP_RETURN = 0x1C99D3           # the dispatch resumes here after the amp stage
@@ -208,7 +215,7 @@ def unpack_call(state_runner, frame: bytes, i7: int | None = None):
     i7 = getattr(state_runner, "entry_i7", None)
     if i7 is None:
         i7 = m2.word_reg(state_runner, "I7")
-    rx = RX_BASE + (idx << 8)
+    rx = RX_BASE + idx * RX_STRIDE
     r = state_runner.fresh_call(UNPACK, regs={"R4": 0x268438, "R8": UNPACK_LOCAL, "R12": rx,
                                               "I6": i7, "I7": i7 - 16},
                                 return_address=UNPACK_CALLER)
