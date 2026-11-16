@@ -266,13 +266,13 @@ def wmul2(p: Prog) -> None:
     _wmul_body(p, 22)                       # (perf: inline, shorter than the call)
 
 
-def _term(p: Prog, ch: int, cl: int, first: bool) -> None:
+def _term(p: Prog, ch: int, cl: int, first: bool, b: int = 0) -> None:
     """The accumulators R9 (the products' floors / 2^22) and R10 (their low words, mod 2^32) +=
     the coefficient at I1 + ch (as c 2), I1 + cl (as c) times the word R4 (_pieces).
     2026-11-10 (perf): SSF / SSI, the product exact (was 12-bit float pieces). Clobbers R5-R8, R13."""
     p.lsh(5, 4, 8)                           # x 2^8
-    p.ldi(6, ch, 1)                          # c 2
-    p.ldi(8, cl, 1)                          # c
+    p.ldi(6, b + ch, 1)                      # c 2
+    p.ldi(8, b + cl, 1)                      # c
     if first:
         p.mul_ssf(9, 5, 6)                   # floor(x c / 2^22)
         p.mul_ssi(10, 4, 8)                  # x c mod 2^32
@@ -306,41 +306,42 @@ def _clamp(p: Prog, r: int, cr: tuple[int, int] | None = None) -> None:
     p.iop(r, r, "MAX", 12)
 
 
-def _hp1_body(p: Prog) -> None:
-    # I1: [cbh, cbl, gh, gl, y2, y1, u2, u1]; R4 the input -> R4 the output
+def _hp1_body(p: Prog, b: int = 0, cr: tuple[int, int] | None = None) -> None:
+    # I1 + B: [cbh, cbl, gh, gl, y2, y1, u2, u1]; R4 the input -> R4 the output
+    # (B, CR: for a caller that runs it inline, several filters from one I1, the limiter's bounds in registers)
     p.ipass(3, 4)
-    p.ldi(4, 4, 1)
-    _term(p, 0, 1, True)                     # cb y[-2]
-    p.ldi(4, 5, 1)
-    _term(p, 2, 3, False)                    # g y[-1]
-    p.sti(4, 1, 4)
+    p.ldi(4, b + 4, 1)
+    _term(p, 0, 1, True, b)                  # cb y[-2]
+    p.ldi(4, b + 5, 1)
+    _term(p, 2, 3, False, b)                 # g y[-1]
+    p.sti(b + 4, 1, 4)
     _sum22(p)
-    p.ldi(5, 6, 1)
+    p.ldi(5, b + 6, 1)
     p.iop(9, 9, "+", 5)                      # + u[-2]
-    p.ldi(5, 7, 1)
+    p.ldi(5, b + 7, 1)
     p.iop(9, 9, "-", 5)
     p.iop(9, 9, "-", 5)                      # - 2 u[-1]
     p.iop(9, 9, "+", 3)                      # + u
-    p.sti(6, 1, 5)
-    p.sti(7, 1, 3)
-    _clamp(p, 9)
-    p.sti(5, 1, 9)
+    p.sti(b + 6, 1, 5)
+    p.sti(b + 7, 1, 3)
+    _clamp(p, 9, cr)
+    p.sti(b + 5, 1, 9)
     p.ipass(4, 9)
 
 
-def _res2_body(p: Prog) -> None:
-    # I1: [c1h, c1l, gh, gl, c0h, c0l, y2, y1]; R4 the input -> R4 the output
+def _res2_body(p: Prog, b: int = 0, cr: tuple[int, int] | None = None) -> None:
+    # I1 + B: [c1h, c1l, gh, gl, c0h, c0l, y2, y1]; R4 the input -> R4 the output (B, CR as for _hp1_body)
     p.ipass(3, 4)
-    p.ldi(4, 6, 1)
-    _term(p, 0, 1, True)                     # c1 y[-2]
-    p.ldi(4, 7, 1)
-    _term(p, 2, 3, False)                    # g y[-1]
-    p.sti(6, 1, 4)
+    p.ldi(4, b + 6, 1)
+    _term(p, 0, 1, True, b)                  # c1 y[-2]
+    p.ldi(4, b + 7, 1)
+    _term(p, 2, 3, False, b)                 # g y[-1]
+    p.sti(b + 6, 1, 4)
     p.ipass(4, 3)
-    _term(p, 4, 5, False)                    # c0 x
+    _term(p, 4, 5, False, b)                 # c0 x
     _sum22(p)
-    _clamp(p, 9)
-    p.sti(7, 1, 9)
+    _clamp(p, 9, cr)
+    p.sti(b + 7, 1, 9)
     p.ipass(4, 9)
 
 
@@ -487,6 +488,28 @@ def hpc_inline(p: Prog, fh: int, cr: tuple[int, int], k22: int | None = None) ->
     _hp1f_body(p, fh - mid, cr, k22)
     _hp1f_body(p, fh + HP1_N - mid, cr, k22)
     delay2(p, fh + 2 * HP1_N)
+
+
+def res4_exact_inline(p: Prog, fr: int, cr: tuple[int, int]) -> None:
+    """res4(exact=True) at state words FR inline: one I1 at its middle, the limiter's bounds in the registers CR.
+    R4 in, R4 out; R11 the state base. Clobbers R3, R5-R10, R12-R14, I1."""
+    mid = fr + RES2_N
+    at(p, mid)
+    _res2_body(p, fr - mid, cr)
+    _res2_body(p, fr + RES2_N - mid, cr)
+
+
+def path_exact_inline(p: Prog, fh: int, fr: int, cr: tuple[int, int]) -> None:
+    """hpc(exact=True) at FH then res4(exact=True) at FR = FH + HPC_N, inline at one I1 (their middle), the
+    limiter's bounds in the registers CR. R4 in, R4 out; R11 the state base. Clobbers R3, R5-R10, R12-R14, I1."""
+    assert fr == fh + HPC_N
+    mid = fh + 17
+    at(p, mid)
+    _hp1_body(p, fh - mid, cr)
+    _hp1_body(p, fh + HP1_N - mid, cr)
+    delay2(p, fh + 2 * HP1_N)
+    _res2_body(p, fr - mid, cr)
+    _res2_body(p, fr + RES2_N - mid, cr)
 
 
 def path_inline(p: Prog, fh: int, fr: int, cr: tuple[int, int], k22: int) -> None:
@@ -844,9 +867,13 @@ class TRXCP:
         wmul(p)
         ws(p, 11, 4)
 
+        cr = (15, 2)                           # the limiter's bounds, held through both loops
+        p.iconst(15, 0x7FFFFF)
+        p.iconst(2, -0x800000)
+
         def room():
             fibw(p, 6, 7, 4)
-            res4(p, TRXCP.RR, exact=True)    # v0.51: the clap stays exact (its RATE 0 burst, a band 8 dB off in float)
+            res4_exact_inline(p, TRXCP.RR, cr)  # v0.51: the clap stays exact (its RATE 0 burst, a band 8 dB off in float)
             p.ipass(6, 4)
             p.ld(5, C["a"])
             wmul(p)                                   # (stored as a word, read back below)
@@ -895,12 +922,12 @@ class TRXCP:
             wmul(p)
             ss(p, 0, 4)                               # e = sat(mpy(dec, e))
             p.ld(4, C["c"])
-            hpc(p, TRXCP.HP, exact=True)
-            res4(p, TRXCP.RC, exact=True)
+            path_exact_inline(p, TRXCP.HP, TRXCP.RC, cr)
             p.ldi(5, 0, 5)                            # the room's word
             iadd(p, 4, 4, 5)
             p.ash(4, 4, -2)
         ss(p, 0, 1)
+        p.iconst(2, -0x800000)                        # (the burst above took R2)
         out_ints(p, L, clap)
 
 
