@@ -135,7 +135,10 @@ MNM_LONG = {"PW": "Pulse Width", "PWAD": "PW Sweep", "PWRS": "PW Restart", "WAVE
             "PCH2": "Pitch 2", "PCH3": "Pitch 3", "PCH4": "Pitch 4",
             # VO-6 (v0.26)
             "VOC1": "Vocal Freq 1", "VOC2": "Vocal Freq 2", "V-SW": "Vowel Switch",
-            "VOIC": "Voice Type", "CONS": "Consonant", "CLEN": "Cons Length", "CVOL": "Cons Volume"}
+            "VOIC": "Voice Type", "CONS": "Consonant", "CLEN": "Cons Length", "CVOL": "Cons Volume",
+            # SOPHIE (docs/sophie.md)
+            "DCAY": "Decay", "COLR": "Color", "METL": "Metal", "FBK": "Feedback", "SWEP": "Sweep",
+            "CRSH": "Crush", "MODL": "Model"}
 # parameters the port does not run (DENS's chorus is the Monomachine's effect after the
 # machine): drawn as "-", as an unused one
 MNM_UNPORTED = {"CHRL", "CHRW"}
@@ -174,6 +177,7 @@ MNM_CHOICES = {
     # VO-6: its manual's names (Appendix A); V-SW below 64 ends the vowel
     "VO-6": {"V-SW": ("OFF", "ON"), "CONS": ("-", "B", "D", "F", "G", "H", "J", "K", "L", "M", "N",
                                             "P", "R", "RR", "S", "SJ", "T", "TJ", "TH", "V", "Z")},
+    "SOPHIE": {"MODL": ("FUSE", "STAK", "SPLT", "SHRD", "PIPE", "BOOM", "KICK")},
 }
 # v0.27: the controls the Monomachine draws as other than a knob (owner, 2026-10-27; 0 a knob,
 # 1 empty): 2 a grid the marker steps through row by row (DPRO-WAVE's WAVE, VO-6's CONS), 3 a
@@ -185,7 +189,7 @@ MNM_WIDGET = {("DPRO-WAVE", "WAVE"): 2, ("VO-6", "CONS"): 2,
               ("DPRO-DENS", "PCH2"): 4, ("DPRO-DENS", "PCH3"): 4, ("DPRO-DENS", "PCH4"): 4,
               ("SID 6581", "PWRS"): 5, ("SID 6581", "WAVE"): 5, ("SID 6581", "MOD"): 5,
               ("SID 6581", "MSRC"): 5, ("DPRO-WAVE", "WPRS"): 5, ("DPRO-WAVE", "SYNC"): 5,
-              ("VO-6", "V-SW"): 5}
+              ("VO-6", "V-SW"): 5, ("SOPHIE", "MODL"): 5}
 MNM_WAVES = 32
 MNM_PCH = 255                       # mnm_choices' mark: the choice by mnm_pch_idx[knob]
 

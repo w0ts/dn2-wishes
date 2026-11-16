@@ -70,6 +70,17 @@ test against the DN2, never as fact about it.
 
 ---
 
+## Schwung Sophie
+
+<https://github.com/mestela/schwung-sophie> — Matt Estela and digisophie contributors.
+
+The SOPHIE machine's synthesis (`src/dsp/sophie.c`'s voice: carrier, modulators, envelopes,
+feedback, noise, the models and the crusher), ported to the DSL in `src/dnfw/mnm/sophie.py`
+(`docs/sophie.md` says what was left out).
+
+> Copyright (c) 2026 Matt Estela
+> Copyright (c) 2026 digisophie contributors
+
 ## digihealth (GPL-2.0-or-later)
 
 <https://github.com/irpina/digihealth> -- irpina.

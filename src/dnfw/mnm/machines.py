@@ -16,11 +16,11 @@ F = note x 2048 / 12 + TUNE x 683 / 128 (TUNE 64: in tune), 0..0x5800; A = 2^(F 
 from __future__ import annotations
 
 from . import core as C
-from . import ddrw, dens, sid, vo6, wave
+from . import ddrw, dens, sid, sophie, vo6, wave
 from ..md import core as K
 from ..perc.dsl import Prog
 
-MODULES = (sid, wave, ddrw, dens, vo6)      # their types: TYPES below (6, 7, 14, 15, 16)
+MODULES = (sid, wave, ddrw, dens, vo6, sophie)   # their types: TYPES below (6, 7, 14, 15, 16, 17)
 F_TOP = 0x5800
 
 
@@ -185,9 +185,9 @@ DEFAULTS = {M.NAME: M.DEFAULTS for M in MODULES}
 # RESONATOR's former types, then the ones after the sample machines (8..13). One table for
 # the ColdFire (dnfw.waverider.coldfire, pages), the DSP's lookup (dnfw.waverider.dsp) and
 # PERC's voice (dnfw.perc.program).
-TYPE_SLOTS = (6, 7, 14, 15, 16)
+TYPE_SLOTS = (6, 7, 14, 15, 16, 17)       # 17: SOPHIE (docs/sophie.md)
 TYPES = TYPE_SLOTS[:len(MACHINES)]
 # MACHINE SEL's names (long, short), as the DN2 lists its own
 LIST_NAMES = {"SID 6581": ("SID 6581", "SID"), "DPRO-WAVE": ("DPRO Wave", "DPW"),
               "DPRO-DDRW": ("DPRO Ddrw", "DDW"), "DPRO-DENS": ("DPRO Dens", "DNS"),
-              "VO-6": ("VO-6", "VO6")}
+              "VO-6": ("VO-6", "VO6"), "SOPHIE": ("Sophie", "SOP")}

@@ -327,9 +327,14 @@ int md_page_draw(void *view, void *c, int page, int type)
  *   MW_VU     a needle at the bottom of a box, left to right (DENS's PCH2..4)
  *   MW_SWITCH a round switch, a line through it pointing at the position (SID's, WPRS, SYNC, V-SW)
  * An unused place (---, DENS's chorus) is left empty. */
-static const char *const mnm_family[MNM_N] = {"SID", "DIGIPRO", "DIGIPRO", "DIGIPRO", "VO"};
-static const char *const mnm_fam_short[MNM_N] = {"SID", "DPRO", "DPRO", "DPRO", "VO"};
-static const char *const mnm_mach_short[MNM_N] = {"6581", "WAVE", "DDRW", "DENS", "VO-6"};
+/* Sized by their contents, checked against MNM_N: a machine added without its names would
+ * otherwise leave a null pointer here, read as text (SOPHIE did, found in the emulator). */
+static const char *const mnm_family[] = {"SID", "DIGIPRO", "DIGIPRO", "DIGIPRO", "VO", "SOPHIE"};
+static const char *const mnm_fam_short[] = {"SID", "DPRO", "DPRO", "DPRO", "VO", "SOPH"};
+static const char *const mnm_mach_short[] = {"6581", "WAVE", "DDRW", "DENS", "VO-6", "DRUM"};
+_Static_assert(sizeof mnm_family / sizeof *mnm_family == MNM_N, "mnm_family: one per machine");
+_Static_assert(sizeof mnm_fam_short / sizeof *mnm_fam_short == MNM_N, "mnm_fam_short: one per machine");
+_Static_assert(sizeof mnm_mach_short / sizeof *mnm_mach_short == MNM_N, "mnm_mach_short: one per machine");
 
 static int mnm_k(void *view, int j)             /* knob 0..127, as the DSP and page.c read it */
 {
