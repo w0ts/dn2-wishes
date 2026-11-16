@@ -34,6 +34,13 @@ def par(p: Prog, d: int, k: int) -> None:
     K.w(p, d, P0 + k)
 
 
+def page2(p: Prog, L, d: int, k: int) -> None:
+    """Fd = page-2 control k (0..6) as 0..1: PERC's page-2 records (the Machinedrum's track-FX
+    records, `dnfw.perc.machines.FX_PARAMS`, which PERC applies only to its own machines), each
+    clamp(knob - lo, 0, top) / top. L is the Monomachine layout (its `perc` holds the words)."""
+    p.ld(d, L.perc.C[f"q{k}"])
+
+
 def st(p: Prog, d: int, k: int) -> None:
     K.s(p, d, k)
 

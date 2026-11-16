@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from . import gnd
+from ..builder import selection as _sel
+from ..builder.parts import md_key as _md_key
 
 try:                                          # the families arrive one by one
     from . import trx
@@ -22,7 +24,30 @@ ORDER = ("TRX-BD", "TRX-B2", "TRX-SD", "TRX-XT", "TRX-CP", "TRX-RS", "TRX-CB", "
          "GND-SN", "GND-NS", "GND-IM",              # PERC's order until v0.16, TRX-S2 added
          "PI-BD", "PI-SD", "PI-MT", "PI-ML", "PI-MA", "PI-RS", "PI-RC", "PI-CC", "PI-HH")   # v0.24
 _ALL = {M.NAME: M for M in (*_TRX, *_EFM, *gnd.MACHINES, *pi.MACHINES)}
-MACHINES = tuple(_ALL[n] for n in ORDER if n in _ALL)
+
+
+def _silent(M):
+    """the builder's (branch builder d54bb6a): a machine left out of this build keeps its place on
+    TYPE (its index, so a project's TYPE value keeps its machine) with no code of its own: every
+    left-out machine shares one body (dnfw.md.voice._same_code: one function each step), which
+    writes silence"""
+    return type("Silent", (), {"NAME": M.NAME, "ID": M.ID, "PNAMES": M.PNAMES, "LEFT_OUT": True,
+                               "host": staticmethod(_nothing), "init": staticmethod(_nothing),
+                               "trig": staticmethod(_nothing), "render": staticmethod(_silence)})
+
+
+def _nothing(p, L) -> None:
+    return None
+
+
+def _silence(p, L) -> None:
+    from .gnd import out_loop
+    out_loop(p, L, lambda: p.fconst(4, 0.0))
+
+
+ALL_MACHINES = tuple(_ALL[n] for n in ORDER if n in _ALL)
+MACHINES = tuple(M if _sel.on(_md_key(M.NAME)) else _silent(M) for M in ALL_MACHINES)
+LEFT_OUT = tuple(M.NAME for M in MACHINES if getattr(M, "LEFT_OUT", False))
 NAMES = tuple(M.NAME for M in MACHINES)
 BY_NAME = {M.NAME: M for M in MACHINES}
 

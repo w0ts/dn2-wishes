@@ -2689,7 +2689,10 @@ def tdm_tx(p: Prog, L: Layout) -> None:
         p.ld(6, G.BLOWN_COUNT)
         p.iop(6, 6, "AND", 12)
         p.st(SM.LINK_BUF + 4 * 22, 6)
-        p.iconst(0, 23)
+        p.ld(6, G.INS_SKIPS)                   # 2026-11-10: unit 23, the insert blocks passed through
+        p.iop(6, 6, "AND", 12)                 # for time, the count (the title bar's DSP label, csrc/meter)
+        p.st(SM.LINK_BUF + 4 * 23, 6)
+        p.iconst(0, 24)
         p.st(K["u"], 0)
 
         def zero():
@@ -2703,7 +2706,7 @@ def tdm_tx(p: Prog, L: Layout) -> None:
             p.iconst(12, 1)
             p.iop(0, 12, "+", 0)
             p.st(K["u"], 0)
-        p.loop(K["v"], SM.TX_UNITS - 1 - 23, zero)
+        p.loop(K["v"], SM.TX_UNITS - 1 - 24, zero)
         _tx_out(p, K)
 
     def busy():

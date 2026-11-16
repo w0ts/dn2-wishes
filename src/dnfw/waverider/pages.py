@@ -134,7 +134,17 @@ MNM_LONG = {"TUNE": "Tune", "---": "Unused",
             "HARM": "Harmonics", "TIMB": "Timbre", "MORP": "Morph", "FINE": "Fine Tune",
             # TB303 (docs/tb303.md)
             "CUT": "Cutoff", "RES": "Resonance", "ENV": "Env Mod", "DEC": "Decay", "ACC": "Accent",
-            "SLID": "Slide", "WAVE": "Saw/Square"}
+            "SLID": "Slide", "WAVE": "Saw/Square",
+            # DRONE (docs/drone.md)
+            "SPRD": "Spread", "CPL": "Couple", "TOPO": "Topology", "CHAR": "Character", "DRFT": "Drift",
+            "TONE": "Tone", "BEAT": "Binaural Beat", "DTUN": "Detune", "GLID": "Glide Time",
+            "GLTY": "Glide Type", "HOLD": "Hold",
+            # ANALOG2 (docs/analog2.md)
+            "DTN": "Detune", "MIX": "Osc Mix", "NOIS": "Noise", "DRV": "Drive", "KTR": "Key Track",
+            "SWRM": "Swarm", "SEMI": "Osc2 Semi", "SDTN": "Swarm Spread", "SYNC": "Hard Sync",
+            "WAV2": "Osc2 Wave", "FLT": "Filter"}
+# a name one machine means otherwise (MNM_LONG is by short name across machines)
+MNM_LONG_BY = {("ANALOG2", "WAVE"): "Waveform"}
 # parameters the port does not run (DENS's chorus is the Monomachine's effect after the
 # machine): drawn as "-", as an unused one
 MNM_UNPORTED = {"CHRL", "CHRW"}
@@ -149,6 +159,11 @@ def _pch_names() -> tuple[tuple[int, ...], tuple[str, ...]]:
 # the enumerated parameters: their choices by name, as the Monomachine shows them (0: a knob)
 MNM_CHOICES = {
     "SOPHIE": {"MODL": ("FUSE", "STAK", "SPLT", "SHRD", "PIPE", "BOOM", "KICK")},
+    "ANALOG2": {"WAVE": ("SAW", "SQR", "TRI", "SIN", "PWM"), "WAV2": ("=1", "SAW", "SQR", "TRI", "SIN", "PWM"),
+                "SYNC": ("OFF", "ON"), "SWRM": ("OFF", "1", "2", "3", "4", "5", "6"), "SEMI": 49,
+                "FLT": tuple(m[0] + md.replace("NTCH", "NT") for m in ("SVF", "LADR", "OTA", "DIOD", "MS20")
+                             for md in ("L12", "L24", "BP", "HP", "NTCH"))},
+    "DRONE": {"TOPO": ("PAIR", "CHN", "RING"), "GLTY": ("RATE", "TIME"), "HOLD": ("OFF", "ON")},
     "PLAITS": {"MODL": _mnm_plaits.MODELS, "TUNE": 49, "FINE": 128},   # TUNE, FINE: steps (MW_SEMIS, MW_CENTS)      # 2026-11-09: every engine ported (dnfw.mnm.plaits)
 }
 # v0.27: the controls the Monomachine draws as other than a knob (owner, 2026-10-27; 0 a knob,
@@ -156,6 +171,8 @@ MNM_CHOICES = {
 # needle at the bottom moving left or right, 5 a knob switch pointing at its position (the
 # removed machines used 2..4; md_page.c keeps their drawing)
 MNM_WIDGET = {("SOPHIE", "MODL"): 5, ("PLAITS", "MODL"): 5,
+              ("DRONE", "TOPO"): 5, ("ANALOG2", "WAVE"): 5, ("ANALOG2", "WAV2"): 5, ("ANALOG2", "SYNC"): 5,
+              ("ANALOG2", "SWRM"): 5, ("ANALOG2", "FLT"): 5, ("ANALOG2", "SEMI"): 6, ("DRONE", "GLTY"): 5, ("DRONE", "HOLD"): 5,
               # 2026-11-09: 6 MW_SEMIS, the step - n / 2 as +7 / -12 / 0 (the User, build #3: semitones,
               # not the note name); 7 MW_CENTS, the step - n / 2 as +12c / -30c
               ("PLAITS", "TUNE"): 6, ("PLAITS", "FINE"): 7}   # 2026-11-09: md_page.c draws a choice as a
@@ -169,8 +186,32 @@ MNM_PCH = 255                       # mnm_choices' mark: the choice by mnm_pch_i
 # PERC's eight records each, labelled per machine
 MNM_KINDS = tuple(t - 4 for t in _mnm_types.CF_TYPES)   # the reserved types' too (empty pages)
 MNM_PAGE = PARAM_IDS
+# 2026-11-09: a machine with PNAMES2 (DRONE, ANALOG 2) has a second page on PERC's page-2 records (the
+# Machinedrum's track-FX records and TYPE, which PERC applies only to its own machines): 16 controls
+MNM_PAGE2 = (*FX_IDS, TYPE_ID)
+MNM_RECS = tuple(_perc.PARAMS) + tuple(_perc.FX_PARAMS) + (_perc.TYPE_REC + (0, 127),)   # (rid, slot, lo, top) x 16
+
+
+def mnm_pnames(M) -> tuple[str, ...]:
+    """a machine's 16 control names: its eight, then its page 2's (none: eight '---')"""
+    return tuple(M.PNAMES) + tuple(getattr(M, "PNAMES2", ("---",) * 8))
+
+
+def _mnm_ix(d: int) -> int:
+    """wr_count / wr_page compute kind - 8 (kinds 2, 3 give 0, 1): -> the machine's index in
+    CF_MACHINES (0xff: none). v0.45's BOUNCE (type 17, kind 13) is a sample machine, so every
+    Monomachine type above it sits one place lower than kind - 8 (found 2026-11-10: DRONE drew
+    ANALOG 2's title)"""
+    kind = d + 2 if d < 2 else d + 8
+    return MNM_KINDS.index(kind) if kind in MNM_KINDS else 0xFF
+
+
+def mnm_pages(M) -> int:
+    return 2 if hasattr(M, "PNAMES2") else 1
 MNM_LABELS = [{r: (sh if sh != "---" and sh not in MNM_UNPORTED else "-") for r, sh in zip(PARAM_IDS, M.PNAMES)}
               for M in _mnm.CF_MACHINES]
+MNM_LABELS2 = [{r: (sh if sh != "---" else "-") for r, sh in zip(MNM_PAGE2, mnm_pnames(M)[8:])}
+               for M in _mnm.CF_MACHINES]
 MNM_TITLES = tuple(sh for _lo, sh in _mnm.CF_LIST_NAMES)
 MNM_SUBTITLES = tuple(lo for lo, _sh in _mnm.CF_LIST_NAMES)
 
@@ -178,8 +219,9 @@ MNM_SUBTITLES = tuple(lo for lo, _sh in _mnm.CF_LIST_NAMES)
 def mnm_named(k: int) -> dict[int, tuple[str, str]]:
     """record -> (long, short) on a Monomachine machine's track"""
     M = _mnm.CF_MACHINES[k]
-    out = {r: ((MNM_LONG.get(sh, sh), sh) if sh != "---" and sh not in MNM_UNPORTED else (UNUSED_LONG, "-"))
-           for r, sh in zip(PARAM_IDS, M.PNAMES)}
+    out = {r: ((MNM_LONG_BY.get((M.NAME, sh), MNM_LONG.get(sh, sh)), sh) if sh != "---" and sh not in MNM_UNPORTED
+               else (UNUSED_LONG, "-"))
+           for r, sh in zip(PARAM_IDS + MNM_PAGE2, mnm_pnames(M))}
     out.update({r: (UNUSED_LONG, UNUSED_SHORT) for r in range(238, 263) if r not in out})
     return out
 
@@ -211,8 +253,8 @@ def mnm_c_header() -> str:
     for M in _mnm.CF_MACHINES:
         ch = MNM_CHOICES.get(M.NAME, {})
         n_row, at_row = [], []
-        for sh in M.PNAMES:
-            c = ch.get(sh, 0)
+        for sh in mnm_pnames(M):
+            c = ch.get(sh, 0) if sh != "---" else 0
             if c == "pch":
                 n_row.append(MNM_PCH)
                 at_row.append(len(names))
@@ -230,7 +272,7 @@ def mnm_c_header() -> str:
     def arr(rows):
         return ", ".join("{" + ", ".join(map(str, r)) + "}" for r in rows)
     labels = ", ".join("{" + ", ".join(q + (sh if sh != "---" and sh not in MNM_UNPORTED else "-") + q
-                                       for sh in M.PNAMES) + "}" for M in _mnm.CF_MACHINES)
+                                       for sh in mnm_pnames(M)) + "}" for M in _mnm.CF_MACHINES)
     pidx = _pch_names()[0]
     lines = [
         f"#define MNM_N {len(_mnm.CF_MACHINES)}",
@@ -248,25 +290,29 @@ def mnm_c_header() -> str:
         f"#define MNM_WAVES {MNM_WAVES}",
         f"#define MNM_PCH {MNM_PCH}",
         f"static const unsigned char mnm_pch_idx[128] = {{{', '.join(map(str, pidx))}}};",
-        f"static const char mnm_labels[MNM_N][8][6] = {{{labels}}};",
-        f"static const unsigned char mnm_lo[8] = {{{', '.join(str(lo) for _r, _s, lo, _t in _perc.PARAMS)}}};",
-        f"static const unsigned char mnm_top[8] = {{{', '.join(str(t) for _r, _s, _lo, t in _perc.PARAMS)}}};",
-        f"static const unsigned char mnm_choices[MNM_N][8] = {{{arr(rows_n)}}};",
-        f"static const unsigned char mnm_choice_at[MNM_N][8] = {{{arr(rows_at)}}};",
+        "#define MNM_J 16                       /* a machine's controls: page 1's eight, page 2's eight */",
+        f"static const unsigned char mnm_npages[MNM_N] = {{{', '.join(str(mnm_pages(M)) for M in _mnm.CF_MACHINES)}}};",
+        f"static const char mnm_labels[MNM_N][MNM_J][6] = {{{labels}}};",
+        f"static const unsigned char mnm_lo[MNM_J] = {{{', '.join(str(lo) for _r, _s, lo, _t in MNM_RECS)}}};",
+        f"static const unsigned char mnm_top[MNM_J] = {{{', '.join(str(t) for _r, _s, _lo, t in MNM_RECS)}}};",
+        f"static const unsigned char mnm_choices[MNM_N][MNM_J] = {{{arr(rows_n)}}};",
+        f"static const unsigned char mnm_choice_at[MNM_N][MNM_J] = {{{arr(rows_at)}}};",
         f"static const char mnm_choice_names[{max(1, len(names))}][5] = {{{', '.join(q + n + q for n in names)}}};",
         # v0.27: the frame slot of each of the eight (smp_quant's 4 detents a choice), and each
         # control's widget as the Monomachine draws it (docs/mnm-pages-plan.md)
-        f"static const unsigned char mnm_slot[8] = {{{', '.join(str(sl) for _r, sl, _lo, _t in _perc.PARAMS)}}};",
+        f"static const unsigned char mnm_slot[MNM_J] = {{{', '.join(str(sl) for _r, sl, _lo, _t in MNM_RECS)}}};",
         # v0.33: each machine's own start (dnfw.mnm's DEFAULTS), set by MACHINE SEL (rec.c), as
         # the words the eight records take (perc.live.knob_word), and the records' ids
-        f"static const unsigned short mnm_rid[8] = {{{', '.join(str(r) for r, _s, _lo, _t in _perc.PARAMS)}}};",
-        f"static const unsigned short mnm_default[MNM_N][8] = {{{arr([[_knob_word(x, t, lo) for (_r, _s, lo, t), x in zip(_perc.PARAMS, d)] for d in _mnm.CF_DEFAULTS])}}};",
+        f"static const unsigned short mnm_rid[MNM_J] = {{{', '.join(str(r) for r, _s, _lo, _t in MNM_RECS)}}};",
+        # page 2's start: a machine with PNAMES2 its DEFAULTS2 (knob 0..127 each), else the records'
+        # words untouched (0xffff: not written)
+        f"static const unsigned short mnm_default[MNM_N][MNM_J] = {{{arr([[_knob_word(x, t, lo) for (_r, _s, lo, t), x in zip(_perc.PARAMS, d)] + ([_knob_word(x, t, lo) for (_r, _s, lo, t), x in zip(MNM_RECS[8:], getattr(M, 'DEFAULTS2'))] if hasattr(M, 'PNAMES2') else [0xFFFF] * 8) for d, M in zip(_mnm.CF_DEFAULTS, _mnm.CF_MACHINES)])}}};",
         # 2026-11-09: a RETIRED choice (an empty name: PLAITS' GRAN, removed): shown as the choice
         # before it, stepped past (md_page.c, page.c, fmt.c); its knob slot stays, so saved knobs keep
         # their choice
         f"#define MNM_RETIRED(mi, j, c) {mnm_retired()}",
         "enum { MW_KNOB, MW_EMPTY, MW_GRID, MW_SLIDE, MW_VU, MW_SWITCH, MW_SEMIS, MW_CENTS };",
-        f"static const unsigned char mnm_widget[MNM_N][8] = {{{arr([[MNM_WIDGET.get((M.NAME, sh), 1 if sh == '---' or sh in MNM_UNPORTED else 0) for sh in M.PNAMES] for M in _mnm.CF_MACHINES])}}};",
+        f"static const unsigned char mnm_widget[MNM_N][MNM_J] = {{{arr([[MNM_WIDGET.get((M.NAME, sh), 1 if sh == '---' or sh in MNM_UNPORTED else 0) for sh in mnm_pnames(M)] for M in _mnm.CF_MACHINES])}}};",
     ]
     return "\n".join(lines) + "\n"
 
@@ -544,10 +590,12 @@ def source(page_draw: int, cell: int) -> str:
                      f"    .long {', '.join(str(e) for e in entries)}\n"
                      f"    .long {TAG}")
     page_data = "\n".join(pages)
-    mtables = "\n".join(f"    .long mnm_labels_{k}" for k in range(len(MNM_LABELS)))
+    mlabs = [{**lab, **(MNM_LABELS2[k] if mnm_pages(_mnm.CF_MACHINES[k]) > 1 else {})}
+             for k, lab in enumerate(MNM_LABELS)]
+    mtables = "\n".join(f"    .long mnm_labels_{k}" for k in range(len(mlabs)))
     mtables += "\n" + "\n".join(f"mnm_labels_{k}:\n" + "\n".join(f"    .long {rid}, mlab_{k}_{rid}" for rid in lab)
-                                + "\n    .long 0" for k, lab in enumerate(MNM_LABELS))
-    mstrings = "\n".join(f'mlab_{k}_{rid}: .asciz "{name}"' for k, lab in enumerate(MNM_LABELS)
+                                + "\n    .long 0" for k, lab in enumerate(mlabs))
+    mstrings = "\n".join(f'mlab_{k}_{rid}: .asciz "{name}"' for k, lab in enumerate(mlabs)
                           for rid, name in lab.items())
     # v0.45: wr_label's Monomachine dispatch, one explicit test a kind, index k into
     # mnm_label_tables (not a range: a range let BOUNCE, kind 13, index past the table)
@@ -559,6 +607,9 @@ def source(page_draw: int, cell: int) -> str:
     mnm_page_data = "\n".join(f"    .long mnm_title_{k}, mnm_subtitle_{k}\n"
                               f"    .long {', '.join(str(e) for e in MNM_PAGE)}\n"
                               f"    .long {TAG}" for k in range(len(MNM_LABELS)))
+    mnm2_page_data = "\n".join(f"    .long mnm_title_{k}, mnm_subtitle_{k}\n"
+                               f"    .long {', '.join(str(e) for e in MNM_PAGE2)}\n"
+                               f"    .long {TAG}" for k in range(len(MNM_LABELS)))
     smp_page_data = "\n".join(f"    .long smp_title_{k}, smp_subtitle_{k}\n"
                               f"    .long {', '.join(str(e) for e in entries)}\n"
                               f"    .long {TAG}" for k, entries in enumerate(SMP_PAGES))
@@ -593,27 +644,43 @@ is_wr:
 wr_count:
     bsr.w   is_wr
     tst.l   %d0
-    beq.s   1f
+    beq.w   1f
     addq.l  #4,%sp
     subq.l  #1,%d0
-    bne.s   3f
+    bne.w   3f
     moveq   #{len(PAGES)},%d0
     rts
 3:  moveq   #2,%d1                         | d0 = kind - 1: 1, 2 and 9.. the Monomachine's
     cmp.l   %d1,%d0
-    bls.s   4f
+    bls.w   4f
     moveq   #8,%d1
     cmp.l   %d1,%d0
-    bls.s   5f
-4:  moveq   #1,%d0                         | a Monomachine machine: its one page
+    bls.w   5f
+4:  moveq   #9,%d1                         | a Monomachine machine: its pages (2026-11-09: 1 or 2)
+    cmp.l   %d1,%d0
+    bcc.w   11f
+    subq.l  #1,%d0                         | d0 = kind - 1: 1, 2 -> 0, 1
+    bra.w   12f
+11: subq.l  #7,%d0                         | 9.. -> 2..
+    move.l  %a0,%sp@-                      | (2026-11-10) the computed kind - 8 -> the machine's index
+    lea     mnm_ix_tab,%a0                 | (types past BOUNCE's 17 are one place lower)
+    move.b  %a0@(0,%d0:l),%d0
+    andi.l  #0xff,%d0
+    movea.l %sp@+,%a0
+12: move.l  %a0,%sp@-
+    lea     mnm_npages_tab,%a0
+    moveq   #0,%d1
+    move.b  %a0@(0,%d0:l),%d1
+    movea.l %sp@+,%a0
+    move.l  %d1,%d0
     rts
 5:  moveq   #2,%d0                         | a sample machine: its two pages (v0.22: the recorder is FUNC + VOICE)
     rts
 1:  move.l  %sp@(8),%d0
     cmpi.l  #{NEW_TYPE},%d0
-    blt.s   2f
+    blt.w   2f
     cmpi.l  #{TYPES_LAST},%d0
-    bgt.s   2f
+    bgt.w   2f
     moveq   #{CLONE},%d0
 2:  moveq   #4,%d1
     rts
@@ -625,49 +692,67 @@ wr_count:
 wr_page:
     bsr.w   is_wr
     tst.l   %d0
-    beq.s   3f
+    beq.w   3f
     subq.l  #1,%d0
-    bne.s   5f
+    bne.w   5f
     move.l  %sp@(16),%d0
     moveq   #{len(PAGES)},%d1
     cmp.l   %d1,%d0
-    bcs.s   1f
+    bcs.w   1f
 6:  move.l  #{EMPTY_PAGE:#010x},%d0
-    bra.s   2f
+    bra.w   2f
 1:  moveq   #44,%d1
     mulu.w  %d1,%d0
     addi.l  #descriptors,%d0
-    bra.s   2f
+    bra.w   2f
 | d0 = kind - 1: 1, 2 -> the Monomachine's 0, 1; 3..8 a sample machine; 9.. -> 2..;
 | v0.44: 12 (BOUNCE, kind 13) -> the sample row 6 (d0 9 at 4:, as 3..8 give 0..5)
 5:  moveq   #{_smp.BOUNCE_TYPE - 5},%d1
     cmp.l   %d1,%d0
-    bne.s   10f
+    bne.w   10f
     moveq   #{len(_smp.NAMES) + 2},%d0
-    bra.s   4f
+    bra.w   4f
 10: moveq   #9,%d1
     cmp.l   %d1,%d0
-    bcc.s   7f
+    bcc.w   7f
     moveq   #3,%d1
     cmp.l   %d1,%d0
-    bcc.s   4f
+    bcc.w   4f
     addq.l  #6,%d0
 7:  subq.l  #7,%d0                         | the Monomachine machine's index
-    move.l  %sp@(16),%d1                   | its one page
-    bne.s   6b
+    move.l  %a0,%sp@-                      | (2026-11-10) the computed kind - 8 -> the machine's index
+    lea     mnm_ix_tab,%a0                 | (types past BOUNCE's 17 are one place lower)
+    move.b  %a0@(0,%d0:l),%d0
+    andi.l  #0xff,%d0
+    movea.l %sp@+,%a0
+    move.l  %sp@(16),%d1                   | its page: 0, or 1 when it has two (2026-11-09)
+    beq.w   10f
+    subq.l  #1,%d1
+    bne.w   6b
+    move.l  %a0,%sp@-
+    lea     mnm_npages_tab,%a0
+    moveq   #0,%d1
+    move.b  %a0@(0,%d0:l),%d1
+    movea.l %sp@+,%a0
+    subq.l  #2,%d1
+    bne.w   6b
     moveq   #44,%d1
     mulu.w  %d1,%d0
+    addi.l  #mnm2_descriptors,%d0
+    bra.w   2f
+10: moveq   #44,%d1
+    mulu.w  %d1,%d0
     addi.l  #mnm_descriptors,%d0
-    bra.s   2f
+    bra.w   2f
 4:  subq.l  #2,%d0
 | a sample machine (d0 = its kind - 3): pages 0 and 1 its own (the DT2's SRC page 1 and
 | page 2, the same parameters), page 2 the recorder
 8:  move.l  %sp@(16),%d1
     subq.l  #2,%d1
-    bcs.s   9f
-    bne.s   6b
+    bcs.w   9f
+    bne.w   6b
     move.l  #smp_rec_descriptor,%d0
-    bra.s   2f
+    bra.w   2f
 9:  subq.l  #1,%d0
     moveq   #44,%d1
     mulu.w  %d1,%d0
@@ -678,9 +763,9 @@ wr_page:
 3:  move.l  %sp@(12),%d1
     move.l  %sp@(16),%d0
     cmpi.l  #{NEW_TYPE},%d1
-    blt.s   0f
+    blt.w   0f
     cmpi.l  #{TYPES_LAST},%d1
-    bgt.s   0f
+    bgt.w   0f
     moveq   #{CLONE},%d1
 0:  rts
 
@@ -690,10 +775,10 @@ wr_page:
 wr_label:
     bsr.w   is_wr
     tst.l   %d0
-    beq.s   9f
+    beq.w   9f
     lea     labels,%a0
     subq.l  #1,%d0
-    beq.s   0f
+    beq.w   0f
 | d0 = kind - 1. Only a Monomachine machine's kind (MNM_KINDS, each named below) reads
 | mnm_label_tables; every other kind -- the sample machines, BOUNCE, and any type
 | added later -- gets the stock names (wr_names swapped them in). v0.44 tested ranges
@@ -702,7 +787,7 @@ wr_label:
 | absolute address 0x000000EE -- the unit froze drawing the first cell of any page of a
 | BOUNCE track (MACHINE SEL's YES; every boot of a project holding one).
 {mnm_label_pick}
-    bra.s   9f
+    bra.w   9f
 wl_hit:
     lsl.l   #2,%d0
     lea     mnm_label_tables,%a0
@@ -710,11 +795,11 @@ wl_hit:
     movea.l %a0@,%a0
 0:  move.l  %sp@(8),%d0
 1:  move.l  %a0@+,%d1
-    beq.s   9f
+    beq.w   9f
     cmp.l   %d0,%d1
-    beq.s   2f
+    beq.w   2f
     addq.l  #4,%a0
-    bra.s   1b
+    bra.w   1b
 2:  move.l  %a0@,%d0
     rts
 9:  jmp     {GET_SHORT_NAME:#010x}
@@ -795,6 +880,14 @@ descriptors:
 {page_data}
 mnm_descriptors:
 {mnm_page_data}
+mnm2_descriptors:
+{mnm2_page_data}
+mnm_ix_tab:
+    .byte {", ".join(str(_mnm_ix(d)) for d in range(max(MNM_KINDS) - 7))}
+    .align 2
+mnm_npages_tab:
+    .byte {", ".join(str(mnm_pages(M)) for M in _mnm.CF_MACHINES)}
+    .align 2
 smp_descriptors:
 {smp_page_data}
 {_rep("subtitle", SUBTITLE)}

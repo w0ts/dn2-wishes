@@ -409,8 +409,19 @@ def perc_links_ok() -> bool:
             and re.findall(r"JUMP (0x[0-9a-f]+);\s*// smp.asm's wr_smp", perc) == [f"{dsp.SMP_SW:#x}"]
             and re.findall(r"JUMP (0x[0-9a-f]+);\s*// inserts.asm's wr_ins",
                            (SHARC / "smp.asm").read_text(encoding="utf-8")) == [f"{dsp.INS_SW:#x}"]
-            and re.findall(r"JUMP (0x[0-9a-f]+);\s*// ping.asm's wr_ping",
-                           (SHARC / "inserts.asm").read_text(encoding="utf-8")) == [f"{dsp.PING_SW:#x}"])
+            and _ins_tail_ok())
+
+
+def _ins_tail_ok() -> bool:
+    """inserts.asm's last JUMP: to the A2 filter machines' pass when it is built (2026-11-09), which
+    JUMPs on to PING; else straight to PING"""
+    ins = (SHARC / "inserts.asm").read_text(encoding="utf-8")
+    from dnfw.a2f import design as AD                    # the build's choice, not a file left over
+    a2f = SHARC / "a2f.asm"
+    if not AD.BUILT_MODELS:
+        return re.findall(r"JUMP (0x[0-9a-f]+);\s*// ping.asm's wr_ping", ins) == [f"{dsp.PING_SW:#x}"]
+    return (re.findall(r"JUMP (0x[0-9a-f]+);\s*// ping.asm's wr_ping", ins) == [f"{dsp.A2F_SW:#x}"]
+            and f"JUMP {dsp.PING_SW:#x};" in a2f.read_text(encoding="utf-8"))
 
 
 def no_gran_link() -> bool:
@@ -510,7 +521,7 @@ def main(argv=None):
     p.add_argument("--frame-be", help="a frame as the ColdFire holds it at 0x80005e60 (16-bit BE)")
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
-    p.add_argument("--steps", "decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,mainrec,recwhole,pvmix,fdn8,xdly,inserts,inspost,insbus,tdm,twin,stock,mnm,frame", "decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,flexlevel,mainrec,recwhole,pvmix,fdn8,xdly,inserts,tdm,stock,mnm,frame")   # v0.27: shft, gran removed; v0.45: ping removed   # voice: PERC
+    p.add_argument("--steps", "decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,mainrec,recwhole,pvmix,fdn8,xdly,inserts,insall,a2f,inspost,insbus,tdm,twin,stock,mnm,frame", "decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,flexlevel,mainrec,recwhole,pvmix,fdn8,xdly,inserts,tdm,stock,mnm,frame")   # v0.27: shft, gran removed; v0.45: ping removed   # voice: PERC
     p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
@@ -722,6 +733,20 @@ def main(argv=None):
             results["3i_inserts"] = ins_step.run(sys.modules[__name__], snap, m2mach, m5, sound, machines)
             gc.collect()
             show(results["3i_inserts"])
+
+        if "insall" in steps:
+            print("\nstep 3i2: every mono insert type alone, at defaults and at an extreme")
+            insall_step = importlib.import_module("sharc_insall_step")
+            results["3i2_insall"] = insall_step.run(sys.modules[__name__], snap, m2mach, m5, sound, machines)
+            gc.collect()
+            show(results["3i2_insall"])
+
+        if "a2f" in steps and importlib.import_module("dnfw.a2f.design").BUILT_MODELS:
+            print("\nstep 3k: the A2 filter machines (filter types 7..11)")
+            a2f_step = importlib.import_module("sharc_a2f_step")
+            results["3k_a2f"] = a2f_step.run(sys.modules[__name__], snap, m2mach, m5, sound, machines)
+            gc.collect()
+            show(results["3k_a2f"])
 
         if "inspost" in steps:
             print("\nstep 3j: the stereo inserts after the pan (CHOR, WIDE)")
@@ -3153,11 +3178,17 @@ def step_pvmix(snap, m2mach, m5: Image, stock: Image) -> dict:
                       if rm.state.overlay.get(a) != rs.state.overlay.get(a))
         mixr = range(SM.MIX_BUF, SM.MIX_BUF + 256)
         # the overlay holds load (byte) addresses: DM + 0x28000000
-        stray = [a for a in diff if not any(o <= a - dsp.LOAD_ALIAS < o + 4 or o <= a < o + 4 for o in own)]
+        # the twin table B is loaded as zeros by the build and copied by the hook (step 4t proves it
+        # ends as stock's), so its span differs from stock's image by design
+        twin = range(dsp.TWIN_B, dsp.TWIN_B + dsp.TWIN_BYTES)
+        stray = [a for a in diff if a not in twin and a - dsp.LOAD_ALIAS not in twin
+                 and not any(o <= a - dsp.LOAD_ALIAS < o + 4 or o <= a < o + 4 for o in own)]
         got = mix(rm)
         checks[f"{name}: both make the call and come back after it"] = ok
         checks[f"{name}: every register as stock's"] = same_regs
         checks[f"{name}: every word written as stock's (given the mixed block), but the preview's own"] = ok and not stray
+        if stray:
+            print(f"    {name}: stray words {[hex(a) for a in stray[:12]]} ({len(stray)})", flush=True)
         checks[f"{name}: the mix as the model's ({min(left, 16)} words added)"] = ok and got == want
         tap = [m2.word(rm.state, SM.MAIN_TAP + 4 * k) or 0 for k in range(64)]
         checks[f"{name}: v0.37: the MAIN tap holds the mix as it came, before the preview"] = ok and tap == mix_in
@@ -3657,7 +3688,7 @@ def step_twin(snap, m2mach, m5: Image, stock: Image) -> dict:
         "the second pass copies nothing (fewer than 40 instructions)": r2.state.steps - first_steps < 40
         if r2.state.steps >= first_steps else r2.state.steps < 40,
     }
-    return {"checks": checks, "first_pass_instructions": first_steps}
+    return {"ok": all(checks.values()), "checks": checks, "first_pass_instructions": first_steps}
 
 
 def step_stock(snap, m2mach, m5: Image, stock: Image, sound, machines, blocks) -> dict:
@@ -3960,6 +3991,25 @@ def step_mnm(init, sound, machines, blocks) -> dict:
         runs[f"{name}_tops"] = _slim(run_blocks(init, frames(k, knobs=[127] * 8), blocks))
         print(f"    {name}: {round(time.perf_counter() - t0)} s", flush=True)
     runs["silent"] = _slim(run_blocks(init, frames(0, trig=()), blocks))
+    # 2026-11-10: DRONE's legato glide (GLID ~0.5): note 48 on at block 1, note 60 on at
+    # block 12; "held": no note-off between (a held key, or HOLD's latch), "released": the voice's
+    # note-off (frame +36, bit 0) at block 6. Bit-exact as above; after block 12 they must differ
+    if "DRONE" in MM.NAMES:
+        dk = MM.NAMES.index("DRONE")
+
+        def drone_leg(released):
+            def fb(b):
+                f = base_frame(sound, machines, t0=types[dk], overrides=mnm_words(dk),
+                               note=0x3000 if b < 12 else 0x3C00, trigger=False)
+                if b in (1, 12):
+                    f.put(FR.TRIG_NOTE, 1)               # note on, voice 0 (track 0's)
+                if released and b == 6:
+                    f.put(36, 1)                         # its note-off (amp gate off)
+                f.param(0, 26, 64 << 8)                  # q0 GLID (AMD, 0..120)
+                return f.to_bytes()
+            return fb
+        runs["DRONE_held"] = _slim(run_blocks(init, drone_leg(False), 24))
+        runs["DRONE_released"] = _slim(run_blocks(init, drone_leg(True), 24))
     # 2026-11-09: every PLAITS model (MODL's choices past WS, which the default runs), triggered at
     # block 1 and again at block 4, its HARM/TIMB/MORP off-centre; and a track whose MODL changes
     # every two blocks through the models (each entry runs the model's init), bit-exact as above
@@ -4086,6 +4136,17 @@ def step_mnm(init, sound, machines, blocks) -> dict:
         f"the budget: of four SID tracks the first {fits} play, the rest are silent":
             None not in budget and all(v > 0.01 for v in budget[:fits]) and all(v == 0.0 for v in budget[fits:]),
     }
+    if "DRONE_held" in runs:                     # 2026-11-10: legato glides, a released note jumps
+        hs, rs = perc_series(runs["DRONE_held"], 0), perc_series(runs["DRONE_released"], 0)
+        # (from the note-off on, the released voice's amp releases and PERC's rest may hush it: the
+        # two runs are compared up to the note-off, and from the second note's next block on)
+        checks["DRONE: a note held into the next trig glides, a released one does not: "
+               "the same until the note-off, different after the second note"] = (
+            runs["DRONE_held"]["ok"] and runs["DRONE_released"]["ok"]
+            and hs[:6 * BLOCK] == rs[:6 * BLOCK] and hs[13 * BLOCK:] != rs[13 * BLOCK:])
+        n_drone = {"held_peaks": [round(V.peak(hs[b * BLOCK:(b + 1) * BLOCK]), 4) for b in range(24)],
+                   "released_peaks": [round(V.peak(rs[b * BLOCK:(b + 1) * BLOCK]), 4) for b in range(24)]}
+        n["drone_legato"] = n_drone
     dynr = runs["dynamic"]
 
     def dpk(b, t):

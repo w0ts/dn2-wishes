@@ -75,3 +75,23 @@ Monomachine VO-6 and a sample page, each with FUNC held and after the release.
   preflight, erase pass. The SHARC steps failed on both builds for a missing cached init
   snapshot in the fresh trees; the DSP is unchanged.
 - Not on hardware yet.
+
+## The load labels (2026-11-10)
+
+The User: "a little shark/cpu/memory icon blinking when we are over dsp/cpu/memory, on the right of the
+title bar"; drawn icons were tried and refused ("they dont work... what about CPU / DSP / RAM ?"). So, on
+every page (stock's and ours) while FUNC is up, the title bar's right end shows a word in a black box for
+each limit hit, while it is and a second after (`ICON_HOLD`), blinking at 2 Hz; the lit ones packed to
+the right, over the tempo, which comes back when they go. FUNC held: the meter's corner covers them.
+
+| label | lit when | from |
+|---|---|---|
+| **DSP** | the DSP's guard left a voice out for time, or passed an insert block through for time; or the DSP's load peak at 99 % (`ICON_DSP_PCT`, off under 97 %; the unit idle reads D 94 %) | voices: the idle packet's unit 17 (`smp_skipped_any`); inserts: **unit 23, new**, the guard's `INS_SKIPS` count (`sampler/program.py`, 3 DSP instructions; `link.c` `smp_ins_skip_at`); load: unit 18 |
+| **CPU** | the ColdFire's load over the last half second at 90 % (`ICON_CPU_PM`, off under 85 %) | the meter's C (`cpu_window`, computed every half second, FUNC or not) |
+| **RAM** | an FDN8 / XDLY insert found no instance free (FULL), or the main heap 90 % used (`ICON_HEAP_PCT`) | `ins.c` `ins_full_any`; the heap walked every 2 s (`ICON_HEAP_EVERY`) with FUNC up too, under its own lock |
+
+The PERC / Monomachine pages' "CPU" under LEV (v0.30) is gone: LEV always reads LEV, the title bar's DSP
+says it (the User). State: the meter's RAM block, words 25..29 (`MTR_ICON_*`); `MTR_ICON_FORCE`
+(`METER_RAM + 0x74`, bits D C M) shows a label steadily, for the emulator's screenshots (no DSP, no audio
+ISR, a frame counter standing still there). Not measured: the audio ISR's lateness, a task's deadline.
+Not on hardware yet; the thresholds are first guesses.

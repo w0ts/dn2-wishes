@@ -4,15 +4,17 @@
 (complex-ping/overtone, read only; nothing of its code taken): in each slot **M.SEL** picks the insert,
 **MIX** mixes it in (dry / wet), and it has up to six knobs of its own. The eight, in build order: FUZZ,
 TAPE, FOLD, CHOR, WIDE, HARM (2026-11-09), **FDN8 and XDLY** (2026-11-10: the send reverb's and the send
-delay's engines, per track). FUZZ, TAPE, FOLD and HARM run on the mono voice before the filter, CHOR and
+delay's engines, per track), then **SUB, DIST, GATER and RING** (2026-11-10, ported from Optimist: below,
+"SUB, DIST, GATER, RING"). FUZZ, TAPE, FOLD, HARM, SUB, DIST, GATER and RING run on the mono voice before the filter, CHOR and
 WIDE on the voice in stereo after the pan (below, "After the pan"), FDN8 and XDLY on the track's own bus
 after the routing (below, "On the track's bus"). Within each of those stages slot 1 runs before slot 2;
 across them the stage decides (a CHOR in slot 1 and a FUZZ in slot 2: the FUZZ, before the filter, is
 heard first).
 
-A type keeps its number for good (OFF 0, FUZZ 1 .. HARM 6, FDN8 7, XDLY 8; ports3's SUB DIST GATER RING
-would be 9..12): the saved records name types by number, and a build that does not know a number reads
-it as OFF.
+A type keeps its number for good (OFF 0, FUZZ 1 .. HARM 6, FDN8 7, XDLY 8, SUB 9, DIST 10, GATER 11,
+RING 12): the saved records name types by number, and a build that does not know a number reads it as
+OFF. SUB, DIST, GATER and RING are builder parts (`dnfw.builder.parts` INS_SUB .. INS_RING,
+`design.PART`): a build that leaves one out does not emit it, and the type plays as OFF.
 
 ## The pages
 
@@ -40,9 +42,10 @@ The views are found in the screen's view list (as rec.c's question test): the FX
 | M.SEL | the insert's knob 1 | 2 | 3 | 4 | 5 | 6 | MIX |
 
 M.SEL turns like a stock multi-choice (2026-11-09, the User: one detent per type was far too
-sensitive): a 0..127 value turned as a knob, each type a band of it, `type = value x 9 / 128`
-(OFF 0..14, FUZZ 15..28, TAPE 29..42, FOLD 43..56, CHOR 57..71, WIDE 72..85, HARM 86..99, FDN8 100..113,
-XDLY 114..127). A saved record keeps the type; loaded, M.SEL sits in the middle of its band.
+sensitive): a 0..127 value turned as a knob, each type a band of it, `type = value x 13 / 128`
+(OFF 0..9, FUZZ 10..19, TAPE 20..29, FOLD 30..39, CHOR 40..49, WIDE 50..59, HARM 60..68, FDN8 69..78,
+XDLY 79..88, SUB 89..98, DIST 99..108, GATR 109..118, RING 119..127; with nine types, until 2026-11-10:
+OFF 0..14 .. XDLY 114..127). A saved record keeps the type; loaded, M.SEL sits in the middle of its band. 2026-11-10 (the User): the list is sorted A-Z, OFF first (OFF CHOR DIST FDN8 FOLD FUZZ GATR HARM RING SUB TAPE WIDE XDLY), through `ORDER` / `POS` in ins.c: only the display order, a type's number (the saved byte) is unchanged; the bands above are by position.
 
 | insert | B | C | D | E | F | G |
 |---|---|---|---|---|---|---|
@@ -54,6 +57,10 @@ XDLY 114..127). A saved record keeps the type; loaded, M.SEL sits in the middle 
 | HARM | AMNT | FREQ | EVEN | TONE | LEV | |
 | FDN8 | PRE | SIZE | DAMP | MOD | HPF | LPF |
 | XDLY | TIM1 | TIM2 | FDBK | MOD | TONE | |
+| SUB | LEV | BAND | TONE | OCT | DRY | |
+| DIST | DRIV | TONE | BIAS | LOW | LEV | |
+| GATR (GATER) | DPTH | PATN | RATE | SHPE | SWNG | |
+| RING | FREQ | SHPE | AM | LEV | | |
 
 `csrc/inserts/ins.c` draws the page over the screen (page.c `wr_screen`) with **stock 1.12's own
 widgets** (`csrc/waverider/widgets.h`, docs/widgets.md): M.SEL a choice box, the insert's knobs and
@@ -77,7 +84,7 @@ directory page's end; loads never write past the command block (a static assert 
 32 records (track t's slot j is record 2 t + j), each eight 7-bit fields: **type | instance << 4**, MIX,
 K1..K6 (0..127). 32 x 8 bytes do not fit `0xf18..0x1000` (232 bytes), so they are packed
 (`dnfw.inserts.design.pack`, `ins.c ins_words`, held to each other by `test/test_inserts_c.py`): word 0 the
-change word (`ins_gen`), word 1 zero, then 8 groups of 7 words, each 4 records' 32 fields: word w holds
+change word (`ins_gen`), word 1 zero (GATER's clock word, no writer yet), then 8 groups of 7 words, each 4 records' 32 fields: word w holds
 fields 4w .. 4w+3 in its bits 0..27, fields 28..31 are the 7 words' top nibbles. The pre pass unpacks them
 into its table (`design.TABLE`, L2 `0x200afa00`, 32 x 8 words) whenever the change word moved; the three
 passes read the table. At power-on the pool's directory and the table are zeros: every insert OFF until
@@ -123,6 +130,83 @@ sine at 127 (the sine from the same fold's phase); a 20 Hz DC blocker; TONE a on
 **HARM**: the band above FREQ (a one-pole high-pass, 500 Hz .. 8 kHz) driven x 4 into b^2 (even) and
 4 b^3 - 3 b (odd), mixed by EVEN; a DC blocker; TONE a one-pole; added to the dry track at AMNT x 0.5;
 LEV; MIX.
+
+## SUB, DIST, GATER, RING (ported from Optimist)
+
+Ported from Optimist (GPL-3.0-only, the User's own): `firmware/src/fx/insfx/insfx.c` (`ifx_mod`: RING,
+SUB), `firmware/src/fx/fx.c` (`dist_gains`, `dist_run`: DIST), `firmware/src/fx/insfx/gater.c` (GATER),
+rewritten in float32 for the SHARC (`dnfw.inserts.ref` spells out every operation; `dnfw.inserts.program`
+the code). First built on the one-slot design (ports3, 2026-11-09), re-ported 2026-11-10 onto the two
+slots: types 9..12, mono, in the pass before the filter, in **either slot**; each (voice slot, insert
+slot) has its own state (8 words at `STATE + 32 (2 s + j)`), so the same type in both slots of a track
+runs twice, each its own (SUB into SUB is a sub of the sub). Optimist's fades in and out (2.9 ms) and
+rest on silence are left out: MIX is the dry / wet, and a slot's state starts from zeros whenever its
+track or its type changes, as for the others.
+
+**SUB** (state: the band, its envelope, the square, two flip-flops and the trigger): the band under BAND
+(a one-pole, 110 Hz x 8^p: 110 .. 880 Hz; Optimist's ~440 Hz at BAND 85); its envelope, up at 1/8 a
+sample (~0.2 ms), down at 1/1024 (~21 ms); a Schmitt trigger at +-1/8 of the envelope turns a flip-flop on
+each rising crossing (the octave down) and, OCT 64..127, a second flip-flop on the first's rising edges
+(two octaves down); a square at the envelope's level, rounded by TONE (a one-pole, 60 Hz x 16^p: 60 ..
+960 Hz; Optimist's ~220 Hz at TONE 59); out = DRY x the voice + LEV x the square, then MIX.
+
+**DIST**: Optimist's DIST, on FUZZ's sample loop (one copy of the loop, `fz_loop`, run after FUZZ's or
+DIST's block values; DIST adds its block values only). The drive is relative to the voice's peak (FUZZ's
+envelope follower, instant up, ~0.35 s down; floor 0.1), so DRIV clips a quiet and a loud note alike:
+DRIV 0.5x .. 48x (0.5 x 96^p) of the peak into FUZZ's clip (BIAS, its static part out, the 20 Hz DC
+blocker, TONE 300 Hz .. 12 kHz); the band under LOW (a one-pole, 20 Hz x 16^p: 20 .. 320 Hz; Optimist's
+fixed 55 Hz) stays out of the clip and is added back dry; the clip's output goes back to the peak's level
+with a make-up of 1 / (1.5 min(G, 1)); LEV x 2. It fades in over ~10 ms (FUZZ's gate smoothing, the gate
+off). (FUZZ's loop gained 6 instructions a sample for it: the pre-filter and release from words, the dry
+share, the low band back.)
+
+**RING**: the voice times a sine of FREQ, 26 Hz x 100^p (26 Hz .. 2.6 kHz, Optimist's exponential knob);
+SHPE drives the sine into a clip (x 1 .. 16: towards a square); AM lifts the carrier towards 1 (0 ring
+modulation, 127 the dry); LEV; MIX.
+
+**GATER** (GATR on the page): Optimist's trance gate. PATN one of Optimist's 16 patterns of 16 steps
+(`design.GT_PAT`, `GT_PAT_NAMES`: 16TH 8TH 4TH HALF OFF8 OF16 DOT8 DOT4 TRN1..TRN4 GALP RGAL CLAV TRSL;
+index = trunc(16 p)); RATE a step's note value (1/2 1/4 1/8 1/8T 1/16 1/16T 1/32 1/64; index =
+trunc(8 p)). An open step is a pulse, open to its end, or to its middle when the next step is open too;
+closed, the gain is 1 - DPTH. The gain follows at a bounded slope: SHPE a ramp of 2^((SHPE - 127) / 16) / 2
+of a step, held to 1 ms .. 171 ms (48 .. 8192 samples). SWNG makes each pair's first step longer by 0 ..
+50 %. GATER's tables (8 rates, 16 patterns: 96 B) are loaded with the pass's state, after its words
+(`program.state_bytes`).
+
+**GATER's clock.** The phase is Q28 a step, 2^32 the 16 steps (it wraps by itself), per (voice slot,
+insert slot). It runs from the tempo: the frame copy's word 108 (`0x25c48c + 216`), BPM x 120 (120 BPM
+when 0): (BPM x 120) / 112,500 ticks of 1/96 beat a block (a 16th = 24 ticks). The ColdFire's **clock
+word** puts it on the sequencer's place: **the values' word 1** (`design.CLK`, `0x84000f1c`, between the
+change word and the packed records; ports3 had it at `+0xf7c`, which the two slots' packed records now
+fill; `ins.c ins_words` sends 0 there):
+
+    bit 31      playing
+    bits 0..11  the sequencer's place since PLAY, in ticks of 1/96 beat, modulo 3072 (8 bars)
+
+The pass acts on the word only when it differs from the one the slot last saw: playing, the phase goes
+to (place / RATE's ticks) mod 16 steps when it is more than 2 ticks off; bit 31 clear (or 0): the phase
+runs on. **No ColdFire writes it yet**, so GATER free-runs from the tempo; a writer would have to send
+word 1 on its own (the link sends the 58 words only when `ins_gen` moves).
+
+**Cost** (2026-11-10, **the model's steps**, `dnfw.perc.dsl` run mode, one step an instruction; not run on
+the SHARC runner, which read up to 20 % more than the model for the others; slot s playing track s, a
+steady block; the pass with every insert OFF is 1,751):
+
+| (model) | slot 1, one voice | both slots, one voice | slot 1, 16 voices | both slots, 16 voices |
+|---|---|---|---|---|
+| SUB | +2,143 | +4,281 | 35,692 | 69,447 |
+| DIST | +2,946 | +5,892 | 48,887 | 96,023 |
+| GATER | +1,610 | +3,220 | 27,511 | 53,271 |
+| RING | +1,836 | +3,672 | 31,127 | 60,503 |
+| (FUZZ, its loop shared) | +2,828 | +5,656 | 46,999 | 92,247 |
+
+`design.COST` (the guard's bound): one unit's model steps x 1.2 x 1.5 (SUB 3,900, DIST 5,400, GATER 2,900,
+RING 3,400), an estimate until the runner measures them.
+
+**Code** (inserts.asm, assembled with selas at sw `0xbd7000`): 1,432 instructions, 6,384 B with the four
+(936 / 4,124 B before); left out alone: SUB 139 instructions / 632 B, DIST 77 / 378 B, GATER 195 / 862 B,
+RING 76 / 336 B; none of the four 945 / 4,176 B. **It does not fit `INS_L2_SPAN` (0x1400): 6,384 + 128
+(L2_TAIL) = 6,512 B, 1,392 over.**
 
 **Cost** (the SHARC runner, the pass called alone, slot s playing track s): per **voice**, since each
 voice slot playing a track with an insert runs it (a chord on one track costs one insert a voice).
@@ -310,6 +394,18 @@ A second slot costs what the first does. With every insert OFF the three passes 
 to the one-slot build's 1,800.
 
 ## Checked, and not
+
+- SUB, DIST, GATER, RING on two slots (ins47, 2026-11-10; tests in the session's scratch
+  `ports3/ins47/test_ins47.py`): the DSL model equals `dnfw.inserts.ref` bit for bit over 260 blocks (the
+  four in slot 1 and in slot 2, the same type in both slots of a track, DIST into FUZZ, TAPE into SUB, slot 2
+  alone, types switched in either slot, knobs moved, tempo changes, clock words PLAY / jump / STOP, loud,
+  quiet and silent input, the slot map rotating with a track on two voices); two GATERs in one track's
+  slots keep their own phases; SUB peaks at f/2 and f/4, RING is the voice times its sine, DIST's shape
+  follows the peak (x 10 in, x 10 out), GATER's steps at 120 and 150 BPM and the clock word, each in slot
+  1 and slot 2; types the pass does not run (CHOR WIDE FDN8 XDLY, 13..15) untouched; builder subsets.
+  `test/test_inserts.py`, `test_inserts_post.py`, `test_inserts_c.py`, `test_inserts_bus.py` pass. Not
+  checked: the SHARC runner (step `inserts` covers the tree's four), the unit, the ColdFire page in the
+  emulator, a clock word from the ColdFire (none is written).
 
 - `test/test_inserts.py`: the DSL model equals `dnfw.inserts.ref` bit for bit over 120 blocks (two
   FUZZ tracks, knobs moved, the gate, one switched off and on, MIX 0, loud input); tracks with no

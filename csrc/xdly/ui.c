@@ -88,6 +88,18 @@ static void dlt_label(void *canvas, int x0, int y0, const char *name)
     TEXT(canvas, FONT, x0 + 12, y0, CENTRED, name);
 }
 
+/* 2026-11-09: the list popup (csrc/waverider/popup.c), the values' order */
+typedef const char *(*wpop_name_fn)(int i, int arg);
+extern void wpop_offer(int slot, const char *label, int n, int cur, wpop_name_fn name, wpop_name_fn tag, int arg);
+extern int wpop_slot_of(int x0, int y0);
+static const char *const dlt_list[2] = {"XDLY", "STOCK"};
+
+static const char *dlt_pop_name(int i, int arg)
+{
+    (void)arg;
+    return dlt_list[i];
+}
+
 void dlt_cell(void *view, void *canvas, int x0, int y0, u32 id)
 {
     if (id != TYPE_REC)
@@ -101,4 +113,5 @@ void dlt_cell(void *view, void *canvas, int x0, int y0, u32 id)
     TEXT(canvas, FONT, x0 + 12, y0 + 17, CENTRED, dlt_seen ? "STO" : "XDL");
     TEXT(canvas, FONT, x0 + 12, y0 + 9, CENTRED, dlt_seen ? "CK" : "Y");
     dlt_label(canvas, x0, y0, "TYPE");
+    wpop_offer(wpop_slot_of(x0, y0), "TYPE", 2, dlt_seen, dlt_pop_name, 0, 0);
 }

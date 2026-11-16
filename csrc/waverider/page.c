@@ -51,6 +51,11 @@ typedef unsigned char u8;
 #define KIT_POINTER (*(unsigned char *volatile *)0x800052A0u)
 #define UI_TRACK    (*(volatile u8 *)0x42432A6Cu)
 
+/* 2026-11-09: the list popup (popup.c): a list place offered as it is drawn */
+typedef const char *(*wpop_name_fn)(int i, int arg);
+extern void wpop_offer(int slot, const char *label, int n, int cur, wpop_name_fn name, wpop_name_fn tag, int arg);
+extern int wpop_slot_of(int x0, int y0);
+
 /* the strips: four columns of 25 across x 22..121 */
 #define COL0  22
 #define COLW  25
@@ -166,6 +171,84 @@ static void wr_names(void)
     names_on = key;
 }
 
+#if FLT_SETS
+static void px(void *c, int x, int y);
+/* 2026-11-10: the A2 filter machines (src/dnfw/a2f/pages.py; PING's mechanism, removed in v0.45): while
+ * the active track's filter is one of them (types 7..11, the byte at sound+0xDF), Multi-Mode's and the
+ * filter envelope's records whose meaning they change carry their names; the stock pointers go back
+ * when it is not. The same mechanism as wr_names, on records it does not touch. */
+static const char *flt_stock_long[FLT_NAMED] __attribute__((section(".data")));
+static const char *flt_stock_short[FLT_NAMED] __attribute__((section(".data")));
+static int flt_on __attribute__((section(".data"))) = -2;   /* -2: not yet run */
+
+/* -> which of flt_filters the active track's filter is (0..FLT_SETS-1), or -1 */
+static int flt_active(void)
+{
+    u8 t = UI_TRACK;
+    unsigned char *kit = KIT_POINTER;
+    if (t > 15 || !kit)
+        return -1;
+    signed char f = (signed char)kit[52u + 1163u * t + 0xDFu];
+    for (int k = 0; k < FLT_SETS; k++)
+        if (f == flt_filters[k])
+            return k;
+    return -1;
+}
+
+static void flt_names(void)
+{
+    int on = flt_active();
+    if (on == flt_on)
+        return;
+    for (int k = 0; k < FLT_NAMED; k++) {
+        u32 id = flt_named_ids[k];
+        if (flt_on == -2) {                     /* the first call: keep the stock pointers */
+            flt_stock_long[k] = NAME_LONG(id);
+            flt_stock_short[k] = NAME_SHORT(id);
+        }
+        const char *l = on >= 0 ? flt_named_long[on][k] : 0;
+        const char *sh = on >= 0 ? flt_named_short[on][k] : 0;
+        NAME_LONG(id) = l ? l : flt_stock_long[k];
+        NAME_SHORT(id) = sh ? sh : flt_stock_short[k];
+    }
+    flt_on = on;
+}
+
+/* their MODE (record 38) and MOD2 (44) cells as the mode's name, a dot a choice under it */
+static void flt_cell(void *view, void *canvas, int x0, int y0, u32 id)
+{
+    int ti = -1;
+    for (int k = 0; k < FLT_TEXT_IDS; k++)
+        if (id == flt_text_ids[k])
+            ti = k;
+    if (ti < 0)
+        return;
+    int set = flt_active();
+    if (set < 0 || !flt_type_count[set][ti])
+        return;
+    for (int x = x0; x < x0 + 24; x++)
+        for (int y = y0 + 8; y < y0 + 24; y++)
+            SET_PIXEL(canvas, x, y, 0);
+    u8 flag;
+    const int *r = RECORD(id);
+    int n = flt_type_count[set][ti], span = r[3] - r[2];
+    int v = GET_VALUE(view, id, &flag) - r[2];
+    int at = span > 0 ? v * n / span : 0;     /* as the DSP: trunc(v / span * n), the top clamped */
+    if (at < 0) at = 0;
+    if (at >= n) at = n - 1;
+    TEXT(canvas, FONT, x0 + 12, y0 + 14, CENTRED, "%.4s", flt_type_text[set][ti][at]);
+    for (int j = 0; j < n; j++) {
+        int cx = x0 + 12 + (2 * j - (n - 1)) * 3;
+        px(canvas, cx, y0 + 10);
+        if (j == at) {
+            px(canvas, cx, y0 + 11);
+            px(canvas, cx + 1, y0 + 10);
+            px(canvas, cx + 1, y0 + 11);
+        }
+    }
+}
+#endif
+
 /* v0.22: the UI loop's draw of its screen (0x4011d60a(screen, canvas), at 0x4002e4ca),
  * then, while it is up, the RECORDER over all of it (rec.c, smp_page.c) */
 #define SCREEN_DRAW ((void (*)(void *, void *))0x4011D60Au)
@@ -186,6 +269,9 @@ void wr_screen(void *screen, void *canvas)
     extern void smp_list_draw(void *canvas);
     extern void sl_screen(int phase, int covered);      /* parameter slides (csrc/slides) */
     extern void ins_title(void);
+    extern void wpop_begin(void);
+    extern void wpop_draw(void *canvas);
+    wpop_begin();                               /* the list popup: offered as the page draws */
     ins_title();                                /* the FX key's page names (csrc/inserts) */
     sl_screen(0, 0);
     SCREEN_DRAW(screen, canvas);
@@ -207,10 +293,12 @@ void wr_screen(void *screen, void *canvas)
         extern int ins_visible(void);
         extern void ins_draw(void *canvas);
         extern void ins_dots(void *canvas);
-        if (ins_visible())                      /* the per-track inserts' page (csrc/inserts) */
+        if (ins_visible()) {                    /* the per-track inserts' page (csrc/inserts) */
+            wpop_begin();                       /* (the stock page under it offers nothing of ours) */
             ins_draw(canvas);
-        else
+        } else
             ins_dots(canvas);                   /* stock's FX page: FX 1/2's dots */
+        wpop_draw(canvas);                      /* the list popup, over the page */
     }
     extern void mtr_draw(void *canvas);
     mtr_draw(canvas);                           /* the system meter's corner, over everything */
@@ -228,11 +316,17 @@ int wr_poll(void *screen)
     extern void smp_er_poll(void);
     extern void mtr_poll(void *screen);
     mtr_poll(screen);                           /* the system meter: FUNC held, every page (csrc/meter) */
+    extern void wpop_poll(void *screen);
+    wpop_poll(screen);                          /* the list popup's redraws (popup.c) */
     smp_er_poll();                              /* v0.39: ERASE MOD DATA, a step a pass (erase.c) */
     smp_boot();
     jmp_poll();                                 /* DIRECT JUMP's setting, read and written (csrc/jump) */
     rec_poll();
+    { extern void hold_poll(void); hold_poll(); }   /* DRONE's HOLD latch (csrc/hold) */
     wr_names();
+#if FLT_SETS
+    flt_names();                                /* the A2 filter machines' FLTR names */
+#endif
     extern void rvt_poll(void);
     rvt_poll();                                 /* FDN8: the Reverb page's TYPE and names (csrc/fdn8) */
     extern void dlt_poll(void);
@@ -512,7 +606,8 @@ static void smp_picture(void *c, void *view, int kind)
 
 /* Every cell widget of a stock page is drawn by 0x4006448a(view, canvas, x, y, id, ...),
  * and as each one finishes (wr_cell_tail) this is told which: parameter slides draw their
- * marks there. (Until v0.44 it also drew PING's TYPE cell as a name; v0.45: PING removed.) */
+ * marks there, and a stock list offers the list popup (popup_stock.c). (Until v0.44 it also drew
+ * PING's TYPE cell as a name; v0.45: PING removed.) */
 void wr_cell(void *view, void *canvas, int x0, int y0, u32 id)
 {
     extern void sl_cell(void *view, void *canvas, int x, int y, u32 id);
@@ -521,6 +616,23 @@ void wr_cell(void *view, void *canvas, int x0, int y0, u32 id)
     rvt_cell(view, canvas, x0, y0, id);         /* FDN8: the Reverb page's TYPE (csrc/fdn8) */
     extern void dlt_cell(void *view, void *canvas, int x, int y, u32 id);
     dlt_cell(view, canvas, x0, y0, id);         /* XDLY: the Delay page's TYPE (csrc/xdly) */
+#if FLT_SETS
+    flt_cell(view, canvas, x0, y0, id);         /* the A2 filter machines' MODE, MOD2 (2026-11-10) */
+#endif
+    extern void wpop_stock_cell(void *view, int x0, int y0, u32 id, int ours);
+    wpop_stock_cell(view, x0, y0, id, id == 122u || id == 131u);   /* a stock list: the popup (popup_stock.c) */
+}
+
+static const char *perc_name(int i, int arg)
+{
+    (void)arg;
+    return perc_machine[i];
+}
+
+static const char *perc_tag(int i, int arg)
+{
+    (void)arg;
+    return perc_what_upper[i];
 }
 
 void wr_page_draw(void *view, void *canvas)
@@ -530,13 +642,21 @@ void wr_page_draw(void *view, void *canvas)
     int mi = mnm_index(kind);                   /* v0.26: a Monomachine machine's: one page */
     int mnm = mi >= 0;
     int smp = SMP_IDX(kind) >= 0;   /* a sample machine's (v0.44: BOUNCE's kind 13 too) */
-    if (page < 0 || page >= (smp ? 2 : mnm ? 1 : WR_PAGES))
+    if (page < 0 || page >= (smp ? 2 : mnm ? mnm_npages[mi] : WR_PAGES))   /* 2026-11-10: DRONE, ANALOG2: 2 */
         page = 0;
     if (kind == 1) {                            /* PERC: the names TYPE has now */
         u8 flag;
         perc_seen = perc_of(GET_VALUE(view, PERC_TYPE_ID, &flag));
     }
     wr_names();
+    if (kind == 1)                              /* TYPE: the list popup (popup.c) */
+        for (int s = 0; s < 8; s++)
+            if (wr_ids[page][s] == PERC_TYPE_ID)
+                wpop_offer(s, "TYPE", PERC_N, perc_seen, perc_name, perc_tag, 0);
+    if (mnm) {                                  /* MODL ..: the list popup (md_page.c) */
+        extern void mnm_pop_offer(void *view, int mi);
+        mnm_pop_offer(view, mi);
+    }
     if (kind == 1) {                            /* v0.20: the Machinedrum's own screen */
         extern int md_page_draw(void *view, void *canvas, int page, int type);
         if (md_page_draw(view, canvas, page, perc_seen))
@@ -553,9 +673,12 @@ void wr_page_draw(void *view, void *canvas)
         return;
     }
     if (mnm) {                                  /* v0.27: the Monomachine's own screen */
-        extern int mnm_page_draw(void *view, void *canvas, int mi);
-        if (mnm_page_draw(view, canvas, mi))
+        extern int mnm_page_draw(void *view, void *canvas, int mi, int page);
+        if (mnm_page_draw(view, canvas, mi, page)) {
+            if (mnm_npages[mi] > 1)             /* 2026-11-10: page 2's dots */
+                PAGE_DOTS(view, canvas, mnm_npages[mi], page, 7);
             return;
+        }
     }
     if (mnm) {                                  /* the Monomachine's grid of eight (no MD OS read) */
         extern void smp_knob_page(void *view, void *canvas, const unsigned short *ids,

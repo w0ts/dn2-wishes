@@ -338,12 +338,17 @@ int smp_dsp_load(void)
     return (int)((smp_load_peak + 5u) / 10u);      /* percent */
 }
 
-int smp_skipped_any(void)                       /* any voice, within the last half second */
+/* 2026-11-10: the DSP's count of insert blocks passed through for time (unit 23, guard INS_SKIPS),
+ * and when it last moved (periods | 1, 0 never) */
+volatile u32 smp_ins_skips __attribute__((section(".data"))) = 0;
+volatile u32 smp_ins_skip_at __attribute__((section(".data"))) = 0;
+
+int smp_skipped_any(void)                       /* any voice, or an insert block, within the last half second */
 {
     for (int t = 0; t < 16; t++)
         if (smp_skipped(t))
             return 1;
-    return 0;
+    return smp_ins_skip_at && (int)(periods - smp_ins_skip_at) < 750;
 }
 
 /* track T's playhead as a fraction x POS_ONE, or -1: none (nothing playing, or no news from
@@ -533,6 +538,10 @@ void smp_tdm(u32 h)
                 smp_load_at = periods;
             }
             smp_load_seen = periods | 1u;
+        }
+        if (v[23] != smp_ins_skips) {           /* 2026-11-10: the insert blocks passed through for time */
+            smp_ins_skips = v[23];
+            smp_ins_skip_at = periods | 1u;
         }
         smp_blown_mask |= v[19];                /* v0.34: the output guard's record */
         if (v[22] != smp_blown_count) {

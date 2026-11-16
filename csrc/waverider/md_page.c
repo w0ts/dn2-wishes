@@ -169,18 +169,16 @@ static void invert(void *c, int x0, int y0, int x1, int y1)
 
 /* the left column as stock draws it (2026-11-09, docs/widgets.md): the track box (stock's frame
  * for the track, NAME3 where stock writes SYN; the guard's V<n><where> while FUNC is held just
- * after it wiped a voice) and LEV (stock's fader; "CPU" as its label while the DSP leaves voices
- * out for time, v0.30) */
+ * after it wiped a voice) and LEV (stock's fader; until 2026-11-10 "CPU" as its label while the DSP
+ * left voices out for time, v0.30: now the title bar's DSP label, on every page, csrc/meter) */
 static void left_panel(void *view, void *c, const char *name3)
 {
     extern int smp_func_held;
-    extern int smp_skipped_any(void);
     char v[4];
     if (smp_func_held && blown_text(v))
         name3 = v;
     u8 flag;
-    wg_left_panel(c, UI_TRACK, name3, GET_VALUE(view, TRACK_LEVEL_ID, &flag),
-                  smp_skipped_any() ? "CPU" : "LEV");
+    wg_left_panel(c, UI_TRACK, name3, GET_VALUE(view, TRACK_LEVEL_ID, &flag), "LEV");
 }
 
 /* p-locked: the cell inverted, as stock lights it (its widget and label) */
@@ -243,7 +241,7 @@ static int mnm_k(void *view, int j)             /* knob 0..127, as the DSP and p
 {
     u8 flag;
     int top = mnm_top[j];
-    int v = (GET_VALUE(view, perc_param_ids[j], &flag) >> 8) - mnm_lo[j];
+    int v = (GET_VALUE(view, mnm_rid[j], &flag) >> 8) - mnm_lo[j];   /* j 0..15: page 2's from 8 */
     v = v < 0 ? 0 : v > top ? top : v;
     return (v * 254 + top) / (2 * top);
 }
@@ -284,17 +282,75 @@ static const char *mnm_value_text(int mi, int j, int c)
     return mnm_choice_names[mnm_choice_at[mi][j] + c];
 }
 
-int mnm_page_draw(void *view, void *c, int mi)
+/* 2026-11-09: the list popup (popup.c) for a control whose choices are names (SOPHIE's, PLAITS'
+ * MODL): the names in the knob's order, a RETIRED one (PLAITS' GRAN) left out, as the knob steps
+ * past it. Not TUNE / FINE (numbers) nor a ROM wave's S01.. */
+typedef const char *(*wpop_name_fn)(int i, int arg);
+extern void wpop_offer(int slot, const char *label, int n, int cur, wpop_name_fn name, wpop_name_fn tag, int arg);
+
+static int mnm_listed(int mi, int j)
+{
+    int w = mnm_widget[mi][j], n = mnm_choices[mi][j];
+    return n && w != MW_KNOB && w != MW_EMPTY && w != MW_SEMIS && w != MW_CENTS
+           && n != MNM_WAVES && n != 2 * MNM_WAVES;
+}
+
+static int mnm_retired_at(int mi, int j)        /* the retired choice, or -1 */
+{
+    int cnt = mnm_choice_count(mnm_choices[mi][j]);
+    for (int c = 0; c < cnt; c++)
+        if (MNM_RETIRED(mi, j, c))
+            return c;
+    return -1;
+}
+
+static const char *mnm_pop_name(int i, int arg)     /* arg: mi * 8 + j; i: a place in the list */
+{
+    int mi = arg >> 3, j = arg & 7, r = mnm_retired_at(mi, j);
+    int c = r >= 0 && i >= r ? i + 1 : i;
+    return mnm_value_text(mi, j, c);
+}
+
+void mnm_pop_offer(void *view, int mi)
+{
+    if (mi < 0 || mi >= MNM_N)
+        return;
+    for (int s = 0; s < 8; s++) {
+        if (!mnm_listed(mi, s))
+            continue;
+        int n = mnm_choices[mi][s], cnt = mnm_choice_count(n), ch = mnm_choice_of(n, mnm_k(view, s));
+        int r = mnm_retired_at(mi, s);
+        if (ch > cnt - 1)
+            ch = cnt - 1;
+        if (r >= 0) {                           /* the list without it; the knob there shows the one before */
+            cnt--;
+            if (ch >= r)
+                ch--;
+        }
+        wpop_offer(s, mnm_labels[mi][s], cnt, ch, mnm_pop_name, 0, mi * 8 + s);
+    }
+}
+
+int mnm_page_draw(void *view, void *c, int mi, int page)
 {
     if (!ok() || mi < 0 || mi >= MNM_N)
         return 0;
     fill(c, 0, 0, 127, 53, 0);
+    int base = page > 0 && page < mnm_npages[mi] ? 8 * page : 0;
     for (int s = 0; s < 8; s++) {
-        int w = mnm_widget[mi][s];
-        const char *name = mnm_labels[mi][s];
+        int j = base + s;
+        int w = mnm_widget[mi][j];
+        const char *name = mnm_labels[mi][j];
         if (w == MW_EMPTY || (name[0] == '-' && !name[1]))
             continue;
-        int k = mnm_k(view, s), n = mnm_choices[mi][s];
+        int k = mnm_k(view, j), n = mnm_choices[mi][j];
+        if (j >= 8 && n && n != MNM_PCH) {     /* page 2: as the DSP, trunc(v / top x n) (the knob's 128ths differ) */
+            u8 fl;
+            int v = (GET_VALUE(view, mnm_rid[j], &fl) >> 8) - mnm_lo[j], top = mnm_top[j];
+            v = v < 0 ? 0 : v > top ? top : v;
+            k = (((v * n) / top) * 128 + 64) / n;   /* a knob whose (k n) >> 7 is that choice */
+            if (k > 127) k = 127;
+        }
         char vb[8];
         extern int smp_values_held(void);
         if (smp_values_held()) {                   /* v0.35: SYN held: the value (O14): a knob's */
@@ -303,7 +359,7 @@ int mnm_page_draw(void *view, void *c, int mi)
                 name = vb;
             } else {
                 int cnt = mnm_choice_count(n), ch = mnm_choice_of(n, k);
-                name = mnm_value_text(mi, s, ch > cnt - 1 ? cnt - 1 : ch);
+                name = mnm_value_text(mi, j, ch > cnt - 1 ? cnt - 1 : ch);
             }
         }
         wg_label(c, s, name);
@@ -311,11 +367,11 @@ int mnm_page_draw(void *view, void *c, int mi)
          * (MODL: SWRM, TUNE: +7, FINE: +28c), else the knob */
         if (w != MW_KNOB && n) {
             int cnt = mnm_choice_count(n), ch = mnm_choice_of(n, k);
-            wg_choice(c, s, mnm_value_text(mi, s, ch > cnt - 1 ? cnt - 1 : ch));
+            wg_choice(c, s, mnm_value_text(mi, j, ch > cnt - 1 ? cnt - 1 : ch));
         } else {
             wg_knob(c, s, k);
         }
-        if (locked(view, perc_param_ids[s]))   /* p-locked, as stock lights it */
+        if (locked(view, mnm_rid[j]))   /* p-locked, as stock lights it */
             wg_lit(c, s);
     }
     left_panel(view, c, mnm_name_short[mi]);

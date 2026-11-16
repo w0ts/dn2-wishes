@@ -21,6 +21,13 @@ FUZZ (K1 DRIV, K2 TONE, K3 BIAS, K4 PRE, K5 GATE, K6 LEV), per sample x:
     t += (d - t) c                                         (TONE)
     x' = x + (t lev gg - x) mod
 A track whose M.SEL changes starts its insert from zeros.
+
+SUB, DIST, GATER and RING (2026-11-09) are ported from Optimist (GPL-3.0-only, the User's own):
+firmware/src/fx/insfx/insfx.c (ifx_mod: RING, SUB), firmware/src/fx/fx.c (dist_gains, dist_run: DIST),
+firmware/src/fx/insfx/gater.c (GATER, its patterns IGT_PAT); rewritten here in float32, what changed in
+docs/inserts.md. DIST runs FUZZ's sample loop (fz_loop) with its own block values. 2026-11-10: types
+9..12 on the two-slot design, in either slot, each (voice slot, insert slot) its own state; GATER's
+clock word at design.CLK (the values' word 1).
 """
 
 from __future__ import annotations
@@ -37,7 +44,9 @@ class Ref:
         self.last = [(0, 0)] * D.RECORDS         # per (voice slot, insert slot): (type, track) it last ran
         self.ring = [np.zeros(D.TP_RING, F) for _ in range(D.RECORDS)]
 
-    def block(self, par: bytes, bufs, route=None) -> None:
+    def block(self, par: bytes, bufs, route=None, tempo: int = 0, clk: int = 0) -> None:
+        """TEMPO: the frame's BPM x 120 (0: 120 BPM); CLK: the ColdFire's clock word (design.CLK)"""
+        self.tempo, self.clk = tempo & 0xFFFF, clk & 0xFFFFFFFF
         for i in range(D.RECORDS):                 # i = 2 t + j: voice slot t, insert slot j
             t, j = i >> 1, i & 1
             tr = t if route is None else route[t] & 0xFFFF
@@ -61,37 +70,67 @@ class Ref:
                 self.fold(self.st[i], p, bufs[t])
             elif sel == D.HARM:
                 self.harm(self.st[i], p, bufs[t])
+            elif sel == D.SUB:
+                self.sub(self.st[i], p, bufs[t])
+            elif sel == D.DIST:
+                self.dist(self.st[i], p, bufs[t])
+            elif sel == D.GATER:
+                self.gater(self.st[i], p, bufs[t])
+            elif sel == D.RING:
+                self.ring_mod(self.st[i], p, bufs[t])
 
     def fuzz(self, s, p, buf) -> None:
         mod, drv, tone, bias, pre, gate, lev = p
         g = drv * F(D.FZ_DRIVE_OCT)
         g = exp2(g)
-        c = tone * F(D.LOG2_TONE_SPAN)
-        c = exp2(c)
-        c = c * F(D.W_TONE)
-        c = exp2(c)
-        c = F(1.0) - c
+        k = pre * F(D.FZ_PRE_MAX)
+        thr = gate * F(D.FZ_GATE_MAX)
+        v = dict(g=g, k=k, thr=thr, pa=F(D.FZ_PRE_A), rel=F(D.FZ_ENV_REL), a1=F(1.0), lv=lev, kl=F(0.0))
+        self.fz_loop(s, v, tone, bias, mod, buf)
+
+    def dist(self, s, p, buf) -> None:
+        """DIST: FUZZ's loop, the drive over the peak (s1, the follower), the low band dry (s0)"""
+        mod, drv, tone, bias, low, lev, _ = p
+        gd = drv * F(D.DS_DRIVE_OCT)
+        gd = exp2(gd)
+        gd = gd * F(D.DS_DRIVE_LO)
+        pk = max(F(s[1]), F(D.DS_FLOOR))
+        g = recip(pk)
+        g = gd * g
+        m = min(gd, F(1.0))
+        m = m * F(1.5)
+        m = recip(m)
+        lv = lev * F(D.DS_LEV_MAX)
+        lv = lv * pk
+        lv = lv * m
+        pa = self.pole_c(low, D.W_DL, D.LOG2_DL_SPAN)
+        v = dict(g=g, k=F(1.0), thr=F(0.0), pa=pa, rel=F(D.DS_REL), a1=F(0.0), lv=lv, kl=F(1.0))
+        self.fz_loop(s, v, tone, bias, mod, buf)
+
+    def fz_loop(self, s, v, tone, bias, mod, buf) -> None:
+        """FUZZ's and DIST's sample loop; state s0 lp, s1 env, s2 gg, s3 dx, s4 dy, s5 tl"""
+        g, k, thr, pa, rel, a1, lev, kl = (v[n] for n in ("g", "k", "thr", "pa", "rel", "a1", "lv", "kl"))
+        c = self.tone_c(tone)
         b = bias * F(D.FZ_BIAS_MAX)
         y0 = b * b
         y0 = y0 * b
         y0 = y0 * F(0.5)
         b15 = b * F(1.5)
         y0 = b15 - y0
-        k = pre * F(D.FZ_PRE_MAX)
-        thr = gate * F(D.FZ_GATE_MAX)
         lp, env, gg, dx, dy, tl = s[0], s[1], s[2], s[3], s[4], s[5]
         for j in range(D.BLOCK):
             x = F(buf[j])
             x = max(x, F(-D.IN_MAX))
             x = min(x, F(D.IN_MAX))
             u = x - lp
-            u = u * F(D.FZ_PRE_A)
+            u = u * pa
             lp = lp + u
             h = x - lp
             h = h * k
-            xe = x + h
+            xe = x * a1
+            xe = xe + h
             a = max(x, F(0.0) - x)
-            env = env * F(D.FZ_ENV_REL)
+            env = env * rel
             env = max(a, env)
             tg = F(1.0)
             if thr > F(0.0) and not env > thr:
@@ -99,14 +138,14 @@ class Ref:
             tg = tg - gg
             tg = tg * F(D.FZ_GATE_K)
             gg = gg + tg
-            v = xe * g
-            v = v + b
-            v = max(v, F(-1.0))
-            v = min(v, F(1.0))
-            v3 = v * v
-            v3 = v3 * v
+            vv = xe * g
+            vv = vv + b
+            vv = max(vv, F(-1.0))
+            vv = min(vv, F(1.0))
+            v3 = vv * vv
+            v3 = v3 * vv
             v3 = v3 * F(0.5)
-            y = v * F(1.5)
+            y = vv * F(1.5)
             y = y - v3
             y = y - y0
             d = y - dx
@@ -118,6 +157,8 @@ class Ref:
             tl = tl + w
             o = tl * lev
             o = o * gg
+            lo = lp * kl
+            o = o + lo
             o = o - x
             o = o * mod
             buf[j] = x + o
@@ -194,13 +235,18 @@ class Ref:
         s[0], s[1], s[2], s[3], s[4], s[5] = lp, phw, phf, d1, seed, wp
 
     @staticmethod
-    def tone_c(p) -> np.float32:
-        """a one-pole's coefficient at 300 Hz x 40^p (FUZZ's TONE)"""
-        c = p * F(D.LOG2_TONE_SPAN)
+    def pole_c(p, w, l2) -> np.float32:
+        """a one-pole's coefficient at f_lo x span^p (w = -2 pi f_lo / FS / ln 2, l2 = log2(span))"""
+        c = p * F(l2)
         c = exp2(c)
-        c = c * F(D.W_TONE)
+        c = c * F(w)
         c = exp2(c)
         return F(1.0) - c
+
+    @classmethod
+    def tone_c(cls, p) -> np.float32:
+        """a one-pole's coefficient at 300 Hz x 40^p (FUZZ's TONE)"""
+        return cls.pole_c(p, D.W_TONE, D.LOG2_TONE_SPAN)
 
     def fold(self, s, p, buf) -> None:
         """FOLD: state s0 dx, s1 dy (the DC blocker), s2 the tone one-pole"""
@@ -288,3 +334,152 @@ class Ref:
             y = y * mod
             buf[j] = x + y
         s[0], s[1], s[2], s[3] = lp, dx, dy, tl
+
+    def sub(self, s, p, buf) -> None:
+        """SUB: state s0 the band's one-pole, s1 its envelope, s2 the rounded square, s3 the flip-flop,
+        s4 the trigger (armed 0, fired 1), s5 the second flip-flop (two octaves)"""
+        mod, lev, band, tone, octv, dry, _ = p
+        a = self.pole_c(band, D.W_SB, D.LOG2_SB_SPAN)
+        c = self.pole_c(tone, D.W_ST, D.LOG2_ST_SPAN)
+        o = F(1.0) if octv >= F(0.5) else F(0.0)
+        lp, e, l1, f1, tr, f2 = s[0], s[1], s[2], s[3], s[4], s[5]
+        for j in range(D.BLOCK):
+            x = F(buf[j])
+            x = max(x, F(-D.IN_MAX))
+            x = min(x, F(D.IN_MAX))
+            u = x - lp
+            u = u * a
+            lp = lp + u
+            al = max(lp, F(0.0) - lp)
+            d = al - e
+            kk = F(D.SB_UP) if al > e else F(D.SB_DN)
+            d = d * kk
+            e = e + d
+            th = e * F(D.SB_THR)
+            if tr == F(0.0):
+                if lp > th:
+                    f1 = F(1.0) - f1
+                    tr = F(1.0)
+                    if f1 > F(0.5):
+                        f2 = F(1.0) - f2
+            else:
+                nth = F(0.0) - th
+                if lp < nth:
+                    tr = F(0.0)
+            q = f2 - f1
+            q = q * o
+            q = f1 + q
+            q = q * F(2.0)
+            q = q - F(1.0)
+            q = e * q
+            w = q - l1
+            w = w * c
+            l1 = l1 + w
+            y = x * dry
+            z = l1 * lev
+            y = y + z
+            y = y - x
+            y = y * mod
+            buf[j] = x + y
+        s[0], s[1], s[2], s[3], s[4], s[5] = lp, e, l1, f1, tr, f2
+
+    def ring_mod(self, s, p, buf) -> None:
+        """RING: state s0 the carrier's phase (of 2^32)"""
+        mod, freq, shpe, am, lev, _, _ = p
+        hz = freq * F(D.LOG2_RG_SPAN)
+        hz = exp2(hz)
+        hz = hz * F(D.RG_LO * D.RG_PH_PER_HZ)
+        inc = trunc(hz)
+        sh = shpe * F(D.RG_SHAPE_MAX)
+        sh = sh + F(1.0)
+        ph = int(s[0]) & 0xFFFFFFFF
+        for j in range(D.BLOCK):
+            x = F(buf[j])
+            x = max(x, F(-D.IN_MAX))
+            x = min(x, F(D.IN_MAX))
+            c = sine(ph)
+            ph = (ph + inc) & 0xFFFFFFFF
+            c = c * sh
+            c = max(c, F(-1.0))
+            c = min(c, F(1.0))
+            t = F(1.0) - c
+            t = t * am
+            c = c + t
+            y = x * c
+            y = y * lev
+            y = y - x
+            y = y * mod
+            buf[j] = x + y
+        s[0] = ph
+
+    def gater(self, s, p, buf) -> None:
+        """GATER: state s0 the phase (Q28 a step, 2^32 the 16 steps), s1 the closure (0 open .. DPTH),
+        s2 the clock word it last saw"""
+        mod, dpth, patn, rate, shpe, swng, _ = p
+        bpm = self.tempo if self.tempo else 120 * 120
+        tpb = F(bpm) * F(D.TICKS_PER_BPM120)
+        r = min(trunc(rate * F(len(D.GT_RATE))), len(D.GT_RATE) - 1)
+        inv = F(1.0 / D.GT_RATE[r])
+        ds = tpb * inv                               # steps a block
+        ds = ds * F(2.0 ** 23)
+        incs = trunc(ds)                             # a sample's step, Q28
+        sl = F(float(incs) * 2.0 ** -27)
+        ex = F(1.0) - shpe
+        ex = ex * F(D.GT_SHAPE_OCT)
+        ex = exp2(ex)
+        sl = sl * ex
+        sl = max(sl, F(D.GT_SMIN))
+        sl = min(sl, F(D.GT_SMAX))
+        nsl = F(0.0) - sl
+        pat = D.GT_PAT[min(trunc(patn * F(16.0)), 15)]
+        nx = ((pat >> 1) | (pat << 15)) & 0xFFFF
+        b1 = swng * F(D.GT_SWING_MAX)
+        b1 = b1 + F(1.0)
+        b1 = trunc(b1 * F(float(D.GT_STEP)))
+        h0 = b1 >> 1
+        h1 = h0 + D.GT_STEP
+        ph = int(s[0]) & 0xFFFFFFFF
+        w = self.clk
+        if w != (int(s[2]) & 0xFFFFFFFF):
+            s[2] = w
+            if w >> 31:
+                tf = F(float(w & 0xFFF)) * inv
+                n = trunc(tf)
+                f = tf - F(n)
+                f = f * F(float(D.GT_STEP))
+                tgt = ((n << 28) + trunc(f)) & 0xFFFFFFFF
+                tol = inv * F(D.GT_TOL_TICKS * float(D.GT_STEP))
+                tol = trunc(tol)
+                dv = (ph - tgt) & 0xFFFFFFFF
+                dv = dv - (1 << 32) if dv >> 31 else dv
+                if dv > tol or dv < -tol:
+                    ph = tgt
+        c = F(s[1])
+        for j in range(D.BLOCK):
+            x = F(buf[j])
+            x = max(x, F(-D.IN_MAX))
+            x = min(x, F(D.IN_MAX))
+            q = ph & (D.GT_PAIR - 1)
+            k = (ph >> 28) & 14
+            if q < b1:
+                end, full = h0, b1
+            else:
+                k += 1
+                end, full = h1, D.GT_PAIR
+            m = 1 << k
+            if not nx & m:
+                end = full
+            tg = dpth
+            if pat & m and q < end:
+                tg = F(0.0)
+            tg = tg - c
+            tg = min(tg, sl)
+            tg = max(tg, nsl)
+            c = c + tg
+            g = F(1.0) - c
+            y = x * g
+            y = y - x
+            y = y * mod
+            buf[j] = x + y
+            ph = (ph + incs) & 0xFFFFFFFF
+        s[0], s[1] = ph, c

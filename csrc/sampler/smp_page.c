@@ -1921,6 +1921,25 @@ void smp_fb_draw(void *c, int samp)
     }
 }
 
+/* 2026-11-09: the list popup (csrc/waverider/popup.c): PLAY's and MODE's four names */
+typedef const char *(*wpop_name_fn)(int i, int arg);
+extern void wpop_offer(int slot, const char *label, int n, int cur, wpop_name_fn name, wpop_name_fn tag, int arg);
+
+static const char *play_name(int i, int arg)
+{
+    (void)arg;
+    return smp_play[i];
+}
+
+static void pop_offer(void *view, int kind, const u32 *ids, int places)
+{
+    for (int i = 0; i < places; i++)
+        if (ids[i] && widget_of(ids[i], kind) == W_PLAY) {
+            int k = value(view, ids[i], 0) * 4 / 128;
+            wpop_offer(i, NAME_SHORT(ids[i]), 4, k > 3 ? 3 : k, play_name, 0, 0);
+        }
+}
+
 void smp_page_draw(void *view, void *c, int kind, int wave)
 {
     u32 ids[8];
@@ -1931,6 +1950,7 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
     for (int i = 0; i < 8; i++)
         ids[i] = smp_ids[SMP_IDX(kind)][i];
     smp_box(c);
+    pop_offer(view, kind, ids, wave ? 4 : 8);
     if (!wave) {                                /* page 1: the widgets and their labels */
         for (int i = 0; i < 8; i++) {
             cell_i = i;

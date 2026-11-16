@@ -13,9 +13,16 @@ K1..K6), which this pass, the post pass and the bus pass read. Then for each voi
 slot j (i = 2 s + j, slot 1 before slot 2): the track s plays, its record 2 tr + j; when that is a built
 type, its state (8 words at STATE + 32 i, zeros when the type or the track changed), the insert run over
 the voice's buffer in place. OFF (and a type this pass does not run) costs a load and a compare.
+
+SUB, DIST, GATER, RING (types 9..12, either slot): ported from Optimist (GPL-3.0-only, the User's own),
+firmware/src/fx/insfx/insfx.c, fx.c, insfx/gater.c (dnfw.inserts.ref, docs/inserts.md). DIST shares
+FUZZ's loop (fz_loop, emitted once). Each is a builder part (design.PART): left out, it is not emitted
+and plays as OFF.
 """
 
 from __future__ import annotations
+
+import struct
 
 from ..fdn8 import program as FP
 from ..perc import guard as G
@@ -28,36 +35,101 @@ SCRATCH = STATE + STATE_BYTES    # the pass's own words
 TABLE = D.TABLE                  # the unpacked records (design.TABLE), and the last change word seen
 _NAMES = ["t", "i", "j", "rec", "w1", "sa", "buf", "gn"] + [f"p{k}" for k in range(7)] + [f"s{k}" for k in range(8)] + [
     "g", "c", "b", "y0", "k", "thr", "cnt",
-    "gd", "step", "lvl", "d", "rb", "sel", "tr"]
+    "gd", "step", "lvl", "d", "rb", "sel", "tr",
+    # SUB DIST GATER RING (ports3, 2026-11-09): FUZZ's loop's values (DIST shares it), GATER's block values
+    "pa", "rel", "a1", "lv", "kl", "fz", "inv", "inc", "sl", "nsl", "pat", "nx", "b1", "h0", "h1"]
 C = {n: SCRATCH + 4 * k for k, n in enumerate(_NAMES)}
 assert len(C) == len(_NAMES)
 SCRATCH_BYTES = 4 * len(_NAMES)
-
-
-assert SCRATCH + SCRATCH_BYTES <= TABLE
+# GATER's tables after the words: RATE's 1 / ticks (float32), the 16 patterns (loaded with the state)
+RATE_TAB = SCRATCH + SCRATCH_BYTES
+PAT_TAB = RATE_TAB + 4 * len(D.GT_RATE)
+TABLE_WORDS = [struct.unpack("<I", struct.pack("<f", 1.0 / d))[0] for d in D.GT_RATE] + list(D.GT_PAT)
+assert PAT_TAB + 4 * len(D.GT_PAT) <= TABLE
 
 
 def state_bytes() -> bytes:
-    """the state, the pass's words, then the unpacked records and the last change word: zeros"""
-    return bytes(TABLE + D.TABLE_BYTES - STATE)
+    """the state and the pass's words (zeros), GATER's tables, then the unpacked records and the last
+    change word (zeros)"""
+    head = bytes(RATE_TAB - STATE) + struct.pack(f"<{len(TABLE_WORDS)}I", *TABLE_WORDS)
+    return head + bytes(TABLE + D.TABLE_BYTES - STATE - len(head))
 
 
 def fuzz(p: Prog) -> None:
-    """FUZZ over the buffer at C['buf'] (ref.Ref.fuzz); values p0 MIX, p1..p6, state s0..s5"""
+    """FUZZ's block values (ref.Ref.fuzz); fz_loop runs it. Values p0 MIX, p1..p6"""
     p.ld(0, C["p1"])
     p.fconst(1, D.FZ_DRIVE_OCT)
     p.fop(0, 0, "*", 1)
     FP.exp2(p)
     p.st(C["g"], 0)
-    p.ld(0, C["p2"])
-    p.fconst(1, D.LOG2_TONE_SPAN)
+    p.ld(0, C["p4"])
+    p.fconst(1, D.FZ_PRE_MAX)
+    p.fop(0, 0, "*", 1)
+    p.st(C["k"], 0)
+    p.ld(0, C["p5"])
+    p.fconst(1, D.FZ_GATE_MAX)
+    p.fop(0, 0, "*", 1)
+    p.st(C["thr"], 0)
+    p.fconst(0, D.FZ_PRE_A)
+    p.st(C["pa"], 0)
+    p.fconst(0, D.FZ_ENV_REL)
+    p.st(C["rel"], 0)
+    p.fconst(0, 1.0)
+    p.st(C["a1"], 0)
+    p.st(C["fz"], 0)
+    p.ld(0, C["p6"])
+    p.st(C["lv"], 0)
+    p.fconst(0, 0.0)
+    p.st(C["kl"], 0)
+
+
+def dist(p: Prog) -> None:
+    """DIST's block values (ref.Ref.dist): the drive over the peak (s1), the low band (s0) dry"""
+    p.ld(0, C["p1"])
+    p.fconst(1, D.DS_DRIVE_OCT)
     p.fop(0, 0, "*", 1)
     FP.exp2(p)
-    p.fconst(1, D.W_TONE)
+    p.fconst(1, D.DS_DRIVE_LO)
     p.fop(0, 0, "*", 1)
-    FP.exp2(p)
+    p.st(C["gd"], 0)
+    p.ld(0, C["s1"])
+    p.fconst(1, D.DS_FLOOR)
+    p.fop(0, 0, "MAX", 1)
+    p.st(C["lvl"], 0)                            # the peak
+    FP.recip(p)
+    p.ld(1, C["gd"])
+    p.fop(0, 1, "*", 0)
+    p.st(C["g"], 0)
+    p.ld(0, C["gd"])
     p.fconst(1, 1.0)
-    p.fop(0, 1, "-", 0)
+    p.fop(0, 0, "MIN", 1)
+    p.fconst(1, 1.5)
+    p.fop(0, 0, "*", 1)
+    FP.recip(p)                                  # the make-up
+    p.ld(1, C["p5"])
+    p.fconst(2, D.DS_LEV_MAX)
+    p.fop(1, 1, "*", 2)
+    p.ld(2, C["lvl"])
+    p.fop(1, 1, "*", 2)
+    p.fop(1, 1, "*", 0)
+    p.st(C["lv"], 1)
+    pole_c(p, "p4", D.W_DL, D.LOG2_DL_SPAN)
+    p.st(C["pa"], 0)
+    p.fconst(0, 1.0)
+    p.st(C["k"], 0)
+    p.st(C["kl"], 0)
+    p.st(C["fz"], 0)
+    p.fconst(0, 0.0)
+    p.st(C["thr"], 0)
+    p.st(C["a1"], 0)
+    p.fconst(0, D.DS_REL)
+    p.st(C["rel"], 0)
+
+
+def fz_loop(p: Prog) -> None:
+    """FUZZ's and DIST's loop over the buffer at C['buf'] (ref.Ref.fz_loop): TONE p2, BIAS p3; state
+    s0 lp, s1 env, s2 gg, s3 dx, s4 dy, s5 tl"""
+    tone_c(p, "p2")
     p.st(C["c"], 0)
     p.ld(0, C["p3"])
     p.fconst(1, D.FZ_BIAS_MAX)
@@ -71,14 +143,6 @@ def fuzz(p: Prog) -> None:
     p.fop(3, 0, "*", 1)
     p.fop(2, 3, "-", 2)
     p.st(C["y0"], 2)
-    p.ld(0, C["p4"])
-    p.fconst(1, D.FZ_PRE_MAX)
-    p.fop(0, 0, "*", 1)
-    p.st(C["k"], 0)
-    p.ld(0, C["p5"])
-    p.fconst(1, D.FZ_GATE_MAX)
-    p.fop(0, 0, "*", 1)
-    p.st(C["thr"], 0)
     p.ld(4, C["buf"])
     p.seti(0, 4)
     p.seti(1, 4)
@@ -91,19 +155,21 @@ def fuzz(p: Prog) -> None:
         p.fop(0, 0, "MIN", 1)
         p.ld(2, C["s0"])                         # lp
         p.fop(3, 0, "-", 2)
-        p.fconst(1, D.FZ_PRE_A)
+        p.ld(1, C["pa"])
         p.fop(3, 3, "*", 1)
         p.fop(2, 2, "+", 3)
         p.st(C["s0"], 2)
         p.fop(3, 0, "-", 2)
         p.ld(1, C["k"])
         p.fop(3, 3, "*", 1)
-        p.fop(5, 0, "+", 3)                      # xe
+        p.ld(1, C["a1"])
+        p.fop(5, 0, "*", 1)
+        p.fop(5, 5, "+", 3)                      # xe
         p.fconst(1, 0.0)
         p.fop(1, 1, "-", 0)
         p.fop(6, 0, "MAX", 1)                    # a
         p.ld(2, C["s1"])
-        p.fconst(1, D.FZ_ENV_REL)
+        p.ld(1, C["rel"])
         p.fop(2, 2, "*", 1)
         p.fop(2, 6, "MAX", 2)                    # env
         p.st(C["s1"], 2)
@@ -151,10 +217,14 @@ def fuzz(p: Prog) -> None:
         p.fop(3, 3, "*", 1)
         p.fop(2, 2, "+", 3)
         p.st(C["s5"], 2)                         # tl
-        p.ld(1, C["p6"])
+        p.ld(1, C["lv"])
         p.fop(3, 2, "*", 1)
         p.ld(1, C["s2"])
         p.fop(3, 3, "*", 1)
+        p.ld(2, C["s0"])
+        p.ld(1, C["kl"])
+        p.fop(2, 2, "*", 1)
+        p.fop(3, 3, "+", 2)                      # (DIST: the low band back, dry)
         p.fop(3, 3, "-", 0)
         p.ld(1, C["p0"])
         p.fop(3, 3, "*", 1)
@@ -325,17 +395,22 @@ def tape(p: Prog) -> None:
     p.loop_r(11, D.BLOCK, one)
 
 
-def tone_c(p: Prog, src: str) -> None:
-    """F0 = a one-pole's coefficient at 300 Hz x 40^C[src] (ref.Ref.tone_c)"""
+def pole_c(p: Prog, src: str, w: float, l2: float) -> None:
+    """F0 = a one-pole's coefficient at f_lo x span^C[src] (ref.Ref.pole_c)"""
     p.ld(0, C[src])
-    p.fconst(1, D.LOG2_TONE_SPAN)
+    p.fconst(1, l2)
     p.fop(0, 0, "*", 1)
     FP.exp2(p)
-    p.fconst(1, D.W_TONE)
+    p.fconst(1, w)
     p.fop(0, 0, "*", 1)
     FP.exp2(p)
     p.fconst(1, 1.0)
     p.fop(0, 1, "-", 0)
+
+
+def tone_c(p: Prog, src: str) -> None:
+    """F0 = a one-pole's coefficient at 300 Hz x 40^C[src] (ref.Ref.tone_c)"""
+    pole_c(p, src, D.W_TONE, D.LOG2_TONE_SPAN)
 
 
 def clamp_in(p: Prog) -> None:
@@ -496,6 +571,312 @@ def harm(p: Prog) -> None:
     p.loop_r(11, D.BLOCK, one)
 
 
+def sub(p: Prog) -> None:
+    """SUB (ref.Ref.sub); p1 LEV, p2 BAND, p3 TONE, p4 OCT, p5 DRY; s0 lp, s1 e, s2 l1, s3 ff, s4 trig, s5 ff2"""
+    pole_c(p, "p2", D.W_SB, D.LOG2_SB_SPAN)
+    p.st(C["g"], 0)
+    pole_c(p, "p3", D.W_ST, D.LOG2_ST_SPAN)
+    p.st(C["c"], 0)
+    p.ld(0, C["p4"])
+    p.fconst(1, 0.5)
+    p.fconst(2, 0.0)
+    p.if_(0, "GE", 1, lambda: p.fconst(2, 1.0))
+    p.st(C["b"], 2)                              # two octaves down
+    p.ld(4, C["buf"])
+    p.seti(0, 4)
+    p.seti(1, 4)
+
+    def fire():                                  # a rising crossing: the flip-flop turns, the trigger fires
+        p.ld(7, C["s3"])
+        p.fconst(1, 1.0)
+        p.fop(7, 1, "-", 7)
+        p.st(C["s3"], 7)
+        p.st(C["s4"], 1)
+
+        def second():
+            p.ld(7, C["s5"])
+            p.fconst(1, 1.0)
+            p.fop(7, 1, "-", 7)
+            p.st(C["s5"], 7)
+        p.fconst(1, 0.5)
+        p.if_(7, "GT", 1, second)
+
+    def rearm():
+        p.fconst(1, 0.0)
+        p.fop(1, 1, "-", 5)
+
+        def armed():
+            p.fconst(1, 0.0)
+            p.st(C["s4"], 1)
+        p.if_(2, "LT", 1, armed)
+
+    def one():
+        clamp_in(p)
+        p.ld(2, C["s0"])
+        p.fop(3, 0, "-", 2)
+        p.ld(1, C["g"])
+        p.fop(3, 3, "*", 1)
+        p.fop(2, 2, "+", 3)
+        p.st(C["s0"], 2)                         # lp
+        p.fconst(1, 0.0)
+        p.fop(1, 1, "-", 2)
+        p.fop(3, 2, "MAX", 1)                    # |lp|
+        p.ld(4, C["s1"])
+        p.fop(5, 3, "-", 4)
+        p.fconst(6, D.SB_DN)
+        p.if_(3, "GT", 4, lambda: p.fconst(6, D.SB_UP))
+        p.fop(5, 5, "*", 6)
+        p.fop(4, 4, "+", 5)
+        p.st(C["s1"], 4)                         # e
+        p.fconst(1, D.SB_THR)
+        p.fop(5, 4, "*", 1)                      # th
+        p.ld(6, C["s4"])
+        p.ifz(6, "EQ", lambda: p.if_(2, "GT", 5, fire), rearm, kind="f")
+        p.ld(6, C["s3"])
+        p.ld(7, C["s5"])
+        p.fop(7, 7, "-", 6)
+        p.ld(1, C["b"])
+        p.fop(7, 7, "*", 1)
+        p.fop(7, 6, "+", 7)
+        p.fconst(1, 2.0)
+        p.fop(7, 7, "*", 1)
+        p.fconst(1, 1.0)
+        p.fop(7, 7, "-", 1)
+        p.fop(7, 4, "*", 7)                      # the square at e
+        p.ld(2, C["s2"])
+        p.fop(7, 7, "-", 2)
+        p.ld(1, C["c"])
+        p.fop(7, 7, "*", 1)
+        p.fop(2, 2, "+", 7)
+        p.st(C["s2"], 2)                         # rounded
+        p.ld(1, C["p5"])
+        p.fop(3, 0, "*", 1)
+        p.ld(1, C["p1"])
+        p.fop(2, 2, "*", 1)
+        p.fop(3, 3, "+", 2)
+        p.fop(3, 3, "-", 0)
+        p.ld(1, C["p0"])
+        p.fop(3, 3, "*", 1)
+        p.fop(3, 0, "+", 3)
+        p.stpost(1, 3)
+    p.loop_r(11, D.BLOCK, one)
+
+
+def ring(p: Prog) -> None:
+    """RING (ref.Ref.ring_mod); p1 FREQ, p2 SHPE, p3 AM, p4 LEV; s0 the phase"""
+    p.ld(0, C["p1"])
+    p.fconst(1, D.LOG2_RG_SPAN)
+    p.fop(0, 0, "*", 1)
+    FP.exp2(p)
+    p.fconst(1, D.RG_LO * D.RG_PH_PER_HZ)
+    p.fop(0, 0, "*", 1)
+    p.trunc(0, 0)
+    p.st(C["inc"], 0)
+    p.ld(0, C["p2"])
+    p.fconst(1, D.RG_SHAPE_MAX)
+    p.fop(0, 0, "*", 1)
+    p.fconst(1, 1.0)
+    p.fop(0, 0, "+", 1)
+    p.st(C["g"], 0)
+    p.ld(4, C["buf"])
+    p.seti(0, 4)
+    p.seti(1, 4)
+    p.ld(8, C["s0"])
+    p.ld(9, C["inc"])
+
+    def one():
+        clamp_in(p)
+        p.ipass(0, 8)
+        FP.sine(p)
+        p.iop(8, 8, "+", 9)
+        p.ld(1, C["g"])
+        p.fop(0, 0, "*", 1)
+        p.fconst(1, -1.0)
+        p.fop(0, 0, "MAX", 1)
+        p.fconst(1, 1.0)
+        p.fop(0, 0, "MIN", 1)
+        p.fop(2, 1, "-", 0)
+        p.ld(1, C["p3"])
+        p.fop(2, 2, "*", 1)
+        p.fop(0, 0, "+", 2)                      # the carrier
+        p.ld(5, C["k"])
+        p.fop(3, 5, "*", 0)
+        p.ld(1, C["p4"])
+        p.fop(3, 3, "*", 1)
+        p.fop(3, 3, "-", 5)
+        p.ld(1, C["p0"])
+        p.fop(3, 3, "*", 1)
+        p.fop(3, 5, "+", 3)
+        p.stpost(1, 3)
+    p.loop_r(11, D.BLOCK, one)
+    p.st(C["s0"], 8)
+
+
+def gater(p: Prog) -> None:
+    """GATER (ref.Ref.gater); p1 DPTH, p2 PATN, p3 RATE, p4 SHPE, p5 SWNG; s0 the phase (Q28 a step),
+    s1 the closure, s2 the clock word last seen (design.CLK)"""
+    p.ld(0, D.TEMPO)
+    p.iconst(12, 0xFFFF)
+    p.iop(0, 0, "AND", 12)
+    p.ifz(0, "EQ", lambda: p.iconst(0, 120 * 120))
+    p.iconst(1, 0)
+    p.float_(0, 0, 1)
+    p.fconst(1, D.TICKS_PER_BPM120)
+    p.fop(0, 0, "*", 1)                          # ticks a block
+    p.ld(1, C["p3"])
+    p.fconst(2, float(len(D.GT_RATE)))
+    p.fop(1, 1, "*", 2)
+    p.trunc(1, 1)
+    p.iconst(2, len(D.GT_RATE) - 1)
+    p.iop(1, 1, "MIN", 2)
+    p.lsh(1, 1, 2)
+    p.iconst(12, RATE_TAB)
+    p.iop(2, 12, "+", 1)
+    p.seti(4, 2)
+    p.ldi(1, 0, 4)
+    p.st(C["inv"], 1)                            # 1 / the step's ticks
+    p.fop(0, 0, "*", 1)
+    p.fconst(1, 2.0 ** 23)
+    p.fop(0, 0, "*", 1)
+    p.trunc(0, 0)
+    p.st(C["inc"], 0)                            # a sample's step, Q28
+    p.iconst(1, -27)
+    p.float_(2, 0, 1)
+    p.st(C["sl"], 2)
+    p.ld(0, C["p4"])
+    p.fconst(1, 1.0)
+    p.fop(0, 1, "-", 0)
+    p.fconst(1, D.GT_SHAPE_OCT)
+    p.fop(0, 0, "*", 1)
+    FP.exp2(p)
+    p.ld(1, C["sl"])
+    p.fop(0, 1, "*", 0)
+    p.fconst(1, D.GT_SMIN)
+    p.fop(0, 0, "MAX", 1)
+    p.fconst(1, D.GT_SMAX)
+    p.fop(0, 0, "MIN", 1)
+    p.st(C["sl"], 0)
+    p.fconst(1, 0.0)
+    p.fop(1, 1, "-", 0)
+    p.st(C["nsl"], 1)
+    p.ld(0, C["p2"])
+    p.fconst(1, 16.0)
+    p.fop(0, 0, "*", 1)
+    p.trunc(0, 0)
+    p.iconst(1, 15)
+    p.iop(0, 0, "MIN", 1)
+    p.lsh(0, 0, 2)
+    p.iconst(12, PAT_TAB)
+    p.iop(2, 12, "+", 0)
+    p.seti(4, 2)
+    p.ldi(13, 0, 4)                              # the pattern
+    p.lsh(1, 13, -1)
+    p.lsh(2, 13, 15)
+    p.iop(1, 1, "OR", 2)
+    p.iconst(12, 0xFFFF)
+    p.iop(14, 1, "AND", 12)                      # bit k: step k + 1 is open
+    p.ld(0, C["p5"])
+    p.fconst(1, D.GT_SWING_MAX)
+    p.fop(0, 0, "*", 1)
+    p.fconst(1, 1.0)
+    p.fop(0, 0, "+", 1)
+    p.fconst(1, float(D.GT_STEP))
+    p.fop(0, 0, "*", 1)
+    p.trunc(0, 0)
+    p.st(C["b1"], 0)                             # a pair's first step (the swing)
+    p.lsh(1, 0, -1)
+    p.st(C["h0"], 1)
+    p.iconst(12, D.GT_STEP)
+    p.iop(1, 12, "+", 1)
+    p.st(C["h1"], 1)
+    p.ld(8, C["s0"])
+
+    def snap():                                  # the clock word: the sequencer's place, to the phase
+        p.iconst(12, 0xFFF)
+        p.iop(1, 0, "AND", 12)
+        p.iconst(2, 0)
+        p.float_(1, 1, 2)
+        p.ld(2, C["inv"])
+        p.fop(1, 1, "*", 2)
+        p.trunc(3, 1)
+        p.iconst(4, 0)
+        p.float_(4, 3, 4)
+        p.fop(1, 1, "-", 4)
+        p.fconst(4, float(D.GT_STEP))
+        p.fop(1, 1, "*", 4)
+        p.trunc(1, 1)
+        p.lsh(12, 3, 28)
+        p.iop(3, 12, "+", 1)                     # the target
+        p.fconst(4, D.GT_TOL_TICKS * float(D.GT_STEP))
+        p.fop(2, 2, "*", 4)
+        p.trunc(2, 2)                            # the tolerance
+        p.iop(4, 8, "-", 3)
+        p.iconst(5, 0)
+        p.iop(6, 5, "-", 2)
+
+        def take():
+            p.ipass(8, 3)
+        p.if_(4, "GT", 2, take, lambda: p.if_(4, "LT", 6, take, kind="i"), kind="i")
+
+    def seen():
+        p.st(C["s2"], 0)
+        p.ifz(0, "LT", snap)
+    p.ld(0, D.CLK)
+    p.ld(1, C["s2"])
+    p.if_(0, "NE", 1, seen, kind="i")
+    p.ld(5, C["s1"])
+    p.ld(9, C["inc"])
+    p.ld(4, C["buf"])
+    p.seti(0, 4)
+    p.seti(1, 4)
+
+    def one():
+        clamp_in(p)
+        p.iconst(12, D.GT_PAIR - 1)
+        p.iop(1, 8, "AND", 12)                   # q
+        p.lsh(2, 8, -28)
+        p.iconst(12, 14)
+        p.iop(2, 2, "AND", 12)                   # k
+        p.ld(3, C["b1"])
+
+        def first():
+            p.ld(6, C["h0"])
+            p.ipass(7, 3)
+
+        def second():
+            p.iconst(12, 1)
+            p.iop(2, 12, "+", 2)
+            p.ld(6, C["h1"])
+            p.iconst(7, D.GT_PAIR)
+        p.if_(1, "LT", 3, first, second, kind="i")
+        p.iconst(3, 1)
+        p.float_(3, 3, 2)
+        p.trunc(3, 3)                            # 1 << k
+        p.iop(4, 14, "AND", 3)
+        p.ifz(4, "EQ", lambda: p.ipass(6, 7))    # the next step closed: open to this one's end
+        p.ld(4, C["p1"])
+        p.iop(10, 13, "AND", 3)
+        p.ifz(10, "NE", lambda: p.if_(1, "LT", 6, lambda: p.fconst(4, 0.0), kind="i"))
+        p.fop(4, 4, "-", 5)
+        p.ld(1, C["sl"])
+        p.fop(4, 4, "MIN", 1)
+        p.ld(1, C["nsl"])
+        p.fop(4, 4, "MAX", 1)
+        p.fop(5, 5, "+", 4)                      # the closure
+        p.fconst(1, 1.0)
+        p.fop(1, 1, "-", 5)
+        p.fop(1, 0, "*", 1)
+        p.fop(1, 1, "-", 0)
+        p.ld(2, C["p0"])
+        p.fop(1, 1, "*", 2)
+        p.fop(1, 0, "+", 1)
+        p.stpost(1, 1)
+        p.iop(8, 8, "+", 9)
+    p.loop_r(11, D.BLOCK, one)
+    p.st(C["s0"], 8)
+    p.st(C["s1"], 5)
+
+
 def track(p: Prog) -> None:
     """voice slot C['t']: the track it plays (design.ROUTE), that track's bytes, then its insert"""
     p.ld(0, C["t"])
@@ -548,8 +929,9 @@ def track(p: Prog) -> None:
                     for _ in range(16):
                         p.stpost(1, 0)
                 p.loop_r(11, D.TP_RING // 16, sixteen)
-            p.iconst(6, D.TAPE)
-            p.if_(5, "EQ", 6, fresh_ring, kind="i")
+            if D.TAPE in D.BUILT:                # dnfw.builder: no ring without TAPE
+                p.iconst(6, D.TAPE)
+                p.if_(5, "EQ", 6, fresh_ring, kind="i")
         p.iconst(9, 0)
 
         def differs():
@@ -570,8 +952,17 @@ def track(p: Prog) -> None:
         p.seti(4, 2)
         p.ldi(3, 0, 4)
         p.st(C["buf"], 3)
+        fzd = D.FUZZ in D.BUILT or D.DIST in D.BUILT
+        if fzd:                                  # FUZZ and DIST (when the guard admits them) set it:
+            p.iconst(0, 0)                       # their shared loop, emitted once, runs after
+            p.st(C["fz"], 0)
         _by_type(p, [(typ, (lambda fn, typ: lambda p: G.ins_admit(p, D.COST[typ], lambda: fn(p)))(fn, typ))
-                     for typ, fn in ((D.FUZZ, fuzz), (D.TAPE, tape), (D.FOLD, fold), (D.HARM, harm))])
+                     for typ, fn in ((D.FUZZ, fuzz), (D.TAPE, tape), (D.FOLD, fold), (D.HARM, harm),
+                                     (D.SUB, sub), (D.DIST, dist), (D.GATER, gater), (D.RING, ring))
+                     if typ in D.BUILT])         # dnfw.builder: only the inserts this build runs
+        if fzd:
+            p.ld(0, C["fz"])
+            p.ifz(0, "NE", lambda: fz_loop(p))
         p.ld(2, C["sa"])
         p.seti(4, 2)
         for k in range(D.STATE_WORDS - 2):
@@ -581,12 +972,17 @@ def track(p: Prog) -> None:
 
 
 def _is_built(p: Prog, run) -> None:
-    """RUN once when M.SEL (C['sel']) is a type this build runs (design.BUILT): a flag first"""
-    p.iconst(7, 0)
-    for typ in D.BUILT:
-        p.ld(5, C["sel"])
-        p.iconst(6, typ)
-        p.if_(5, "EQ", 6, lambda: p.iconst(7, 1), kind="i")
+    """RUN once when M.SEL (C['sel']) is a type this build runs (design.BUILT): bit min(sel, 15) of
+    the built types' mask (1 << n as FLOAT 1 BY n, TRUNC)"""
+    assert max(D.BUILT) < 15
+    p.ld(5, C["sel"])
+    p.iconst(6, 15)
+    p.iop(5, 5, "MIN", 6)
+    p.iconst(7, 1)
+    p.float_(7, 7, 5)
+    p.trunc(7, 7)
+    p.iconst(12, sum(1 << t for t in D.BUILT))
+    p.iop(7, 7, "AND", 12)
     p.ifz(7, "NE", run)
 
 
@@ -740,5 +1136,7 @@ def program(next_sw: int, prefix: str = "in") -> str:
 
 def run(mem: Mem) -> Prog:
     p = Prog("run", mem=mem)
+    for k, w in enumerate(TABLE_WORDS):          # (on the DSP: state_bytes, loaded with the code)
+        mem.put(RATE_TAB + 4 * k, w)
     body(p)
     return p

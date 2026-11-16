@@ -141,6 +141,20 @@ FM's frequency quantizer is rebuilt from `lookup_tables.py`'s formula.
 > DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 > OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+## Optimist (GPL-3.0-only): DRONE, ANALOG 2's filters, inserts SUB DIST GATER RING
+
+The User's own synth firmware (`~/GitHub/optimist`, GPL-3.0-only), ported to the DSL (float32 at
+44.1 kHz; what changed is in each module's docstring). GPL-3.0-only code combined with this
+AGPL-3.0 work, as GPL-3.0 section 13 allows; each module keeps its SPDX line and this credit.
+
+- **DRONE** (`src/dnfw/mnm/drone.py`): firmware/src/engines/drone/eng_drone.c, drone_mem.h and
+  voice.c's glide; the network after Caravel 0.3.3's DRONE by bonszaimusic
+  (<https://github.com/bonszaimusic/caravel>, firmware/src/eng_drone.c, GPL-3.0-only).
+- **ANALOG 2's filters** (`src/dnfw/a2f/`): firmware/src/engines/analog/a2_models.c and the SVF of
+  eng_analog2.c (eng_analog.c: Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments).
+- **Inserts SUB, DIST, GATER, RING** (`src/dnfw/inserts/`): firmware/src/fx/insfx/insfx.c (ifx_mod),
+  firmware/src/fx/fx.c (dist_gains, dist_run), firmware/src/fx/insfx/gater.c (its patterns).
+
 ## digihealth (GPL-2.0-or-later)
 
 <https://github.com/irpina/digihealth> -- irpina.
@@ -159,6 +173,20 @@ here under GPL-3.0, which section 13 of the AGPL-3.0 allows to be combined with
 this project. Those parts remain under the GPL-3.0's terms.
 
 > Copyright (C) 2026 irpina and contributors
+
+## selache's selas (GPL-3.0), a tool the builder page serves
+
+<https://github.com/js216/selache> -- Jakob Kastelic. Its SHARC+ assembler, selas, assembles our
+SHARC sources (`scripts/gen_waverider_sharc.py`); it is a tool, and nothing of it is copied into
+the firmware (an assembler's output is not a work derived from the assembler). The modular
+builder's page (`docs/builder.md`) runs it in the browser as `selas.wasm`: selache at commit
+2b26d3b75c53063575bc5c820fa0d38879335187, unmodified, compiled to WebAssembly through the small
+wrapper in `tools/selas-wasm/` (GPL-3.0, like selas). The page serves that wrapper's source beside
+`selas.wasm` (`selas-wasm-source.zip`) and links selache's source at that commit, as GPL-3.0
+section 6 asks of whoever conveys the binary.
+
+> selache. Copyright (c) 2026 Jakob Kastelic. Licensed under the GNU General Public License,
+> version 3.
 
 ## The MIT License
 

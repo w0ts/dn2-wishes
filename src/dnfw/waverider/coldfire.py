@@ -509,6 +509,10 @@ MACHSEL_COMMIT_SITE = 0x4005BBA0        # v0.30: MACHINE SEL's jsr 0x40031880 (c
 MACHSEL_COMMIT_STOCK = bytes.fromhex("4eb940031880")
 MODAPPLY_SITE = 0x40027196              # v0.25: the per-frame driver's jsr 0x400db390 (apply modulation)
 MODAPPLY_STOCK = bytes.fromhex("4eb9400db390")
+HOLD_NOTE_SITE = 0x40026AFC             # the ISR's note-on gate store (csrc/hold/hooks.S), 12 bytes
+HOLD_NOTE_STOCK = "20020680000005cc278c0c00"   # move.l %d2,%d0 ; addi.l #1484,%d0 ; move.l %a4,(%a3,%d0.l*4)
+HOLD_KEYS_SITE = 0x40026F6A             # lea 0x4002a3a6,%a2: the ISR's "a key is held on track t" (released if not)
+HOLD_KEYS_STOCK = "45f94002a3a6"
 POLL_SITE = 0x4002E464                  # jsr 0x4011d5d4 (isDirty), its argument the screen
 # v0.38: per-project pools (csrc/sampler/pools.c, hooks.S, docs/project-pools.md): the OS's
 # project LOAD 0x40042E6E (its entry, its success where it sets the slot, its exit) and NEW
@@ -593,7 +597,8 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     # the C page renderer first (the assembly calls it), at C_LOAD
     from .. import slides as SL
     from .. import modversion                   # v0.39: the mod's version (VERSION), shown at the browser's top
-    cimage, csyms, cbss = compile_c(pages.c_header() + SL.c_header(stock)
+    from ..a2f import pages as flt_pages        # 2026-11-10: the A2 filter machines' FLTR names
+    cimage, csyms, cbss = compile_c(pages.c_header() + flt_pages.c_header() + SL.c_header(stock)
                                     + modversion.c_define(),
                                      base=pages.C_LOAD)
     if cbss:
@@ -714,6 +719,11 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     _need(content, PAGE_SITE - 4, bytes.fromhex("2f027404"), "0x400c2652's push of d2 and its bound")
     _need(content, POLL_SITE - 2, bytes.fromhex("2f0a"), "the UI loop pushes the screen")
     _need(content, POLL_SITE + 6, bytes.fromhex("588f4a00"), "... and tests the answer's low byte")
+    # 2026-11-10: DRONE's HOLD latch (csrc/hold): the note-on's gate length, the key-release test
+    edit(HOLD_NOTE_SITE, bytes.fromhex("4eb9") + _long(csyms["hold_note_hook"]) + bytes.fromhex("4e714e714e71"),
+         "DRONE's HOLD: a note's gate length through hold_len", bytes.fromhex(HOLD_NOTE_STOCK))
+    edit(HOLD_KEYS_SITE, bytes.fromhex("45f9") + _long(csyms["hold_keys"]),
+         "DRONE's HOLD: a latched track's keys count as held", bytes.fromhex(HOLD_KEYS_STOCK))
     edit(POLL_SITE, bytes.fromhex("4eb9") + _long(csyms["wr_poll"]),
          "the UI loop's redraw test: wr_poll asks for a redraw while a modulation marker on "
          "Waverider's page would move, then answers as stock", POLL_STOCK)
@@ -964,11 +974,20 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
                  "ins_pop", "ins_draw", "ins_visible", "ins_words", "ins_gen", "ins_up", "ins_sel", "ins_selv", "ins_mod", "ins_kv",
                  "ins_hdr_tail"):   # the sample link's state (v0.15)
         layout[name] = csyms[name]
+    for name in ("hold_seq", "hold_count", "hold_len", "hold_keys", "hold_poll"):   # DRONE's HOLD (csrc/hold)
+        layout[name] = csyms[name]
     layout["mtr_ram"] = pages.METER_RAM      # the system meter's state block (csrc/meter/meter.c MTR_*)
-    # v0.45: PING removed (owner, 2026-11-08): its chunk (the FLTR list's 'Ping', the filter
-    # names, the LOAD bound, slot_to_id, the descriptor, the curve) is no longer composed, so
-    # all of those stay stock and a sound saved with filter 6 loads as Multi-Mode
-    return {"content": bytes(content), "edits": edits, "layout": layout,
-            "chunk": {"load": pages.LOAD, "code": chunk},
-            "c_chunk": {"load": pages.C_LOAD, "code": cimage},
-            "machines_chunk": {"load": MCHUNK, "code": bytes(mchunk)}}
+    # v0.45: PING removed (owner, 2026-11-08). 2026-11-10: its mechanism (the FLTR list, names, LOAD
+    # bound, slot_to_id, descriptor, curve) composed again for the A2 filter machines 7..11 only
+    # (dnfw.a2f.coldfire), in what was PING's chunk; none built: all stock, as v0.45
+    from ..a2f import coldfire as flt_cf
+    out = {"content": None, "edits": edits, "layout": layout,
+           "chunk": {"load": pages.LOAD, "code": chunk},
+           "c_chunk": {"load": pages.C_LOAD, "code": cimage},
+           "machines_chunk": {"load": MCHUNK, "code": bytes(mchunk)}}
+    if flt_cf.NEW_FILTERS:
+        fbuilt = flt_cf.compose(content, edit, assemble)
+        layout.update(fbuilt["layout"])
+        out["flt_chunk"] = fbuilt["chunk"]
+    out["content"] = bytes(content)
+    return out

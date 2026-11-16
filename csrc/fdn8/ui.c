@@ -106,6 +106,18 @@ static void rvt_label(void *canvas, int x0, int y0, const char *name)
 
 /* page.c wr_cell, after each stock cell widget: TYPE's cell (its widget x0..x0+23,
  * y0+8..y0+23, and its label, in case the views were built before TYPE was named) */
+/* 2026-11-09: the list popup (csrc/waverider/popup.c), the values' order */
+typedef const char *(*wpop_name_fn)(int i, int arg);
+extern void wpop_offer(int slot, const char *label, int n, int cur, wpop_name_fn name, wpop_name_fn tag, int arg);
+extern int wpop_slot_of(int x0, int y0);
+static const char *const rvt_list[3] = {"FDN8", "STOCK", "LONG"};
+
+static const char *rvt_pop_name(int i, int arg)
+{
+    (void)arg;
+    return rvt_list[i];
+}
+
 void rvt_cell(void *view, void *canvas, int x0, int y0, u32 id)
 {
     if (id != TYPE_REC)
@@ -121,4 +133,5 @@ void rvt_cell(void *view, void *canvas, int x0, int y0, u32 id)
     TEXT(canvas, FONT, x0 + 12, y0 + 17, CENTRED, rvt_seen == 1 ? "STO" : rvt_seen == 2 ? "LON" : "FDN");
     TEXT(canvas, FONT, x0 + 12, y0 + 9, CENTRED, rvt_seen == 1 ? "CK" : rvt_seen == 2 ? "G" : "8");
     rvt_label(canvas, x0, y0, "TYPE");
+    wpop_offer(wpop_slot_of(x0, y0), "TYPE", 3, rvt_seen, rvt_pop_name, 0, 0);
 }

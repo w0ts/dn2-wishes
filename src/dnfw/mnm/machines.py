@@ -18,11 +18,16 @@ is empty.
 from __future__ import annotations
 
 from . import core as C
-from . import plaits, sophie, tb303
+from . import analog2, drone, plaits, sophie, tb303
 from ..md import core as K
 from ..perc.dsl import Prog
+from ..builder import selection as _sel
 
-MODULES = (sophie, plaits, tb303)        # their types: TYPES below (20, 18, 19)
+ALL_MODULES = (sophie, plaits, tb303, drone, analog2)   # their types: ALL_TYPE_SLOTS below (20, 18, 19, 21, 22)
+# the builder (docs/builder.md): a machine left out of this build is emitted nowhere and its type
+# is RESERVED below, as the removed machines' are
+PART = {"SOPHIE": "MNM_SOPHIE", "PLAITS": "MNM_PLAITS", "TB303": "MNM_TB303", "DRONE": "MNM_DRONE", "ANALOG2": "MNM_ANALOG2"}
+MODULES = tuple(M for M in ALL_MODULES if _sel.on(PART[M.NAME]))
 F_TOP = 0x5800
 
 
@@ -119,9 +124,22 @@ def _render(M):
     return render
 
 
+def _pad8(t, fill):
+    """page 2's eight places (the eighth, PERC's TYPE record, unused by a Monomachine machine)"""
+    return tuple(t) + (fill,) * (8 - len(t))
+
+
+def _knobs(d):
+    """page 2's starts as knobs 0..127 (a module may give them as 0..1)"""
+    return tuple(int(round(x * 127)) if isinstance(x, float) else int(x) for x in d)
+
+
 def _adapter(M):
     return type(M.NAME.replace(" ", "").replace("-", ""), (), {
         "NAME": M.NAME, "ID": M.ID, "PNAMES": M.PNAMES, "MNM": M,
+        # 2026-11-09: a second page (PERC's page-2 records; dnfw.waverider.pages.MNM_PAGE2)
+        **({"PNAMES2": _pad8(M.PNAMES2, "---"), "DEFAULTS2": _pad8(_knobs(M.DEFAULTS2), 0)}
+           if hasattr(M, "PNAMES2") else {}),
         "host": staticmethod(_host_ddrw if M is ddrw else _host),
         "init": staticmethod(lambda p, L, M=M: M.init(p, L.mnm)),
         "trig": staticmethod(lambda p, L, M=M: M.trig(p, L.mnm)),
@@ -138,16 +156,20 @@ DEFAULTS = {M.NAME: M.DEFAULTS for M in MODULES}
 # voice (dnfw.perc.program).
 # v0.45 (2026-11-09, the User: keep upstream dn2mk2's numbers): BOUNCE is upstream's type 17, so
 # SOPHIE moved 17 -> 20; PLAITS and TB303 keep 18 and 19
-TYPE_SLOTS = (20, 18, 19)                 # 20: SOPHIE (docs/sophie.md), 18: PLAITS (docs/plaits.md), 19: TB303 (docs/tb303.md)
+ALL_TYPE_SLOTS = (20, 18, 19, 21, 22)     # 20: SOPHIE (docs/sophie.md), 18: PLAITS, 19: TB303, 2026-11-10: 21 DRONE, 22 ANALOG2
+TYPE_SLOTS = tuple(t for M, t in zip(ALL_MODULES, ALL_TYPE_SLOTS) if M in MODULES)   # each machine keeps its type
 TYPES = TYPE_SLOTS[:len(MACHINES)]
 # the removed machines' types (2026-11-08): reserved, never reused, so every other machine keeps
 # its number and a project's track on one stays on it (silent, its page empty)
 RESERVED = {6: "SID 6581", 7: "DPRO-WAVE", 14: "DPRO-DDRW", 15: "DPRO-DENS", 16: "VO-6"}
+# the machines this build leaves out (dnfw.builder): reserved the same way, for this build only
+LEFT_OUT = {t: M.NAME for M, t in zip(ALL_MODULES, ALL_TYPE_SLOTS) if M not in MODULES}
+RESERVED.update(LEFT_OUT)
 assert not set(RESERVED) & set(TYPES)
 from ..sampler import machines as _smp  # noqa: E402
 assert not set(_smp.TYPES) & (set(TYPES) | set(RESERVED)), "a machine type of ours is a sample machine's (v0.44 BOUNCE: 17)"
 # MACHINE SEL's names (long, short), as the DN2 lists its own
-LIST_NAMES = {"SOPHIE": ("Sophie", "SOP"), "PLAITS": ("Plaits", "PLT"), "TB303": ("TB-303", "303")}
+LIST_NAMES = {"SOPHIE": ("Sophie", "SOP"), "PLAITS": ("Plaits", "PLT"), "TB303": ("TB-303", "303"), "DRONE": ("Drone", "DRN"), "ANALOG2": ("Analog 2", "AN2")}
 REMOVED_NAMES = ("Removed", "---")       # a reserved type's name (MACHINE SEL never lists it)
 
 

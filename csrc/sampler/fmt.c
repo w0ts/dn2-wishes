@@ -118,9 +118,9 @@ static int fq_click __attribute__((section(".data"))) = 0;      /* v0.32: a FUNC
 static int mnm_quant(int mi, int slot, int old, int value)
 {
     int j = 0;
-    while (j < 8 && mnm_slot[j] != slot)
+    while (j < MNM_J && mnm_slot[j] != slot)
         j++;
-    if (j == 8 || !mnm_choices[mi][j])
+    if (j == MNM_J || !mnm_choices[mi][j])
         return value;                           /* not one of the eight, or a knob */
     int n = mnm_choices[mi][j], count = n == MNM_PCH ? mnm_pch_idx[127] + 1 : n;
     int oc = old >> 8, nc = (value >> 8) & 0xFF, d = nc - oc;
@@ -188,7 +188,7 @@ static int func_kind(u8 *s, int slot, u32 id)
         return slot == PERC_PTCH_SLOT || slot == PERC_TYPE_SLOT ? F_KEEP : F_NONE;
     int mi = mnm_index(ty - 4);
     if (mi >= 0) {
-        for (int j = 0; j < 8; j++)
+        for (int j = 0; j < MNM_J; j++)
             if (mnm_slot[j] == slot) {
                 if (MNM_TUNE_MONO && j == MNM_TUNE_J && mnm_labels[mi][j][0] == 'T' && mnm_labels[mi][j][1] == 'U')
                     return F_TUNE;              /* v0.47: by semitones (the owner) */

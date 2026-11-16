@@ -35,7 +35,7 @@ MNM_TYPES = {t: k for k, t in enumerate(_mnm_types.TYPES)}   # 6, 7 (CZ's and RE
 MNM_LEVEL = 0.25                         # a Monomachine machine's full scale on a DN2 track
 # v0.27: each machine's own level, by name (owner: MNM-1 was quiet); a machine without one plays
 # at MD_LEVEL (SOPHIE). SID, the DPRO machines and VO-6 had theirs until they went (2026-11-08).
-MNM_LEVELS: dict[str, float] = {}
+MNM_LEVELS: dict[str, float] = {"DRONE": 0.7}   # 2026-11-09: DRONE peaks 1.5..1.8 at gain 1 (half MD_LEVEL; by ear later)
 # v0.26: the DSP's room for the Monomachine voices. They never go quiet (as on the
 # Monomachine, a voice plays until the next note), and one costs as much as two to ten of
 # the Machinedrum's, so each block they are rendered in track order while their cost (the
@@ -48,7 +48,9 @@ MNM_COST = {"SOPHIE": 34_000,   # SOPHIE: 29,979 measured (test_perc_live, the t
                                 # 58,357, MDAL 47,418, ADD 32,682, FM 29,216, the others 20,295 (WS)..24,451
                                 # (SD). 2026-11-09: one figure for every engine (sixteen voices at it, 960,000,
                                 # stay under MNM_BUDGET, so a cost per engine would change nothing)
-            "TB303": 70_000}    # TB303: 63,577 measured (WAVE square; saw 52,140), the voice in a DN2 block
+            "TB303": 70_000,    # TB303: 63,577 measured (WAVE square; saw 52,140), the voice in a DN2 block
+            "DRONE": 36_000,    # DRONE: 17,251 + the voice ~14,700 with BEAT (two ears); ~24k without
+            "ANALOG2": 32_000}  # ANALOG2: 16,168 (6 copies, sync, DIOD LP24, note 127) + ~14,700    # DRONE: 17,251 + the voice ~14,700 with BEAT (two ears); ~24k without
 # v0.36: no longer the limit (the owner and misterairplane: two voices at most on a Monomachine
 # track). 150,000 fitted 2 SID / VO-6 / DENS and 1 DDRW whatever the DSP's real time; it came
 # before the frame guard (v0.27), which measures the frame and leaves out (v0.36: steals) the
@@ -367,7 +369,7 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
 
     def mnm_note():
         from ..mnm import core as MNC
-        for name, lev in MNM_LEVELS.items():    # v0.27: the machine's own level
+        for name, lev in ((n, v) for n, v in MNM_LEVELS.items() if n in _mnm_types.NAMES):   # v0.27: the machine's own level (2026-11-09: only those built)
             p.iconst(12, _mnm_types.NAMES.index(name) + 1)
             p.if_(0, "EQ", 12, lambda lev=lev: (p.fconst(1, lev), p.st(C["lev"], 1)), kind="i")
         p.ld(9, C["t"])

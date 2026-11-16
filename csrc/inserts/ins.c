@@ -9,7 +9,7 @@
  * smp_ui_pop hands every item to ins_pop first) and it draws over the screen with stock's own widgets
  * (page.c wr_screen; csrc/waverider/widgets.h), keeping stock's left panel:
  *
- *     A M.SEL (OFF FUZZ TAPE FOLD CHOR WIDE HARM FDN8 XDLY, each a band of 0..127)   B..G the
+ *     A M.SEL (OFF CHOR DIST FDN8 FOLD FUZZ GATR HARM RING SUB TAPE WIDE XDLY: A-Z, each a band of 0..127)   B..G the
  *     insert's knobs   H MIX (dry/wet)
  *
  * Each slot keeps every insert's knobs (switching M.SEL and back keeps them). FDN8 and XDLY run on the
@@ -46,8 +46,8 @@ typedef signed char s8;
  * std::string at +0x48: "FX" on entering the FX page, "Delay (1/3)" .. on the SEND pages) */
 #define FX_PAGE_VTABLE 0x401E1448u
 #define TITLE_VTABLE   0x401E1D28u
-#define TYPES     9                             /* OFF and the eight (dnfw.inserts.design: a type keeps its
-                                                 * number for good; ports3's would be 9..12) */
+#define TYPES     13                            /* OFF and the twelve (dnfw.inserts.design: a type keeps its
+                                                 * number for good; 2026-11-10 SUB DIST GATER RING 9..12, Optimist's) */
 #define SLOTS     2
 #define T_FDN8    7
 #define T_XDLY    8
@@ -55,9 +55,15 @@ typedef signed char s8;
 #define N_XDLY    4
 #define NO_INST   0xFF
 #define PAGES     3                             /* FX 1/3 stock's, 2/3 INSERT 1, 3/3 INSERT 2 */
-static const u8 BUILT[TYPES] = {1, 1, 1, 1, 1, 1, 1, 1, 1};   /* what this build runs */
+/* 2026-11-10 (the User): M.SEL lists the types A-Z, OFF first. Only the DISPLAY order is sorted: a type's
+ * number (ins_sel, the saved record's first byte, the DSP's) never changes. ORDER[position] = type,
+ * POS[type] = position; the knob's band, the popup and a loaded project's band all go through them. */
+static const u8 ORDER[TYPES] = {0, 4, 10, 7, 3, 1, 11, 6, 12, 9, 2, 5, 8};   /* OFF CHOR DIST FDN8 FOLD FUZZ GATR HARM RING SUB TAPE WIDE XDLY */
+static const u8 POS[TYPES] = {0, 5, 10, 4, 1, 11, 7, 3, 12, 9, 2, 6, 8};
+static const u8 BUILT[TYPES] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};   /* what this build runs */
 
-static const char *const NAME[TYPES] = {"OFF", "FUZZ", "TAPE", "FOLD", "CHOR", "WIDE", "HARM", "FDN8", "XDLY"};
+static const char *const NAME[TYPES] = {"OFF", "FUZZ", "TAPE", "FOLD", "CHOR", "WIDE", "HARM", "FDN8", "XDLY",
+                                        "SUB", "DIST", "GATR", "RING"};
 static const char *const LABEL[TYPES][6] = {
     {"", "", "", "", "", ""},
     {"DRIV", "TONE", "BIAS", "PRE", "GATE", "LEV"},
@@ -68,11 +74,16 @@ static const char *const LABEL[TYPES][6] = {
     {"AMNT", "FREQ", "EVEN", "TONE", "LEV", ""},
     {"PRE", "SIZE", "DAMP", "MOD", "HPF", "LPF"},     /* FDN8 (docs/fdn8.md's knobs) */
     {"TIM1", "TIM2", "FDBK", "MOD", "TONE", ""},      /* XDLY (docs/xdly.md's knobs) */
+    {"LEV", "BAND", "TONE", "OCT", "DRY", ""},        /* SUB (docs/inserts.md, ported from Optimist) */
+    {"DRIV", "TONE", "BIAS", "LOW", "LEV", ""},       /* DIST */
+    {"DPTH", "PATN", "RATE", "SHPE", "SWNG", ""},     /* GATER */
+    {"FREQ", "SHPE", "AM", "LEV", "", ""},            /* RING */
 };
 static const u8 DEFAULT[TYPES][6] = {
     {0, 0, 0, 0, 0, 0}, {64, 90, 0, 30, 0, 100}, {50, 30, 20, 25, 50, 10}, {80, 64, 0, 100, 100, 0},
     {50, 50, 40, 64, 100, 0}, {90, 20, 40, 80, 0, 0}, {50, 70, 64, 80, 100, 0},
     {0, 60, 30, 64, 0, 127}, {60, 70, 60, 0, 98, 0},
+    {100, 85, 59, 0, 127, 0}, {64, 90, 20, 64, 64, 0}, {127, 64, 64, 20, 0, 0}, {64, 0, 0, 100, 0, 0},
 };
 
 u8 ins_sel[16][SLOTS] __attribute__((section(".data")));    /* the type (from ins_selv's band) */
@@ -147,6 +158,16 @@ static void reassign(void)
                 assign(t, j);
 }
 
+/* the load icons' memory one (csrc/meter/meter.c): a slot of FDN8 / XDLY found no instance free (FULL) */
+int ins_full_any(void)
+{
+    for (int t = 0; t < 16; t++)
+        for (int j = 0; j < SLOTS; j++)
+            if (ins_sel[t][j] < TYPES && instances(ins_sel[t][j]) && ins_inst[t][j] == NO_INST)
+                return 1;
+    return 0;
+}
+
 /* a record's eight fields (dnfw.inserts.design: type | instance << 4, MIX, K1..K6); a FULL slot is OFF */
 static void fields(int t, int j, u8 *f)
 {
@@ -195,7 +216,7 @@ void ins_set_record(int t, int j, const u8 *f)
     init();
     int y = f[0] < TYPES ? f[0] : 0;            /* a type this build does not know: OFF */
     ins_sel[t][j] = (u8)y;
-    ins_selv[t][j] = (u8)((y * 128 + 64) / TYPES);   /* the middle of its band */
+    ins_selv[t][j] = (u8)((POS[y] * 128 + 64) / TYPES);   /* the middle of its band, by display position */
     ins_mod[t][j] = f[1] & 0x7F;
     for (int k = 0; k < 6; k++)
         ins_kv[t][j][y][k] = f[2 + k] & 0x7F;
@@ -220,11 +241,12 @@ static void turn(int knob, int delta)
 {
     int t = UI_TRACK & 15, j = (ins_up - 1) & 1;
     if (knob == 1) {
-        /* as a stock multi-choice: turned as a 0..127 knob, each type a band of it (about 14 of it
-         * for nine types), so a type takes a ninth of a turn of the range, not one step */
+        /* as a stock multi-choice: turned as a 0..127 knob, each type a band of it (about 10 of it
+         * for thirteen types, in ORDER: OFF 0..9, CHOR 10..19 .. XDLY 118..127), so a type takes a band
+         * of a turn of the range, not one step */
         int was = ins_sel[t][j];
         ins_selv[t][j] = (u8)clamp(ins_selv[t][j] + delta, 0, 127);
-        ins_sel[t][j] = (u8)(ins_selv[t][j] * TYPES / 128);
+        ins_sel[t][j] = ORDER[ins_selv[t][j] * TYPES / 128];
         if (ins_sel[t][j] != was) {
             if (instances(was) && ins_inst[t][j] != NO_INST)
                 ins_inst[t][j] = NO_INST;       /* given back */
@@ -414,12 +436,22 @@ static void fill(void *c, int x0, int y0, int x1, int y1, int on)
  * drew them; the eight places are ours, drawn with stock's widgets: A M.SEL a choice, B..G the insert's
  * knobs, H MIX a knob, each with stock's label; an unused place is left empty. Under M.SEL: FULL when the
  * slot's FDN8 / XDLY found no instance free (it passes the sound through) */
+typedef const char *(*wpop_name_fn)(int i, int arg);
+extern void wpop_offer(int slot, const char *label, int n, int cur, wpop_name_fn name, wpop_name_fn tag, int arg);
+
+static const char *ins_name(int i, int arg)
+{
+    (void)arg;
+    return NAME[ORDER[i]];
+}
+
 void ins_draw(void *c)
 {
     init();
     int t = UI_TRACK & 15, j = (ins_up - 1) & 1, y = ins_sel[t][j];
     fill(c, 22, 0, 127, 53, 0);                 /* the places; stock's title bar and left panel stay */
     wg_choice(c, 0, NAME[y]);
+    wpop_offer(0, "M.SEL", TYPES, POS[y], ins_name, 0, 0);   /* the list popup (csrc/waverider/popup.c) */
     wg_label(c, 0, !BUILT[y] ? "SOON" : instances(y) && ins_inst[t][j] == NO_INST ? "FULL" : "M.SEL");
     for (int k = 0; k < 6; k++) {
         if (!LABEL[y][k][0])

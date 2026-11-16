@@ -988,9 +988,9 @@ u32 smp_machine_commit(u32 model, u32 track, u32 type, u32 a, u32 b)
     int mi = track < 16 && KIT && SOUND_TYPE(track) == (int)type && was != (int)type ? mnm_index((int)type - 4) : -1;
     if (mi >= 0) {
         u32 owner = UI_OWNER();
-        for (int j = 0; owner && j < 8; j++) {
+        for (int j = 0; owner && j < MNM_J; j++) {
             u32 ps = PARAM_SET(owner, mnm_rid[j], track);
-            if (ps)
+            if (ps && mnm_default[mi][j] != 0xFFFFu)   /* page 2: only a machine that has one */
                 SET_VALUE(ps, mnm_rid[j], (u32)mnm_default[mi][j], track, 0, 0, 1);
         }
     }
@@ -1841,6 +1841,11 @@ u32 smp_held_hi __attribute__((section(".data"), aligned(4))) = 0;
 int smp_knob_d __attribute__((section(".data"))) = 0;       /* v0.32: the last knob turn (fmt.c func_turn) */
 u32 smp_knob_at __attribute__((section(".data"))) = 0;
 int smp_knob_code __attribute__((section(".data"))) = 0;     /* v0.48: which knob (1..8: A..H), its value shown */
+int smp_pop_knob __attribute__((section(".data"))) = 0;      /* 2026-11-09: the same, for the list popup (popup.c): its
+                                                            * own copy, as v0.48 clears smp_knob_code after a second */
+u32 smp_ui_seq __attribute__((section(".data"))) = 0;      /* every item, counted: the order of the two (the */
+u32 smp_knob_seq __attribute__((section(".data"))) = 0;    /* frame counter can stand still between them) */
+u32 smp_key_seq __attribute__((section(".data"))) = 0;
 
 u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock receive returns it */
 {
@@ -1864,6 +1869,8 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
             it[0] = IT_DROP;
             return (u32)it;
         }
+        smp_pop_knob = (int)code;
+        smp_knob_seq = ++smp_ui_seq;
     }
     u32 flags = (u32)it[8] << 24 | (u32)it[9] << 16 | (u32)it[10] << 8 | it[11];
     /* v0.25: a key's item: bit 0 while it is down (a press), bit 4 on most keys' release,
@@ -1873,6 +1880,8 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
      * and the list's YES then did nothing (the owner's v0.24 report). Released is "not
      * down", for every key. */
     int down = (flags & F_PRESS) && !(flags & F_RELEASE);
+    if (it[0] == IT_KEY && down && !(flags & F_REPEAT) && code != K_FUNC && !(code >= K_ENC_A && code <= K_ENC_H))
+        smp_key_seq = ++smp_ui_seq;                     /* a press (not FUNC, nor an encoder's push: held while turning): the popup goes */
     if (it[0] == IT_KEY && code < 64) {
         u32 *h = code < 32 ? &smp_held_lo : &smp_held_hi;
         u32 bit = 1u << (code & 31);

@@ -48,6 +48,7 @@ enum {
     MTR_CPU, MTR_HEAP, MTR_HEAP_OK, MTR_HEAP_FAULTS, MTR_DRAWS,                         /* the figures */
     MTR_W_AT, MTR_W_T, MTR_W_IDLE, MTR_W_ISR, MTR_W_SW, MTR_HEAP_AT, MTR_DRAW_NEXT, MTR_HELD_WAS,
     MTR_HEAP_TOT, MTR_DPK, MTR_DPK_AT, MTR_CPK, MTR_CPK_AT,                             /* the bars */
+    MTR_ICON_AT_D, MTR_ICON_AT_C, MTR_ICON_AT_M, MTR_ICON_SHOWN, MTR_ICON_FORCE, MTR_ICON_HYS,   /* the load icons */
     MTR_WORDS
 };
 _Static_assert(MTR_WORDS * 4 <= 256, "the meter's block");
@@ -135,6 +136,88 @@ static void peak(volatile u32 *pk, volatile u32 *at, int v, u32 f)
     }
 }
 
+/* The load labels (2026-11-10, the User: "a little shark/cpu/memory icon blinking when we are over
+ * dsp/cpu/memory, on the right of the title bar"; then, the drawn icons not working: "CPU / DSP /
+ * RAM"): at the title bar's right end, on every page, a word in a black box for each limit hit,
+ * shown while it is and ICON_HOLD after, blinking at 2 Hz; the lit ones packed to the right, over
+ * the tempo (it comes back when they go):
+ *   DSP: the DSP's guard left a voice out for time (link.c smp_skipped_any; until now the PERC /
+ *     Monomachine pages' "CPU" under LEV, which this replaces), or its load at ICON_DSP_PCT;
+ *   CPU: the ColdFire's load over the last half second at ICON_CPU_PM (cpu_window);
+ *   RAM: an FDN8 / XDLY insert found no instance free (FULL, ins.c), or the main heap
+ *     ICON_HEAP_PCT used (walked every ICON_HEAP_EVERY, FUNC up or down).
+ * MTR_ICON_FORCE (bit 0 D, 1 C, 2 M) shows an icon steadily: the emulator's screenshots (it runs
+ * no DSP and no audio ISR, and its frame counter stands still). The FUNC meter covers them. */
+#define ICON_HOLD     1500u             /* frames: a second after the last event */
+#define ICON_BLINK    375u              /* frames: on a quarter second, off a quarter: 2 Hz */
+#define ICON_CPU_PM   900               /* the ColdFire's load, permille: on at this, off under ICON_CPU_OFF */
+#define ICON_CPU_OFF  850
+#define ICON_DSP_PCT  99                /* the DSP's load, percent: on at this, off under ICON_DSP_OFF.
+                                         * 2026-11-10, the unit idle (sequencer stopped) reads D 94 %, so 95 lit it
+                                         * there; the skips are what say the time ran out, this only the ceiling */
+#define ICON_DSP_OFF  97
+#define ICON_HEAP_PCT 90                /* the main heap's used share, percent */
+#define ICON_HEAP_EVERY 3000u           /* frames: the heap walked every 2 s for RAM */
+#define ICON_X1       126               /* the right-most box's last column */
+#define ICON_TEMPO_X0 100               /* the tempo's clock and figure, x 100..126 */
+#define ICON_Y0       55                /* the boxes' rows, 55..61 (the title bar is y 54..63) */
+
+extern int smp_skipped_any(void);
+extern int ins_full_any(void);
+
+static int heap_pct(void)              /* the main heap's used share, -1 not walked yet */
+{
+    if (!mtr_heap_ok || mtr_heap_tot < mtr_heap || mtr_heap_tot < 100u)
+        return -1;
+    u32 used = mtr_heap_tot - mtr_heap, pc = used / (mtr_heap_tot / 100u);
+    return pc > 100u ? 100 : (int)pc;
+}
+
+static u32 over(u32 bit, int v, int on, int off)    /* a level with hysteresis: on at ON, off under OFF */
+{
+    u32 h = MTR[MTR_ICON_HYS];
+    if (v >= on)
+        h |= bit;
+    else if (v < off)
+        h &= ~bit;
+    MTR[MTR_ICON_HYS] = h;
+    return h & bit;
+}
+
+static u32 icons_live(u32 f)            /* the icons to show now (bits), the force ones included */
+{
+    u32 ev = (smp_skipped_any() ? 1u : 0u)
+           | (over(1u, smp_dsp_load(), ICON_DSP_PCT, ICON_DSP_OFF) ? 1u : 0u)
+           | (over(2u, mtr_cpu, ICON_CPU_PM, ICON_CPU_OFF) ? 2u : 0u)
+           | (ins_full_any() || heap_pct() >= ICON_HEAP_PCT ? 4u : 0u);
+    u32 on = 0;
+    for (int k = 0; k < 3; k++) {
+        if (ev >> k & 1u)
+            MTR[MTR_ICON_AT_D + k] = f | 1u;
+        u32 at = MTR[MTR_ICON_AT_D + k];
+        if (at && f - at < ICON_HOLD)
+            on |= 1u << k;
+    }
+    return on | (MTR[MTR_ICON_FORCE] & 7u);
+}
+
+static u32 icons_lit(u32 f)             /* of those, the ones lit at this moment of the blink */
+{
+    u32 on = icons_live(f), force = MTR[MTR_ICON_FORCE] & 7u;
+    return (f / ICON_BLINK & 1u) ? force & on : on;
+}
+
+static void icons_draw(void *canvas);
+
+static void icons_poll(void *screen, u32 f)
+{
+    u32 lit = icons_lit(f);
+    if (lit != MTR[MTR_ICON_SHOWN]) {   /* a blink, an icon come or gone: one redraw */
+        MTR[MTR_ICON_SHOWN] = lit;
+        SET_DIRTY(screen);
+    }
+}
+
 /* the UI loop's redraw test, every pass: the windows, and a redraw asked for while FUNC is
  * held (and once when it is let go, so stock's screen comes back whole) */
 void mtr_poll(void *screen)
@@ -154,10 +237,11 @@ void mtr_poll(void *screen)
     peak(&MTR[MTR_DPK], &MTR[MTR_DPK_AT], smp_dsp_load(), f);
     peak(&MTR[MTR_CPK], &MTR[MTR_CPK_AT], pct_of_pm(mtr_cpu), f);
     u32 held = smp_func_held != 0;
-    if (held && (!held_was || f - heap_at >= 2u * WINDOW)) {
-        heap_walk();                            /* at the press, then once a second */
+    if ((held && (!held_was || f - heap_at >= 2u * WINDOW)) || (!held && f - heap_at >= ICON_HEAP_EVERY)) {
+        heap_walk();                            /* at the press, then once a second; FUNC up: every 2 s (RAM's label) */
         heap_at = f;
     }
+    icons_poll(screen, f);
     if (held != held_was || (held && (int)(f - draw_next) >= 0)) {
         draw_next = f + REDRAW;
         SET_DIRTY(screen);
@@ -177,6 +261,11 @@ static const u8 GLYPH[][5] = {
     {0, 0, 7, 0, 0},    /* 15 - */
     {0, 0, 0, 0, 2},    /* 16 . */
     {0, 0, 0, 0, 0},    /* 17 space */
+    {6, 5, 6, 4, 4},    /* 18 P (the load labels) */
+    {7, 4, 7, 1, 7},    /* 19 S */
+    {5, 5, 5, 5, 7},    /* 20 U */
+    {6, 5, 6, 5, 5},    /* 21 R */
+    {2, 5, 7, 5, 5},    /* 22 A */
 };
 
 static int gi(char ch)
@@ -191,9 +280,58 @@ static int gi(char ch)
     case 'M': return 14;
     case '-': return 15;
     case '.': return 16;
+    case 'P': return 18;
+    case 'S': return 19;
+    case 'U': return 20;
+    case 'R': return 21;
+    case 'A': return 22;
     default: return 17;
     }
 }
+
+/* the lit labels, packed to the right of the title bar: a black box, the word lit in it (3 x 5
+ * letters; RAM's M 5 wide, a 3-wide M reads as an H) */
+static const u8 WIDE_M[5] = {17, 27, 21, 17, 17};
+
+static int letter_w(char ch)
+{
+    return ch == 'M' ? 5 : 3;
+}
+
+static void icons_draw(void *canvas)
+{
+    static const char *const WORD[3] = {"DSP", "CPU", "RAM"};
+    u32 lit = MTR[MTR_ICON_SHOWN];
+    if (!lit)
+        return;
+    for (int y = ICON_Y0 - 1; y <= ICON_Y0 + 7; y++)   /* the tempo's place, its clock included, cleared */
+        for (int xx = ICON_TEMPO_X0; xx <= ICON_X1; xx++)
+            SET_PIXEL(canvas, xx, y, 1);
+    int x = ICON_X1 + 1;
+    for (int k = 2; k >= 0; k--) {
+        if (!(lit >> k & 1u))
+            continue;
+        int w = 1;
+        for (int i = 0; i < 3; i++)
+            w += letter_w(WORD[k][i]) + 1;     /* each letter and the column after it */
+        x -= w + 1;
+        for (int c = -1; c <= w; c++)          /* the bar's colour round it, the tempo under it hidden */
+            for (int y = ICON_Y0 - 1; y <= ICON_Y0 + 7; y++)
+                SET_PIXEL(canvas, x + c, y, c < 0 || c == w || y < ICON_Y0 || y > ICON_Y0 + 6);
+        int lx = x + 1;
+        for (int i = 0; i < 3; i++) {
+            char ch = WORD[k][i];
+            int lw = letter_w(ch);
+            const u8 *g = ch == 'M' ? WIDE_M : GLYPH[gi(ch)];
+            for (int r = 0; r < 5; r++)
+                for (int b = 0; b < lw; b++)
+                    if (g[r] >> (lw - 1 - b) & 1u)
+                        SET_PIXEL(canvas, lx + b, ICON_Y0 + 5 - r, 1);
+            lx += lw + 1;
+        }
+    }
+}
+
 
 static int put_num(char *b, int n, u32 v)      /* decimal, no leading zeros */
 {
@@ -266,8 +404,10 @@ static void column(void *canvas, int x, char letter, int pct, int pk)
  * canvas is 128 x 64, y counting up from the bottom. */
 void mtr_draw(void *canvas)
 {
-    if (!smp_func_held)
+    if (!smp_func_held) {
+        icons_draw(canvas);              /* the load icons, while FUNC is up */
         return;
+    }
     for (int y = 54; y <= 63; y++)
         for (int x = BOX_X0 - 2; x < 128; x++)
             SET_PIXEL(canvas, x, y, 1);

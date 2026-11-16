@@ -29,11 +29,129 @@ _NAMES = (["t", "cnt", "tr", "sel", "i", "j", "rec", "sa", "rb", "lp", "rp"] + [
           + [f"s{k}" for k in range(6)]
           + ["wg", "dl", "ab", "ct", "nv", "inc", "base", "dep", "fb", "k", "ph0", "v", "a0", "d",
              "step", "gl", "gr", "pos"]
-          + [f"sv{k}" for k in range(16)] + [f"svi{i}" for i in SAVE_I] + ["sva"])
+          + [f"sv{k}" for k in range(16)] + [f"svi{i}" for i in SAVE_I] + ["sva", "bk", "bg"])
 C = {n: SCRATCH + 4 * k for k, n in enumerate(_NAMES)}
 SCRATCH_BYTES = 4 * len(_NAMES)
 SENDS_SW = 0x1C1738              # the FX sends, the call's stock target
 MASK = D.POST_RING - 1
+
+
+# 2026-11-09: DRONE's BEAT (dnfw.mnm.drone): the side of its two ears, per voice slot, written by the
+# machine before the chain (pre-amp) and mixed here after the pan, scaled by what the chain did to the mid
+SIDE_L2 = 0x200B1800             # slot t's block at SIDE_L2 + SIDE_STRIDE t (dnfw.waverider.dsp)
+SIDE_STRIDE = 0x90               # 36 words: 0..31 the side, 32 sum |mid| pre-amp, 33 flag (1.0), 34 last gain
+SIDE_BYTES = 16 * SIDE_STRIDE
+assert SIDE_L2 >= STATE + STATE_BYTES + 8 * D.BLOCK + 4 * len(_NAMES)
+GAIN_MAX = 4.0                   # the side's gain at most (a mid the chain raised that much)
+
+
+def _beat_built() -> bool:
+    from ..mnm import machines as MM
+    return "DRONE" in MM.NAMES
+
+
+def _recip(p: Prog, d: int, x: int) -> None:
+    """Fd = 1 / Fx (Fx >= 1e-9 > 0): the integer seed from the float's bits, three Newton steps
+    (dnfw.ping.live.recip's). Clobbers R12, R13."""
+    p.iconst(12, 0x7EF311C7)
+    p.iop(d, 12, "-", x)
+    for _ in range(3):
+        p.fop(13, x, "*", d)
+        p.fconst(12, 2.0)
+        p.fop(13, 12, "-", 13)
+        p.fop(d, d, "*", 13)
+
+
+def beat(p: Prog) -> None:
+    """slot C['t']: DRONE's side, when it wrote one this block (flag), into the slot's stereo block:
+    L += g s, R -= g s, g from the last block's gain to this one's over the block, this one's =
+    (sum |L + R| / 2) / (sum |mid| pre-amp), at most GAIN_MAX: the amp envelope, the level, the pan
+    and the filter's broadband gain, as the chain gave them to the mid. The flag is cleared; no
+    flag: the last gain 0 (BEAT starts from silence)."""
+    p.ld(0, C["t"])
+    p.lsh(1, 0, 7)
+    p.lsh(2, 0, 4)
+    p.iconst(12, SIDE_L2)
+    p.iop(3, 12, "+", 1)
+    p.ipass(12, 3)
+    p.iop(3, 12, "+", 2)
+    p.seti(4, 3)
+    p.ldi(5, 33, 4)
+    p.fconst(6, 0.5)
+
+    def on():
+        p.fconst(6, 0.0)
+        p.sti(33, 4, 6)
+        p.ld(0, C["t"])
+        p.lsh(1, 0, 8)
+        p.iconst(12, D.STEREO)
+        p.iop(1, 12, "+", 1)
+        p.seti(0, 1)
+        p.seti(2, 1)
+        p.iconst(12, D.STEREO_R)
+        p.iop(1, 12, "+", 1)
+        p.seti(1, 1)
+        p.seti(3, 1)
+        p.fconst(7, 0.0)
+
+        def acc():
+            p.ldpost(8, 0)
+            p.ldpost(9, 1)
+            p.fop(8, 8, "+", 9)
+            p.fconst(10, 0.0)
+            p.fop(10, 10, "-", 8)
+            p.fop(8, 8, "MAX", 10)
+            p.fop(7, 7, "+", 8)
+        p.loop(C["bk"], D.BLOCK, acc)
+        p.fconst(12, 0.5)
+        p.fop(7, 7, "*", 12)                     # sum |post mid|
+        p.ldi(6, 32, 4)
+        p.fconst(12, 1e-9)
+        p.fop(6, 6, "MAX", 12)
+        _recip(p, 8, 6)
+        p.fop(7, 7, "*", 8)
+        p.fconst(12, GAIN_MAX)
+        p.fop(7, 7, "MIN", 12)                   # g, this block's
+        p.ldi(9, 34, 4)                          # the last block's
+        p.sti(34, 4, 7)
+        p.fop(10, 7, "-", 9)
+        p.fconst(12, 1.0 / D.BLOCK)
+        p.fop(10, 10, "*", 12)                   # its step a sample
+        p.ld(0, C["t"])
+        p.lsh(1, 0, 8)
+        p.iconst(12, D.STEREO)
+        p.iop(1, 12, "+", 1)
+        p.seti(0, 1)
+        p.seti(2, 1)
+        p.iconst(12, D.STEREO_R)
+        p.iop(1, 12, "+", 1)
+        p.seti(1, 1)
+        p.seti(3, 1)
+        p.ld(1, C["t"])                          # I4 back at the side's word 0
+        p.lsh(2, 1, 7)
+        p.lsh(3, 1, 4)
+        p.iconst(12, SIDE_L2)
+        p.iop(2, 12, "+", 2)
+        p.ipass(12, 2)
+        p.iop(2, 12, "+", 3)
+        p.seti(4, 2)
+
+        def mix():
+            p.fop(9, 9, "+", 10)
+            p.ldpost(5, 4)
+            p.fop(5, 5, "*", 9)
+            p.ldpost(6, 0)
+            p.fop(6, 6, "+", 5)
+            p.stpost(2, 6)
+            p.ldpost(6, 1)
+            p.fop(6, 6, "-", 5)
+            p.stpost(3, 6)
+        p.loop(C["bk"], D.BLOCK, mix)
+
+    def off():
+        p.fconst(6, 0.0)
+        p.sti(34, 4, 6)
+    p.if_(5, "GT", 6, on, off)
 
 
 def state_bytes() -> bytes:
@@ -445,6 +563,9 @@ def body(p: Prog) -> None:
         p.iconst(12, 1)
         p.iop(1, 0, "AND", 12)
         p.st(C["j"], 1)
+        if _beat_built():                        # 2026-11-10: DRONE's BEAT, once a slot, before its inserts
+            p.ld(1, C["j"])
+            p.ifz(1, "EQ", lambda: beat(p))
         slot(p)
         p.ld(0, C["i"])
         p.iconst(12, 1)

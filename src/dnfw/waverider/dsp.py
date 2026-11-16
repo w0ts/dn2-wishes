@@ -53,6 +53,7 @@ import struct
 
 from ..image import bootstream, sharc_object
 from . import live
+from ..builder import selection as _sel     # dnfw.builder: FX_FDN8 / FX_XDLY off -> the stock hook, no code
 
 STOCK_SHA256 = "336e340aa0cdcd34e314cfa44849f709a3134f6bd4cd57dfc7e15702c83115e2"
 LOAD_ALIAS = 0x28000000          # boot-stream load address = LOAD_ALIAS + DM byte address
@@ -80,7 +81,7 @@ STATE_DM, STATE_BYTES = 0x2DDE00, 0x380      # save area, PERC's scratch, idle_l
 # 0x200fa000..0x200fdfff; the I-cache (enabled by the startup, docs/waverider-dsp-silence.md)
 # serves it. Its voices' state and scratch stay in L1, its tables in DDR.
 PERC_L2_LOAD = 0x200C0000
-PERC_L2_SPAN = 0x25000                       # 148 KB (v0.45 + b4, 2026-11-09: 150,710 B of code, BOUNCE's type and v0.45's PERC changes; 147 KB PLAITS VA+FM+ADD+SWARM+NOISE+PART+STRING+MODAL+BD+SD+HH, 2026-11-09: 149,892 B of code; VA 131,794; TB303: 128,282 B; PLAITS 123,128; 118,986 without SID, the DPRO machines and VO-6, 2026-11-08;
+PERC_L2_SPAN = 0x28000                       # 148 KB (v0.45 + b4, 2026-11-09: 150,710 B of code, BOUNCE's type and v0.45's PERC changes; 147 KB PLAITS VA+FM+ADD+SWARM+NOISE+PART+STRING+MODAL+BD+SD+HH, 2026-11-09: 149,892 B of code; VA 131,794; TB303: 128,282 B; PLAITS 123,128; 118,986 without SID, the DPRO machines and VO-6, 2026-11-08;
                                              # 142 KB SOPHIE, 140 KB v0.24..v0.42, 80 KB v0.17..v0.23). The span is zero-padded into
                                              # the DSP upload, so it is kept to the code
 PERC_SW = 0xB80000 + (PERC_L2_LOAD - 0x20000000) // 2       # 0xbe0000
@@ -135,7 +136,7 @@ FDN8_RING_BYTES = 0x80000                   # 512 KB (256 KB until LONG)
 # bus's call of the stock delay (sw 0x1c1c58) gets wr_xdly as its target; wr_xdly JUMPs on to the
 # stock delay unless TYPE (k 40, Delay FX Routing) asks for XDLY.
 XDLY_L2_LOAD = FDN8_L2_LOAD + FDN8_L2_SPAN   # 0x200ac800
-XDLY_L2_SPAN = 0x200AE000 - XDLY_L2_LOAD     # 6 KB (the per-track inserts' code follows at 0x200ae000)
+XDLY_L2_SPAN = 0x200ADA00 - XDLY_L2_LOAD     # 4.5 KB (2026-11-10: 0x600 to the inserts, SUB DIST GATER RING; xdly.asm 4,148 B)
 XDLY_SW = 0xB80000 + (XDLY_L2_LOAD - 0x20000000) // 2       # 0xbd6400
 XDLY_STATE_DM = 0x2E6E00
 DELAY_SITE_SW = 0x1C1C58                     # the FX bus: CALL 0xb8482c (DB), then its two pushes
@@ -144,8 +145,8 @@ STOCK_DELAY_SW = 0xB8482C
 # the per-track inserts (docs/inserts.md, dnfw.inserts): their pass in L2 after FDN8's span (inside
 # the range proven on units; XDLY's branch ends its span here), their state after the code. smp.asm's
 # tail JUMPs to wr_ins, which JUMPs on to PING.
-INS_L2_LOAD = 0x200AE000
-INS_L2_SPAN = 0x1400                         # the code; then the state (dnfw.inserts.program.STATE; 0x1800 until
+INS_L2_LOAD = 0x200ADA00                     # 2026-11-10 (0x200AE000 until the four ports)
+INS_L2_SPAN = 0x1A00                         # the code; then the state (dnfw.inserts.program.STATE; 0x1800 until
                                              # 2026-11-10: two slots' state and the unpacked records need the room)
 INS_SW = 0xB80000 + (INS_L2_LOAD - 0x20000000) // 2          # 0xbd7000
 INS_STATE_L2 = INS_L2_LOAD + INS_L2_SPAN                     # 0x200af800
@@ -157,6 +158,12 @@ POST_L2_LOAD = 0x200B0000
 POST_L2_SPAN = 0x1000                        # the code; then the state (dnfw.inserts.post.STATE)
 POST_SW = 0xB80000 + (POST_L2_LOAD - 0x20000000) // 2        # 0xbd8000
 POST_STATE_L2 = POST_L2_LOAD + POST_L2_SPAN                  # 0x200b1000
+# 2026-11-09: DRONE's BEAT side blocks at 0x200b1800 (dnfw.inserts.post.SIDE_L2, 0x900 B); the A2 filter
+# machines' pass (dnfw.a2f.program): its code, then its state
+A2F_L2_LOAD = 0x200B2400
+A2F_L2_SPAN = 0x3400                          # the code; then the state (dnfw.a2f.program.STATE)
+A2F_STATE_L2 = A2F_L2_LOAD + A2F_L2_SPAN      # 0x200b5800, up to 0x800 B (SMP_L2_LOAD 0x200b6000)
+A2F_SW = 0xB80000 + (A2F_L2_LOAD - 0x20000000) // 2
 SENDS_SITE_SW = 0x1C3054                     # the engine: CJUMP 0x1c1738 (DB), then its two pushes
 SENDS_SITE_STOCK = bytes.fromhex("04181c003817")
 # 2026-11-10: the bus inserts (docs/inserts.md "On the track's bus", dnfw.inserts.bus): FDN8 and XDLY per
@@ -339,7 +346,8 @@ def objects() -> dict[str, bytes]:
     return {name: sharc_object.load_bytes(bytes.fromhex(spec[name]["object_parcels_be"]))
             for name in ("perc", "smp", "entry_jump", "idle_load", "idle_jump", "block_count",
                          "entry_mark", "emark_jump", "lookup_ptr", "ping",
-                         "pvmix", "pvmix_jump", "fdn8", "xdly", "inserts", "inspost", "insbus")}
+                         "pvmix", "pvmix_jump", "fdn8", "xdly", "inserts", "inspost", "insbus", "a2f")
+            if name in spec}
 
 
 def pvmix_object() -> bytes:
@@ -400,6 +408,8 @@ def spans() -> list[tuple[str, int, bytes]]:
 
 
 def _fdn8_state() -> bytes:
+    if not _sel.on("FX_FDN8"):
+        return b""
     from ..fdn8 import program as fdn8_program
     assert fdn8_program.STATE == FDN8_STATE_DM and fdn8_program.RING == FDN8_RING_DDR
     assert FDN8_STATE_DM >= MNM_RENDER_DM + MNM_RENDER_BYTES
@@ -407,6 +417,8 @@ def _fdn8_state() -> bytes:
 
 
 def _xdly_state() -> bytes:
+    if not _sel.on("FX_XDLY"):
+        return b""
     from ..xdly import program as xdly_program
     from ..fdn8 import program as fdn8_program
     assert xdly_program.STATE == XDLY_STATE_DM
@@ -416,7 +428,10 @@ def _xdly_state() -> bytes:
 
 def delay_call() -> bytes:
     """the FX bus's CALL at DELAY_SITE_SW with wr_xdly as its target: the same instruction
-    (parcels 0x1804, then the 24-bit address), only the address changed"""
+    (parcels 0x1804, then the 24-bit address), only the address changed; the stock call when
+    this build has no XDLY (dnfw.builder)"""
+    if not _sel.on("FX_XDLY"):
+        return DELAY_SITE_STOCK
     if XDLY_SW >> 24:
         raise DspError("wr_xdly is beyond a 24-bit address")
     return DELAY_SITE_STOCK[:2] + struct.pack("<HH", XDLY_SW >> 16, XDLY_SW & 0xFFFF)
@@ -445,7 +460,10 @@ def out_cjump() -> bytes:
 
 def reverb_cjump() -> bytes:
     """the FX bus's CJUMP at REVERB_SITE_SW with wr_fdn8 as its target: the same instruction
-    (type 8a CJUMP (DB), parcels 0x1804, then the 24-bit address), only the address changed"""
+    (type 8a CJUMP (DB), parcels 0x1804, then the 24-bit address), only the address changed; the
+    stock CJUMP when this build has no FDN8 (dnfw.builder)"""
+    if not _sel.on("FX_FDN8"):
+        return REVERB_SITE_STOCK
     if FDN8_SW >> 24:
         raise DspError("wr_fdn8 is beyond a 24-bit address")
     return REVERB_SITE_STOCK[:2] + struct.pack("<HH", FDN8_SW >> 16, FDN8_SW & 0xFFFF)
@@ -535,8 +553,8 @@ def l2_spans() -> list[tuple[str, int, bytes]]:
             raise DspError(f"{name}.asm ({len(code)} bytes) leaves fewer than 64 bytes of its L2 span")
         out.append((what, at, code + bytes(span - len(code))))
     # v0.32: the voices' working state (zeros)
-    out.append(("Monomachine scratch and the voice order, in L2 (zeros; v0.32)", MNM_SCRATCH_L2,
-                bytes(MNM_SCRATCH_BYTES)))
+    out.append(("Monomachine scratch and the voice order, in L2 (zeros; v0.32; ANALOG2's mix tables)",
+                MNM_SCRATCH_L2, _mnm_scratch()))
     out.append(("the main mix's tap for the recorder's MAIN, in L2 (zeros; v0.37)", MAIN_TAP_L2,
                 bytes(MAIN_TAP_BYTES)))
     code = obj["fdn8"]
@@ -574,7 +592,35 @@ def l2_spans() -> list[tuple[str, int, bytes]]:
     assert (_ins().FDN8_SW, _ins().XDLY_SW, _ins().BUS_STATE) == (FDN8_SW, XDLY_SW, INSBUS_STATE_L2)
     out.append(("the bus inserts' head: each instance's owner (zeros), the engines' I/O descriptor",
                 INSBUS_STATE_L2, ins_bus.state_bytes()))
+    if "a2f" in obj:                             # 2026-11-09: the A2 filter machines' pass (dnfw.a2f)
+        from ..a2f import program as a2f_program
+        code = obj["a2f"]
+        assert a2f_program.STATE == A2F_STATE_L2 and A2F_STATE_L2 + 0x800 <= SMP_L2_LOAD
+        if A2F_L2_SPAN - len(code) < 64:
+            raise DspError(f"a2f.asm ({len(code)} bytes) leaves fewer than 64 bytes of its L2 span")
+        out.append(("a2f.asm (wr_a2f), in L2", A2F_L2_LOAD, code + bytes(A2F_L2_SPAN - len(code))))
+        st = a2f_program.state_bytes()
+        assert len(st) <= 0x800
+        out.append(("the A2 filters' state and mix tables", A2F_STATE_L2, st))
+    if ins_post._beat_built():                   # 2026-11-09: DRONE's BEAT side blocks (dnfw.mnm.drone)
+        assert ins_post.SIDE_L2 + ins_post.SIDE_BYTES <= A2F_L2_LOAD
+        out.append(("DRONE's BEAT side blocks: 16 slots x 36 words (zeros)", ins_post.SIDE_L2,
+                    bytes(ins_post.SIDE_BYTES)))
     return out
+
+
+def _mnm_scratch() -> bytes:
+    """the Monomachine L2 scratch: zeros, but for ANALOG2's filter mix tables at its TABLES_OFF
+    (2026-11-09; dnfw.mnm.analog2.ctx: nothing writes there at run time)"""
+    raw = bytearray(MNM_SCRATCH_BYTES)
+    from ..mnm import machines as _mm
+    if "ANALOG2" in _mm.NAMES:
+        from ..mnm import analog2 as A2
+        from ..perc import program as _pp
+        words = A2.table_words()
+        assert A2.TABLES_OFF >= _pp.BOUNDS_OFF + 4 * 16 and A2.TABLES_OFF + 4 * len(words) <= MNM_SCRATCH_BYTES
+        struct.pack_into(f"<{len(words)}f", raw, A2.TABLES_OFF, *words)
+    return bytes(raw)
 
 
 def _check_l2(stock: bytes, span_list) -> None:

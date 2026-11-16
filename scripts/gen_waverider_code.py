@@ -78,6 +78,10 @@ def main() -> int:
         "machines_chunk": {"load": built["machines_chunk"]["load"],
                            "code": built["machines_chunk"]["code"].hex()},
     }
+    if "flt_chunk" in built:                     # 2026-11-10: the A2 filter machines' FLTR list (dnfw.a2f.coldfire)
+        from dnfw.a2f import coldfire as FC      # noqa: PLC0415
+        code["flt_chunk"] = {"load": built["flt_chunk"]["load"], "code": built["flt_chunk"]["code"].hex()}
+        code["guards"] += [{"va": va, "bytes": want, "what": why} for va, want, why in FC.GUARDS]
     text = (json.dumps(code, indent=1) + "\n").encode()
     if "--check" in sys.argv[1:]:               # v0.33: the gate's: the committed code is the sources'
         same = OUT_JSON.read_bytes() == text

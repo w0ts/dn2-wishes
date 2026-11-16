@@ -16,11 +16,23 @@ BLOCK = 32
 TRACKS = 16
 
 # M.SEL: 0 OFF, then the inserts in their build order (a type is a number 0..15 for good: the saved
-# records keep it, so a type added later takes the next number; ports3's SUB DIST GATER RING would be
-# 9..12)
-OFF, FUZZ, TAPE, FOLD, CHOR, WIDE, HARM, FDN8, XDLY = range(9)
-NAMES = ("OFF", "FUZZ", "TAPE", "FOLD", "CHOR", "WIDE", "HARM", "FDN8", "XDLY")
-BUILT = (FUZZ, TAPE, FOLD, HARM)                 # the types the pass before the filter runs
+# records keep it, so a type added later takes the next number). 2026-11-10: SUB DIST GATER RING
+# (ported from Optimist, ports3) take 9..12. The ColdFire's M.SEL is a 0..127 value, each type a band
+# of it: type = value x len(NAMES) / 128 (csrc/inserts/ins.c TYPES = len(NAMES))
+OFF, FUZZ, TAPE, FOLD, CHOR, WIDE, HARM, FDN8, XDLY, SUB, DIST, GATER, RING = range(13)
+NAMES = ("OFF", "FUZZ", "TAPE", "FOLD", "CHOR", "WIDE", "HARM", "FDN8", "XDLY", "SUB", "DIST", "GATER", "RING")
+PORTS = (SUB, DIST, GATER, RING)                 # Optimist's four: each a builder part (dnfw.builder.parts)
+PART = {SUB: "INS_SUB", DIST: "INS_DIST", GATER: "INS_GATER", RING: "INS_RING"}
+
+
+def _ports_built() -> tuple[int, ...]:
+    from ..builder import selection
+    return tuple(t for t in PORTS if selection.on(PART[t]))
+
+
+# the types the pass before the filter runs (mono, per voice): the tree's four, and those of Optimist's
+# four this build has (dnfw.builder: a type left out plays as OFF)
+BUILT = (FUZZ, TAPE, FOLD, HARM) + _ports_built()
 POST = (CHOR, WIDE)                              # the types the pass after the pan runs (stereo)
 BUS = (FDN8, XDLY)                               # the types the pass on the track's bus runs (dnfw.inserts.bus)
 TYPE_BITS = 4                                    # field 0 of a record: type | instance << TYPE_BITS
@@ -113,6 +125,79 @@ HM_AMNT_MAX = 0.5
 W_HM = -2 * math.pi * HM_FREQ_LO / FS / math.log(2)
 LOG2_HM_SPAN = math.log2(HM_FREQ_SPAN)
 
+# -- SUB, DIST, GATER, RING: ported from Optimist (GPL-3.0-only, the User's own), firmware/src/fx/insfx/insfx.c
+# (ifx_mod: RING, SUB), firmware/src/fx/fx.c (dist_gains, dist_run: DIST), firmware/src/fx/insfx/gater.c
+# (GATER); rewritten here in float32 for the SHARC (docs/inserts.md). Mono, before the filter, in either
+# insert slot; each (voice slot, insert slot) its own state.
+
+# SUB: K1 LEV, K2 BAND, K3 TONE, K4 OCT, K5 DRY. An octave down (OCT 64..127: two): a flip-flop on the
+# zero crossings of the band under BAND (a one-pole, 110 Hz x 8^p), a Schmitt trigger at 1/8 of its
+# envelope (fast up, slow down); a square at that envelope's level (the second flip-flop toggles on the
+# first's rising edges), rounded by TONE (a one-pole, 60 Hz x 16^p), x LEV, added to the dry x DRY.
+SB_BAND_LO, SB_BAND_SPAN = 110.0, 8.0
+SB_TONE_LO, SB_TONE_SPAN = 60.0, 16.0
+W_SB = -2 * math.pi * SB_BAND_LO / FS / math.log(2)
+LOG2_SB_SPAN = math.log2(SB_BAND_SPAN)
+W_ST = -2 * math.pi * SB_TONE_LO / FS / math.log(2)
+LOG2_ST_SPAN = math.log2(SB_TONE_SPAN)
+SB_UP, SB_DN = 1.0 / 8, 1.0 / 1024                # the envelope: ~0.2 ms up, ~21 ms down (Optimist's >>3, >>10)
+SB_THR = 1.0 / 8                                  # the trigger's threshold, of the envelope
+
+# DIST: K1 DRIV, K2 TONE, K3 BIAS, K4 LOW, K5 LEV. Optimist's DIST: the drive relative to the voice's peak
+# (a follower, instant up, ~0.35 s down: DRIV means the same clipping on a quiet and a loud note), 0.5x ..
+# 48x into FUZZ's clip (its bias, DC blocker and TONE), the band under LOW (a one-pole, 20 Hz x 16^p) kept
+# out of the clip and added back dry, then back to the peak's level with a make-up (/ 1.5 min(G, 1)),
+# x LEV x 2. It runs FUZZ's sample loop (program.fz_loop) with its own block values.
+DS_DRIVE_LO, DS_DRIVE_OCT = 0.5, math.log2(96.0)  # DRIV: 0.5 x 2^(6.58 p), 0.5x .. 48x
+DS_FLOOR = 0.1                                    # the peak's floor (near silence is not driven to full)
+DS_REL = math.exp(-1.0 / (0.35 * FS))             # the peak's release, a sample
+DS_LOW_LO, DS_LOW_SPAN = 20.0, 16.0
+W_DL = -2 * math.pi * DS_LOW_LO / FS / math.log(2)
+LOG2_DL_SPAN = math.log2(DS_LOW_SPAN)
+DS_LEV_MAX = 2.0
+
+# RING: K1 FREQ, K2 SHPE, K3 AM, K4 LEV. The voice times a sine of 26 Hz x 100^p (26 Hz .. 2.6 kHz,
+# Optimist's range, an exponential knob); SHPE drives the sine into a clip (x 1 .. 16: towards a square);
+# AM lifts the carrier towards 1 (0: ring, 127: the dry); LEV.
+RG_LO, RG_SPAN = 26.0, 100.0
+LOG2_RG_SPAN = math.log2(RG_SPAN)
+RG_PH_PER_HZ = 2 ** 32 / FS                       # a sample's phase step per Hz, of 2^32
+RG_SHAPE_MAX = 15.0
+
+# GATER: K1 DPTH, K2 PATN, K3 RATE, K4 SHPE, K5 SWNG. Optimist's trance gate: 16 patterns of 16 steps,
+# each step a note value of the tempo; an open step ('x') is a pulse, open to its end, or to its middle
+# when the next step is open too; the gain follows open / closed (closed: 1 - DPTH) at a bounded slope
+# (SHPE: a ramp of 2^((SHAPE - 127) / 16) / 2 of a step, held to 1 .. 171 ms); SWNG makes each pair's first
+# step longer (+ 0 .. 50 %). The phase: Q28 a step, 2^32 the 16 steps (it wraps by itself), run from
+# the tempo (the frame's BPM x 120); the ColdFire's clock word (CLK) puts it on the sequencer's place.
+GT_PAT = (0xFFFF, 0x5555, 0x1111, 0x0101, 0x4444, 0xAAAA, 0x9249, 0x1041,
+          0x6D6D, 0xB6DB, 0xB777, 0xDAB5, 0xDDDD, 0xBBBB, 0x1449, 0x4949)   # Optimist's IGT_PAT, bit k step k
+GT_PAT_NAMES = ("16TH", "8TH", "4TH", "HALF", "OFF8", "OF16", "DOT8", "DOT4",
+                "TRN1", "TRN2", "TRN3", "TRN4", "GALP", "RGAL", "CLAV", "TRSL")
+GT_RATE = (192, 96, 48, 32, 24, 16, 12, 6)        # RATE: a step in ticks of 1/96 beat (a 16th = 24)
+GT_RATE_NAMES = ("1/2", "1/4", "1/8", "1/8T", "1/16", "1/16T", "1/32", "1/64")
+GT_STEP = 1 << 28
+GT_PAIR = 2 * GT_STEP
+GT_SWING_MAX = 0.5
+GT_SMAX, GT_SMIN = 1.0 / 48, 1.0 / 8192           # the closure's slope a sample (48 .. 8192 samples)
+GT_SHAPE_OCT = 127.0 / 16
+GT_TOL_TICKS = 2                                  # the clock word moves the phase when it is this far off
+FRAME = 0x25C48C                                  # the DSP's frame copy (dnfw.perc.machines.FRAME)
+TEMPO = FRAME + 216                               # its word 108: BPM x 120 (dnfw.sampler.program.TEMPO_OFFSET)
+TICKS_PER_BPM120 = 1.0 / 112500                   # 1/96-beat ticks a block (32 samples) per BPM x 120
+# The ColdFire's clock word: bit 31 playing, bits 0..11 the sequencer's place since PLAY in ticks of 1/96
+# beat (a 16th of the pattern's own tempo = 24) modulo GT_WRAP (8 bars: every RATE's 16 steps divide it).
+# The pass acts only on a word that changed since the slot last looked: playing, it puts the phase there
+# when it is more than GT_TOL_TICKS off; 0 (or a word with bit 31 clear): the phase runs on from the
+# tempo (Optimist's stopped behaviour). 2026-11-10, two slots: the values fill 0xf18..0x1000, so the
+# clock word is the values' word 1 (GEN + 4, until now sent as zero by ins.c ins_words; ports3 had it at
+# 0xf7c, now inside PACK). No ColdFire writes it yet: GATER runs from the tempo.
+CLK_OFFSET = GEN_OFFSET + 4
+CLK = POOL_DDR + CLK_OFFSET
+GT_WRAP = 3072
+assert all(GT_WRAP % (16 * d) == 0 for d in GT_RATE)
+assert GEN_OFFSET < CLK_OFFSET < PACK_OFFSET
+
 # -- after the pan: the voice in stereo (dnfw.inserts.post). Each voice slot's stereo block, as the
 # stock voice chain leaves it for the FX sends (sw 0x1c1738) and the routing (0x1c1f1e): L 32 floats at
 # STEREO + 0x100 s, R at + 0x80 (byte addresses; docs/inserts.md "After the pan")
@@ -145,7 +230,7 @@ assert WD_D_MIN + WD_D_SPAN < POST_RING
 
 def pack(table: bytes | list[int], gen: int) -> list[int]:
     """the 2 + 56 words the ColdFire sends from GEN_OFFSET (csrc/inserts/ins.c ins_words): the change
-    word, a zero, then each group g of 4 records (fields n = 0..31, record 4 g + n // 8, field n % 8):
+    word, a zero (CLK, GATER's clock word: no ColdFire writes it yet), then each group g of 4 records (fields n = 0..31, record 4 g + n // 8, field n % 8):
     word w holds fields 4w .. 4w+3 in its bits 0..27 (7 each); fields 28..31 are X = the words' top
     nibbles (word w's at bit 4w), field 28 + m = X >> 7m. Values past 127 are cut to 7 bits."""
     v = [int(x) & 0x7F for x in table]
@@ -197,4 +282,7 @@ assert XDLY_LINES_DDR + XDLY_INSTANCES * XDLY_LINES_STRIDE <= POOL_DDR
 # it is expected to end before the frame's insert deadline; the bounds are the runner's cost of one
 # unit (docs/inserts.md) x 1.5, x 2 for the DDR-heavy (DDR's cost on the unit is unmeasured)
 COST = {FUZZ: 5_700, TAPE: 8_200, FOLD: 6_300, HARM: 4_700, CHOR: 13_000, WIDE: 4_700,
-        FDN8: 32_000, XDLY: 20_000}
+        FDN8: 32_000, XDLY: 20_000,
+        # SUB DIST GATER RING (2026-11-10, ins47): not run on the runner yet, so the model's steps of one
+        # unit (2,143 / 2,946 / 1,610 / 1,836) x 1.2 (the runner read up to 20 % over the model) x 1.5
+        SUB: 3_900, DIST: 5_400, GATER: 2_900, RING: 3_400}

@@ -18,6 +18,7 @@ gates do. selache (GPL-3.0) is a tool here; nothing of it is copied.
 from __future__ import annotations
 
 import argparse
+import importlib
 import hashlib
 import json
 import pathlib
@@ -69,6 +70,11 @@ def one_jump(line: str, at_sw: int, work: pathlib.Path) -> dict:
     return {"source": line, "toolchain": TOOLCHAIN, "at_sw": hex(at_sw), "object_parcels_be": be.hex()}
 
 
+def _a2f_built() -> bool:
+    """the A2 filter machines' pass is in this build (dnfw.a2f.design, the builder's choice)"""
+    return bool(importlib.import_module("dnfw.a2f.design").BUILT_MODELS)
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--assemble", action="store_true")
@@ -89,6 +95,7 @@ def main(argv=None) -> int:
             inserts = assemble("inserts", dsp.INS_SW, work)
             inspost = assemble("inspost", dsp.POST_SW, work)
             insbus = assemble("insbus", dsp.INSBUS_SW, work)
+            a2f = assemble("a2f", dsp.A2F_SW, work) if _a2f_built() else None
             pjump = one_jump(PVMIX_LINE, dsp.PVMIX_SITE_SW, work)
             ejump = one_jump(EMARK_LINE, dsp.CALL_SITE_SW, work)
             lptr = one_jump(LOOKUP_LINE, dsp.LOOKUP_SITE_SW, work)
@@ -107,6 +114,7 @@ def main(argv=None) -> int:
             inserts = committed("inserts")
             inspost = committed("inspost")
             insbus = committed("insbus")
+            a2f = committed("a2f") if _a2f_built() else None
             pjump = old["pvmix_jump"]
             ejump = old["emark_jump"]
             lptr = old["lookup_ptr"]
@@ -131,6 +139,8 @@ def main(argv=None) -> int:
             "inserts": {k: v for k, v in inserts.items() if k != "instruction_offsets"},
             "inspost": {k: v for k, v in inspost.items() if k != "instruction_offsets"},
             "insbus": {k: v for k, v in insbus.items() if k != "instruction_offsets"}}
+    if a2f is not None:                                  # 2026-11-09: the A2 filter machines' pass (dnfw.a2f)
+        spec["a2f"] = {k: v for k, v in a2f.items() if k != "instruction_offsets"}
     dsp.CODE.write_text(json.dumps(spec, indent=2) + "\n", encoding="utf-8", newline="\n")
     print(f"wrote {dsp.CODE.relative_to(ROOT)}: perc {len(perc['object_parcels_be']) // 2} B, ping {len(ping['object_parcels_be']) // 2} B, entry {len(jump['object_parcels_be']) // 2} B")
     return 0
