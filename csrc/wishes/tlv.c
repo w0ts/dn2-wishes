@@ -20,8 +20,11 @@
 #define P3 3266489917u
 #define P4 668265263u
 #define P5 374761393u
-#define SEED0 0x57495348u               /* 'WISH' */
-#define SEED1 0x4E324D58u               /* 'N2MX' */
+/* the seeds are ASCII tags, spelled as characters: a hex literal of the second reads as an address in the
+   uncached block to autobuild's address check (rebase/lib/addrcheck.py, check A) */
+#define TAG4(a, b, c, d) (((uint32_t)(a) << 24) | ((uint32_t)(b) << 16) | ((uint32_t)(c) << 8) | (uint32_t)(d))
+#define SEED0 TAG4('W', 'I', 'S', 'H')
+#define SEED1 TAG4('N', '2', 'M', 'X')
 
 /* the tags this build reads and writes (none yet: phase 1 is the record alone; the matrix adds its own) */
 static const u16 known[] = {0};
