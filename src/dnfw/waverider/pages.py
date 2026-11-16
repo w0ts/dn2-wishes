@@ -146,7 +146,7 @@ MNM_LONG = {"TUNE": "Tune", "---": "Unused",
             # ANALOG2 (docs/analog2.md)
             "DTN": "Detune", "MIX": "Osc Mix", "NOIS": "Noise", "DRV": "Drive", "KTR": "Key Track",
             "SWRM": "Swarm", "SEMI": "Osc2 Semi", "SDTN": "Swarm Spread", "SYNC": "Hard Sync",
-            "WAV2": "Osc2 Wave", "FLT": "Filter",
+            "WAV2": "Osc2 Wave", "FLT2": "Filter 2 Type", "WDTH": "Stereo Width",
             # SID 6581, DPRO WAVE / DDRW / DENS, VO-6 (v0.26; removed 2026-11-08, back 2026-11-11):
             # their names as at 28eb110's parent (MIX, SYNC, WAV2, WAVE: below, by machine)
             "PW": "Pulse Width", "PWAD": "PW Sweep", "PWRS": "PW Restart",
@@ -225,7 +225,7 @@ MNM_CHOICES = {
     "SOPHIE": {"MODL": ("FUSE", "STAK", "SPLT", "SHRD", "PIPE", "BOOM", "KICK")},
     "ANALOG2": {"WAVE": ("SAW", "SQR", "TRI", "SIN", "PWM"), "WAV2": ("=1", "SAW", "SQR", "TRI", "SIN", "PWM"),
                 "SYNC": ("OFF", "ON"), "SWRM": ("OFF", "1", "2", "3", "4", "5", "6"), "SEMI": 49,
-                "FLT": tuple(m[0] + md.replace("NTCH", "NT") for m in ("SVF", "LADR", "OTA", "DIOD", "MS20")
+                "FLT2": tuple(m[0] + md.replace("NTCH", "NT") for m in ("SVF", "LADR", "OTA", "DIOD", "MS20")
                              for md in ("L12", "L24", "BP", "HP", "NTCH")),
                 "GLTY": ("OFF", "RATE", "TIME")},           # 2026-11-11: page 3 (OFF: the record's stock default)
     "DRONE": {"TOPO": ("PAIR", "CHN", "RING"), "GLTY": ("RATE", "TIME"), "HOLD": ("OFF", "ON"),
@@ -249,7 +249,7 @@ MNM_WIDGET = {("SOPHIE", "MODL"): 5, ("PLAITS", "MODL"): 5, (_mnm.MONO_NAME, _mn
               ("SID 6581", "MSRC"): 5, ("DPRO-WAVE", "WPRS"): 5, ("DPRO-WAVE", "SYNC"): 5,
               ("VO-6", "V-SW"): 5,
               ("DRONE", "TOPO"): 5, ("ANALOG2", "WAVE"): 5, ("ANALOG2", "WAV2"): 5, ("ANALOG2", "SYNC"): 5,
-              ("ANALOG2", "SWRM"): 5, ("ANALOG2", "FLT"): 5, ("ANALOG2", "SEMI"): 6, ("DRONE", "GLTY"): 5, ("DRONE", "HOLD"): 5, ("DRONE", "OCT"): 5,
+              ("ANALOG2", "SWRM"): 5, ("ANALOG2", "FLT2"): 5, ("ANALOG2", "SEMI"): 6, ("DRONE", "GLTY"): 5, ("DRONE", "HOLD"): 5, ("DRONE", "OCT"): 5,
               ("ANALOG2", "GLTY"): 5,
               # 2026-11-09: 6 MW_SEMIS, the step - n / 2 as +7 / -12 / 0 (the User, build #3: semitones,
               # not the note name); 7 MW_CENTS, the step - n / 2 as +12c / -30c
@@ -291,6 +291,31 @@ def _mnm_ix(d: int) -> int:
 
 def mnm_pages(M) -> int:
     return 3 if hasattr(M, "PNAMES3") else 2 if hasattr(M, "PNAMES2") else 1
+
+
+def mnm_order(M) -> tuple[int, ...]:
+    """2026-11-11: the control j (0..23, mnm_pnames' order: the record it keeps) drawn at each of the 24 places
+    (page 8 p + knob). A machine's LAYOUT (pages of names, None an empty knob) places its controls; the rest (its
+    unused controls) fill the places left, in order. No LAYOUT: j at place j"""
+    layout = getattr(M, "LAYOUT", None)
+    if layout is None:
+        return tuple(range(24))
+    names = mnm_pnames(M)
+    at = [None] * 24
+    for pg, row in enumerate(layout):
+        if len(row) > 8:
+            raise ValueError(f"{M.NAME}: page {pg + 1} has {len(row)} knobs")
+        for s, sh in enumerate(row):
+            if sh is not None:
+                if sh not in names or names.index(sh) in at:
+                    raise ValueError(f"{M.NAME}: {sh} not a control, or placed twice")
+                at[8 * pg + s] = names.index(sh)
+    placed = [sh for row in layout for sh in row if sh is not None]
+    missing = [sh for sh in names if sh != "---" and sh not in MNM_UNPORTED and sh not in placed]
+    if missing:
+        raise ValueError(f"{M.NAME}: LAYOUT leaves out {missing}")
+    rest = iter(j for j in range(24) if j not in at)
+    return tuple(j if j is not None else next(rest) for j in at)
 MNM_LABELS = [{r: (sh if sh != "---" and sh not in MNM_UNPORTED else "-") for r, sh in zip(PARAM_IDS, M.PNAMES)}
               for M in _mnm.CF_MACHINES]
 MNM_LABELS2 = [{r: (sh if sh != "---" else "-") for r, sh in zip(MNM_PAGE2, mnm_pnames(M)[8:16])}
@@ -437,6 +462,8 @@ def mnm_c_header() -> str:
         # v0.33: each machine's own start (dnfw.mnm's DEFAULTS), set by MACHINE SEL (rec.c), as
         # the words the eight records take (perc.live.knob_word), and the records' ids
         f"static const unsigned short mnm_rid[MNM_J] = {{{', '.join(str(r) for r, _s, _lo, _t in MNM_RECS)}}};",
+        # 2026-11-11: the control drawn at each place (page 8 p + knob), as the descriptors' records
+        f"static const unsigned char mnm_order[MNM_N][MNM_J] = {{{arr([list(mnm_order(M)) for M in _mnm.CF_MACHINES])}}};",
         # page 2's and page 3's start: a machine with PNAMES2 / PNAMES3 its DEFAULTS2 / DEFAULTS3 (knob
         # 0..127 each), else the records' words untouched (0xffff: not written)
         f"static const unsigned short mnm_default[MNM_N][MNM_J] = {{{arr([mnm_default_words(d, M) for d, M in zip(_mnm.CF_ALL_DEFAULTS, _mnm.CF_ALL)])}}};",
@@ -821,15 +848,12 @@ def source(page_draw: int, cell: int) -> str:
     mnm_label_pick = "\n".join(f"    moveq   #{kd - 1},%d1\n    cmp.l   %d1,%d0\n    bne.s   wl_n{k}\n"
                                f"    moveq   #{k},%d0\n    bra.s   wl_hit\nwl_n{k}:"
                                for k, kd in enumerate(MNM_KINDS))
-    mnm_page_data = "\n".join(f"    .long mnm_title_{k}, mnm_subtitle_{k}\n"
-                              f"    .long {', '.join(str(e) for e in MNM_PAGE)}\n"
-                              f"    .long {TAG}" for k in range(len(MNM_LABELS)))
-    mnm2_page_data = "\n".join(f"    .long mnm_title_{k}, mnm_subtitle_{k}\n"
-                               f"    .long {', '.join(str(e) for e in MNM_PAGE2)}\n"
-                               f"    .long {TAG}" for k in range(len(MNM_LABELS)))
-    mnm3_page_data = "\n".join(f"    .long mnm_title_{k}, mnm_subtitle_{k}\n"
-                               f"    .long {', '.join(str(e) for e in MNM_PAGE3)}\n"
-                               f"    .long {TAG}" for k in range(len(MNM_LABELS)))
+    # 2026-11-11: each machine's knobs in its own order (mnm_order: a control keeps its record wherever it is drawn)
+    mnm_page_data, mnm2_page_data, mnm3_page_data = (
+        "\n".join(f"    .long mnm_title_{k}, mnm_subtitle_{k}\n"
+                  f"    .long {', '.join(str(MNM_RECS[j][0]) for j in mnm_order(M)[8 * pg:8 * pg + 8])}\n"
+                  f"    .long {TAG}" for k, M in enumerate(_mnm.CF_MACHINES))
+        for pg in range(3))
     smp_page_data = "\n".join(f"    .long smp_title_{k}, smp_subtitle_{k}\n"
                               f"    .long {', '.join(str(e) for e in entries)}\n"
                               f"    .long {TAG}" for k, entries in enumerate(SMP_PAGES))

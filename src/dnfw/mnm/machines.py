@@ -205,6 +205,8 @@ def _adapter(M):
         # 2026-11-11: a third page (dnfw.perc.machines.P3_RECS; dnfw.waverider.pages.MNM_PAGE3)
         **({"PNAMES3": _pad8(M.PNAMES3, "---"), "DEFAULTS3": _pad8(_knobs(M.DEFAULTS3), 0)}
            if hasattr(M, "PNAMES3") else {}),
+        # 2026-11-11: where each control is drawn (dnfw.waverider.pages mnm_order)
+        **({"LAYOUT": M.LAYOUT} if hasattr(M, "LAYOUT") else {}),
         "host": staticmethod(_host_ddrw if M is ddrw else _host),
         "init": staticmethod(lambda p, L, M=M: M.init(p, L.mnm)),
         "trig": staticmethod(lambda p, L, M=M: M.trig(p, L.mnm)),

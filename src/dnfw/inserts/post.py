@@ -46,8 +46,9 @@ GAIN_MAX = 4.0                   # the side's gain at most (a mid the chain rais
 
 
 def _beat_built() -> bool:
+    """a machine that writes a side block is built: DRONE (BEAT), ANALOG2 (WDTH, 2026-11-11)"""
     from ..mnm import machines as MM
-    return "DRONE" in MM.NAMES
+    return "DRONE" in MM.NAMES or "ANALOG2" in MM.NAMES
 
 
 def _recip(p: Prog, d: int, x: int) -> None:

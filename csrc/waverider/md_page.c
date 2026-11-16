@@ -579,7 +579,7 @@ void mnm_pop_offer(void *view, int mi, int page)
         return;
     int base = page > 0 && page < mnm_npages[mi] ? 8 * page : 0;
     for (int s = 0; s < 8; s++) {
-        int j = base + s;
+        int j = mnm_order[mi][base + s];       /* 2026-11-11: the control drawn there (its record, the descriptor's) */
         if (!mnm_listed(mi, j))
             continue;
         int n = mnm_choices[mi][j], cnt = mnm_choice_count(n), ch = mnm_choice_of(n, mnm_k_shown(view, mi, j));
@@ -625,7 +625,7 @@ int mnm_page_draw(void *view, void *c, int mi, int page)
     fill(c, 0, 0, 127, 53, 0);
     int base = page > 0 && page < mnm_npages[mi] ? 8 * page : 0;
     for (int s = 0; s < 8; s++) {
-        int j = base + s;
+        int j = mnm_order[mi][base + s];       /* 2026-11-11: the control drawn there (its record, the descriptor's) */
         int w = mnm_widget[mi][j];
         const char *name = mnm_labels[mi][j];
         if (w == MW_EMPTY || (name[0] == '-' && !name[1]))

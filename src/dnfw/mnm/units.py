@@ -71,6 +71,7 @@ UNITS: dict[str, dict[str, tuple]] = {
         "CUT": ("hz", lambda k: 30.0 * 2.0 ** (k * math.log2(16000.0 / 30.0) / 127.0), False),
         "RES": ("pct", None, False), "DRV": ("pct", None, False), "KTR": ("spct", None, False),
         "SDTN": ("pct", None, False), "DRFT": ("pct", None, False),
+        "WDTH": ("pct", None, False),                                    # 2026-11-11: the swarm's stereo width
         "GLID": ("glid", None, True),                                    # 2026-11-11, page 3: DRONE's, 0 OFF
     },
 }

@@ -75,7 +75,7 @@ MNM_COST = {"SOPHIE": 34_000,   # SOPHIE: 29,979 measured (test_perc_live, the t
                                 # stay under MNM_BUDGET, so a cost per engine would change nothing)
             "TB303": 70_000,    # TB303: 63,577 measured (WAVE square; saw 52,140), the voice in a DN2 block
             "DRONE": 36_000,    # DRONE: 17,251 + the voice ~14,700 with BEAT (two ears); ~24k without
-            "ANALOG2": 32_000,  # ANALOG2: 16,168 (6 copies, sync, DIOD LP24, note 127) + ~14,700    # DRONE: 17,251 + the voice ~14,700 with BEAT (two ears); ~24k without
+            "ANALOG2": 32_000,  # ANALOG2: 16,168 (6 copies, sync, DIOD LP24, note 127) + ~14,700; 2026-11-11 WDTH on: 21,034 (MS20 LP24, DRV) steps    # DRONE: 17,251 + the voice ~14,700 with BEAT (two ears); ~24k without
             # the Monomachine's five (28eb110's parent; back 2026-11-11)
             "SID 6581": 60_000, "DPRO-WAVE": 34_000, "DPRO-DDRW": 78_000, "DPRO-DENS": 70_000,
             "VO-6": 75_000}
@@ -389,7 +389,7 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
     p.ld(5, C["mnm"])                         # v0.26: a Monomachine machine's type picks it
     p.ifz(5, "NE", lambda: (p.iconst(12, MDV.N - 1), p.iop(4, 12, "+", 5)))
     p.st(C["type"], 4)
-    def param(k, slot, lo, top):
+    def param(k, slot, lo, top, word=None):
         half(p, 4, M.frame_offset(slot), 10)
         p.lsh(4, 4, -8)
         p.iconst(12, -lo)
@@ -402,7 +402,7 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
         p.float_(5, 4, 12)
         p.fconst(12, 1.0 / top)
         p.fop(5, 5, "*", 12)
-        p.st(C[f"p{k}" if k < 8 else f"q{k - 8}" if k < 15 else f"r{k - 15}"], 5)
+        p.st(C[word or (f"p{k}" if k < 8 else f"q{k - 8}" if k < 15 else f"r{k - 15}")], 5)
     for k, (_rid, slot, lo, top) in enumerate(M.PARAMS):
         param(k, slot, lo, top)
     if MONO_THRESHOLDS:
@@ -421,6 +421,7 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
     def fx_params():                          # 2026-11-10 (poly16): only PERC's voices read them (fx)
         for k, (_rid, slot, lo, top) in enumerate(M.FX_PARAMS, start=len(M.PARAMS)):
             param(k, slot, lo, top)
+        param(0, M.TYPE_REC[1], 0, 127, "q7")   # 2026-11-11: page 2's eighth, TYPE's record (ANALOG 2's WDTH)
     # 2026-11-11 (the merge, found by the runner's DRONE glide check): the page-2 words (q0..q6) feed PERC's own
     # machines AND the Monomachine machines that have a second page (DRONE's GLID/GLTY/HOLD, ANALOG2's
     # SWRM SEMI SDTN SYNC WAV2 DRFT FLT): the poly16 skip for every Monomachine machine left them 0

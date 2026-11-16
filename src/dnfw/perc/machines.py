@@ -154,7 +154,8 @@ SC_WORDS = ("t", "count", "out", "tr", "type", "note", "trig", "sbase",
             "s5k", "s5a1", "s5a2", "s5a3", "buf", "amd", "amdt", "eqm", "fxam", "fxeq", "fxhp", "fxlp", "fxy",
             "mnm", "lev",   # v0.26: the Monomachine machine (index + 1, 0 PERC), the output level,
             "mcost", "mskip",  # the Monomachine voices' cost so far this block, this one's over the budget
-            "r0", "r1")        # 2026-11-11: page 3's first two (P3_RECS), for a Monomachine machine that has one
+            "r0", "r1",        # 2026-11-11: page 3's first two (P3_RECS), for a Monomachine machine that has one
+            "q7")              # 2026-11-11: page 2's eighth (TYPE_REC: ANALOG 2's WDTH), last so no word moves
 
 
 class Layout:

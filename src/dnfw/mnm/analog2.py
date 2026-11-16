@@ -16,7 +16,8 @@ cutoff + KTR (note - 60) / 256 CUT units). Page 2 (`core.page2`, q0..q6 as 0..1;
 min(n - 1, trunc(q n))): q0 SWRM (0..6 copies, 0 off), q1 SEMI (-24..+24 st, osc 2's interval),
 q2 SDTN (the copies' spread, q x 127), q3 SYNC (ON for q >= 0.5), q4 WAV2 (=1 SAW SQR TRI SIN
 PWM; 0 osc 1's), q5 DRFT (round(q x 127): Optimist's DRFT, 0 restarts the phases on a trig),
-q6 FLT (model x 5 + mode, 25 choices: SVF LP12 .. MS20 NOTCH; 0 SVF LP12, ANALOG's).
+q6 FLT2 (model x 5 + mode, 25 choices: SVF LP12 .. MS20 NOTCH; 0 SVF LP12, ANALOG's), q7 WDTH (2026-11-11, TYPE's
+record: the copies' stereo width, 0 mono).
 Page 3 (2026-11-11, `core.page3`): r0 GLID, r1 GLTY (OFF RATE TIME), DRONE's mono legato glide on the
 oscillators (dnfw.mnm.a2glide); OFF is its record's stock default, so older tracks play as before.
 
@@ -44,6 +45,14 @@ Against Optimist:
 - A trig: with DRFT 0 the phases restart (osc 1 and the spread at 0, osc 2 a quarter turn on),
   free otherwise; the filter's states and last cutoff go on (Optimist's retrigger keeps them).
 
+WDTH (2026-11-11, the User: "a stereo spread of voices"): with copies and WDTH > 0, the copies go left (+1 -2 +3,
+SIDE_OF) and right (-1 +2 -3), osc 1 and 2 in the middle. The mid is the same sum as with WDTH 0 (to float rounding:
+the copies are summed right, then left); the side L - R of the copies runs through the same filter (its own states,
+S_Z2), x 2 WDTH (the knee's 2 x, not its curve; DRV not on the side), into the slot's side block (DRONE's BEAT's,
+dnfw.inserts.post.beat: added after the pan as L += g s, R -= g s, g the chain's gain on the mid). WDTH 0 or no copies
+writes nothing: output bit-identical to before. Cost (model steps a block, 6 copies, sync, DRV): +2.7k (SVF) .. +4.8k
+(MS20); on the runner's memory clock +4.0k .. +6.2k cycles.
+
 The filters' words and mix tables (`ctx`): the words in the render scratch's XB (SID's phases,
 free since 2026-11-08), the tables (`table_words`, not zeros) at TABLES_OFF in the Monomachine's
 L2 scratch, which the coordinator loads.
@@ -53,6 +62,7 @@ from __future__ import annotations
 
 from . import a2glide as G
 from . import core as C
+from .drone import SIDE_L2, SIDE_STRIDE, _side_base
 from .tb303 import _exp2p
 from ..a2f import models as M
 from ..perc.dsl import Prog
@@ -60,14 +70,21 @@ from ..perc.dsl import Prog
 NAME, ID = "ANALOG2", 68
 PNAMES = ("WAVE", "DTN", "MIX", "NOIS", "CUT", "RES", "DRV", "KTR")
 DEFAULTS = (0, 10, 64, 0, 90, 30, 0, 64)         # Optimist's ANALOG defaults
-PNAMES2 = ("SWRM", "SEMI", "SDTN", "SYNC", "WAV2", "DRFT", "FLT")
+PNAMES2 = ("SWRM", "SEMI", "SDTN", "SYNC", "WAV2", "DRFT", "FLT2", "WDTH")
 # page 2's start as knobs 0..127 (dnfw.waverider.pages mnm_default: perc.live.knob_word; q ~ knob / 127):
-# Optimist's SWRM 0, SEMI 0, SDTN 34, SYNC OFF, WAV2 =1, DRFT 0, FLT SVF LP12
-DEFAULTS2 = (0, 64, 34, 0, 0, 0, 0)
+# Optimist's SWRM 0, SEMI 0, SDTN 34, SYNC OFF, WAV2 =1, DRFT 0, FLT SVF LP12; WDTH 0 (2026-11-11: mono, as before)
+DEFAULTS2 = (0, 64, 34, 0, 0, 0, 0, 0)
 # 2026-11-11: page 3, the glide (dnfw.mnm.a2glide). MACHINE SEL starts it OFF, GLID at Optimist's SLIDE_T (TIME_MS
 # index 54, ~50 ms), so RATE or TIME glides at once
 PNAMES3 = ("GLID", "GLTY")
 DEFAULTS3 = (54, 0)
+# 2026-11-11 (the User: spread next to the swarm count; the filter type, FLT2 (ANALOG 2's own filter, not the
+# DN2's), beside CUT and RES; osc 2's SEMI beside WAV2): where each control is drawn, page by page, knobs A..H.
+# Display only: a control keeps its record wherever it is drawn (dnfw.waverider.pages mnm_order), so old tracks
+# keep their values. None: an empty knob
+LAYOUT = (("WAVE", "DTN", "MIX", "NOIS", "FLT2", "CUT", "RES", "KTR"),
+          ("SWRM", "SDTN", "DRFT", "SYNC", "WAV2", "SEMI", "DRV", "WDTH"),
+          ("GLID", "GLTY"))
 WAVES = ("SAW", "SQR", "TRI", "SIN", "PWM")
 WAVES2 = ("=1",) + WAVES
 FLTS = tuple(f"{m} {md}" for m in M.MODELS for md in M.MODES)
@@ -107,7 +124,15 @@ S_END = 30
  D_GS, D_GA, D_GB, D_RES, D_MODE, D_MODEL, D_RI1, D_IF2, D_N0, D_HN, D_RI2, D_TH2) = range(S_END, S_END + 25)
 D_END = S_END + 25
 GW = G.Words(D_END)                              # the glide's words (2026-11-11), up to GW.END
-assert GW.END <= C.K.NS
+# 2026-11-11, WDTH (the User: "a stereo spread of voices", option A): the copies' sides (K_S + k, k 1..6: +1 left,
+# -1 right), the side's filter states, D_WID 2 x WDTH while the side is on (copies and WDTH > 0; else 0), D_SEL the
+# job pass's side (0 every job)
+SIDE_OF = (1, -1, -1, 1, 1, -1)                  # copy k's side: left the copies at +1 -2 +3, right -1 +2 -3
+K_S = GW.END
+S_Z2 = K_S + 7
+D_WID, D_SEL = S_Z2 + 4, S_Z2 + 5
+A_END = S_Z2 + 6
+assert A_END <= C.K.NS
 
 
 def ctx(L: C.Layout) -> M.Ctx:
@@ -167,10 +192,12 @@ def init(p: Prog, L: C.Layout) -> None:
     p.iop(0, 12, "+", 0)
     p.seti(2, 0)
     p.iconst(1, 0)
-    p.loop(L.W["n5"], GW.END, lambda: p.stpost(2, 1))
+    p.loop(L.W["n5"], A_END, lambda: p.stpost(2, 1))
     for k in range(1, 7):
         p.iconst(0, COPY_AT[k - 1])
         _sv(p, K_A + k, 0)
+        p.iconst(0, SIDE_OF[k - 1])
+        _sv(p, K_S + k, 0)
         p.iconst(0, COPY_PH[k - 1])
         _sv(p, K_C + k, 0)
     p.iconst(0, HALF)
@@ -410,6 +437,7 @@ def _filter_ctl(p: Prog, L: C.Layout) -> None:
         p.fconst(0, 0.0)
         for k in range(4):
             _sv(p, S_Z + k, 0)
+            _sv(p, S_Z2 + k, 0)
     p.if_(2, "NE", 3, change, kind="i")
 
 
@@ -490,11 +518,43 @@ def pitch(p: Prog, L: C.Layout) -> None:
             _sv(p, D_TH2, 1)
         M.recip(p)
         _sv(p, ri, 15)
+    _width(p, L)
+
+
+def _width(p: Prog, L: C.Layout) -> None:
+    """D_WID = 2 x WDTH (q7) with copies, else 0; on: the side block's |mid| sum 0 and its flag 1 (DRONE's BEAT's
+    block: the coordinator's post-pan pass mixes the side in, dnfw.inserts.post.beat)"""
+    C.page2(p, L, 0, 7)
+    _k(p, 0, 0, "*", 2.0)
+    p.fconst(3, 0.0)
+    p.fconst(2, 0.0)
+    _ld(p, 1, D_NC)
+
+    def on():
+        p.fpass(3, 0)
+        _side_base(p, L, 0)
+        p.seti(5, 0)
+        p.fconst(2, 0.0)
+        p.sti(32, 5, 2)
+        p.fconst(2, 1.0)
+        p.sti(33, 5, 2)
+    p.ifz(1, "NE", lambda: p.if_(0, "GT", 2, on))
+    _sv(p, D_WID, 3)
+
+
+def _side_at(p: Prog, L: C.Layout, i: int) -> None:
+    """Ii = this half's 16 words of the slot's side block. Clobbers R0, R1, R12-R14."""
+    _side_base(p, L, 0)
+    p.ld(1, L.W["half"])
+    p.lsh(1, 1, 6)
+    p.ipass(12, 1)
+    p.iop(0, 12, "+", 0)
+    p.seti(i, 0)
 
 
 # the Monomachine scratch words the halves use (dnfw.mnm.core SC_WORDS: the removed machines')
 WN = {"bv": "bv", "i3": "x0", "jobs": "n4", "job": "inner", "ri1": "minc", "if2": "inc", "n0": "x1",
-      "hn": "fd", "g2": "g"}
+      "hn": "fd", "g2": "g", "jall": "u", "passes": "osc", "pass": "j"}
 
 
 # -- the oscillators ---------------------------------------------------------------------------
@@ -654,7 +714,8 @@ def _kernel(p: Prog, L: C.Layout) -> None:
 
 
 def _jobs(p: Prog, L: C.Layout) -> None:
-    """the copies, osc 1, osc 2 when free: one kernel each"""
+    """the copies, osc 1, osc 2 when free: one kernel each. With the side on (D_WID), three passes: the right
+    copies (b = R; side = -R), the left (b = R + L; side = b + 2 side = L - R), then the oscillators"""
     W = L.W
     _ld(p, 0, D_NC)
     p.iconst(12, 1)
@@ -666,54 +727,119 @@ def _jobs(p: Prog, L: C.Layout) -> None:
     def osc2():
         p.ifz(2, "EQ", lambda: (p.iconst(12, 1), p.iop(0, 12, "+", 0)))
     p.if_(1, "NE", 12, osc2)
-    p.st(W[WN["jobs"]], 0)
+    p.st(W[WN["jall"]], 0)
+    p.iconst(2, 1)
+    _ld(p, 1, D_WID)
+    p.fconst(12, 0.0)
+    p.if_(1, "NE", 12, lambda: p.iconst(2, 3))
+    p.st(W[WN["passes"]], 2)
     p.iconst(0, 0)
-    p.st(W[WN["job"]], 0)
+    p.st(W[WN["pass"]], 0)
 
-    def job():
-        p.ld(6, W[WN["job"]])
-        _ld(p, 7, D_NC)
+    def one_pass():
+        p.ld(0, W[WN["pass"]])
+        p.ld(1, W[WN["jall"]])
+        _ld(p, 2, D_NC)
+        p.iconst(3, 0)                           # the first job
+        p.iconst(4, 0)                           # the side
+        _ld(p, 5, D_WID)
+        p.fconst(12, 0.0)
 
-        def copy():                              # copy k = job + 1: osc 1 + a spr + c
-            _ri(p, 0, "I3")
-            p.iconst(12, p.ioff(3, 4 * (C.K.S0 + K_A + 1)))
-            p.iop(0, 12, "+", 0)
-            p.lsh(1, 6, 2)
-            p.ipass(12, 0)
-            p.iop(0, 12, "+", 1)
-            p.seti(2, 0)
-            p.ldi(1, 0, 2)                       # a
-            p.ldi(2, K_C - K_A, 2)               # c
-            _ld(p, 3, S_SPR)
-            p.mul_ssi(3, 3, 1)
-            _ld(p, 8, S_Q0)
-            p.iop(8, 8, "+", 3)
-            p.iop(8, 8, "+", 2)
-            _ld(p, 3, D_DINC)
-            p.mul_ssi(3, 3, 1)
-            _ld(p, 9, D_INC1)
-            p.iop(9, 9, "+", 3)
-            _ld(p, 5, D_GC)
-            _ld(p, 4, D_W1)
+        def stereo():
+            p.iconst(12, 2)
+            p.if_(0, "LT", 12, lambda: (p.ipass(1, 2), p.iconst(4, -1),
+                                        p.ifz(0, "NE", lambda: p.iconst(4, 1))),
+                  lambda: (p.ipass(3, 2), p.ipass(12, 1), p.iop(1, 12, "-", 2)), kind="i")
+        p.if_(5, "NE", 12, stereo)
+        p.st(W[WN["jobs"]], 1)
+        p.st(W[WN["job"]], 3)
+        _sv(p, D_SEL, 4)
+        M.mloop(p, W[WN["jobs"]], lambda: _job(p, L))
+        p.ld(0, W[WN["pass"]])
+        _ld(p, 5, D_WID)
+        p.fconst(12, 0.0)
 
-        def osc1():
-            _ld(p, 8, S_Q0)
-            _ld(p, 9, D_INC1)
-            _ld(p, 5, D_G1)
-            _ld(p, 4, D_W1)
+        def side():
+            p.ld(2, W[WN["bv"]])
+            p.ipass(3, 0)
+            _side_at(p, L, 5)
+            p.seti(0, 2)
 
-        def osc2():
-            _ld(p, 8, S_Q1)
-            _ld(p, 9, D_INC2)
-            _ld(p, 5, D_G2)
-            _ld(p, 4, D_W2)
-        p.if_(6, "LT", 7, copy, lambda: p.if_(6, "EQ", 7, osc1, osc2, kind="i"), kind="i")
-        _kernel(p, L)
-        p.ld(8, W[WN["job"]])
+            def neg():
+                p.ldpost(1, 0)
+                p.fconst(12, 0.0)
+                p.fop(1, 12, "-", 1)
+                p.stpost(5, 1)
+
+            def lr():
+                p.ldpost(1, 0)
+                p.ldi(2, 0, 5)
+                p.fop(2, 2, "+", 2)
+                p.fop(2, 2, "+", 1)
+                p.stpost(5, 2)
+            def second():
+                p.iconst(12, 1)
+                p.if_(3, "EQ", 12, lambda: p.loop_r(11, M.N, lr), kind="i")
+            p.ifz(3, "EQ", lambda: p.loop_r(11, M.N, neg), second)
+        p.if_(5, "NE", 12, side)
+        p.ld(8, W[WN["pass"]])
         p.iconst(12, 1)
         p.iop(8, 8, "+", 12)
-        p.st(W[WN["job"]], 8)
-    M.mloop(p, W[WN["jobs"]], job)
+        p.st(W[WN["pass"]], 8)
+    M.mloop(p, W[WN["passes"]], one_pass)
+
+
+def _job(p: Prog, L: C.Layout) -> None:
+    """one job (W job): a copy (D_SEL 0, or the copy on D_SEL's side; another is skipped), osc 1, osc 2"""
+    W = L.W
+    p.ld(6, W[WN["job"]])
+    _ld(p, 7, D_NC)
+
+    def copy():                                  # copy k = job + 1: osc 1 + a spr + c
+        _ri(p, 0, "I3")
+        p.iconst(12, p.ioff(3, 4 * (C.K.S0 + K_A + 1)))
+        p.iop(0, 12, "+", 0)
+        p.lsh(1, 6, 2)
+        p.ipass(12, 0)
+        p.iop(0, 12, "+", 1)
+        p.seti(2, 0)
+        p.ldi(1, 0, 2)                           # a
+        p.ldi(2, K_C - K_A, 2)                   # c
+        _ld(p, 3, S_SPR)
+        p.mul_ssi(3, 3, 1)
+        _ld(p, 8, S_Q0)
+        p.iop(8, 8, "+", 3)
+        p.iop(8, 8, "+", 2)
+        _ld(p, 3, D_DINC)
+        p.mul_ssi(3, 3, 1)
+        _ld(p, 9, D_INC1)
+        p.iop(9, 9, "+", 3)
+        _ld(p, 5, D_GC)
+        _ld(p, 4, D_W1)
+        p.ldi(10, K_S - K_A, 2)                  # its side
+        _ld(p, 11, D_SEL)
+        p.iconst(6, 1)
+        p.ifz(11, "NE", lambda: p.if_(10, "NE", 11, lambda: p.iconst(6, 0), kind="i"))
+
+    def osc1():
+        _ld(p, 8, S_Q0)
+        _ld(p, 9, D_INC1)
+        _ld(p, 5, D_G1)
+        _ld(p, 4, D_W1)
+        p.iconst(6, 1)
+
+    def osc2():
+        _ld(p, 8, S_Q1)
+        _ld(p, 9, D_INC2)
+        _ld(p, 5, D_G2)
+        _ld(p, 4, D_W2)
+        p.iconst(6, 1)
+    p.if_(6, "LT", 7, copy, lambda: p.if_(6, "EQ", 7, osc1, osc2, kind="i"), kind="i")
+    p.ifz(6, "NE", lambda: _kernel(p, L))
+    p.ld(8, W[WN["job"]])
+    p.iconst(12, 1)
+    p.iop(8, 8, "+", 12)
+    p.st(W[WN["job"]], 8)
 
 
 def _sync(p: Prog, L: C.Layout) -> None:
@@ -905,29 +1031,35 @@ def _drive(p: Prog, L: C.Layout) -> None:
     p.if_(6, "NE", 12, run)
 
 
-def _filter(p: Prog, L: C.Layout) -> None:
+def _filter(p: Prog, L: C.Layout, side: bool = False) -> None:
     """the filter (dnfw.a2f.models) in place over b: its words from the block's, the states at
-    S_Z (cleared past 1e4 or NaN, as a2m_block); I3 kept round it (the models clobber it)"""
+    S_Z (cleared past 1e4 or NaN, as a2m_block); I3 kept round it (the models clobber it). SIDE (2026-11-11,
+    WDTH): the same filter over this half's side block, its own states at S_Z2, before b's (the ramp moves on
+    with b's)"""
     X = ctx(L)
     W = L.W
+    z = S_Z2 if side else S_Z
     for src, w in ((D_GS, "gs"), (D_GA, "ge"), (D_RES, "res"), (D_MODE, "mode"), (D_MODEL, "model")):
         _ld(p, 0, src)
         p.st(X.C[w], 0)
-    _ld(p, 0, D_GA)                              # the next half ramps on from here
-    _sv(p, D_GS, 0)
-    _ld(p, 0, D_GB)
-    _sv(p, D_GA, 0)
-    p.ld(0, W[WN["bv"]])
+    if side:
+        _side_at(p, L, 0)                        # (R0 its address)
+    else:
+        _ld(p, 0, D_GA)                          # the next half ramps on from here
+        _sv(p, D_GS, 0)
+        _ld(p, 0, D_GB)
+        _sv(p, D_GA, 0)
+        p.ld(0, W[WN["bv"]])
     p.st(X.C["buf"], 0)
     b3 = p.ibias.get(3)                          # the voice's I3 bias (shrink), put back with it below
     _ri(p, 0, "I3")
     p.st(W[WN["i3"]], 0)
-    p.iconst(12, p.ioff(3, 4 * (C.K.S0 + S_Z)))
+    p.iconst(12, p.ioff(3, 4 * (C.K.S0 + z)))
     p.iop(0, 12, "+", 0)
     p.st(X.C["zp"], 0)
     p.iconst(9, 0)
     for k in range(4):
-        _ld(p, 0, S_Z + k)
+        _ld(p, 0, z + k)
         p.iconst(12, 0x7FFFFFFF)
         p.iop(0, 0, "AND", 12)
         p.iconst(12, 0x461C4000)                 # 1e4
@@ -936,7 +1068,7 @@ def _filter(p: Prog, L: C.Layout) -> None:
     def clear():
         p.iconst(0, 0)
         for k in range(4):
-            _sv(p, S_Z + k, 0)
+            _sv(p, z + k, 0)
     p.ifz(9, "NE", clear)
     M.half(p, X)
     p.ld(0, W[WN["i3"]])
@@ -964,6 +1096,29 @@ def _out(p: Prog, L: C.Layout) -> None:
         p.fop(1, 1, "+", 1)
         p.stpost(0, 1)
     p.loop_r(11, M.N, one)
+
+
+def _side_out(p: Prog, L: C.Layout) -> None:
+    """the side x 2 WDTH (b's 2 x after the knee; WDTH's own), the block's |b| sum into the side block's word 32"""
+    _side_at(p, L, 5)
+    _ld(p, 6, D_WID)
+    p.ld(0, L.W[WN["bv"]])
+    p.seti(0, 0)
+    p.fconst(7, 0.0)
+
+    def one():
+        p.ldpost(1, 0)
+        M.fabs(p, 2, 1)
+        p.fop(7, 7, "+", 2)
+        p.ldi(3, 0, 5)
+        p.fop(3, 3, "*", 6)
+        p.stpost(5, 3)
+    p.loop_r(11, M.N, one)
+    _side_base(p, L, 0)
+    p.seti(5, 0)
+    p.ldi(1, 32, 5)
+    p.fop(1, 1, "+", 7)
+    p.sti(32, 5, 1)
 
 
 def half(p: Prog, L: C.Layout) -> None:
@@ -995,7 +1150,13 @@ def half(p: Prog, L: C.Layout) -> None:
         p.lsh(9, 9, 4)
         p.iop(8, 8, "+", 9)
         _sv(p, ph, 8)
+    _ld(p, 0, D_WID)
+    p.fconst(12, 0.0)
+    p.if_(0, "NE", 12, lambda: _filter(p, L, side=True))
     _noise(p, L)
     _drive(p, L)
     _filter(p, L)
     _out(p, L)
+    _ld(p, 0, D_WID)
+    p.fconst(12, 0.0)
+    p.if_(0, "NE", 12, lambda: _side_out(p, L))
