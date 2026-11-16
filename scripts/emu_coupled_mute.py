@@ -32,7 +32,7 @@ import sys
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from emu_coupled import CF_FRAME, Coupled                       # noqa: E402
-from emu_coupled_flex import install_smoother_model             # noqa: E402
+from emu_coupled_flex import DETENT_PERIODS, install_smoother_model     # noqa: E402
 
 KIT, STRIDE = 0x800052A0, 1163
 FLEX = 17
@@ -86,10 +86,16 @@ def main() -> int:
         held(code, True)
         held(code, False)
 
+    # 2026-11-14 (integrator, r6): a detent every DETENT_PERIODS periods (was 2). The firmware takes
+    # detents at any spacing (scratch/knob-probe/emu_knob_probe.py: 4 detents 0..4 M UI instructions
+    # apart all land on r5, r6 and clean v0.53 1.12), but the first detent after FLEX REC opens waits
+    # up to 4.3 M (emu_knob_first.py: r6 3.9-4.3 M, clean 1.8 M, mostly in the idle task), longer
+    # than 2 periods' UI (2 M): a detent injected while that one is pending is lost in this harness
+    # (2 periods: MUTE stays OFF on r6; 4: ON). The unit itself was not measured
     def turn(enc, delta, n):
         for _ in range(n):
             c.machine.pc = P.encoder(c.machine.m, c.panel.profile, enc, delta)
-            c.periods(2)
+            c.periods(DETENT_PERIODS)
 
     kit = c.long(KIT)
     snd = kit + 52 + STRIDE * T
