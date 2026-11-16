@@ -700,6 +700,7 @@ def main() -> int:
                 scen += ("lib",)                # v0.31: the +Drive's library, bounded to its region
             if "smp_heads" in lay:
                 scen += ("live",)               # v0.38: 22 live adds and 3 recordings, each must play
+                scen += ("bulk",)               # LOAD TO PROJECT of 40 at once: all queued, loaded, played
             if "smp_lib_fpar" in lay:
                 scen += ("nest",)               # v0.40: folders inside folders over the link, power cuts
             if "smp_rs_done" in lay:
@@ -732,7 +733,7 @@ def main() -> int:
 
             def l16_body(tdir):
                 rc, out = run("link16", l16_cmd, logs, env=EMU_ENV, trace=tdir)
-                oks = re.findall(r"link16 (save|fast|dead|high|lowram|slices|lib|live|nest|recstore|norm): .*\"ok\": (true|false)", out)
+                oks = re.findall(r"link16 (save|fast|dead|high|lowram|slices|lib|live|bulk|nest|recstore|norm): .*\"ok\": (true|false)", out)
                 good = rc == 0 and len(oks) == len(scen) and all(v == "true" for _, v in oks)
                 return good, ("save, fast (a lost packet resent); every byte loaded and saved; the frame's routing words stock's in "
                               "every period; v0.22: the RAM check first, past 128 MB loaded only when it "
@@ -740,6 +741,7 @@ def main() -> int:
                               "a hole reused, every write inside its region, a small device refused (lib); v0.38: 22 samples "
                               "added live and 3 recordings, one after another, each plays on the DSP by its own rule "
                               "(the count covers it), a recording while it records too (live)"
+                              + ("; LOAD TO PROJECT of 40 at once: every one queued, loaded and played (bulk)" if "bulk" in scen else "")
                               + ("; v0.40: folders inside folders: an old flat library read as it was, a path's "
                                  "levels made once, look-alikes apart, six deep at most, DROP refused with a folder "
                                  "inside, one sector a change, a power cut after every sector of making and of a "
@@ -1451,10 +1453,14 @@ def main() -> int:
                     "wait:10", "press:17", "wait:2", "yes", "wait:2", "release:17", "wait:8", "png:d0", mem(fbs),
                     "up", "wait:4", "yes", "wait:6", "png:d1", mem(fbs), f"call:{fbc:#x}",
                     "yes", "wait:6", "png:d2", f"call:{fbc:#x}", "yes", "wait:6", "png:d3", f"call:{fbm:#x}",
-                    # v0.33: FUNC + YES held on a sample previews it (+DRIVE's: asked of the
-                    # loader); let go, it stops
+                    # v0.33: FUNC + YES on a sample previews it (+DRIVE's: asked of the loader).
+                    # Auto preview: in +DRIVE it is a toggle, so let go it plays on; FUNC + YES
+                    # again stops it
                     "press:17", "wait:2", "press:10", "wait:6", mem(lay["smp_pv_state"]),
-                    "release:10", "wait:2", "release:17", "wait:4", mem(lay["smp_pv_state"]), f"call:{fbm:#x}",
+                    "release:10", "wait:2", "release:17", "wait:4", mem(lay["smp_pv_state"])]
+                ds += ([mem(lay["smp_fb_auto"]), "press:17", "wait:2", "press:10", "wait:4", "release:10", "wait:2",
+                        "release:17", "wait:4", mem(lay["smp_pv_state"]), mem(lay["smp_fb_auto"])] if "smp_fb_auto" in lay else [])
+                ds += [f"call:{fbm:#x}",
                     "right", "wait:6", "png:d4", "yes", "wait:6", mem(lay["smp_lp_queued"]),
                     "no", "wait:6", mem(lay["smp_fb_folder"]), mem(fbs), "no", "wait:6", mem(fbs),
                     "no", "wait:6", mem(lay["smp_fb_open"]),
@@ -1487,20 +1493,26 @@ def main() -> int:
                         d0 = [int(str(c.get("d0")), 0) for c in r.get("direct_calls", [])][2:]   # (the refresh's, the turn's)
                         sh = [pathlib.Path(r["screens"][n]).read_bytes() for n in ("d0", "d1", "d2", "d3", "d4")]
                         S = hex(fbs)
+                        ash = 3 if "smp_fb_auto" in lay else 0    # auto preview: three more reads before
                         facts = {"opens on the two stores": int(m[S], 16) == 0xFFFFFFFF,
                                  "UP, YES: +DRIVE, its three folders (v0.33: RECORDED shows, named, though empty)":
                                  int(m[f"{S}@1"], 16) == 1 and d0[0:1] == [3],
                                  "YES: INCOMING's two samples": d0[1:2] == [2],
                                  "YES ticks one": d0[2:3] == [1],
-                                 "v0.33: FUNC + YES held previews it; let go, it stops":
+                                 ("auto preview: FUNC + YES turns it on (it plays, let go too), again off (it stops)"
+                                  if "smp_fb_auto" in lay else "v0.33: FUNC + YES held previews it; let go, it stops"):
                                  int(m[hex(lay["smp_pv_state"])], 16) in (1, 2, 3)
-                                 and int(m[f"{hex(lay['smp_pv_state'])}@3"], 16) == 0,
+                                 and (int(m[f"{hex(lay['smp_pv_state'])}@3"], 16) in (1, 2, 3)
+                                      and int(m[hex(lay["smp_fb_auto"])], 16) == 1
+                                      and int(m[f"{hex(lay['smp_pv_state'])}@5"], 16) == 0
+                                      and int(m[f"{hex(lay['smp_fb_auto'])}@6"], 16) == 0
+                                      if "smp_fb_auto" in lay else int(m[f"{hex(lay['smp_pv_state'])}@3"], 16) == 0),
                                  "the preview ticks nothing (still one)": d0[3:4] == [1],
                                  "v0.33: MOVE SELECTED, MOVE HERE: DRUMS holds two": d0[4:5] == [2],
                                  "LOAD TO PROJ queues it": int(m[hex(lay["smp_lp_queued"])], 16) == 1,
                                  "NO: +DRIVE's folders": int(m[hex(lay["smp_fb_folder"])], 16) == 0xFFFFFFFF
-                                 and int(m[f"{S}@6"], 16) == 1,
-                                 "NO: the two stores": int(m[f"{S}@7"], 16) == 0xFFFFFFFF,
+                                 and int(m[f"{S}@{6 + ash}"], 16) == 1,
+                                 "NO: the two stores": int(m[f"{S}@{7 + ash}"], 16) == 0xFFFFFFFF,
                                  "NO: closed": int(m[hex(lay["smp_fb_open"])], 16) == 0,
                                  "each step drawn": len(set(sh)) == 5}
                         good = all(facts.values())
@@ -1581,6 +1593,30 @@ def main() -> int:
                     ns += ["png:n4"]
                     ns += ["spin:5:1", mem(cur), "spin:5:1", mem(cur), "spin:5:1", mem(cur),
                            "spin:5:-1", mem(cur), "spin:5:-1", mem(cur), "spin:5:-1", mem(cur)]
+                    # auto preview (FUNC + YES in +DRIVE toggles it): in AT HIHAT, on: the sample under
+                    # the cursor plays at once; ten DOWNs with the clock still start nothing; 100 ticks
+                    # (66 ms) later still nothing; 300 (200 ms) later exactly one; again for one more
+                    # DOWN; FUNC + YES again: off and silent; on again, then NO up and closed: off.
+                    # The link: no retries, the loader idle at the end
+                    auto = "smp_fb_auto" in lay
+                    if auto:
+                        A, AS, PV = lay["smp_fb_auto"], lay["smp_fb_auto_starts"], lay["smp_pv_state"]
+                        RT_, LS_ = lay["smp_retries"], lay["smp_lstate"]
+                        ar = [mem(A), mem(AS), mem(PV), mem(cur), mem(RT_), mem(LS_)]
+                        fy = ["press:17", "wait:2", "press:10", "wait:2", "release:10", "wait:2", "release:17", "wait:4"]
+                        ns += [f"poke:{lay['smp_fb_folder']:#x}:00000002", f"poke:{cur:#x}:00000001",
+                               f"poke:{lay['smp_overlay_dirty']:#x}:00000001", "wait:4"] + clock(30000) + ar      # a0
+                        ns += fy + ["wait:4"] + ar                                                         # a1: on
+                        for _ in range(10):
+                            ns += ["down", "wait:2"]
+                        ns += ar                                                                         # a2: scrolled
+                        ns += clock(30100) + ["wait:2"] + ar                                           # a3: 66 ms
+                        ns += clock(30300) + ["wait:2"] + ar                                           # a4: 200 ms
+                        ns += ["down", "wait:2"] + clock(30400) + ["wait:2"] + ar                   # a5: 66 ms
+                        ns += clock(30700) + ["wait:2"] + ar                                           # a6: 200 ms
+                        ns += fy + ar                                                                    # a7: off
+                        ns += fy + ["no", "wait:4", "no", "wait:4", "no", "wait:4"] + ar          # a8: on, closed
+                        ns += [mem(lay["smp_fb_open"])]
                     njs = work / "drivenav.json"
                     n_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
                              "--snapshot", snap, "--steps", ",".join(ns), "--png-dir", work / "drivenav", "--json", njs]
@@ -1659,6 +1695,24 @@ def main() -> int:
                                 "turned by hand: a row a detent; turned back, the first detent back lost (v0.41)":
                                     None not in jc[13:] and jc[13:16] == [jit[-1] + 1, jit[-1] + 2, jit[-1] + 3]
                                     and jc[16:19] == [jit[-1] + 3, jit[-1] + 2, jit[-1] + 1]})
+                            if auto:
+                                a_ = [i32(A, i) for i in range(9)]
+                                s_ = [i32(AS, i) for i in range(9)]
+                                p_ = [i32(PV, i) for i in range(9)]
+                                r_ = [i32(RT_, i) for i in range(9)]
+                                l_ = [i32(LS_, i) for i in range(9)]
+                                facts.update({
+                                    "auto preview: FUNC + YES turns it on, the sample under the cursor plays at once":
+                                        a_[0] == 0 and a_[1] == 1 and s_[1] == s_[0] + 1 and p_[1] in (1, 2, 3),
+                                    "auto preview: ten DOWNs with no time passing start nothing": s_[2] == s_[1],
+                                    "auto preview: 66 ms after the last move still nothing": s_[3] == s_[1],
+                                    "auto preview: 200 ms after it, exactly one, playing": s_[4] == s_[1] + 1 and p_[4] in (1, 2, 3),
+                                    "auto preview: one more DOWN: nothing at 66 ms, one at 200 ms": s_[5] == s_[4] and s_[6] == s_[4] + 1,
+                                    "auto preview: FUNC + YES again: off, silent": a_[7] == 0 and p_[7] == 0 and s_[7] == s_[6],
+                                    "auto preview: on, then the browser closed: off": a_[8] == 0
+                                        and int(at(lay["smp_fb_open"], 2) or "1", 16) == 0,
+                                    "auto preview: the link stays healthy (no retries, the loader idle)":
+                                        None not in r_ and r_[8] == r_[0] and l_[8] in (0, 4)})
                             good = all(bool(v) for v in facts.values())
                             why = f"{ {k: v for k, v in facts.items() if not v} } cur={curs} jitter={jc} jrows={jr} off={offs} ticks={ticks} rows0={r0} rows3={rows(3)} rows20={after}"
                         return good, ("held arrows repeat in the list and the action menu, FUNC + DOWN a page, a pushed "

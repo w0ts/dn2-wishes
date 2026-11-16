@@ -146,6 +146,9 @@ def steps(lay):
     s += ["yes", "wait:8"] + look("808")                                        # 3: into 808
     s += [f"press:{FUNC}", "wait:2", f"press:{YESK}", "wait:6", mem(lay["smp_pv_state"]),
           f"release:{YESK}", "wait:2", f"release:{FUNC}", "wait:4", mem(lay["smp_pv_state"])]
+    if "smp_fb_auto" in lay:      # auto preview: FUNC + YES is a toggle in +DRIVE: again, it stops
+        s += [f"press:{FUNC}", "wait:2", f"press:{YESK}", "wait:4", f"release:{YESK}", "wait:2",
+              f"release:{FUNC}", "wait:4", mem(lay["smp_pv_state"])]
     s += ["yes", "wait:4", "right", "wait:6", "yes", "wait:6", mem(lay["smp_lp_queued"])]  # tick, LOAD TO PROJ
     s += ["no", "wait:6"] + look("up1")                                         # 4: NO: KICKS, on 808
     s += ["no", "wait:6"] + look("up2")                                         # 5: NO: TSP, on KICKS
@@ -223,7 +226,10 @@ def facts(r, lay):
         "YES: 808, three levels down: its two samples, the path in the title":
             g(count, "808") == 2 and g(fold, "808") == 5 and g(rows, "808")[:2] == ["808 A", "808 B"]
             and g(titles, "808") == fit(T + "/KICKS/808", TITLE_W),
-        "FUNC + YES held previews it there; let go, it stops": len(pv) >= 2 and pv[0] in (1, 2, 3) and pv[1] == 0,
+        ("FUNC + YES turns auto preview on there (it plays, let go too); again, it stops" if "smp_fb_auto" in lay
+         else "FUNC + YES held previews it there; let go, it stops"):
+            (len(pv) >= 3 and pv[0] in (1, 2, 3) and pv[1] in (1, 2, 3) and pv[2] == 0) if "smp_fb_auto" in lay
+            else (len(pv) >= 2 and pv[0] in (1, 2, 3) and pv[1] == 0),
         "a tick there, LOAD TO PROJECT queues it": bool(reads(lay["smp_lp_queued"]))
         and i32(reads(lay["smp_lp_queued"])[0]) == 1,
         "NO: up to KICKS, on 808": g(fold, "up1") == 3 and g(cur, "up1") == 0,

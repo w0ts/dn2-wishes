@@ -2050,7 +2050,7 @@ extern const char *smp_lib_name(int k);
 extern int smp_lib_read(int k, u32 off, u32 bytes, void *buf);
 extern u8 *smp_lib_stage(void);
 extern int smp_lib_busy(void);
-#define LPQ 16
+#define LPQ 128                                 /* every user slot (SAMP 1..122) can be queued at once; 16 dropped the rest of a big selection silently */
 static short lp_q[LPQ] __attribute__((section(".data")));
 static u32 lp_head __attribute__((section(".data"))) = 0, lp_tail __attribute__((section(".data"))) = 0;
 static int lp_k __attribute__((section(".data"))) = -1;      /* the library entry being copied */

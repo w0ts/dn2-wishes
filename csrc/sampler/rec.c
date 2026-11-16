@@ -1347,10 +1347,63 @@ static void fb_preview(int slot)
     }
 }
 
+/* Auto preview (+DRIVE): FUNC + YES on a sample toggles it (it was hold-to-play there). On,
+ * the sample under the cursor plays once the cursor has rested on it FB_AUTO_REST, so fast
+ * scrolling starts no +Drive reads and sends nothing over the link; each new one stops the
+ * one before (fb_preview). Folders play nothing. Off when the browser closes, when it leaves
+ * +DRIVE, or at the next FUNC + YES. PROJECT RAM's FUNC + YES stays hold-to-play. */
+#define FB_AUTO_REST 225u                       /* 150 ms, in the 1.5 kHz ticks of 0x4058f8d4 */
+int smp_fb_auto __attribute__((section(".data"))) = 0;
+u32 smp_fb_auto_starts __attribute__((section(".data"))) = 0;   /* previews it started (the gate reads it) */
+static int fb_auto_cur __attribute__((section(".data"))) = -1;
+static int fb_auto_fold __attribute__((section(".data"))) = -100;
+static int fb_auto_slot __attribute__((section(".data"))) = -1;   /* the one last started */
+static u32 fb_auto_at __attribute__((section(".data"))) = 0;      /* when the cursor got there */
+extern int smp_fb_item(int i, int *slot);
+
+static void fb_auto_toggle(void)
+{
+    smp_fb_auto = !smp_fb_auto;
+    fb_auto_slot = -1;
+    fb_auto_cur = smp_fb_cur;
+    fb_auto_fold = smp_fb_folder;
+    fb_auto_at = *(volatile u32 *)0x4058F8D4u - FB_AUTO_REST;   /* on: the one under the cursor at once */
+    if (!smp_fb_auto)
+        fb_preview_stop();
+    smp_overlay_dirty = 1;                      /* the title bar's marker */
+}
+
 static void fb_pv_poll(void)                    /* the browser closed: its preview stops */
 {
+    if (smp_fb_auto && (!smp_fb_open || smp_fb_store != 1)) {
+        smp_fb_auto = 0;
+        fb_auto_slot = -1;
+        smp_overlay_dirty = 1;
+    }
     if (fb_pv && !smp_fb_open)
         fb_preview_stop();
+    if (!smp_fb_auto || smp_fb_menu)
+        return;
+    u32 now = *(volatile u32 *)0x4058F8D4u;
+    if (smp_fb_cur != fb_auto_cur || smp_fb_folder != fb_auto_fold) {
+        fb_auto_cur = smp_fb_cur;               /* moved: wait until it rests */
+        fb_auto_fold = smp_fb_folder;
+        fb_auto_at = now;
+        return;
+    }
+    if (now - fb_auto_at < FB_AUTO_REST)
+        return;
+    int slot = -1;
+    smp_fb_item(smp_fb_cur, &slot);
+    if (slot < 0 || slot == fb_auto_slot)
+        return;                                 /* a folder, or already started */
+    fb_preview(slot);
+    if (fb_pv) {
+        fb_auto_slot = slot;
+        smp_fb_auto_starts++;
+    }
+    else
+        fb_auto_at = now;                       /* not now (the link busy): again after a rest */
 }
 
 /* v0.40: where the TRIM preview is, for TRIM's playhead (smp_page.c). The DSP plays it from
@@ -1854,8 +1907,8 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
         lrpt_code = 0;                          /* v0.30: and the list's */
     if (rec_pv_on && it[0] == IT_KEY && !down && (code == K_YES || code == K_FUNC))
         preview(0);                             /* FUNC + YES let go: the preview stops */
-    if (fb_pv && it[0] == IT_KEY && !down && (code == K_YES || code == K_FUNC))
-        fb_preview_stop();                      /* v0.33: and the browser's */
+    if (fb_pv && !smp_fb_auto && it[0] == IT_KEY && !down && (code == K_YES || code == K_FUNC))
+        fb_preview_stop();                      /* v0.33: and the browser's (not auto preview's) */
     /* v0.35: a held key's repeat (bit 3 with bit 0: the stock UI's key task sends these
      * while a key stays down, and stock's own handlers take them only where a hold means
      * something, its lists' arrows). Ours read every bit-0 item as a press, so a held
@@ -2182,6 +2235,8 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
             } else if (code == K_UP || code == K_DOWN) {
                 lst_press(code);                /* v0.30: held, it goes on */
             }
+            else if (code == K_YES && smp_func_held && slot >= 0 && smp_fb_store == 1)
+                fb_auto_toggle();                   /* +DRIVE: FUNC + YES turns auto preview on/off */
             else if (code == K_YES && smp_func_held && slot >= 0)
                 fb_preview(slot);                   /* v0.33: FUNC + YES previews while held, as the DT2's */
             else if (code == K_YES && slot >= 0)    /* v0.33: YES ticks in both stores, as the DT2's */

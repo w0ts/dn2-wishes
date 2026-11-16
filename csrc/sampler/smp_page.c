@@ -1450,23 +1450,31 @@ void smp_fb_delete(int slot, int folder)
     smp_fb_unmark_all();
 }
 
+int smp_lp_skipped __attribute__((section(".data"))) = 0;   /* asked but not queued (queue full): on the title line */
+
 int smp_fb_load_project(int slot, int folder)
 {
-    int n = 0;
+    int n = 0, asked = 0;
     if (smp_fb_store != 1)
         return 0;
     if (smp_fb_mark_count()) {
         for (int k = 0; k < LB_CAP; k++)
             if (!lb_marks[k >> 5])
                 k |= 31;                        /* v0.45: a word with nothing ticked, skipped */
-            else if (lb_marked(k) && smp_lib_used(k))
+            else if (lb_marked(k) && smp_lib_used(k)) {
+                asked++;
                 n += smp_lib_load(k) == 0;
-    } else if (slot >= 0)
+            }
+    } else if (slot >= 0) {
+        asked++;
         n += smp_lib_load(slot) == 0;
-    else if (folder != -1)
+    } else if (folder != -1)
         for (int k = 0; k < LB_CAP; k++)
-            if (lb_under(k, folder))            /* v0.40: and its folders' */
+            if (lb_under(k, folder) && smp_lib_used(k)) {   /* v0.40: and its folders' */
+                asked++;
                 n += smp_lib_load(k) == 0;
+            }
+    smp_lp_skipped = asked - n;
     smp_fb_unmark_all();
     return n;
 }
@@ -1791,6 +1799,8 @@ void smp_fb_draw(void *c, int samp)
     int marks = smp_fb_mark_count(), pend = smp_lib_pending();
     if (pend)                                   /* v0.31: LOAD TO PROJECT under way */
         LABEL(c, 64, 57, "LOADING TO PROJECT %d", pend);
+    else if (smp_lp_skipped > 0 && !marks)     /* more asked than the queue took */
+        LABEL(c, 64, 57, "%d NOT LOADED", smp_lp_skipped);
     else if (marks)
         LABEL(c, 64, 57, "%d SELECTED", marks);
     else if (smp_fb_store == -1)
@@ -1811,6 +1821,12 @@ void smp_fb_draw(void *c, int samp)
         folder_icon(c, 2, 57);
         LABEL(c, 64, 57, "%.22s", fb_folder_name(smp_fb_folder));
     }
+    extern int smp_fb_auto;
+    if (smp_fb_auto)                            /* auto preview on: a play mark (5 rows) at the right */
+        for (int j = 0; j < 3; j++) {
+            hline(c, 123, 123 + j, 57 + j, 0);
+            hline(c, 123, 123 + j, 61 - j, 0);
+        }
     hline(c, 0, 127, 55, 0);
     int n = smp_fb_count();
     if (n == 0) {

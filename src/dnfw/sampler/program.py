@@ -3164,13 +3164,12 @@ def pvmix(p: Prog, L: Layout) -> None:
                 # v0.37: at half (-6 dB): int16 / 65536. At full scale the preview sat ~6 dB
                 # over a sample track at its default VOL and LEVEL ((0.78)^2 x 0.79 = 0.48),
                 # which the preview skips (\x0x/, paQ: "really high", "at least 6dB").
-                # v0.47: a quarter (-12 dB): int16 / 131072. v0.40 normalised every take to full
-                # scale (it was -6 dBFS since v0.30), which put TRIM's preview of a take 6 dB
-                # over where it sat from v0.37 to v0.39 (the owner: "too loud again", "blown
-                # out"; L2: the +DRIVE preview "roughly 12 dB louder" than the sample on a
-                # track). A take's preview peaks at -12 dBFS again, as on v0.37..v0.39
-                p.iconst(12, -33)
-                p.float_(3, 3, 12)            # int16 / 131072
+                # Ours (lpq, the User on 1.12, kept on v0.47): v0.47 took it to a quarter (int16 / 131072, -6 dB);
+                # ours stays a further 6 dB down, the level the User set and heard on b4..b6
+                # (the user on 1.12: still ~12 dB over a track at its
+                # default VOL and LEVEL): int16 / 262144, a quarter of v0.37's level
+                p.iconst(12, -34)
+                p.float_(3, 3, 12)            # int16 / 262144
                 p.float_(2, 2, 12)
                 p.lsh(12, 1, 3)
                 p.iconst(13, SM.MIX_BUF)
