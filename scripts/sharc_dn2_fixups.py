@@ -55,6 +55,37 @@ post-fix), or replaces the step outright:
   G9  (ours, not the runner's) G1's two-pass assumed every memory form names
       its DAG field `i`; the 16-bit Type 3c names it `dmi`. Met in SIMD at
       0x1c2857 in sw 0x1c2712 (Milestone 3).
+  G12 (2026-11-14) the 16-bit Types 3d and 4d in SIMD do no PEy companion
+      access either (G1). The dispatch latches each voice's note trigger with
+      them, two slots a pass over byte cells (sw 0x1c8ef1, 0x1c9ac9 reads
+      engine +0x138fc + t, 0x1c9acc writes +0x1390c + t; 0x1c9abd..0x1c9ac6
+      clear the masks' cells): PEx took the even slots, the odd slots' notes
+      were never latched, so a voice on slot 1, 3, ... never opened its amp.
+      Run by the two-pass, the companion one access width on (a byte: +1);
+      a store of a register with no PEy complement (the clear stores M13)
+      stores the same register there too, as the firmware's stride-2 clear
+      of all sixteen cells needs.
+  G13 (2026-11-14) Type 7a MODIFY's width selector (w, l): (1, 0) "(nw)"
+      scales M by 4, (0, 1) "(sw)" by 2, (0, 0) blank adds M as bytes
+      (PRM's BH table). The runner takes blank as normal-word (x 4 under
+      assume_nw32). The engine init's per-track loop (sw 0x1c8e1c, I2 +=
+      M2 blank at 0x1c8cb8, M2 = 0x70 t) then put track t's DC blocker at
+      0x1c0 t: only tracks 0, 4, 8, 12 got one, the others' state landed in
+      the next arrays, and a voice on slots 1..15 was silent. Run with the
+      scaling off; the warm snapshot is rebuilt with it (INIT_REV). Type 7b
+      (32 bits) carries the same selector at the same bits (39, 23), which
+      the runner's table leaves undecoded and scales as normal-word: read
+      from the raw parcel (the init's I1 += M4 at 0x1c8ca6, blank).
+  G14 (2026-11-14) a long-word access's post-modify (Types 4b/3b, G3)
+      through an index into L1's normal-word space (its byte image, as G4
+      maps it) moves the index by normal words, x 4, not x 8: the per-track
+      gain smoothers are 7 words each (written 0x1c apart by the init, walked
+      by `R2 = DM(I5, 7) (lw)` at 0x1c99f3 a slot each); at x 8 slot t read
+      slot 2t's, slots 1..15 played 4 to 18 dB low and slot 0's smoother
+      never took the track's LEVEL (0.787 at 100): slot 0 now reads ~2 dB
+      lower, as the frame says. A byte-space index (DDR) keeps x 8: at x 4
+      the engine init left the stock delay's DDR state silent (the xdly
+      step's "heard" check: 384 -> 12). The pre-modify's address keeps x 8.
 
 Two accelerations, each measured against the emulated code it replaces:
 
@@ -71,6 +102,7 @@ from __future__ import annotations
 import collections
 import dataclasses
 import math
+import os
 import struct
 import sys
 
@@ -111,6 +143,28 @@ def cond_of(f) -> int:
         return 31
 
 
+# the warm snapshot (sharc_waverider_voice.py's engine init) depends on these fixups: its file name carries this, so
+# a snapshot built under older ones is never taken (G13 changed what the init leaves in slots 1..15)
+INIT_REV = "_g14d"
+# a bisection aid: DNFW_FIXUPS_OFF=G12,G13a,G13b,G14 runs those as before them (a snapshot built so is named apart)
+OFF = {x for x in os.environ.get("DNFW_FIXUPS_OFF", "").split(",") if x}
+if OFF:
+    INIT_REV += "_off_" + "_".join(sorted(OFF))
+
+
+def blank_modify(f) -> bool:
+    """G13: a Type 7a MODIFY whose width selector (w, l) is (0, 0): no (nw) or (sw)"""
+    return not f.get("w") and not f.get("l")
+
+
+def width_7b(insn) -> int:
+    """G13: Type 7b's width selector, bits 39 (w) and 23 (l) of the 48-bit layout as in 7a, which the runner's table
+    leaves undecoded (bits 23 and 7 of the 32-bit parcel) -> M's scale: blank 1, (sw) 2, (nw) 4"""
+    raw = insn.raw if insn.length_bytes == 4 else insn.raw >> 16
+    w, l_ = (raw >> 23) & 1, (raw >> 7) & 1
+    return 4 if w and not l_ else 2 if l_ else 1
+
+
 def simd(state) -> bool:
     return _simd_active(state) is True
 
@@ -118,14 +172,17 @@ def simd(state) -> bool:
 # forms whose PEy the runner already models (compute, or memory companion)
 SIMD_NATIVE = {"2c", "2a_short", "14a", "3b", "15a"}
 # memory forms with no PEy companion transfer in the runner
-MEM_NO_COMPANION = {"3a", "4a", "4b", "15b", "3c"}
+MEM_NO_COMPANION = {"3a", "4a", "4b", "15b", "3c", "3d", "4d"}
+# G12: the forms whose companion is one access width on (G1's others: the next word, + 4)
+BY_WIDTH = {"3d", "4d"}
+WIDTH_BYTES = {"byte": 1, "byte-sign-extended": 1, "short-word": 2, "short-word-sign-extended": 2}
 FLOW = {"12a_imm", "12a_ureg", "11c", "11a", "9a_abs", "9b_abs", "25c_rframe", "9a_rel",
         "25a_direct", "25a_pcrel", "8a_abs", "8a_rel", "13a"}
 COND_UNSUPPORTED = {"6b_shiftimm", "6a_mem", "7a"}
 COND_NATIVE = {31, 0x17}          # the predicates the runner already runs (0x17: Type 7a only)
 MR_PAIRS = (("MRF", "MSF"), ("MRB", "MSB"))     # PEx / PEy multiplier result registers
 LOOP_ABORT_FORMS = {"8a_rel", "8a_abs"}
-WATCH = COND_UNSUPPORTED | LOOP_ABORT_FORMS | {"3a", "4a", "4b", "3b", "15b", "13a", "17a", "17b", "2b"}
+WATCH = COND_UNSUPPORTED | LOOP_ABORT_FORMS | {"3a", "4a", "4b", "3b", "15b", "13a", "17a", "17b", "2b", "7b"}
 NW_LO, NW_HI = 0x240000 // 4, 0x3A0000 // 4
 # PCs whose parcel digikit reads as a 32-bit Type 2b and selache as a 16-bit 2c
 AS_2C = {0x1C0E13, 0x1C4F4A}
@@ -198,14 +255,21 @@ class Fixups:
             return None
         f = insn.fields
         pc = s.pc_sw
+        blank = t == "7a" and blank_modify(f) and getattr(s, "assume_nw32", False) and "G13a" not in OFF
         if in_simd and t not in SIMD_NATIVE and t not in ("17a", "17b"):
-            if t in MEM_NO_COMPANION and not self.is_long(t, f):
+            if t in MEM_NO_COMPANION and not self.is_long(t, f) and not ("G12" in OFF and t in BY_WIDTH):
                 return ("replace", lambda r: self.two_pass(r, insn, memory=True))
             if t in FLOW:
                 if "compute[22:16]" in f:
                     return ("replace", lambda r: self.two_pass(r, insn, flow=True))
             elif "compute[22:16]" in f or t in ("5a_move", "5b_move"):
-                return ("replace", lambda r: self.two_pass(r, insn))
+                return ("replace", lambda r: self.two_pass(r, insn, unscaled=blank))
+        if blank and cond_of(f) == 31:
+            return ("replace", lambda r: self.unscaled(r, insn))
+        if t == "7b" and getattr(s, "assume_nw32", False) and "G13b" not in OFF:
+            scale = width_7b(insn)
+            if scale != 4:
+                return ("replace", lambda r: self.modify_7b(r, insn, scale))
         if t in LOOP_ABORT_FORMS:
             return self.loop_abort(insn, s, pc) if F(f, "a") else None
         if t in ("4b", "3b"):
@@ -217,6 +281,40 @@ class Fixups:
         if t in COND_UNSUPPORTED and cond_of(f) not in (COND_NATIVE if t == "7a" else {31}):
             return ("replace", lambda r: self.conditional(r, insn))
         return None
+
+    def unscaled(self, runner, insn):
+        """G13: a MODIFY with no width selector, M added as bytes"""
+        out = st._execute(dataclasses.replace(runner.state, assume_nw32=False), insn)
+        if len(out) != 1 or out[0].stopped:
+            raise sr.Halt("G13 unscaled MODIFY failed", runner.state.pc_sw, insn.type_name,
+                          str(out[0].stopped if out else ""))
+        runner.state = dataclasses.replace(out[0], assume_nw32=True)
+        runner.instructions += 1
+        self.note("blank MODIFY unscaled (G13)", runner.state.pc_sw)
+
+    def modify_7b(self, runner, insn, scale):
+        """G13: Type 7b MODIFY by its width selector: blank adds M as bytes, (sw) as short words"""
+        s = runner.state
+        f = insn.fields
+        bank = 8 if F(f, "g") else 0
+        src = ((F(f, "is[2:2]") << 2) | F(f, "is[1:0]")) + bank
+        dst = (((F(f, "is[2:2]") << 2) | F(f, "is[1:0]")) ^ F(f, "idis")) + bank
+        mv, lv = s.uregs[32 + F(f, "m") + bank], s.uregs[UREG_CODES["L%d" % src]]
+        taken = cond_of(f) == 31 or seq._predicate(s, cond_of(f)) is True
+        if scale == 2 and taken and not (isinstance(lv, Const) and lv.value == 0):
+            raise sr.Halt("G13: a circular (sw) MODIFY", s.pc_sw, insn.type_name)
+        out = st._execute(dataclasses.replace(s, assume_nw32=False), insn)
+        if len(out) != 1 or out[0].stopped:
+            raise sr.Halt("G13 7b MODIFY failed", s.pc_sw, insn.type_name, str(out[0].stopped if out else ""))
+        x = dataclasses.replace(out[0], assume_nw32=True)
+        if scale == 2 and taken:
+            iv = x.uregs[16 + dst]
+            if not (isinstance(iv, Const) and isinstance(mv, Const)):
+                raise sr.Halt("G13: (sw) MODIFY on a value not concrete", s.pc_sw, insn.type_name)
+            x.uregs[16 + dst] = Const((iv.value + mv.value) & 0xFFFFFFFF)
+        runner.state = x
+        runner.instructions += 1
+        self.note(f"7b MODIFY x{scale} (G13)", s.pc_sw)
 
     @staticmethod
     def _halt(runner, insn, why):
@@ -299,21 +397,30 @@ class Fixups:
         if not isinstance(iv, Const):
             return None
         if t == "4b":
-            off = _signed((F(f, "data[5:5]") << 5) | F(f, "data[4:0]"), 6) * 8
+            mod = _signed((F(f, "data[5:5]") << 5) | F(f, "data[4:0]"), 6)
             code = F(f, "dreg")
         else:
             mv = s.uregs[32 + F(f, "m")]
             if not isinstance(mv, Const):
                 return None
-            off = _signed(mv.value, 32) * 8
+            mod = _signed(mv.value, 32)
             code = F(f, "ureg")
-        addr = iv.value if F(f, "u") else (iv.value + off) & 0xFFFFFFFF
+        addr = iv.value if F(f, "u") else (iv.value + mod * 8) & 0xFFFFFFFF
+        # G14: a post-modify's update through an index into L1's normal-word space (its byte image, as G4 maps it)
+        # counts normal words (x 4), not long words (x 8); a byte-space index (DDR) keeps the runner's x 8
+        ireg, new_i = 16 + F(f, "i"), (iv.value + mod * 4) & 0xFFFFFFFF
+        in_nw = NW_LO * 4 <= iv.value < NW_HI * 4
+
+        def index(r):                           # G14: the post-modify's own update, in normal words
+            if F(f, "u") and in_nw and "G14" not in OFF:
+                r.state.uregs[ireg] = Const(new_i)
         if F(f, "d"):
             _, values = fm._lw_store_pair(dict(s.uregs), code)
 
             def post(r):
                 for k, v in enumerate(values):
                     _dm_write(r.state, addr + 4 * k, 4, v)
+                index(r)
                 self.note(f"lw store {t} (G3)", pc)
             return post
         codes = fm._lw_load_codes(code)
@@ -323,12 +430,15 @@ class Fixups:
                 v = _dm_read(r.state, addr + 4 * k, 4)
                 if v is not None:
                     r.state.uregs[c] = v
+            index(r)
             self.note(f"lw load {t} (G3)", pc)
         return post
 
     # -- G1 ------------------------------------------------------------------------------
-    def two_pass(self, runner, insn, memory=False, flow=False):
+    def two_pass(self, runner, insn, memory=False, flow=False, unscaled=False):
         s = runner.state
+        if unscaled:                                # G13 in SIMD: both passes add M as bytes
+            s = runner.state = dataclasses.replace(s, assume_nw32=False)
         m1 = UREG_CODES["MODE1"]
         mode1 = s.uregs[m1]
         sisd = Const(mode1.value & ~(1 << 21))
@@ -344,7 +454,10 @@ class Fixups:
             iv = uy[idx]
             if not isinstance(iv, Const):
                 raise sr.Halt("two-pass: I register not concrete", s.pc_sw, insn.type_name)
-            uy[idx] = Const((iv.value + 4) & 0xFFFFFFFF)
+            step = 4
+            if insn.type_name in BY_WIDTH:
+                step = WIDTH_BYTES.get(ACCESS_WIDTHS.get((F(f, "l"), F(f, "x"), F(f, "w"))), 4)
+            uy[idx] = Const((iv.value + step) & 0xFFFFFFFF)
             code = F(f, "dreg") if "dreg[3:0]" in f else F(f, "ureg")
             comp = fm._cureg_code(code) is not None
         # PEy's multiplier result registers are MSF/MSB: give them to the
@@ -375,10 +488,14 @@ class Fixups:
         for a, b in MR_PAIRS:
             if a in y.special:
                 x.special[b] = y.special[a]
-        if memory and comp and isinstance(y.overlay, COW):
+        # G12: a 3d/4d store of a register with no PEy complement (M13 in the trig cells' clear) stores the same
+        # register at the companion address too: the firmware clears the odd cells with it
+        if memory and (comp or insn.type_name in BY_WIDTH) and isinstance(y.overlay, COW):
             own = y.overlay.own()
             if own:
                 x.overlay.update(own)
+        if unscaled:
+            x = dataclasses.replace(x, assume_nw32=True)
         runner.state = x
         runner.instructions += 1
         self.note("simd two-pass (G1)", s.pc_sw)

@@ -7,9 +7,9 @@ track's voices must put sound in their track buffers (the DSP's block after the 
 
 Stage 2 (a cold boot: the ColdFire's power-on upload and READY) is not covered here: the DSP side is warm.
 
-2026-11-14: only voice slot 0 is modelled faithfully (emu_coupled.Coupled's all_slots): a note on any other slot is
-silent, stock or ours, and the first note played lands on slot 0. So one track a run: --tracks '' --ours TRACK:TYPE
-(the gate's ournote: 2:21 DRONE, then 3:23 JUNO, each in its own run) puts our machine on and plays it first.
+2026-11-14: --ours TRACK:TYPE puts our machine on by MACHINE SEL's commit (the gate's ournote: 2:21 DRONE, then 2:23
+JUNO, each in its own run). Until the runner's G12-G14 only voice slot 0 sounded here, so the gate's runs play their
+note first; with the warm snapshot built under them every slot does (docs/coupled-emulator.md).
 
 Validated 2026-11-13: r11f (heard on the unit) 0.0232, r14 (silent on the unit) 0.0001, r14b (r14, optstock off)
 0.0232. A gate step that must pass on ours whatever clean does (autobuild report.MUST_PASS).
@@ -84,6 +84,10 @@ def main() -> int:
                                                  "one a run with --tracks '', so its note is on voice slot 0)")
     p.add_argument("--layout", default=str(REPO / "src/dnfw/mods/waverider_code.json"))
     p.add_argument("--periods", type=int, default=48)
+    p.add_argument("--advance", type=int, default=0, help="short notes played first on --advance-track, so the next "
+                                                          "note lands on that voice slot (the ColdFire's turn)")
+    p.add_argument("--advance-track", type=int, default=1)
+    p.add_argument("--expect-slot", type=int, default=None, help="our tracks' voices must include this slot")
     p.add_argument("--json", default=None)
     a = p.parse_args()
     c = Coupled(a.build, a.snapshot, a.stock, verbose=True)
@@ -116,6 +120,19 @@ def main() -> int:
     SM = importlib.import_module("dnfw.sampler.machines")
     ok_all = True
     side = {int(x): "stock" for x in a.tracks.split(",") if x} | {t: "ours" for t, _ in ours}
+    if a.advance:                               # 2026-11-14: the voice slots the ColdFire hands out in turn moved on
+        held(TRK, True)
+        tap(TRIG1 + a.advance_track)
+        held(TRK, False)
+        c.periods(4)
+        if not c.read(KB_ON, 1)[0]:
+            tap(KEYBOARD)
+        for _ in range(a.advance):
+            held(NOTE_KEY, True, 2)
+            held(NOTE_KEY, False, 2)
+        c.periods(8)
+        print(f"  {a.advance} short notes on track {a.advance_track + 1} first: slot tracks "
+              f"{list(struct.unpack('>16I', c.read(SLOT_TRACK, 64)))}", flush=True)
     for t in side:
         held(TRK, True)
         tap(TRIG1 + t)
@@ -150,12 +167,14 @@ def main() -> int:
         # (main_peak reported only: MAIN_TAP is pvmix's, 0 here). 2026-11-14: and bounded (a block after the chain is
         # within +-CEIL; JUNO's first coupled run read 1.1e33, a blow-up the floor alone passed)
         ok = bool(voices) and FLOOR < peak < CEIL and not c.halt
+        if a.expect_slot is not None and side[t] == "ours":     # (the advance run: our note on that slot)
+            ok &= a.expect_slot in voices
         ok_all &= ok
         rep["tracks"][t] = {"side": side[t], "type": types[t], "keyboard": kb, "voices": sorted(voices), "track_peak": peak,
                             "main_peak": main_peak, "ok": ok}
         print(("  ok    " if ok else "  FAIL  ") + f"track {t + 1} ({side[t]}, type {types[t]}): voices {sorted(voices)}, "
               f"track peak {peak:.4f}, main peak {main_peak:.4f}, keyboard {kb}"
-              + ("" if 0 in voices else " (not on voice slot 0, the only one emu_coupled models faithfully)"),
+              + ("" if 0 in voices else " (not on voice slot 0)"),
               flush=True)
     rep["halt"], rep["status"] = c.halt, getattr(c, "last_status", None)
     if a.json:

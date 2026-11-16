@@ -96,15 +96,11 @@ def main() -> int:
     c.periods(4)
     if not c.read(SN.KB_ON, 1)[0]:
         tap(SN.KEYBOARD)
-    # calibrate: idle frames' end, EXTRA so they read --target-idle
-    ends = []
-    for _ in range(6):
-        c.period()
-        ends.append(ck["end"])
-    idle_end = sum(ends[2:]) / len(ends[2:])
+    # calibrate: idle frames' end, EXTRA so they read --target-idle, then the guard's learned tail cleared
+    # (2026-11-14: left as the uncalibrated frames taught it, every voice of ours was refused: Coupled.clock_calibrate).
     # (EXTRA may be negative: a kit with more stock than the unit's reads less stock time, so an idle frame reads
     # the unit's D)
-    ck["extra"] = a.extra if a.extra is not None else int(a.target_idle * ck["P"] - idle_end)
+    idle_end = c.clock_calibrate(a.target_idle, extra=a.extra)
     print(f"  idle end {idle_end:.0f} cycles: EXTRA {ck['extra']} (idle D {(idle_end + ck['extra']) / ck['P']:.3f})", flush=True)
     for _ in range(40):                                            # TAIL and the deadline settle on the new stock
         c.period()

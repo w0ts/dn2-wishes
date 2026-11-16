@@ -3029,14 +3029,16 @@ def main() -> int:
               "a stock note through both processors (coupled)", [sn_cmd, sorted(EMU_ENV.items())], sn_body)
 
         # 2026-11-14 (the GATE GAP of 2026-11-13: our machines never sounded from a real ColdFire frame): the same for
-        # DRONE and JUNO, each put on track 3 by MACHINE SEL's commit and played first in its own run, so its note
-        # lands on voice slot 0: the one slot emu_coupled models faithfully (a note on any other slot is silent there,
-        # stock or ours: the reason every earlier our-machine run was). Track 3's filter is the Multimode: the stock
-        # Equalizer gives NaN in the harness whatever the machine (docs/coupled-emulator.md). Must pass on ours
+        # DRONE and JUNO, each put on track 3 by MACHINE SEL's commit and played in its own run (voice slot 0), and
+        # DRONE once more after 15 short stock notes on track 2, so its note lands on voice slot 15 (the runner's
+        # G12-G14 and the warm snapshot built under them: every slot sounds as slot 0, docs/coupled-emulator.md).
+        # Track 3's filter is the Multimode: the stock Equalizer gives NaN in the harness whatever the machine. Must
+        # pass on ours
         on_runs = [(name, [a.coupled_py, "-u", "scripts/emu_coupled_stocknote.py", "--build", a.build, "--stock",
-                           a.stock, "--snapshot", snap, "--tracks", "", "--ours", spec,
+                           a.stock, "--snapshot", snap, "--tracks", "", "--ours", spec, *extra,
                            "--json", work / f"ournote_{name}.json"])
-                   for name, spec in (("drone", "2:21"), ("juno", "2:23"))]
+                   for name, spec, extra in (("drone", "2:21", ()), ("juno", "2:23", ()),
+                                             ("drone15", "2:21", ("--advance", "15", "--expect-slot", "15")))]
 
         def on_body(tdir):
             for name, cmd in on_runs:
@@ -3044,7 +3046,8 @@ def main() -> int:
                 last = out.strip().splitlines()[-1] if out.strip() else ""
                 if rc != 0 or not last.startswith("PASS"):
                     return False, f"{name}: " + out[-900:]
-            return True, "a held note on DRONE and on JUNO (track 3, each its own run) sounds through both processors"
+            return True, ("a held note on DRONE and on JUNO (track 3, each its own run), and on DRONE on voice slot 15, "
+                          "sounds through both processors")
         later("ournote", "our machines' notes through both processors (coupled)",
               "our machines' notes through both processors (coupled)",
               [[c for _n, c in on_runs], sorted(EMU_ENV.items())], on_body)

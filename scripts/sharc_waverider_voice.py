@@ -399,7 +399,7 @@ def main(argv=None) -> int:
 
     print("step 1: map")
     ctl = controls(mach)
-    cache = OUT / f"m2_init_{mach.sha[:12]}{'_exact' if a.exact else ''}.snap"
+    cache = OUT / f"m2_init_{mach.sha[:12]}{'_exact' if a.exact else ''}{fx.INIT_REV}.snap"
     if a.fresh and cache.exists():
         cache.unlink()
     init = run_init(mach, cache, not a.exact, a.validate)

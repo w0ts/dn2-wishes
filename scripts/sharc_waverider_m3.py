@@ -657,7 +657,7 @@ def load_init(dk, mach, stream, reader, table, fresh):
     m2mach = m2.Machine(dk, stream, reader, table)                # the M2 image and its sha
     snap = None
     for cand in sorted(OUT.glob("m2_init_*.snap")):
-        if cand.name == f"m2_init_{m2mach.sha[:12]}.snap":
+        if cand.name == f"m2_init_{m2mach.sha[:12]}{fx.INIT_REV}.snap":
             snap = cand
             break
     if snap and not fresh:

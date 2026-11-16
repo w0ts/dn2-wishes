@@ -8,9 +8,8 @@ voices (the ColdFire's slot -> track table) and their block after the chain; per
 and RMS (dBFS of that block) over the periods after its first sound. So a held track can be measured alone and with
 another track playing beside it (the unit, r14b: DRONE ~-30 dB, gone when anything else plays).
 
-Only voice slot 0 is modelled faithfully (emu_coupled): the held note, played first, is on it; the sequencer's
-notes take the other slots, so their own levels here are not the unit's (silent, or a few dB low with --all-slots),
-but everything they do to the held voice (the DSP's time, the guard, the budget, the ColdFire's voices) is.
+Every voice slot sounds here since the runner's G12-G14 and the warm snapshot built under them (until then only
+slot 0 did, so a run measured the voice it played first); the held note, played first, is on slot 0.
 
 Usage (bench):
   python -u scripts/emu_coupled_seqnote.py --build X.syx --stock 1.12.syx --snapshot S
@@ -58,13 +57,13 @@ def main() -> int:
                    help="another track (0-based): with the held note still down, [TRK] + [TRIG t] and a second "
                         "KEYBOARD note held there (the sequencer does not start here: PLAY leaves it stopped)")
     p.add_argument("--with-after", type=int, default=24, help="periods the held note plays alone first")
-    p.add_argument("--all-slots", action="store_true", help="emu_coupled's partial repair of slots 1..15")
+    p.add_argument("--stale-tail", action="store_true", help="--clock: keep the guard's tail as the uncalibrated frames set it")
     p.add_argument("--clock", type=float, default=None, help="give the DSP a clock (emu_coupled.dsp_clock) calibrated so "
                                                            "an idle frame reads this D (the unit: ~0.69); the guard's "
                                                            "skips reported")
     p.add_argument("--json", default=None)
     a = p.parse_args()
-    c = Coupled(a.build, a.snapshot, a.stock, verbose=True, all_slots=a.all_slots)
+    c = Coupled(a.build, a.snapshot, a.stock, verbose=True)
     c.watchdog()
     SN.install_smoother_model(c)
     P = c.panel.panelin
@@ -98,12 +97,14 @@ def main() -> int:
         from dnfw.perc import guard as G                          # noqa: PLC0415, N812
         ck = c.dsp_clock(extra=0)
         c.periods(4)
-        ends = []
-        for _ in range(6):
-            c.period()
-            ends.append(ck["end"])
-        idle_end = sum(ends[2:]) / len(ends[2:])
-        ck["extra"] = int(a.clock * ck["P"] - idle_end)
+        idle_end = c.clock_calibrate(a.clock) if not a.stale_tail else None
+        if a.stale_tail:                                          # as before 2026-11-14: the tail learned uncalibrated
+            ends = []
+            for _ in range(6):
+                c.period()
+                ends.append(ck["end"])
+            idle_end = sum(ends[2:]) / len(ends[2:])
+            ck["extra"] = int(a.clock * ck["P"] - idle_end)
         print(f"  DSP clock: idle end {idle_end:.0f} cycles, EXTRA {ck['extra']} (idle D {a.clock})", flush=True)
         c.periods(20)
     for spec in a.machine:                                        # our machine at MACHINE SEL's starts (no sound file)
@@ -165,8 +166,15 @@ def main() -> int:
         rows.append(row)
         clk = None
         if G is not None:
-            clk = {"d": round(ck["d"], 3), "voice_skips": c.dsp_word(G.SKIPS), "ins_skips": c.dsp_word(G.INS_SKIPS)}
+            clk = {"d": round(ck["d"], 3), "voice_skips": c.dsp_word(G.SKIPS), "ins_skips": c.dsp_word(G.INS_SKIPS),
+                   "limit": c.dsp_word(G.LIMIT), "limit_perc": c.dsp_word(G.LIMIT_PERC), "tail": c.dsp_word(G.TAIL),
+                   "period": c.dsp_word(G.PERIOD), "reserve": c.dsp_word(G.RESERVE), "mark0": c.dsp_word(G.MARK0),
+                   "entry": (c.dsp_word(G.MARK) - c.dsp_word(G.MARK0)) & 0xFFFFFFFF,
+                   "ours_end": (c.dsp_word(G.OURS_END) - c.dsp_word(G.MARK0)) & 0xFFFFFFFF,
+                   "cost_slot0": c.dsp_word(G.COST_PERC), "start": (c.dsp_word(G.START) - c.dsp_word(G.MARK0)) & 0xFFFFFFFF}
         clocks.append(clk)
+        if clk and (k < 4 or k % 8 == 0):
+            print(f"  p{k:3d} guard: " + ", ".join(f"{n} {v}" for n, v in clk.items()), flush=True)
         if k % 8 == 0:
             print(f"  p{k:3d}: " + "; ".join(f"track {t + 1} voices {vs} peak {pk}" for t, (vs, pk) in row.items())
                   + f" | slot tracks {list(vt)}, playing {c.read(SEQ_PLAYING, 1)[0]}"
@@ -180,7 +188,7 @@ def main() -> int:
     if a.trig:
         tap(K_STOP)
     rep = {"build": a.build, "sounds": a.sound, "trigs": a.trig, "hold": a.hold, "types": types,
-           "all_slots": a.all_slots, "tracks": {}, "rows": rows, "clocks": clocks, "halt": c.halt}
+           "tracks": {}, "rows": rows, "clocks": clocks, "halt": c.halt}
     for t, s in acc.items():
         rms = math.sqrt(s["sq"] / s["n"]) if s["n"] else 0.0
         rep["tracks"][t + 1] = {"type": types[t], "voices": sorted(s["voices"]), "first_period": s["first"],

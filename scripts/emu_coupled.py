@@ -24,6 +24,7 @@ last block), .smp_out(t) (a sample voice's own output)."""
 
 from __future__ import annotations
 
+import importlib
 import os
 import pathlib
 import struct
@@ -91,14 +92,8 @@ class _FrameClock:
 
 class Coupled:
     def __init__(self, build_syx: str, snapshot: str, stock_syx: str, digikit_sharc: str | None = None,
-                 png_dir: str | None = None, verbose: bool = False, dsp: bool = True, all_slots: bool = False):
+                 png_dir: str | None = None, verbose: bool = False, dsp: bool = True):
         self.verbose = verbose
-        # 2026-11-14: only voice slot 0 is modelled faithfully here. The warm DSP state has only slot 0's per-slot
-        # chain set up (every other slot's DC blocker multiplies by 0: silence, stock or ours), and the runner drops
-        # PEy's access of the SIMD byte forms that latch the odd slots' note triggers (fixups G12, not fixed yet).
-        # all_slots=True copies slot 0's chain to the others (m5.chains_like_slot0): slot 2 then sounds, ~2 dB
-        # under slot 0; the odd slots stay silent. A note under test must land on slot 0 (the first note played).
-        self.all_slots = all_slots
         t0 = time.perf_counter()
         self._load_images(build_syx, stock_syx)
         self._cf_setup(snapshot, png_dir)
@@ -234,8 +229,6 @@ class Coupled:
         self._tmp = tempfile.TemporaryDirectory(dir=M.OUT)
         snap, m2mach = M.snapshot_path(dk, self.stock7, pathlib.Path(self._tmp.name))
         self.dsp_state = M.init_on(snap, m2mach, img, warm=True)
-        if self.all_slots:                  # 2026-11-14: (opt-in, partial) m5.CHAIN_ARRAYS
-            M.chains_like_slot0(self.dsp_state.state)
         self.dsp_i7 = M.m2.word_reg(self.dsp_state, "I7")    # v0.51: every block called with it (m4.unpack_call)
         self.dsp_instructions = 0
 
@@ -294,6 +287,26 @@ class Coupled:
         self.post_block.append(after)
         ck["sites"] = len(sites)
         return ck
+
+    def clock_calibrate(self, target_idle: float = 0.69, measure: int = 6, extra: int | None = None) -> float:
+        """2026-11-14: after dsp_clock(): EXTRA set so an idle frame reads TARGET_IDLE (its end measured over the
+        last MEASURE - 2 of MEASURE periods), then the guard's learned stock tail (TAIL, REST_OUT: held at their peak,
+        eased by 1/4096 a frame) cleared, so it learns them from calibrated frames as a unit does from power-on. Left
+        as the uncalibrated frames set them (EXTRA 0: ~373k cycles of tail on r5), the limit left our voices ~45k
+        cycles, under the guard's 60k FLOOR: every voice of ours was refused, and stolen, under the clock.
+        EXTRA given: that instead of the calibrated one. -> the idle end measured."""
+        G = importlib.import_module("dnfw.perc.guard")
+        ck = self.clock
+        ends = []
+        for _ in range(measure):
+            self.period()
+            ends.append(ck["end"])
+        idle_end = sum(ends[2:]) / len(ends[2:])
+        ck["extra"] = extra if extra is not None else int(target_idle * ck["P"] - idle_end)
+        self.periods(2)                         # (a block reads the frame before it: the last uncalibrated one first)
+        for w in (G.TAIL, G.REST_OUT):
+            self.dsp_poke(w, 0)
+        return idle_end
 
     def dsp_word(self, a) -> int:
         return (self.M.m2.word(self.dsp_state.state, a) or 0) & 0xFFFFFFFF
