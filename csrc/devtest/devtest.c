@@ -21,7 +21,18 @@
  * (0x4011f9aa; about every 34 s on the unit, 121 ticks a second, measured 2026-11-11), so everything here runs
  * on `mono`, the tick unwrapped (stepped every UI pass, far more often than a wrap). Its rate is measured
  * against the audio frames (1,500 a second) once they run; until then it is taken as 1,000 a second (the
- * emulator runs no audio interrupt). */
+ * emulator runs no audio interrupt).
+ *
+ * The glass inverted while armed (2026-11-11, the User: "this way i known when you operate it"). The
+ * ColdFire does not drive the OLED itself: it sends the panel controller, over UART8, 8-byte column groups
+ * (0x40131f04(column, page, bytes): 0x10|page, column, the 8 bytes) and a 0xB8 byte to show them
+ * (0x40131eec). Every glass write goes through that one sender (panel_diff's changed groups, the whole-frame
+ * send 0x40131f54, the clear 0x4013206e), so dt_glass, entered by a jmp at its entry, sends the 8 bytes
+ * flipped while dt_inv is set. panel_diff's entry jumps to dt_present: when the armed state differs from
+ * dt_inv it takes the new state and sends the whole frame once (stock's 0x40131f54: every group, the 0xB8,
+ * the swap), else stock's diff. dt_poll asks for a redraw while they differ, so an idle screen turns too.
+ * The two buffers are never touched: SCREEN reads the normal image, STATE says whether the glass is
+ * inverted. Nothing is saved: a reboot starts disarmed and upright; the auto-disarm turns it back. */
 #include "devtest.h"
 
 #define D __attribute__((section(".data")))
@@ -38,6 +49,7 @@
 #define PANEL_BUTTONS ((void (*)(u32, u32))0x4011FC8Cu)           /* (channel, the channel's mask) */
 #define PANEL_ENCODER ((void (*)(u32, int))0x4011FF0Cu)           /* (encoder 0..8, signed delta) */
 #define PANEL_LAST ((volatile u8 *)0x445A2E30u)                   /* each channel's last mask */
+#define GLASS_WHOLE ((u32 (*)(void))0x40131F54u)  /* stock: every group of FRONT, the 0xB8, the swap -> the new FRONT */
 #define KIT_POINTER (*(u8 *volatile *)0x800052A0u)
 #define SOUND_STRIDE 1163u
 #define SOUND_BASE 52u
@@ -66,8 +78,9 @@
 #define CAP_ARM      (1u << 8)
 #define CAP_KEY      (1u << 9)
 #define CAP_PROFILE  (1u << 10)                  /* remoteui-5: the CPU profiler (prof.c) */
+#define CAP_INVERT   (1u << 11)                  /* the glass inverted while armed; STATE's byte 88 */
 #define CAPS (CAP_TLM | CAP_INFO | CAP_SWITCH | CAP_PEEK | CAP_COUNTERS | CAP_TRACE | CAP_STATE | CAP_SCREEN | CAP_ARM | CAP_KEY \
-              | CAP_PROFILE)
+              | CAP_PROFILE | CAP_INVERT)
 
 /* statuses (the reply's fourth byte) */
 #define ST_OK 0
@@ -101,6 +114,7 @@ static int func_ok(u32 code)
 }
 
 static u32 armed D = 0, arm_flags D = 0, nonce D = 0, nonce_at D = 0, last_cmd D = 0;
+u32 dt_inv D = 0;                                /* the glass's groups go out flipped (set by dt_present only) */
 static u32 tps D = 1000;                         /* ticks a second, measured (dt_poll) */
 static u32 mono D = 0, mono_tick D = 0;          /* the tick unwrapped, and the tick it was stepped at */
 static u32 cal_f D = 0, cal_t D = 0;
@@ -306,7 +320,33 @@ static void play(u32 k)                          /* one queued event, due now */
     }
 }
 
-NOJT void dt_poll(void)
+/* the glass's group sender's entry (0x40131f04, by jmp): the 8 bytes flipped while dt_inv, then stock's */
+void dt_glass(u32 column, u32 page, const u8 *p)
+{
+    extern void dt_glass_stock(u32 column, u32 page, const u8 *p);   /* glass.S: stock's, replayed */
+    u8 b[8];
+    if (dt_inv) {
+        for (u32 k = 0; k < 8; k++)
+            b[k] = (u8)~p[k];
+        p = b;
+    }
+    dt_glass_stock(column, page, p);
+}
+
+/* panel_diff's entry (0x40131fd2, by jmp): the whole frame once when the armed state turned, else stock's
+ * diff; either returns the new FRONT, as panel_diff */
+u32 dt_present(void)
+{
+    extern u32 dt_diff_stock(void);              /* glass.S: stock's panel_diff, replayed */
+    u32 want = armed != 0;
+    if (want == dt_inv)
+        return dt_diff_stock();
+    dt_inv = want;
+    return GLASS_WHOLE();
+}
+
+/* -> nonzero: a redraw is wanted (the glass's state is not the armed state yet) */
+NOJT int dt_poll(void)
 {
     extern int smp_dsp_load(void);
     clock_step();
@@ -331,7 +371,7 @@ NOJT void dt_poll(void)
         else
             for (u32 k = 0; k < PEND; k++)
                 p_kind[k] = 0;
-        return;
+        return dt_inv != 0;
     }
     while (armed) {                              /* the due events, earliest due first, then as they came */
         u32 best = PEND, bd = 0, bo = 0;
@@ -355,6 +395,7 @@ NOJT void dt_poll(void)
             cnt[C_UP]++;
             trace(TR_UP, c, 0);
         }
+    return armed != dt_inv;
 }
 
 static u32 hash(const u8 *p)                     /* FNV-1a */
@@ -581,6 +622,7 @@ NOJT u32 dt_rx(u32 cmd, const u8 *rq, u32 n, u8 *rp, u32 r, u8 *st)
         }
         put32(rp + r, (u32)FB_FRONT); r += 4;
         put32(rp + r, (u32)FB_BACK); r += 4;
+        rp[r++] = (u8)dt_inv;                    /* the glass shows the frames inverted (SCREEN reads them upright) */
     } else if (cmd == 40) {                      /* SCREEN: u8 flags (bit 0 the frame being drawn, bit 1 new frame), u8 chunk */
         u32 flags = sub, ch = n >= 5 ? rq[4] : 0xFFu;
         if (n < 5 || flags > 3 || (ch >= NCHUNK && ch != 0xFFu)) {

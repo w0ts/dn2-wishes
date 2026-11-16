@@ -93,7 +93,7 @@ def test_every_reply_fits_the_firmwares_buffer():
     assert 4 + 12 + 128 <= 160                                 # SCREEN
     assert 4 + 9 + 16 * 8 <= 160                               # TRACE
     assert 4 + 1 + 12 * 4 + 12 <= 160                          # COUNTERS
-    assert 4 + 88 <= 160                                       # STATE
+    assert 4 + 89 <= 160                                       # STATE (byte 88: the glass inverted)
     assert 4 + 4 + 128 <= 160                                  # PEEK
     assert 4 + 4 + 17 * 4 <= 160                               # PROFILE status
     assert 4 + 9 + P.PROF_PER_READ * P.PROF_RECORD <= 160      # PROFILE READ
@@ -217,6 +217,43 @@ def test_disarm_and_timeout_let_every_key_go():
     s = ch.state()
     assert not s.armed and s.held == ()
     assert ch.counters()["auto_disarms"] == 1
+
+
+def test_the_glass_is_inverted_while_armed_and_upright_after():
+    """csrc/devtest dt_present: the glass turns at the UI pass after ARM, back after DISARM or the auto-disarm;
+    SCREEN reads the frames upright either way"""
+    ch = chan()
+    k = K.Keys(ch, log=None)
+    assert not ch.state().glass_inverted
+    upright = ch.screen()
+    k.arm()
+    ch.unit.wait(0.02)
+    assert ch.state().glass_inverted
+    assert ch.screen() == upright                                # the mirror is never inverted
+    k.disarm()
+    ch.unit.wait(0.02)
+    assert not ch.state().glass_inverted
+    ch.set_switch("ARMTIME", 30)
+    k.arm()
+    ch.unit.wait(0.02)
+    assert ch.state().glass_inverted
+    ch.unit.wait(31)
+    s = ch.state()
+    assert not s.armed and not s.glass_inverted
+
+
+def test_state_parses_with_and_without_the_glass_byte():
+    d = bytes(88)
+    assert P.parse_state(d).glass_inverted is False             # a build before the INVERT capability
+    assert P.parse_state(d + b"\x01").glass_inverted is True
+
+
+def test_the_capability_bits_match_the_firmware():
+    text = DEVTEST.read_text()
+    bits = {m.group(1): int(m.group(2)) for m in re.finditer(r"#define CAP_(\w+)\s+\(1u << (\d+)\)", text)}
+    names = {"INFO": "BUILDINFO"}
+    assert {names.get(k, k): v for k, v in bits.items()} == P.CAPS
+    assert "| CAP_PROFILE | CAP_INVERT)" in text                # every bit advertised
 
 
 def test_destructive_keys_are_refused_on_both_sides():

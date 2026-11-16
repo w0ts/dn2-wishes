@@ -47,7 +47,7 @@ STATUS_TEXT = {OK: "ok", 1: "failed", ARGS: "bad arguments or unknown command", 
 
 # capability bits (BUILDINFO)
 CAPS = {"TLM": 0, "BUILDINFO": 1, "SWITCH": 2, "PEEK": 3, "COUNTERS": 4, "TRACE": 5, "STATE": 6, "SCREEN": 7,
-        "ARM": 8, "KEY": 9, "PROFILE": 10}
+        "ARM": 8, "KEY": 9, "PROFILE": 10, "INVERT": 11}
 
 # KEY event kinds
 PRESS, ENCODER, RELEASE = 1, 2, 3
@@ -280,6 +280,7 @@ class State:
     inserts: tuple[tuple[int, int], ...]
     fb_front: int
     fb_back: int
+    glass_inverted: bool = False     # the glass shows the frames inverted (armed); SCREEN still reads them upright
 
 
 def parse_state(d: bytes) -> State:
@@ -293,7 +294,9 @@ def parse_state(d: bytes) -> State:
     types = tuple((b - 256 if b > 127 else b) for b in d[32:48])
     ins = tuple((d[48 + 2 * t], d[49 + 2 * t]) for t in range(16))
     front, back = struct.unpack(">II", d[80:88])
-    return State(frames, tick, tps, bool(armed), bool(flags & 1), left, held, pending, panel, types, ins, front, back)
+    inverted = len(d) > 88 and bool(d[88])          # byte 88 since the INVERT capability (older builds: absent)
+    return State(frames, tick, tps, bool(armed), bool(flags & 1), left, held, pending, panel, types, ins, front, back,
+                 inverted)
 
 
 @dataclass(frozen=True)

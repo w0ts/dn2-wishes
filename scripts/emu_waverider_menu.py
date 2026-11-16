@@ -2213,6 +2213,24 @@ def main() -> int:
     onpc_hooks = []
     dt_log: list = []
     dt_results: dict = {}
+    # 2026-11-11, the glass inverted while armed (csrc/devtest dt_glass): the glass as the panel controller gets
+    # it, each 8-byte group taken where the stock sender (0x40131f04, its body from 0x40131f0c on) sends it
+    # (column at sp + 20, page at sp + 24, the bytes at sp + 28): byte j of group (column, page) is page + 8 column + 8 j
+    glass_model = {"fb": bytearray(1024), "seen": set(), "groups": 0, "shows": 0}
+
+    def at_glass_group(uc_, address, size, user):
+        sp = uc.reg_read(K.UC_M68K_REG_A7)
+        col, page, ptr = struct.unpack(">3I", bytes(uc.mem_read(sp + 20, 12)))
+        data = bytes(uc.mem_read(ptr, 8))
+        for j in range(8):
+            glass_model["fb"][(page & 7) + 8 * (col & 0x78) + 8 * j] = data[j]
+        glass_model["seen"].add((col & 0x78, page & 7))
+        glass_model["groups"] += 1
+
+    def at_glass_show(uc_, address, size, user):
+        glass_model["shows"] += 1
+    uc.hook_add(UC_HOOK_CODE, at_glass_group, begin=0x40131F0C, end=0x40131F0C)
+    uc.hook_add(UC_HOOK_CODE, at_glass_show, begin=0x40131EEC, end=0x40131EEC)
     for step in [s.strip() for s in steps_text.split(",") if s.strip()]:
         step_now["name"] = step
         if step == "func-src":
@@ -2383,6 +2401,25 @@ def main() -> int:
                     "readout_vs_capture_px": DS.differ(readout, cap) if readout and cap else None,
                     "lit_px": sum(bin(b).count("1") for b in readout)}
                 print(f"  dt screen {name}: {dt_results['screens'][name]}")
+            elif parts[1] == "glass":                # dt:glass:NAME, the glass (as sent) against the frame on it (BACK)
+                name = parts[2]
+                back = machine.read(machine.long(0x402A10CC), 1024)
+                flipped = bytes(b ^ 0xFF for b in back)
+                fb = bytes(glass_model["fb"])
+                png_dir.mkdir(parents=True, exist_ok=True)
+                DS.write_png(fb, png_dir / f"{name}.glass.png")
+                dt_results.setdefault("glass", {})[name] = {
+                    "groups_seen": len(glass_model["seen"]), "groups_sent": glass_model["groups"],
+                    "shows": glass_model["shows"], "frames": panel.frames(),
+                    "vs_back_px": DS.differ(fb, back), "vs_back_inverted_px": DS.differ(fb, flipped),
+                    "back_lit_px": sum(bin(b).count("1") for b in back)}
+                print(f"  dt glass {name}: {dt_results['glass'][name]}")
+            elif parts[1] == "age":                  # dt:age:S, the panel tick run S seconds on (at 1,000 a second)
+                for _ in range(int(parts[2])):
+                    t = machine.long(0x466768B0)
+                    machine.write(0x466768B0, struct.pack(">I", (t + 1000) & 0xFFF))
+                    panel.settle(2_000_000)
+                print(f"  dt age {parts[2]} s")
             elif parts[1] == "raw":                  # dt:raw:CMD:HEXARGS, the host's checks bypassed (the firmware's own)
                 r = dt_call(int(parts[2]), bytes.fromhex(parts[3]) if len(parts) > 3 else b"")
                 dt_results.setdefault("raw", []).append({"step": step, "status": None if r is None else r.status,

@@ -427,6 +427,13 @@ GRID_STOCK = bytes.fromhex("2f022f0a4ebaf20e508f")
 # probe's site, docs/usbprobe.md). v0.14..v0.19 also hooked the frame builder (0x400276a2)
 # to put packets in the frame's words 2650..2681; those are the DSP's per-track routing,
 # so v0.20 leaves the frame builder stock (LINK_FEED_SITE is kept for the test that says so)
+# 2026-11-11: the glass inverted while the test channel is armed (csrc/devtest/devtest.c, glass.S): the
+# panel controller's 8-byte group sender and panel_diff, each entered by a jmp to C that replays stock's
+GLASS_SEND_SITE = 0x40131F04            # lea -16(%sp),%sp ; movem.l %d2-%d4/%a2,(%sp)
+GLASS_SEND_STOCK = bytes.fromhex("4feffff048d7041c")
+PANEL_DIFF_SITE = 0x40131FD2            # lea -40(%sp),%sp ; movem.l %d2-%d6/%a2-%a4,(%sp)
+PANEL_DIFF_STOCK = bytes.fromhex("4fefffd848d71c7c")
+GLASS_WHOLE_SITE = 0x40131F54           # the whole-frame send dt_present calls (lea -28(%sp),%sp ; movem.l ...)
 LINK_RX_SITE = 0x4012197A               # lea 0x40207f9e,%a3: F0 00 20 3C, before the compare
 LINK_RX_STOCK = bytes.fromhex("47f940207f9e")
 LINK_FEED_SITE = 0x400276A2             # lea 0x40006c4a,%a2: the frame is built
@@ -860,6 +867,19 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     edit(PJ_WRITE_SITE, bytes.fromhex("4ef9") + _long(csyms["ins_pj_write_hook"]) + bytes.fromhex("4e71"),
          "the project write (a slot to the +Drive): replayed, the slot noted, the inserts' record follows "
          "(csrc/inserts/store.c)", PJ_WRITE_STOCK)
+
+    # 2026-11-11: the glass inverted while the test channel is armed (csrc/devtest)
+    _need(content, GLASS_SEND_SITE + 8, bytes.fromhex("282f0018262f0014"),
+          "the sender goes on: move.l 24(%sp),%d4 (page) ; move.l 20(%sp),%d3 (column)")
+    _need(content, PANEL_DIFF_SITE + 8, bytes.fromhex("2479402a10c8"), "panel_diff goes on: movea.l FRONT,%a2")
+    _need(content, GLASS_WHOLE_SITE, bytes.fromhex("4fefffe448d7043c2a39402a10c8"),
+          "the whole-frame send: its frame, then FRONT")
+    edit(GLASS_SEND_SITE, bytes.fromhex("4ef9") + _long(csyms["dt_glass"]) + bytes.fromhex("4e71"),
+         "the glass's 8-byte group sender: the bytes flipped while the test channel is armed (dt_glass)",
+         GLASS_SEND_STOCK)
+    edit(PANEL_DIFF_SITE, bytes.fromhex("4ef9") + _long(csyms["dt_present"]) + bytes.fromhex("4e71"),
+         "panel_diff: the whole frame once when the armed state turns, else stock's diff (dt_present)",
+         PANEL_DIFF_STOCK)
 
     # the sample link: SysEx in (v0.14); out over the TDM link alone (v0.20)
     edit(LINK_RX_SITE, bytes.fromhex("4eb9") + _long(csyms["smp_rx_hook"]),

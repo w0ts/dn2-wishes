@@ -43,6 +43,7 @@ class ChannelSim:
     faults: frozenset[str] = frozenset()
     sw: list[int] = field(default_factory=lambda: [s[3] for s in SWITCHES])
     armed: bool = False
+    glass_inverted: bool = False                                # the glass turns at the UI pass after ARM / DISARM
     destructive: bool = False
     nonce: int = 0
     nonce_at: float = 0.0
@@ -77,6 +78,7 @@ class ChannelSim:
         now = self.clock()
         if self.armed and now - self.last_cmd >= self.sw[2]:
             self._disarm(1)
+        self.glass_inverted = self.armed
         if not self.armed:
             for c in sorted(self.held):
                 self._button(c, False)
@@ -190,7 +192,7 @@ class ChannelSim:
         self.counters[0] += 1
         sub = a[0] if a else 0xFF
         if cmd == P.BUILDINFO:
-            return P.OK, (b"DTB1" + struct.pack(">HBBIBBBB", 1, 0x01, 0x12, 0x7FF, len(SWITCHES), 128, 64, 8)
+            return P.OK, (b"DTB1" + struct.pack(">HBBIBBBB", 1, 0x01, 0x12, 0xFFF, len(SWITCHES), 128, 64, 8)
                           + b"sim".ljust(16, b"\0") + struct.pack(">I", 1000))
         if cmd == P.SWITCH:
             k = a[1] if len(a) > 1 else 0xFF
@@ -244,7 +246,7 @@ class ChannelSim:
                 panel[ch] |= 1 << bit
             return P.OK, (struct.pack(">3IBBHIIB", int(self.clock() * 1500), self.tick(), 1000, self.armed, self.destructive,
                                       left, lo, hi, len(self.pending)) + bytes(panel) + bytes([1] * 16) + bytes(32)
-                          + struct.pack(">II", 0x44623BC8, 0x44623FC8))
+                          + struct.pack(">II", 0x44623BC8, 0x44623FC8) + bytes([self.glass_inverted]))
         if cmd == P.SCREEN:
             if len(a) < 2 or sub > 3 or not (a[1] < 8 or a[1] == 0xFF):
                 return P.ARGS, b""

@@ -142,6 +142,13 @@ PLAY STOP PAGE PTN SONG T1..T16 PUSHA..PUSHH LEVEL VOICE ARP PLUS STACK MINUS`; 
   with `ARM!` within 10 s; one try per nonce.
 - **Auto-disarm** after `ARMTIME` seconds (default 300, a switch: 30..1800) without an ARM or KEY command, and on
   `disarm`. Disarming lets every injected key go and drops the queue.
+- **The screen is inverted while armed** (the User, 2026-11-11: "this way i known when you operate it"): from the
+  first frame after ARM to the first after DISARM or the auto-disarm. RAM only: a reboot starts disarmed and
+  upright. Only what goes to the glass is flipped (the panel controller's 8-byte groups, `dt_glass` at
+  `0x40131f04`; `dt_present` at `panel_diff` sends the whole frame once when the state turns); the frame buffers
+  stay upright, so SCREEN and the mirror show the normal image, and STATE's last byte says the glass is inverted.
+  Cost: +180 B of the C chunk, two 8-byte entries in the OS; per frame one compare, and 8 bytes flipped per changed
+  group while armed.
 - **Every key goes up by itself:** a press carries its hold time and the unit lets the key go at that time, so a
   host that dies mid-chord leaves nothing held.
 - **Destructive blacklist, in the firmware and in the host:** SETTINGS (the system menu: project manager, OS

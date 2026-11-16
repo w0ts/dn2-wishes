@@ -51,7 +51,7 @@ args: none → data (36 bytes):
 | 0 | 4 bytes | `DTB1` |
 | 4 | u16 | test channel protocol (1) |
 | 6 | 2 bytes | OS version, BCD (`01 12`) |
-| 8 | u32 | capability bits: 0 TLM, 1 BUILDINFO, 2 SWITCH, 3 PEEK, 4 COUNTERS, 5 TRACE, 6 STATE, 7 SCREEN, 8 ARM, 9 KEY, 10 PROFILE (remoteui-5) |
+| 8 | u32 | capability bits: 0 TLM, 1 BUILDINFO, 2 SWITCH, 3 PEEK, 4 COUNTERS, 5 TRACE, 6 STATE, 7 SCREEN, 8 ARM, 9 KEY, 10 PROFILE (remoteui-5), 11 INVERT (the glass inverted while armed; STATE byte 88) |
 | 12 | u8 | number of switches |
 | 13 | u8, u8 | screen width, height (128, 64) |
 | 15 | u8 | screen chunks (8) |
@@ -105,11 +105,15 @@ last 64 events; `since` older than that starts at the oldest kept. `event = kind
 
 ### 38 STATE
 
-args none → data (88 bytes): `u32 audio frames, u32 tick, u32 ticks a second, u8 armed, u8 flags (bit 0
+args none → data (89 bytes; 88 before capability 11): `u32 audio frames, u32 tick, u32 ticks a second, u8 armed, u8 flags (bit 0
 destructive), u16 seconds until auto-disarm, u32 held keys (codes 1..32, bit code-1), u32 held keys (codes
 33..54, bit code-33), u8 queued events, u8 panel state[7] (each channel's 8-bit mask as the UI last saw
 it), i8 machine type[16] (each track's sound, -1 none), u8 insert type[16][2], u32 front buffer address,
-u32 back buffer address`.
+u32 back buffer address, u8 glass inverted`.
+
+`glass inverted` is 1 while the glass shows the frames inverted: from the first frame after ARM to the first
+frame after DISARM or the auto-disarm (the firmware asks for a redraw, so an idle screen turns within a UI pass).
+Only what is sent to the glass is inverted; the two buffers, and so SCREEN, always hold the frames upright.
 
 ### 40 SCREEN
 

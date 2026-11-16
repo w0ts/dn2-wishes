@@ -407,7 +407,7 @@ int wr_poll(void *screen)
     rec_poll();
     { extern void mono_poll(void); mono_poll(); }   /* 2026-11-11: MONOMACHINE's engine turned: its start (rec.c) */
     { extern void hold_poll(void); hold_poll(); }   /* DRONE's HOLD latch (csrc/hold) */
-    { extern void dt_poll(void); dt_poll(); }       /* the test channel's keys (csrc/devtest, a test build) */
+    { extern int dt_poll(void); if (dt_poll()) SET_DIRTY(screen); }   /* the test channel's keys; a redraw turns the glass (csrc/devtest) */
     wr_names();
 #if FLT_SETS
     flt_names();                                /* the A2 filter machines' FLTR names */
