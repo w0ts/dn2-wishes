@@ -8,7 +8,8 @@ order the DSP code (dnfw.inserts.bus) does it, so the two agree bit for bit.
 For each record i = 2 t + j in order (track t's slot 1, then slot 2) whose type is FDN8 or XDLY with an
 instance in range (field 0 >> 4): the instance's engine (dnfw.fdn8.ref, dnfw.xdly.ref: the send FX's
 reference, TYPE 0) on the track's block x G_IN, its parameters from K1..K6 (bus.FDN8_PAR, XDLY_PAR), then
-x' = x + (wet x G_OUT - x) MIX. An instance whose record or type differs from the last that ran it starts
+x' = x + (wet x G_OUT - x) MIX. An instance whose record or type differs from the last that ran it, or that
+no record claimed in the pass before (2026-11-14: it went away and came back; bus.LAST), starts
 fresh: a new engine switched to its type (FDN8: its ring cleared, 32 silent blocks; XDLY: nothing of its
 lines read).
 """
@@ -28,6 +29,8 @@ class BusRef:
         self.fd = [FR.Ref() for _ in range(D.FDN8_INSTANCES)]
         self.xd = [XR.Ref() for _ in range(D.XDLY_INSTANCES)]
         self.owner = [0] * (D.FDN8_INSTANCES + D.XDLY_INSTANCES)
+        self.last = [0] * (D.FDN8_INSTANCES + D.XDLY_INSTANCES)   # the pass that last claimed it (bus.LAST)
+        self.n = 0                                                # this pass (bus.PASSN)
         self.mv = R.Ref()                        # the moved slot 2s: state / ring 2 t (L), 2 t + 1 (R)
 
     def moved(self, t: int, v: bytes, left, right, tempo: int, clk: int) -> None:
@@ -42,6 +45,7 @@ class BusRef:
 
     def block(self, par: bytes, left, right, tempo: int = 0, clk: int = 0) -> None:
         """TEMPO, CLK: as dnfw.inserts.ref.Ref.block's (a moved GATER's)"""
+        self.n = (self.n - 1) & 0xFFFFFFFF          # (bus.PASSN counts down)
         for i in range(D.RECORDS):
             t = i >> 1
             v = par[8 * i:8 * i + 8]
@@ -49,12 +53,17 @@ class BusRef:
             if i & 1 and D.moved(par, t):
                 self.moved(t, v, left[t], right[t], tempo, clk)
                 continue
+            if i & 1:                                # (2026-11-14) not moved: its engines forget (from silence)
+                self.mv.last[2 * t] = self.mv.last[2 * t + 1] = (0, 0)
             if sel == D.FDN8 and inst < D.FDN8_INSTANCES:
                 eng, slot, scales = self.fd[inst], inst, B.FDN8_PAR
             elif sel == D.XDLY and inst < D.XDLY_INSTANCES:
                 eng, slot, scales = self.xd[inst], D.FDN8_INSTANCES + inst, B.XDLY_PAR
             else:
                 continue
+            if self.last[slot] != (self.n + 1) & 0xFFFFFFFF:   # not claimed last pass: it went away, so fresh
+                self.owner[slot] = 0
+            self.last[slot] = self.n
             key = (i + 1) | sel << 8
             if self.owner[slot] != key:           # fresh: a new engine (its switch to its type comes next)
                 self.owner[slot] = key

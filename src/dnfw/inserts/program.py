@@ -1684,7 +1684,7 @@ def track(p: Prog) -> None:
         p.ldi(3, 0, 4)
         p.st(C["buf"], 3)
         call_one(p, lambda: p.jump("", ONE))
-    _is_built(p, run)
+    _is_built(p, run, lambda: forget(p))         # (2026-11-14) not run: it starts fresh when it runs again
 
 
 ONE = "wr_in_one"                                # one's label (design.INS_ONE_SW)
@@ -1969,18 +1969,9 @@ def one(p: Prog) -> None:
         p.seti(4, 2)
         p.sti(0, 4, 9)
 
-        def fresh_ring():                        # TAPE starts from a silent ring
-            p.ld(1, C["rb"])
-            p.seti(1, 1)
-            p.fconst(0, 0.0)
-
-            def eight():                         # (2026-11-14: 8 a pass, not 16: code room for TAPE's stages)
-                for _ in range(8):
-                    p.stpost(1, 0)
-            p.loop_r(11, D.TP_RING // 8, eight)
         if D.TAPE in D.BUILT:                    # dnfw.builder: no ring without TAPE
             p.iconst(6, D.TAPE)
-            p.if_(5, "EQ", 6, fresh_ring, kind="i")
+            p.if_(5, "EQ", 6, lambda: p.call("tp0", lambda: tape_ring0(p)), kind="i")
     p.iconst(9, 0)
 
     def differs():
@@ -1996,7 +1987,18 @@ def one(p: Prog) -> None:
     values(p, C)
     fzd = D.FUZZ in D.BUILT or D.DIST in D.BUILT
 
+    def restart():                               # (2026-11-14) back after the guard held it out: from silence
+        p.iconst(0, 0)                           # (its state words; its TAPE ring, which every type has, too)
+        p.iconst(1, C["s0"])
+        p.seti(4, 1)
+        p.loop_r(11, D.STATE_WORDS - 2, lambda: p.stpost(4, 0))
+        if D.TAPE in D.BUILT:
+            p.call("tp0", lambda: tape_ring0(p))
+
     def run():
+        p.ld(0, C["ist"])
+        p.iconst(1, 1)
+        p.if_(0, "EQ", 1, restart, kind="i")
         if fzd:                                  # FUZZ and DIST set it: their shared loop, emitted once, runs after
             p.iconst(0, 0)
             p.st(C["fz"], 0)
@@ -2032,9 +2034,47 @@ def one(p: Prog) -> None:
         p.sti(k, 4, 8)
 
 
-def _is_built(p: Prog, run) -> None:
+def tape_ring0(p: Prog) -> None:
+    """TAPE's ring (C['rb']) to zeros (a leaf subroutine: it starts fresh, or comes back after a hold). Clobbers
+    R0, R1, R11, I1"""
+    p.ld(1, C["rb"])
+    p.seti(1, 1)
+    p.fconst(0, 0.0)
+
+    def eight():                                 # (2026-11-14: 8 a pass, not 16: code room for TAPE's stages)
+        for _ in range(8):
+            p.stpost(1, 0)
+    p.loop_r(11, D.TP_RING // 8, eight)
+
+
+def forget(p: Prog) -> None:
+    """(2026-11-14, delay leaks: "start fresh") instance C['i'] did not run: its last M.SEL to 0, so its next run
+    starts from silence. Clobbers R0-R2, R12, I4"""
+    p.ld(0, C["i"])
+    p.lsh(1, 0, 5)
+    p.iconst(12, STATE + 4 * (D.STATE_WORDS - 1))
+    p.iop(2, 12, "+", 1)
+    p.seti(4, 2)
+    p.iconst(0, 0)
+    p.sti(0, 4, 0)
+
+
+def forget_all(p: Prog, at: int) -> None:
+    """every instance's last M.SEL (the word at AT + 32 k, k < 32) to 0. Clobbers R0, R1, R11, R13, I4"""
+    p.iconst(1, at)
+    p.iconst(0, 0)
+    p.iconst(13, 4 * D.STATE_WORDS)
+
+    def one_():
+        p.seti(4, 1)
+        p.sti(0, 4, 0)
+        p.iop(1, 13, "+", 1)
+    p.loop_r(11, D.RECORDS, one_)
+
+
+def _is_built(p: Prog, run, else_=None) -> None:
     """RUN once when M.SEL (C['sel']) is a type this build runs (design.BUILT): bit min(sel, 15) of
-    the built types' mask (1 << n as FLOAT 1 BY n, TRUNC)"""
+    the built types' mask (1 << n as FLOAT 1 BY n, TRUNC); else ELSE_"""
     assert max(D.BUILT) < 15
     p.ld(5, C["sel"])
     p.iconst(6, 15)
@@ -2044,7 +2084,7 @@ def _is_built(p: Prog, run) -> None:
     p.trunc(7, 7)
     p.iconst(12, sum(1 << t for t in D.BUILT))
     p.iop(7, 7, "AND", 12)
-    p.ifz(7, "NE", run)
+    p.ifz(7, "NE", run, else_)
 
 
 def _by_type(p: Prog, table) -> None:
@@ -2085,16 +2125,24 @@ def record(p: Prog, C: dict) -> None:
 
 
 def values(p: Prog, C: dict) -> None:
-    """MIX, K1..K6 of the record at C['rec'] -> C['p0'] .. C['p6'], each / 127. Clobbers R2, R8, R9, R12, I4"""
+    """MIX, K1..K6 of the record at C['rec'] -> C['p0'] .. C['p6'], each / 127. Clobbers R2, R8, R9, R11, R12,
+    I1, I4. (2026-11-14, code room: a loop of seven, not seven copies: the same words, a few cycles more)"""
+    assert all(C[f"p{k}"] == C["p0"] + 4 * k for k in range(7))
     p.ld(2, C["rec"])
+    p.iconst(12, 4)
+    p.iop(2, 12, "+", 2)
     p.seti(4, 2)
-    for k in range(7):
-        p.ldi(8, k + 1, 4)
+    p.iconst(2, C["p0"])
+    p.seti(1, 2)
+
+    def one():
+        p.ldpost(8, 4)
         p.iconst(9, 0)
         p.float_(8, 8, 9)
         p.fconst(9, 1 / 127)
         p.fop(8, 8, "*", 9)
-        p.st(C[f"p{k}"], 8)
+        p.stpost(1, 8)
+    p.loop_r(11, 7, one)
 
 
 def unpack(p: Prog, C: dict) -> None:
@@ -2173,8 +2221,8 @@ def set_flags(p: Prog) -> None:
 def body(p: Prog) -> None:
     G.ins_start(p, 1)
     unpack(p, C)
-    p.ld(0, D.FLAGS)                             # (perf) no BUILT record: nothing to walk
-    p.ifz(0, "NE", lambda: _walk(p))
+    p.ld(0, D.FLAGS)                             # (perf) no BUILT record: nothing to walk (2026-11-14: every
+    p.ifz(0, "NE", lambda: _walk(p), lambda: forget_all(p, STATE + 4 * (D.STATE_WORDS - 1)))   # instance forgets)
 
 
 def _walk(p: Prog) -> None:

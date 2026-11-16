@@ -8,6 +8,9 @@ captured at the inserts' entry (dnfw.waverider.dsp.INS_SW) and at PING's (where 
    block, every buffer after the pass is dnfw.inserts.ref's run on the buffers before it, bit for
    bit (the reference keeps its own state across blocks); the pass's cost per block with one and
    with two tracks on (instructions between the two entries).
+2b. (2026-11-14, the User: "Fix all, start fresh") a pre insert that did not run starts from silence: track 0's
+   TAPE on voice slot 0, the slot handed to track 3 (no insert) and back, track 0's M.SEL OFF and back, nothing
+   BUILT (no walk) and back; the buffers silenced from each return: the reference's bit for bit, exact zeros.
 """
 
 from __future__ import annotations
@@ -47,11 +50,11 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
         f = M5.base_frame(sound, machines, overrides=M5.perc_words(1), trigger=b % 24 == 1,
                           others={1: 5, 2: 5, 3: 5, 4: 5}, trigger_others=True)
         if routed:
-            for s_, tr in enumerate(route_of(b)):
+            for s_, tr in enumerate(routed(b) if callable(routed) else route_of(b)):
                 f.put(0xA5A + 2 * s_, tr)
         return f.to_bytes()
 
-    def blocks(par_of, n, routed=False, frames_fn=None, fixed_gen=False, tpg=None):
+    def blocks(par_of, n, routed=False, frames_fn=None, fixed_gen=False, tpg=None, silent=None):
         caps = []
         cur = {}
 
@@ -66,6 +69,10 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
             cur.clear()
             cur["par"] = par_of(len(caps))
             cur["ptr"] = [m2.word(r.state, D.BUFFERS + 4 * t) for t in range(16)]
+            if silent is not None and silent(len(caps)):     # (2b: the voices' buffers silenced)
+                for t in range(16):
+                    for j in range(32):
+                        m2.poke(r.state, cur["ptr"][t] + 4 * j, 0)
             cur["in"] = [[m2.word(r.state, cur["ptr"][t] + 4 * j) or 0 for j in range(32)] for t in range(16)]
             cur["route"] = [((m2.word(r.state, D.ROUTE + 4 * (s_ // 2)) or 0) >> (16 * (s_ & 1))) & 0xFFFF
                             for s_ in range(16)]
@@ -134,6 +141,44 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
     checks["FUZZ: it changes the sound (not a pass-through)"] = changed > 500
     numbers["FUZZ: first mismatch (block)"] = first_bad
     numbers["FUZZ: run info"] = info if "halt" in info else {"blocks": len(caps)}
+
+    # 2b. a pre insert that did not run starts from silence
+    def back_par(b):
+        rows = bytearray(128)
+        rows[0:8] = bytes([D.TAPE, 127, 100, 90, 64, 30, 0, 0])             # track 0 (no hiss)
+        rows[40:48] = bytes([D.FUZZ, 127, 64, 64, 64, 64, 64, 64])           # track 5: the pass walks
+        if 30 <= b < 34:
+            rows[0:8] = bytes(8)                                             # track 0 OFF, then back
+        if 46 <= b < 50:
+            rows = bytearray(128)                                            # nothing BUILT: no walk, then back
+        return bytes(rows)
+
+    def back_route(b):
+        rt = [0xFFFF] * 16
+        rt[0] = 3 if 14 <= b < 18 else 0                                     # slot 0: track 0, 3, 0
+        rt[3] = 5
+        return rt
+    back_quiet = [range(18, 23), range(34, 39), range(50, 55)]
+    caps, info = blocks(back_par, 56, back_route, silent=lambda b: any(b in w for w in back_quiet))
+    ref = R.Ref()
+    exact, first_bad, played, quiet = len(caps) == 56, None, False, True
+    for b, c in enumerate(caps):
+        bufs = [[bf(w) for w in c["in"][t]] for t in range(16)]
+        ref.block(D.records(c["par"]), bufs, c["route"])
+        want = [[fb(x) for x in bufs[t]] for t in range(16)]
+        if c.get("out") != want:
+            exact = False
+            first_bad = first_bad if first_bad is not None else b
+        if b < 14:
+            played |= c["out"][0] != c["in"][0]
+        if any(b in w for w in back_quiet):
+            quiet &= not any(c["out"][0])
+    checks["did not run, back: every buffer as dnfw.inserts.ref's (56 blocks: slot 0 to another track and back, "
+           "track 0 OFF and back, no walk and back)"] = exact
+    checks["did not run, back: track 0's TAPE changed slot 0's sound before"] = played
+    checks["did not run, back: exact zeros on slot 0 after each return, silent input (no old ring)"] = quiet
+    numbers["did not run, back: first mismatch (block)"] = first_bad
+    numbers["did not run, back: run info"] = info if "halt" in info else {"blocks": len(caps)}
 
     # 2c. 2026-11-12 (opt-host's measure on A09: T9 owns slots 2..15, so its DIST ran 14 times a block, sounding or
     # not): slots 2..15 on track 10's DIST, one of them sounding; the silent ones skip it once at rest (program.quiet,

@@ -50,7 +50,14 @@ assert 4 * FD_WORDS <= FD_STRIDE and 4 * XD_WORDS <= XD_STRIDE
 # the head, loaded at power-on (zeros but the descriptor): OWNER 0 = no slot yet, so each instance's first
 # run starts it fresh (its words zeroed then set); the stores themselves are not loaded
 OWNER = STATE                                     # per instance (FDN8's, then XDLY's): 1 + record | type << 8
-HEAD_END = OWNER + 4 * (D.FDN8_INSTANCES + D.XDLY_INSTANCES)
+# 2026-11-14 (delay leaks; the User: "i heard some delay, long after"): OWNER changes only when the instance runs,
+# so a slot whose FDN8 / XDLY went away (another type, OFF) and came back with the same instance (the ColdFire
+# gives the lowest free one: the same) resumed its frozen lines and replayed the old tail. Now each pass counts
+# itself (PASSN, down) and each instance keeps the pass that last claimed it (LAST): a claim after a pass without one
+# clears OWNER, so the instance starts fresh, as the design says ("an instance whose slot or type changed")
+LAST = OWNER + 4 * (D.FDN8_INSTANCES + D.XDLY_INSTANCES)
+PASSN = LAST + 4 * (D.FDN8_INSTANCES + D.XDLY_INSTANCES)
+HEAD_END = PASSN + 4
 # 2026-11-12 (opt-inserts): a unit's scratch in L1, not L2 (the engine reads and writes it every sample: ~340 L2
 # accesses a unit), in the Monomachine render scratch's IN after the post pass's taps line (inserts.post.LINE): the
 # arbiter's transient 0x2e54c0..0x2e5700. The voices rewrite it every block, so every unit writes its descriptor
@@ -98,7 +105,8 @@ MV_STATE = END
 MV_END = MV_STATE + 4 * D.STATE_WORDS * D.MV_INSTANCES
 assert MV_END <= D.BUS_STATE_END, f"the moved inserts' state runs past the bus pass's room: {MV_END:#x}"
 assert MV_END <= D.AUTO_L2, "AUTO's words (design.AUTO_L2) after the moved inserts' state"
-assert MV_STATE >= 0x20000000 > PR.STATE and D.MV_INSTANCES <= D.RECORDS   # program.auto_addr's test and its mod 32
+assert MV_STATE >= 0x20000000 > PR.STATE and D.MV_INSTANCES == D.RECORDS   # program.auto_addr's test and its mod 32
+# (MV_INSTANCES == RECORDS: PR.forget_all walks 32)
 # the guard's bound for a moved insert: the dearest BUILT type, twice (L and R; the unit's cost unmeasured)
 MV_COST = 2 * max(D.COST[t] for t in D.BUILT)
 SITE_SW = 0x1C1FEF                                # the routing, after its per-track loop: JUMP wr_inbus here
@@ -109,7 +117,7 @@ G_OUT = 14.125
 
 
 def state_bytes() -> bytes:
-    """the head's words at power-on: OWNER zeros"""
+    """the head's words at power-on: OWNER, LAST and PASSN zeros"""
     import struct
     return struct.pack(f"<{(HEAD_END - STATE) // 4}I", *[0] * ((HEAD_END - STATE) // 4))
 
@@ -142,7 +150,8 @@ def restore(p: Prog) -> None:
 
 
 def copy(p: Prog, dst: int | str, src: int | str, n: int) -> None:
-    """N words from SRC to DST (an address, or a scratch word's name holding one). Clobbers R0, R11, R12, I0, I1"""
+    """N words from SRC to DST (an address, or a scratch word's name holding one). Clobbers R0, R11, R12, I0, I1,
+    I12"""
     for i, a in ((0, src), (1, dst)):
         if isinstance(a, str):
             p.ld(0, C[a])
@@ -157,8 +166,9 @@ def copy(p: Prog, dst: int | str, src: int | str, n: int) -> None:
     def eight():                                 # perf (2026-11-11): 8 words a pass (the loop's 3 instructions shared)
         for _ in range(8):
             one()
-    if n >= 8:
-        p.loop_r(11, n // 8, eight)
+    if n >= 8:                                   # (2026-11-14, code room: the 8-word loop once, a leaf subroutine;
+        p.iconst(11, n // 8)                     # it was inline at each of the 13 copies)
+        p.call("copy8", lambda: p.loop_r(11, None, eight))
     for _ in range(n % 8):
         one()
 
@@ -302,6 +312,31 @@ def owner_differs(p: Prog, slot: int, then) -> None:
     p.if_(1, "NE", 3, then, kind="i")
 
 
+def claim(p: Prog) -> None:
+    """the record claims its unit's instance (C['aa'], its aux words: design.BUS_AUX_L2 + 16 (first + inst)):
+    OWNER 0 when the last pass did not claim it (it went away and came back: it starts fresh), or while the guard
+    holds it out (its out count, aux word 2, not 0: it comes back fresh, 2026-11-14 "start fresh"), then LAST = this
+    pass. Run whether the guard then runs the unit or holds it. Clobbers R0-R3, R12, I4"""
+    assert 4 * D.AUX_WORDS == 16 and D.BUS_AUX_L2 % 4 == 0
+    p.ld(0, C["aa"])
+    p.seti(4, 0)
+    p.ldi(3, 2, 4)                               # the out count (perc.guard.ins_gate)
+    p.lsh(0, 0, -2)
+    p.iconst(12, LAST - D.BUS_AUX_L2 // 4)
+    p.iop(0, 12, "+", 0)
+    p.seti(4, 0)
+    p.ld(1, PASSN)
+    p.ldi(2, 0, 4)
+    p.sti(0, 4, 1)
+    p.dec(2, 2)                                  # (PASSN counts down: the pass before is this one + 1)
+
+    def gone():
+        p.iconst(0, 0)
+        p.sti(-(LAST - OWNER) // 4, 4, 0)
+    p.if_(2, "NE", 1, lambda: p.iconst(3, 1), kind="i")
+    p.ifz(3, "NE", gone)
+
+
 def enter(p: Prog, sw: int, model) -> None:
     """the engine's MODE 1 call: a leaf call to SW (I12 = the return address - 1)"""
     if p.run:
@@ -432,7 +467,7 @@ def slot(p: Prog) -> None:
     def fdn8():
         p.ld(3, C["inst"])
         p.iconst(12, D.FDN8_INSTANCES)
-        p.if_(3, "LT", 12, lambda: (fdn8_bound(p), unit(1, 0)), kind="i")
+        p.if_(3, "LT", 12, lambda: unit(1, 0), kind="i")
 
     def xdly():
         p.ld(3, C["inst"])
@@ -452,6 +487,10 @@ def slot(p: Prog) -> None:
         blend(p)
 
     def gated():                                 # 2026-11-12: the guard's hold (guard.ins_gate), faded in blend
+        claim(p)                                 # (2026-11-14) before FDN8's bound: a claim may make it fresh
+        p.ld(0, C["unit"])
+        p.iconst(1, 1)
+        p.if_(0, "EQ", 1, lambda: fdn8_bound(p), kind="i")
         block_ptrs(p)
         G.ins_gate(p, C["bnd"], C["aa"], C["ist"], run, grace=True, typ_at=C["sel"])
     p.ld(0, C["unit"])
@@ -504,6 +543,16 @@ def moved(p: Prog) -> None:
                 p.stpost(1, 0)
             p.loop_r(11, D.BLOCK, one)
 
+    def forget():                                # (2026-11-14) not moved here: the track's two engines forget
+        p.ld(0, C["t"])                          # their last M.SEL, so a later move starts from silence
+        p.lsh(1, 0, 6)
+        p.iconst(12, MV_STATE + 4 * (D.STATE_WORDS - 1))
+        p.iop(2, 12, "+", 1)
+        p.seti(4, 2)
+        p.iconst(0, 0)
+        p.sti(0, 4, 0)
+        p.sti(D.STATE_WORDS, 4, 0)
+
     def built():
         p.ld(2, C["rec"])
         p.iconst(12, 4 * D.FIELDS)
@@ -513,15 +562,19 @@ def moved(p: Prog) -> None:
         p.iconst(12, (1 << D.TYPE_BITS) - 1)
         p.iop(3, 3, "AND", 12)
         PR.in_types(p, 4, 3, 8, D.MOVERS)
-        p.ifz(4, "NE", lambda: G.ins_admit(p, MV_COST, run, typ_at=C["sel"]))   # (the moved slot's own type)
+        p.ifz(4, "NE", lambda: G.ins_admit(p, MV_COST, run, typ_at=C["sel"]), forget)   # (the moved slot's type)
     p.ld(3, C["sel"])
     PR.in_types(p, 4, 3, 8, D.BUILT)
-    p.ifz(4, "NE", built)
+    p.ifz(4, "NE", built, forget)
 
 
 def body(p: Prog) -> None:
-    p.ld(0, D.FLAGS + 8)                         # (perf, 2026-11-10) no BUS record: nothing to walk
-    p.ifz(0, "NE", lambda: _walk(p))
+    p.ld(0, PASSN)                               # (2026-11-14) this pass's number (claim), counting down
+    p.dec(0, 0)
+    p.st(PASSN, 0)
+    p.ld(0, D.FLAGS + 8)                         # (perf, 2026-11-10) no BUS record: nothing to walk (2026-11-14:
+    p.ifz(0, "NE", lambda: _walk(p),            # every moved engine forgets its last M.SEL)
+          lambda: PR.forget_all(p, MV_STATE + 4 * (D.STATE_WORDS - 1)))
 
 
 def _walk(p: Prog) -> None:

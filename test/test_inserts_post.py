@@ -252,3 +252,69 @@ def test_a_refused_juno_stays_out_and_switches_without_a_step():
             raw = abs(float(first - got[b - 1][side][31]))
             jump = abs(float(got[b][side][0] - got[b - 1][side][31]))
             assert raw > 0.02 and jump < 0.1 * raw, (b, side, jump, raw)
+
+
+def _fv(w):
+    return np.float32(struct.unpack("<f", struct.pack("<I", w & 0xFFFFFFFF))[0])
+
+
+def test_a_post_insert_that_did_not_run_starts_from_silence():
+    # 2026-11-14 (the User: "Fix all, start fresh"): a voice slot's CHOR / WIDE / JUNO that stopped running (the slot
+    # went to another track, or the M.SEL to OFF, every post insert OFF so the pass did not walk) and runs again
+    # starts from silence: with silent input after it comes back, exact zeros (it used to replay its frozen ring,
+    # peak 1.39, 131 ms). Model = reference bit for bit throughout
+    for typ, knobs in ((D.CHOR, [127, 90, 80, 50, 60, 127, 100]), (D.WIDE, [127, 127, 127, 127, 127, 0, 0]),
+                       (D.JUNO, [127, 127, 0, 0, 0, 0, 0])):
+        rnd = random.Random(typ)
+        m, ref = Mem(), R.PostRef()
+        for b in range(180):
+            rows = bytearray(128)
+            rows[0:8] = bytes([typ] + knobs)                       # track 1's insert
+            rows[40:48] = bytes([D.WIDE, 64, 0, 127, 127, 0, 0, 0])  # track 6 (keeps the pass walking)
+            route = [0xFFFF] * 16
+            route[3] = 5
+            if not 40 <= b < 50:
+                route[0] = 0                                        # voice slot 0 plays track 1 ...
+            else:
+                route[0] = 2                                        # ... track 3 (no insert), then back
+            if 100 <= b < 110:
+                rows[0:8] = bytes(8)                                # track 1's M.SEL OFF, then back
+            if 160 <= b < 170:
+                rows = bytearray(128)                               # every post insert OFF: no walk, then back
+            loud = 1.0 if b < 40 or 55 <= b < 100 or 115 <= b < 160 else 0.0   # it plays before each time away
+            left = [[rnd.uniform(-loud, loud) for _ in range(32)] for _ in range(16)]
+            right = [[x * 0.6 for x in row] for row in left]
+            wl = [np.array(row, np.float32) for row in left]
+            wr = [np.array(row, np.float32) for row in right]
+            ref.block(expand(bytes(rows)), wl, wr, route)
+            lo, ro, _ = call(m, bytes(rows), left, right, route)
+            assert lo == [[fbits(x) for x in row] for row in wl], (typ, b, "left")
+            assert ro == [[fbits(x) for x in row] for row in wr], (typ, b, "right")
+            if b in (39, 99, 159):
+                assert any(lo[0]), (typ, b, "it played")
+            if 50 <= b < 55 or 110 <= b < 115 or 170 <= b < 175:      # back, silent input: from silence
+                assert not any(lo[0] + ro[0]), (typ, b, "an old ring came back")
+
+
+def test_a_held_out_post_insert_comes_back_from_silence():
+    # 2026-11-14: the guard's hold (ins_gate): a CHOR refused at block 20 stays out INS_HOLD blocks; when it comes
+    # back it starts from silence (its state and ring zeros), not from its ring of block 19
+    from dnfw.perc import guard as G
+    route = [0] + [0xFFFF] * 15
+    rnd = random.Random(3)
+    m = Mem()
+    m.put(G.INS_DLP, 100_000)
+    back = 20 + G.INS_HOLD
+    for b in range(back + 30):
+        m.put(G.INS_TESTCLK, 99_000 if b == 20 else 0)
+        p1 = bytearray(128)
+        p1[0:8] = bytes([D.CHOR, 127, 90, 80, 50, 60, 127, 100])
+        loud = 1.0 if b < 20 else 0.0
+        left = [[rnd.uniform(-loud, loud) for _ in range(32)] for _ in range(16)]
+        right = [list(row) for row in left]
+        lo, ro, _ = call(m, bytes(p1), left, right, route)
+        if b == 19:
+            assert any(lo[0]), "it played"
+        if b >= back:
+            assert not any(lo[0] + ro[0]), (b, "the ring of block 19 came back")
+    assert m.get(G.INS_SKIPS) == G.INS_HOLD

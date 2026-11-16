@@ -52,9 +52,8 @@ class Ref:
         for i in range(D.RECORDS):                 # i = 2 t + j: voice slot t, insert slot j
             t, j = i >> 1, i & 1
             tr = t if route is None else route[t] & 0xFFFF
-            if tr > 15:
-                continue
-            if j == 1 and D.moved(par, tr):     # 2026-11-11: the bus pass runs it (dnfw.inserts.busref)
+            if tr > 15 or j == 1 and D.moved(par, tr):   # (2026-11-11: a moved slot 2: the bus pass runs it)
+                self.last[i] = (0, 0)            # (2026-11-14) not run: when it runs again, from silence
                 continue
             self.one(i, tr, par[8 * (2 * tr + j):8 * (2 * tr + j) + 8], bufs[t], 2 * tr + j)
 
@@ -62,6 +61,7 @@ class Ref:
         """record V (played by track TR) over BUF in place, with state / ring K (program.one)"""
         sel = v[0] & ((1 << D.TYPE_BITS) - 1)
         if sel not in D.BUILT:
+            self.last[k] = (0, 0)                # (2026-11-14) not run: when it runs again, from silence
             return
         if (sel, tr) != self.last[k]:
             self.st[k] = [F(0)] * D.STATE_WORDS

@@ -356,3 +356,52 @@ def test_tape_pgain_and_auto():
     assert abs(db[0] + 6) < 0.3, db                        # -6 dB
     dry = 40 * 32 * 0.25 ** 2 / 2
     assert abs(10 * math.log10(acc[2] / dry) + 6) < 1.5, (db, acc[2] / dry)   # AUTO: the dry's level, -6 dB
+
+
+TAPE_REC = [D.TAPE, 127, 100, 90, 64, 30, 0, 0]          # (no hiss: silence in, silence out when fresh)
+
+
+def test_a_pre_insert_that_did_not_run_starts_from_silence():
+    # 2026-11-14 (the User: "Fix all, start fresh"): a voice slot's TAPE that stopped running (the slot played
+    # another track, its M.SEL went OFF, no BUILT record so no walk) and runs again starts from silence (its ring
+    # and state zeros): silent input after the return, exact zeros. Model = reference bit for bit throughout
+    rnd = random.Random(8)
+    m, ref = mem0(), R.Ref()
+    for b in range(180):
+        rows = {0: TAPE_REC, 5: [D.FUZZ, 127, 64, 64, 64, 64, 64, 64]}     # track 6 keeps the pass walking
+        route = [0xFFFF] * 16
+        route[3] = 5
+        route[0] = 2 if 40 <= b < 50 else 0                 # voice slot 0: track 1, track 3 (none), track 1
+        if 100 <= b < 110:
+            rows[0] = [0] * 8                               # track 1's M.SEL OFF, then back
+        if 160 <= b < 170:
+            rows = {}                                       # nothing BUILT: no walk, then back
+        loud = 1.0 if b < 40 or 55 <= b < 100 or 115 <= b < 160 else 0.0
+        bufs = [[rnd.uniform(-loud, loud) for _ in range(32)] for _ in range(16)]
+        want = [np.array(row, np.float32) for row in bufs]
+        par = par_of(rows)
+        ref.block(par, want, route)
+        got = call(m, par, bufs, route)
+        assert got == [[fbits(x) for x in row] for row in want], b
+        if b in (39, 99, 159):
+            assert got[0] != [fbits(np.float32(x)) for x in bufs[0]], (b, "it played")
+        if 50 <= b < 55 or 110 <= b < 115 or 170 <= b < 175:
+            assert not any(got[0]), (b, "an old ring came back")
+
+
+def test_a_held_out_pre_insert_comes_back_from_silence():
+    # 2026-11-14: a TAPE refused at block 20 stays out INS_HOLD blocks; it comes back from silence, not from its
+    # state and ring of block 19
+    from dnfw.perc import guard as G
+    rnd = random.Random(9)
+    m = mem0()
+    m.put(G.INS_DLP, 100_000)
+    back = 20 + G.INS_HOLD
+    for b in range(back + 20):
+        m.put(G.INS_TESTCLK, 99_000 if b == 20 else 0)
+        loud = 1.0 if b < 20 else 0.0
+        bufs = [[rnd.uniform(-loud, loud) for _ in range(32)] for _ in range(16)]
+        got = call(m, par_of({0: TAPE_REC}), bufs)
+        if b >= back:
+            assert not any(got[0]), (b, "the state of block 19 came back")
+    assert m.get(G.INS_SKIPS) == G.INS_HOLD

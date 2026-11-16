@@ -123,3 +123,31 @@ def test_layout():
     from dnfw.inserts import bus as B
     assert B.MV_END <= D.BUS_STATE_END
     assert D.MV_RING_DDR + D.MV_INSTANCES * 4 * D.TP_RING <= 0x82600000     # dnfw.engines.plaits.plk.BIG_DDR
+
+
+def test_a_moved_slot_2_that_did_not_run_starts_from_silence():
+    # 2026-11-14 (the User: "start fresh"): track 1's TAPE in slot 2, moved to the bus under slot 1's CHOR; slot 1
+    # set to OFF (not moved: the pre pass runs TAPE, the moved engines forget), then back to CHOR with the
+    # input silent: the moved TAPE starts from silence, exact zeros. The bus pass's model = busref throughout
+    rnd = random.Random(12)
+    m, ref = TB.mem0(), BR.BusRef()
+    TB.load(m, P.STATE, P.state_bytes())
+    tape = TB.rec(D.TAPE, 0, 127, 100, 90, 64, 30, 0)
+    for b in range(110):
+        rows = {(0, 0): CHOR if not 40 <= b < 50 else TB.rec(0, 0, 0), (0, 1): tape}
+        if 80 <= b < 90:
+            rows = {}                                        # nothing at all: the bus pass does not walk
+        loud = 1.0 if b < 40 or 55 <= b < 80 else 0.0
+        left = [[rnd.uniform(-loud, loud) for _ in range(32)] for _ in range(16)]
+        right = [[x * 0.5 for x in row] for row in left]
+        wl = [[np.float32(x) for x in row] for row in left]
+        wr = [[np.float32(x) for x in row] for row in right]
+        par = TB.table(rows)
+        ref.block(par, wl, wr)
+        lo, ro, _ = TB.call(m, par, left, right, {})
+        assert lo == [[TB.fbits(x) for x in row] for row in wl], b
+        assert ro == [[TB.fbits(x) for x in row] for row in wr], b
+        if b in (39, 79):
+            assert lo[0] != [TB.fbits(np.float32(x)) for x in left[0]], (b, "it played")
+        if 50 <= b < 55 or 90 <= b < 95:
+            assert not any(lo[0] + ro[0]), (b, "an old ring came back")

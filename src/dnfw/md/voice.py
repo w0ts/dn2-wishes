@@ -170,6 +170,57 @@ def reset(p: Prog, L: K.Layout) -> None:
     K.vws(p, "pos", 0)
 
 
+ROUTE = 0x257898                         # 16 x s16: the track each voice slot plays (dnfw.inserts.design.ROUTE)
+
+
+def uses_lines(p: Prog, m: int, d: int) -> None:
+    """Rd = 1 when machine Rm uses the P-I delay lines (the P-I machines, VO-6), else 0. Clobbers R12"""
+    p.iconst(12, DELAY_LO)
+    p.iconst(d, 0)
+    p.if_(m, "GE", 12, lambda: (p.iconst(12, DELAY_HI),
+                                p.if_(m, "LE", 12, lambda: p.iconst(d, 1), kind="i")), kind="i")
+    for k in DELAY_ALSO:
+        p.iconst(12, k)
+        p.if_(m, "EQ", 12, lambda: p.iconst(d, 1), kind="i")
+
+
+def new_track(p: Prog, L: K.Layout) -> None:
+    """2026-11-14 (delay leaks; the User: "Fix all, start fresh"): a note on a track other than the voice's last
+    note's (design ROUTE: the voices go round the tracks) starts its P-I delay lines from silence, when its machine
+    uses them: until now a voice handed from one track's PI-BD to another's (the same machine, so no change) kept
+    the first track's ringing lines under the second's note. The voice's last track in its word trk. Clobbers R0-R4,
+    R6, R7, R12, I5"""
+    p.ld(0, L.C["mdb"])
+    p.iconst(12, -L.state)
+    p.iop(0, 12, "+", 0)
+    p.lsh(0, 0, -10)                           # the voice slot (1 KB of words a slot)
+    p.lsh(1, 0, -1)
+    p.lsh(1, 1, 2)
+    p.iconst(12, ROUTE)
+    p.iop(2, 12, "+", 1)
+    p.seti(5, 2)
+    p.ldi(3, 0, 5)                             # the slot pair's word: even slot low half, odd high
+    p.iconst(12, 1)
+    p.iop(1, 0, "AND", 12)
+    p.ifz(1, "NE", lambda: p.lsh(3, 3, -16))
+    p.iconst(12, 0xFFFF)
+    p.iop(3, 3, "AND", 12)
+    K.vw(p, 4, "trk")
+
+    def moved():
+        K.vws(p, "trk", 3)
+        K.vw(p, 1, "want")
+        uses_lines(p, 1, 2)
+
+        def lines():
+            K.delay_base(p, L, 0)
+            p.seti(5, 0)
+            p.iconst(6, 0)
+            _zeros(p, K.PI_DELAY_WORDS)
+        p.ifz(2, "NE", lines)
+    p.if_(3, "NE", 4, moved, kind="i")
+
+
 def _move(p: Prog, L: K.Layout) -> None:
     """The stream moves on a block (B[32..66] -> B[0..34]). Clobbers R1, R6, R7, R12, I1, I5."""
     p.ld(1, L.C["mdb"])
@@ -201,6 +252,7 @@ def advance(p: Prog, L: K.Layout) -> None:
     K.vw(p, 0, "trg")
 
     def change_if_new():
+        new_track(p, L)
         K.vw(p, 0, "want")
         K.vw(p, 1, "mach")
         p.e("COMP(R0, R1);")

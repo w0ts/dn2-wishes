@@ -16,6 +16,9 @@ read it, at wr_inpost's entry, as the unit has it, before the pass runs.
 2. WIDE, CHOR and JUNO on tracks 1, 2, 5, 16 (and a pre insert on track 4), the slot map rotating them over six
    voice slots (track 2 on two at once), knobs moved, a track switched from WIDE to CHOR: each block every
    slot as dnfw.inserts.postref's, bit for bit; the slots whose track has no post insert untouched.
+2b. (2026-11-14, the User: "Fix all, start fresh") a post insert that did not run starts from silence: track 1's
+   CHOR on voice slot 0, the slot handed to track 3 (no insert) and back, track 1's M.SEL OFF and back, every post
+   insert OFF (no walk) and back; the slot's input silenced from each return: postref's bit for bit, exact zeros.
 3. The pass alone, per voice: OFF, WIDE, CHOR with one and four voices, JUNO, on 1 and 16 slots.
 """
 
@@ -70,21 +73,22 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
         f = M5.base_frame(sound, machines, overrides=M5.perc_words(1), trigger=b % 24 == 1,
                           others={1: 5, 2: 5, 3: 5, 4: 5, 5: 5}, trigger_others=True)
         if routed:
-            for s_, tr in enumerate(route_of(b)):
+            for s_, tr in enumerate(routed(b) if callable(routed) else route_of(b)):
                 f.put(0xA5A + 2 * s_, tr)
         return f.to_bytes()
 
-    def blocks(par_of, n, routed):
+    def blocks(par_of, n, routed, silent=None):
         caps, cur = [], {}
 
         def at_post(r):
             st = r.state
+            quiet = silent is not None and silent(len(caps))
             for s_ in range(16):                     # the unit's stereo blocks (see the docstring)
                 for j in range(32):
                     m2.poke(st, D.STEREO + D.STEREO_STRIDE * s_ + 4 * j,
-                            m2.word(st, EMU_STEREO + EMU_STRIDE * s_ + 4 * j) or 0)
+                            0 if quiet else m2.word(st, EMU_STEREO + EMU_STRIDE * s_ + 4 * j) or 0)
                     m2.poke(st, D.STEREO + D.STEREO_STRIDE * s_ + D.STEREO_R + 4 * j,
-                            m2.word(st, EMU_STEREO + EMU_STRIDE * s_ + EMU_R + 4 * j) or 0)
+                            0 if quiet else m2.word(st, EMU_STEREO + EMU_STRIDE * s_ + EMU_R + 4 * j) or 0)
             for k, v in enumerate(D.records(par_of(len(caps)))):   # the pre pass's unpacked records
                 m2.poke(st, D.TABLE + 4 * k, v)
             for k, v in enumerate(D.flags(D.records(par_of(len(caps))))):   # its flags (perf, 2026-11-10)
@@ -166,6 +170,45 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
     checks["WIDE, CHOR: the slot map really moved (the DSP's own copy)"] = len(maps) >= 5
     numbers["WIDE, CHOR: first mismatch (block); slot maps seen"] = (first_bad, len(maps))
     numbers["WIDE, CHOR: run info"] = info
+
+    # 2b. a post insert that did not run starts from silence
+    def back_par(b):
+        rows = bytearray(128)
+        rows[0:8] = bytes([D.CHOR, 127, 90, 80, 50, 60, 127, 100])          # track 1
+        rows[40:48] = bytes([D.WIDE, 64, 0, 127, 127, 0, 0, 0])              # track 6: the pass walks
+        if 30 <= b < 34:
+            rows[0:8] = bytes(8)                                             # track 1 OFF, then back
+        if 46 <= b < 50:
+            rows = bytearray(128)                                            # nothing: no walk, then back
+        return bytes(rows)
+
+    def back_route(b):
+        rt = [0xFFFF] * 16
+        rt[0] = 2 if 14 <= b < 18 else 0                                     # slot 0: track 1, 3, 1
+        rt[3] = 5
+        return rt
+    back_quiet = [range(18, 23), range(34, 39), range(50, 55)]
+    caps, info = blocks(back_par, 56, back_route, silent=lambda b: any(b in w for w in back_quiet))
+    ref = R.PostRef()
+    exact, first_bad, played, quiet = len(caps) == 56, None, False, True
+    for b, c in enumerate(caps):
+        lin = [[bf(w) for w in c["in"][0][s_]] for s_ in range(16)]
+        rin = [[bf(w) for w in c["in"][1][s_]] for s_ in range(16)]
+        ref.block(D.records(c["par"]), lin, rin, c["route"])
+        want = ([[fb(x) for x in row] for row in lin], [[fb(x) for x in row] for row in rin])
+        if c["out"][0] != want[0] or c["out"][1] != want[1]:
+            exact = False
+            first_bad = first_bad if first_bad is not None else b
+        if b < 14:
+            played |= c["out"][0][0] != c["in"][0][0]
+        if any(b in w for w in back_quiet):
+            quiet &= not any(c["out"][0][0] + c["out"][1][0])
+    checks["did not run, back: every slot as dnfw.inserts.postref's (56 blocks: slot 0 to another track and "
+           "back, track 1 OFF and back, no walk and back)"] = exact
+    checks["did not run, back: track 1's CHOR changed slot 0's sound before"] = played
+    checks["did not run, back: exact zeros on slot 0 after each return, silent input (no old ring)"] = quiet
+    numbers["did not run, back: first mismatch (block)"] = first_bad
+    numbers["did not run, back: run info"] = info
 
     # 3. the pass alone
     base = M5.init_on(snap, m2mach, m5img, warm=True)

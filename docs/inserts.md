@@ -162,6 +162,21 @@ runs twice, each its own (SUB into SUB is a sub of the sub). Optimist's fades in
 rest on silence are left out: MIX is the dry / wet, and a slot's state starts from zeros whenever its
 track or its type changes, as for the others.
 
+**An effect that comes back starts from silence** (2026-11-14, delay leaks; the User: "Fix all, start fresh").
+Every insert's fresh start used to be checked only while it ran, so an instance that stopped (its voice slot
+played another track or none, its M.SEL went OFF or to another type, no record of its kind so the pass did not
+walk) resumed its frozen state and ring when it ran again: an old echo, long after (CHOR peak 1.39 for 131 ms,
+a bus XDLY its 10.9 s lines). Now, in every pass:
+- pre and post inserts: the walk zeroes the last M.SEL of each (voice slot, insert slot) it does not run
+  (`program.forget`, `post.forget`), and a pass that does not walk zeroes all 32 (`forget_all`, L1 stores);
+- the moved slot 2's engines: zeroed when the slot is not moved, all 32 when the bus pass does not walk;
+- bus FDN8 / XDLY: an instance not claimed in the pass before starts fresh (`bus.LAST`, `PASSN`);
+- the guard's hold (`perc.guard.ins_gate`): an instance back after it was held out starts from zeros (pre and
+  post: its state words and ring, `restart`; bus: OWNER cleared while its out count is not 0);
+- P-I voices (`md.voice.new_track`): a note on another track than the voice's last zeroes the delay lines when
+  its machine uses them (2,048 DDR writes; the voice's last track in slot word 227).
+Tests: each model test fails without its fix; runner steps inserts 2b, inspost 2b, insbus 2b / 2c, pitrack.
+
 **SUB** (state: the band, its envelope, the square, two flip-flops and the trigger): the band under BAND
 (a one-pole, 110 Hz x 8^p: 110 .. 880 Hz; Optimist's ~440 Hz at BAND 85); its envelope, up at 1/8 a
 sample (~0.2 ms), down at 1/1024 (~21 ms); a Schmitt trigger at +-1/8 of the envelope turns a flip-flop on
@@ -477,8 +492,10 @@ its tail with the voice (a stolen slot starts again) and cost once a voice, so F
   2 MB lines (DDR `0x83000000 + 0x400000 k`, 10.9 s each, as the send XDLY's): 20 MB of the 25.5 MB our
   DDR had free above `0x82680000`. The ColdFire gives a slot an instance when it takes the type (the
   lowest free) and keeps it while the slot keeps the type; a slot that finds none free shows **FULL**
-  under M.SEL and is sent as OFF (dry). An instance run by another record or type than last time starts
-  as a new engine: its words zeroed, its ring or lines set, FDN8's LFO phases at their start, then the
+  under M.SEL and is sent as OFF (dry). An instance run by another record or type than last time, or that no
+  record claimed in the pass before (2026-11-14, delay leaks: a slot switched OFF or to another type and back
+  gets the same instance again, and used to resume its frozen lines, the old tail replayed; `bus.LAST`,
+  `PASSN`), starts as a new engine: its words zeroed, its ring or lines set, FDN8's LFO phases at their start, then the
   engine's own switch (FDN8 clears its ring, 32 silent blocks, 21 ms; XDLY reads nothing it has not
   written). Neither instance memory is loaded at power-on.
 - **Levels.** The engine gets the track's block x 1/14.125 (a voice's level, as the routing's gain on a
@@ -660,7 +677,8 @@ to the one-slot build's 1,800.
   - `test/test_inserts_bus.py`: the bus pass's model equals `dnfw.inserts.busref` bit for bit over 70
     blocks (FDN8 half wet, XDLY wet only, FDN8 then XDLY on one track, a FULL slot, an XDLY instance moved
     to another track and started fresh), the send FX's words and every register back, the instances' DDR
-    holding the sound and the send reverb's ring untouched;
+    holding the sound and the send reverb's ring untouched; an XDLY and an FDN8 that went OFF (no walk), then
+    unclaimed (a walk without them), then back with silent input give exact zeros (the runner's insbus 2b too);
   - `test/test_inserts_c.py`: ins.c compiled for the host: its packed words are `design.pack`'s, its
     instances given out as the DSP expects, a FULL slot sent as OFF, an unknown type read as OFF;
   - SHARC runner (the build's assembled code): `inserts` (the values sent packed, the pass's own unpack),

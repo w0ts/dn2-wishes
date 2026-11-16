@@ -36,6 +36,9 @@ _NAMES = (["t", "cnt", "tr", "sel", "i", "j", "rec", "sa", "rb", "lp", "rp"] + [
           + [f"sv{k}" for k in range(16)] + [f"svi{i}" for i in SAVE_I] + ["sva", "bk", "bg"])
 C = {n: SCRATCH + 4 * k for k, n in enumerate(_NAMES)}
 SCRATCH_BYTES = 4 * len(_NAMES)
+# 2026-11-14 (delay leaks; the User: "Fix all, start fresh"): an insert that did not run starts from silence when it
+# runs again. A slot the walk passes without a POST insert forgets its last M.SEL (word 7: 0, so its next run is
+# fresh); a pass that does not walk (no POST record) forgets every slot's (32 L1 stores)
 GW = {n: D.POST_GW_L2 + 4 * k for k, n in enumerate(("aa", "icost", "ist", "rbuf", "dl0", "dl31", "dr0", "dr31"))}
 SENDS_SW = 0x1C1738              # the FX sends, the call's stock target
 MASK = D.POST_RING - 1
@@ -504,10 +507,10 @@ def chor(p: Prog) -> None:
     p.seti(0, 4)
     p.fconst(0, 0.0)
 
-    def zero():                                  # WL, WR are one run of 64 words
-        for _ in range(16):
+    def zero():                                  # WL, WR are one run of 64 words (8 a pass: code room, 2026-11-14)
+        for _ in range(8):
             p.stpost(0, 0)
-    p.loop_r(11, 2 * D.BLOCK // 16, zero)
+    p.loop_r(11, 2 * D.BLOCK // 8, zero)
     p.iconst(0, 0)
     p.st(C["v"], 0)
     p.ld(10, C["nv"])
@@ -961,6 +964,29 @@ def _juno_mix(p: Prog) -> None:
     MS.emit(p, _juno_mix_ops(True), chain=False)
 
 
+def forget(p: Prog) -> None:
+    """(2026-11-14) slot C['i']'s last M.SEL to 0: its next run starts fresh. Clobbers R0-R2, R12, I4"""
+    p.ld(0, C["i"])
+    p.lsh(1, 0, 5)
+    p.iconst(12, STATE + 4 * (STATE_WORDS - 1))
+    p.iop(2, 12, "+", 1)
+    p.seti(4, 2)
+    p.iconst(0, 0)
+    p.sti(0, 4, 0)
+
+
+def ring0(p: Prog) -> None:
+    """the slot's ring (C['rb']) to zeros. Clobbers R0, R1, R11, I0"""
+    p.ld(1, C["rb"])
+    p.seti(0, 1)
+    p.fconst(0, 0.0)
+
+    def eight():                                 # (8 a pass, not 16: code room; only when it starts fresh)
+        for _ in range(8):
+            p.stpost(0, 0)
+    p.loop_r(11, D.POST_RING // 8, eight)
+
+
 def slot(p: Prog) -> None:
     """voice slot C['t']: the track it plays (design.ROUTE), its M.SEL, then CHOR or WIDE"""
     p.ld(0, C["t"])
@@ -982,7 +1008,7 @@ def slot(p: Prog) -> None:
         p.ld(5, C["sel"])
         p.iconst(6, typ)
         p.if_(5, "EQ", 6, lambda: p.iconst(7, 1), kind="i")
-    p.ifz(7, "NE", lambda: run(p))
+    p.ifz(7, "NE", lambda: run(p), lambda: forget(p))
 
 
 def run(p: Prog) -> None:
@@ -1032,14 +1058,7 @@ def run(p: Prog) -> None:
         p.seti(4, 2)
         for k in range(D.AUX_WORDS):
             p.sti(k, 4, 9)
-        p.ld(1, C["rb"])
-        p.seti(0, 1)
-        p.fconst(0, 0.0)
-
-        def sixteen():
-            for _ in range(16):
-                p.stpost(0, 0)
-        p.loop_r(11, D.POST_RING // 16, sixteen)
+        p.call("ring0", lambda: ring0(p))
     p.ifz(9, "NE", fresh)
     p.ld(2, C["sa"])
     p.seti(4, 2)
@@ -1063,8 +1082,18 @@ def run(p: Prog) -> None:
     by_type(cost(D.WIDE), cost(D.JUNO), cost(D.CHOR))
     for side, d0, d31 in (("lp", "dl0", "dl31"), ("rp", "dr0", "dr31")):
         PR.dry_ends(p, C[side], GW[d0], GW[d31])
-    G.ins_gate(p, GW["icost"], GW["aa"], GW["ist"], lambda: by_type(lambda: wide(p), lambda: juno(p), lambda: chor(p)),
-               typ_at=C["sel"])
+    def restart():                               # (2026-11-14) back after the guard held it out: from silence
+        p.iconst(0, 0)
+        for k in range(6):
+            p.st(C[f"s{k}"], 0)
+        p.call("ring0", lambda: ring0(p))
+
+    def go():
+        p.ld(0, GW["ist"])
+        p.iconst(1, 1)
+        p.if_(0, "EQ", 1, restart, kind="i")
+        by_type(lambda: wide(p), lambda: juno(p), lambda: chor(p))
+    G.ins_gate(p, GW["icost"], GW["aa"], GW["ist"], go, typ_at=C["sel"])
     for k, (side, d0, d31) in enumerate((("lp", "dl0", "dl31"), ("rp", "dr0", "dr31"))):
         p.ld(0, C[side])
         p.st(GW["rbuf"], 0)
@@ -1077,8 +1106,18 @@ def run(p: Prog) -> None:
 
 
 def body(p: Prog) -> None:
+    def forget_all():                            # (2026-11-14) no walk: every slot forgets its last M.SEL
+        p.iconst(1, STATE + 4 * (STATE_WORDS - 1))
+        p.iconst(0, 0)
+        p.iconst(13, 4 * STATE_WORDS)
+
+        def one():
+            p.seti(4, 1)
+            p.sti(0, 4, 0)
+            p.iop(1, 13, "+", 1)
+        p.loop_r(11, D.RECORDS, one)
     p.ld(0, D.FLAGS + 4)                         # (perf, 2026-11-10) no POST record: nothing to walk
-    p.ifz(0, "NE", lambda: _walk(p))
+    p.ifz(0, "NE", lambda: _walk(p), forget_all)
 
 
 def _walk(p: Prog) -> None:

@@ -14,6 +14,13 @@ and the unpacked records (design.TABLE) the pre pass would have left.
    XDLY on one track, a FULL slot, an XDLY instance moved to another track): every block every track's
    block as dnfw.inserts.busref's, bit for bit; the tracks with no bus insert untouched; the send FX's own
    words (FDN8's and XDLY's) as they were; every register back.
+2b. (2026-11-14, the User: "i heard some delay, long after") an insert that went away and came back:
+   track 1's XDLY and track 2's FDN8 play, then every insert OFF (the pass does not walk), then DIST and an
+   XDLY elsewhere (it walks, no claim), then both back on the same instances with silent input: every block
+   as busref's, and the two tracks' blocks exact zeros after the return (no old tail).
+2c. (2026-11-14, "start fresh") a moved slot 2 that did not run: track 1's TAPE in slot 2 under slot 1's CHOR
+   (moved to the bus), slot 1 OFF (not moved) and back, nothing at all (no walk) and back; silent input from each
+   return: busref's bit for bit, exact zeros on track 1.
 3. The pass alone: OFF, one FDN8 (a clearing block, then steady), one XDLY, eight FDN8 + four XDLY.
 """
 
@@ -58,10 +65,26 @@ def rows_at(b: int) -> bytes:
     if b >= 50:
         del rows[(2, 1)]
         rows[(6, 0)] = rec(D.XDLY, 0, 127, 40, 40, 60, 0, 127)
+    return table(rows)
+
+
+def table(rows: dict) -> bytes:
     out = bytearray(8 * D.RECORDS)
     for (t, j), v in rows.items():
         out[8 * (2 * t + j):8 * (2 * t + j) + 8] = bytes(v)
     return bytes(out)
+
+
+BACK = 36                                        # 2b: play to block 24, OFF to 30, the walk without them to 36
+BACK_ON = {(0, 0): rec(D.XDLY, 0, 127, 20, 30, 100, 0, 90), (1, 0): rec(D.FDN8, 0, 127, 10, 90, 30, 64, 0, 127)}
+
+
+def back_rows(b: int) -> bytes:
+    if b < 24 or b >= BACK:
+        return table(BACK_ON)
+    if b < 30:
+        return table({})
+    return table({(0, 0): rec(D.DIST, 0, 127, 64), (3, 0): rec(D.XDLY, 1, 127, 64, 64, 64)})
 
 
 def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
@@ -90,13 +113,13 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
         return M5.base_frame(sound, machines, overrides=M5.perc_words(1), trigger=b % 24 == 1,
                              others={1: 5, 2: 5}, trigger_others=True).to_bytes()
 
-    def blocks(par_of, n):
+    def blocks(par_of, n, loud_of=None):
         caps, cur = [], {}
 
         def at_bus(r):
             st = r.state
             b = len(caps)
-            loud = 0.0 if b >= n - 8 else 2.0
+            loud = loud_of(b) if loud_of else 0.0 if b >= n - 8 else 2.0
             for t in range(16):
                 for j in range(32):
                     x = rnd.uniform(-loud, loud)
@@ -164,6 +187,61 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
     checks["FDN8, XDLY: they change the sound (not a pass-through)"] = changed > 1000
     numbers["FDN8, XDLY: first mismatch (block)"] = first_bad
     numbers["FDN8, XDLY: run info"] = info
+
+    # 2b. went away and came back
+    caps, info = blocks(back_rows, BACK + 24, loud_of=lambda b: 2.0 if b < 24 else 0.0)
+    ref = R.BusRef()
+    exact, first_bad, played, quiet = len(caps) == BACK + 24, None, False, True
+    for b, c in enumerate(caps):
+        lin = [[bf(w) for w in c["in"][0][t]] for t in range(16)]
+        rin = [[bf(w) for w in c["in"][1][t]] for t in range(16)]
+        ref.block(c["par"], lin, rin)
+        want = ([[fb(x) for x in row] for row in lin], [[fb(x) for x in row] for row in rin])
+        if c["out"][0] != want[0] or c["out"][1] != want[1]:
+            exact = False
+            first_bad = first_bad if first_bad is not None else b
+        if b < 24:
+            played |= any(c["out"][0][0])        # XDLY's wet (MIX 127: the block is the wet only)
+        if b >= BACK:
+            quiet &= not any(c["out"][0][0] + c["out"][1][0] + c["out"][0][1] + c["out"][1][1])
+    checks["went away and came back: every track's block as dnfw.inserts.busref's (60 blocks: XDLY and FDN8 "
+           "play, OFF, another bus insert walks, both back)"] = exact
+    checks["went away and came back: XDLY's wet sounded before it went away"] = played
+    checks["went away and came back: exact zeros on both tracks after the return, silent input (no old "
+           "tail)"] = quiet
+    numbers["went away and came back: first mismatch (block)"] = first_bad
+    numbers["went away and came back: run info"] = info
+
+    # 2c. a moved slot 2 that did not run
+    tape = rec(D.TAPE, 0, 127, 100, 90, 64, 30, 0)
+
+    def mv_rows(b):
+        if 40 <= b < 44:
+            return table({})                     # nothing: no walk, then back
+        return table({(0, 0): rec(D.CHOR, 0, 127, 90, 80, 50, 60, 127, 100) if not 20 <= b < 24
+                      else rec(0, 0, 0), (0, 1): tape})
+    mv_quiet = [range(24, 29), range(44, 49)]
+    caps, info = blocks(mv_rows, 50, loud_of=lambda b: 0.0 if any(b in w for w in mv_quiet) else 2.0)
+    ref = R.BusRef()
+    exact, first_bad, played, quiet = len(caps) == 50, None, False, True
+    for b, c in enumerate(caps):
+        lin = [[bf(w) for w in c["in"][0][t]] for t in range(16)]
+        rin = [[bf(w) for w in c["in"][1][t]] for t in range(16)]
+        ref.block(c["par"], lin, rin)
+        want = ([[fb(x) for x in row] for row in lin], [[fb(x) for x in row] for row in rin])
+        if c["out"][0] != want[0] or c["out"][1] != want[1]:
+            exact = False
+            first_bad = first_bad if first_bad is not None else b
+        if b < 20:
+            played |= c["out"][0][0] != c["in"][0][0]
+        if any(b in w for w in mv_quiet):
+            quiet &= not any(c["out"][0][0] + c["out"][1][0])
+    checks["moved slot 2 did not run, back: every track's block as dnfw.inserts.busref's (50 blocks: slot 1 "
+           "OFF and back, no walk and back)"] = exact
+    checks["moved slot 2 did not run, back: the moved TAPE changed track 1's block before"] = played
+    checks["moved slot 2 did not run, back: exact zeros on track 1 after each return, silent input"] = quiet
+    numbers["moved slot 2 did not run, back: first mismatch (block)"] = first_bad
+    numbers["moved slot 2 did not run, back: run info"] = info
 
     # 3. the pass alone
     base = M5.init_on(snap, m2mach, m5img, warm=True)

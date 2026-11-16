@@ -112,6 +112,42 @@ def test_model_is_the_reference():
     assert not any(m.get(FP.RING + 4 * k) for k in range(0, 40000, 7))     # the send reverb's ring: untouched
 
 
+def test_an_insert_that_went_away_and_came_back_starts_fresh():
+    # 2026-11-14 (the User: "i heard some delay, long after"): a slot's FDN8 / XDLY switched to OFF or another type
+    # and back gets the same instance again (the ColdFire gives the lowest free one); it used to resume its frozen
+    # lines and replay the old tail. Now silent input after the return gives exact zeros. Track 1's away blocks with
+    # no bus record at all (the pass does not walk), track 2's with another bus insert on (it walks, no claim)
+    rnd = random.Random(5)
+    m, ref = mem0(), R.BusRef()
+    on = {(0, 0): rec(D.XDLY, 0, 127, 20, 30, 100, 0, 90), (1, 0): rec(D.FDN8, 0, 127, 10, 90, 30, 64, 0, 127)}
+    played = [False, False]
+    for b in range(260):
+        if b < 160:
+            rows = dict(on)
+        elif b < 170:
+            rows = {}                                              # all off: no walk
+        elif b < 180:
+            rows = {(0, 0): rec(D.DIST, 0, 127, 64), (3, 0): rec(D.XDLY, 1, 127, 64, 64, 64)}   # walk, no claim
+        else:
+            rows = dict(on)
+        par = table(rows)
+        loud = 1.0 if b < 160 else 0.0
+        left = [[rnd.uniform(-loud, loud) for _ in range(32)] for _ in range(16)]
+        right = [list(row) for row in left]
+        wl = [[np.float32(x) for x in row] for row in left]
+        wr = [[np.float32(x) for x in row] for row in right]
+        ref.block(par, wl, wr)
+        lo, ro, _ = call(m, par, left, right, {})
+        assert lo == [[fbits(x) for x in row] for row in wl], f"block {b} left"
+        assert ro == [[fbits(x) for x in row] for row in wr], f"block {b} right"
+        if b < 170:                                                # (FDN8's wet: from block 126, its ring cleared)
+            played = [played[0] or any(lo[0]), played[1] or any(lo[1])]
+        if b == 179:
+            assert played == [True, True], "both played (their tails through the away blocks too)"
+        if b >= 180:
+            assert not any(lo[0] + ro[0] + lo[1] + ro[1]), f"block {b}: an old tail came back"
+
+
 def test_the_units_l1_scratch_holds_nothing_across_blocks():
     # 2026-11-12: a unit's scratch and the pass's own words are the Monomachine render scratch, which the voices
     # rewrite every block: with it full of garbage before every call, every block is still the reference's
@@ -276,3 +312,26 @@ def test_a_refused_bus_insert_fades_out_stays_out_and_fades_back():
     assert m.get(G.INS_SKIPS) == back - 20
     m2, hard = play({20: 200_000})               # past the grace: out at once
     assert hard[20][0] == hard[20][1] and m2.get(G.INS_SKIPS) == back - 20
+
+
+def test_a_held_out_bus_insert_comes_back_from_silence():
+    # 2026-11-14 (the User: "start fresh"): an XDLY refused at block 20 and held out INS_HOLD blocks comes back as a
+    # new engine (its lines unread), not resuming the lines it froze with: silent input after, exact zeros
+    from dnfw.perc import guard as G
+    rows = {(0, 0): rec(D.XDLY, 0, 127, 20, 30, 100, 0, 90)}
+    rnd = random.Random(4)
+    m = mem0()
+    m.put(G.INS_DLP, 100_000)
+    m.put(G.PERIOD, 666_667)
+    back = 20 + G.INS_HOLD
+    for b in range(back + 20):
+        m.put(G.INS_TESTCLK, 200_000 if b == 20 else 0)
+        loud = 1.0 if b < 20 else 0.0
+        left = [[0.0] * 32 for _ in range(16)]
+        left[0] = [rnd.uniform(-loud, loud) for _ in range(32)]
+        lo, ro, _ = call(m, table(rows), left, [list(x) for x in left], {})
+        if b == 19:
+            assert any(lo[0]), "it played"
+        if b >= back:
+            assert not any(lo[0] + ro[0]), (b, "the frozen lines came back")
+    assert m.get(G.INS_SKIPS) == G.INS_HOLD

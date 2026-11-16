@@ -6,7 +6,9 @@ in the order the DSP code (dnfw.inserts.post) does it, so the two agree bit for 
                                              # changed in place; route as dnfw.inserts.ref
 
 Each voice slot gets the post insert of the track it plays; its state (and its ring) start from zeros
-whenever its track or that track's M.SEL changes. A slot whose track's M.SEL is not CHOR or WIDE is
+whenever its track or that track's M.SEL changes, or when it did not run in the pass before (2026-11-14: a slot
+that played another track or none, or an M.SEL set to another type and back: an effect that comes back starts
+from silence; post.forget, FORGOT). A slot whose track's M.SEL is not CHOR or WIDE is
 left as it is.
 
 WIDE (K1 WDTH, K2 TIME, K3 BASS, K4 TONE), per sample l, r:
@@ -44,10 +46,12 @@ class PostRef:
             t, j = i >> 1, i & 1
             tr = t if route is None else route[t] & 0xFFFF
             if tr > 15:
+                self.last[i] = (0, 0)
                 continue
             v = par[8 * (2 * tr + j):8 * (2 * tr + j) + 8]
             sel = v[0] & ((1 << D.TYPE_BITS) - 1)
             if sel not in D.POST:
+                self.last[i] = (0, 0)            # (2026-11-14) it did not run: when it runs again, from silence
                 continue
             if (sel, tr) != self.last[i]:
                 self.st[i] = [0] * 6
