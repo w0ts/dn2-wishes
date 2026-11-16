@@ -1750,9 +1750,12 @@ def main() -> int:
                         f"poke:{lay['smp_overlay_dirty']:#x}:00000001", "wait:6", "png:n0"] + snap_      # 0: the folder
                     # (the emulator's clock, the 1.5 kHz ticks at 0x4058f8d4, does not run: it is set
                     # as time would move it: the repeat's 0.4 s then 0.08 s steps, the marquee's 1 s
-                    # rest and 0.2 s a character)
+                    # rest and 0.2 s a character). 2026-11-14 (the 1.12 gate's blind spots): each clock step
+                    # waits 20 M, about four UI passes. Idle, the UI loop passes once in about 4.5 M instructions
+                    # on 1.11 and 1.12 alike (jmp_poll entries over 100 M, clean v0.53), so 2 M held a pass or
+                    # none by the snapshot's phase: 1.11's per-build snapshot held one, 1.12's none (one repeat seen)
                     def clock(t):
-                        return [f"poke:{TICK:#x}:{t:08x}", "wait:2"]
+                        return [f"poke:{TICK:#x}:{t:08x}", "wait:20"]
                     ns += clock(100) + ["press:14", "wait:2"] + clock(700) + clock(850) + clock(1000) + snap_   # 1: held DOWN
                     ns += ["release:14", "wait:2"] + clock(1300) + snap_ + clock(1600) + snap_                  # 2, 3: let go
                     # 4-19: the marquee of the row it stopped on (selected at tick 1000)
