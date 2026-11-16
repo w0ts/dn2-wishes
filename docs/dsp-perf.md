@@ -307,3 +307,142 @@ caching the derived knob values per record (CHOR 1.6k, WIDE 4.8k a block).
 
 The empty passes' idle tax (all records OFF), measured on this tree: post 48 steps, bus 164 (its L2 save area), pre 21
 (flags from 9f692b8c): the ~25k of the budget table's "idle taxes" were gone before this session.
+## 2026-11-11 speed-pitb session (branch claude/speed-pitb-4777c4, on 81113ac3)
+
+Task: cut the heaviest Machinedrum and TB303 voices. Finding first: **PI-SD / PI-RS are no longer DDR-bound** (about 261 DDR
+accesses a block, 15.9k instructions): the plan "shorten delay lines / burst reads" has nothing left to win. The levers that
+remained are in the instruction stream, and all of them are bit-exact address-mode or loop-shape changes, no arithmetic touched.
+
+| commit | what | est a block (golden basis), before -> after |
+|---|---|---|
+| `33c87b15` | TB303: while a half runs, I0 = slot state word 32, so its state words are `DM(k - 32, I0)`: offsets a compute's move can carry (-32..31); `DM(S0 + k, I3)` (k >= 64) never folded | TB303 39,176 -> 36,705 (-6.3 %) |
+| `e82eeac3` | `Prog.loop0`: the loop count in R0 instead of a scratch word (leaves R0 = 0, R12 = 1 like `loop`; emit mode refuses a body, or a subroutine it calls, that mentions R0; run mode refuses a body that changes it). 25 loops converted, 12 keep `loop` | PI-SD 20,374 -> 19,303, PI-BD 16,547 -> 15,690, PI-MT 18,382 -> 17,525, PI-ML 17,213 -> 16,573, PI-RC/CC/HH -3 %, TRX/EFM -0.5..-1.4 % |
+| `c5411afd` | PI-SD / PI-RS mode loop: I0 at X40[k] + 16 words (X60 at +16, X40 at -16; the step is a folded post-modify) | PI-SD 19,303 -> 18,595, PI-RS 18,953 -> 18,245 (total vs 81113ac3: -8.7 / -8.9 %) |
+| `7ba0930a` | EFM operator `pair()`: I0 = the pair's state words centred (span <= 64 words), no rebase of I1 after the table read | EFM-BD 8,733 -> 8,372, SD 11,300 -> 11,089, XT 10,222 -> 9,860, CP 10,299 -> 9,937, RS 13,462 -> 13,041, CB 13,279 -> 12,737, HH 10,474 -> 10,203 |
+| `39e369a7` | EFM-CY: the four operators unrolled; state via I0 (slot word S0 + 16), host words via I3 offsets; no C['b'] operator base, no loop | EFM-CY 19,373 -> 16,964 (-12.4 %) |
+
+`e077c029`, `c5c22f8d`, `f1d05df7` regenerate perc.asm / perc.json / sharc_code.json (the DSP upload now 1,036,182+ of 1,048,575
+bytes unpacked; EFM-CY's unrolling is about +0.5 KB). Regenerate rather than merge them.
+
+Proof per change: golden_all.py output hash (56 blocks per machine) identical to a `git archive` of 81113ac3 for every machine the
+change touches (all 49 after loop0), and identical again under poison.py; emit mode assembles the whole program (the loop0
+R0 check); preflight family (preflight, code-fresh, rebuild, dsp-identity, hwrules, symbols, coldfire, overbridge) PASS on a
+`mods apply --mod waverider` build of head `f1d05df7`. Runner voice / guard / stress / chords / garbage / wipe: see the result line at
+the end of this section. Not run: the full ship_gate, boot step. No build here is cleared to flash.
+
+### What is left, and why it stops here
+- Multifunction (multiply || add) and hardware loops would be the big instruction savers (PI res body: 3 products + 3 adds + 2
+  saturations a sample, 32 x 8 samples); both stay refused while selmap / digikit decode them differently (docs/SAFETY.md, hwrules).
+- I0 is the only free PAR_I index register (I1 table reads, I2 voice state / ring, I3 slot). Loops that touch three or more
+  32-word scratch arrays (PI-SD mix, junction, hp: X40..XC0) cannot fold their offsets: the window is -32..31 words.
+  Re-laying the scratch (arrays interleaved by 4) would, with a stride-4 modify register; not done.
+- TB303: `_ellip4` is 25 % of it and near its floor (30 constant loads per sample could ride on memory-folded loads, ~2 %); the
+  oversampled osc / ladder are serial recurrences, so SIMD over voices is not available (one voice per call).
+- PI-SD ring `put` / `_at` (3k est): byte offsets instead of word indices (-1 instruction per access), `+2048 j` as the store's own
+  offset (-2 per put): about 1-2 % together; not done.
+- `K.sat` is 4 instructions (two constant loads) wherever bounds cannot sit in registers (PI junction: no free register).
+- TRX-CY / PI-MT: loop0 only; their bodies are already post-modify / SSF tight.
+
+### Note: what blocks multifunction instructions and hardware loops (2026-11-11, read from the repo; nothing built or run for this)
+
+**Multifunction (`Fm = Fx * Fy, Fa = Fx + Fy`, Type 1a, 48-bit).** `dsl.Prog.par` can already model and emit it (multiplier operands
+F0-F3 x F4-F7, ALU F8-F15, one DM move); it is switched off by an assert (`multifunction computes are refused`). Why, per the
+comments and docs/plaits.md: (a) **selas** (the assembler/encoder) "does NOT check these: it encodes garbage" for illegal
+register groups, and its encoding of the legal form is read two ways: (b) the gate's decode step **selmap** reads selas's
+`Fm = Fx * Fy, Fa = ...` as `Fm = MRF + Fx * Fy, ...` (a fixed-point multiply-accumulate), **digikit** (which the SHARC runner's
+emulator uses, and which matched the firmware in every disagreement so far, docs/for-digikit-sharc-runner-dn2.md section 4) reads a
+float multiply. The gate requires every executed pc to decode alike in both, so one disagreement stops the instruction. Nothing
+shows that the silicon, the runner's emulator or the byte-guard refuses it: the refusal is the verification decode.
+The compute-plus-move forms (type 3a / 4a) are in use already, limited to I0..I3 for the same reason (selmap reads
+`compute, R = DM(I4, M6)` as 4 bytes).
+
+**Hardware loops.** The firmware itself uses `LCNTR = ureg, DO ... UNTIL LCE` (type 12a_ureg); digikit's emulator runs it. It does
+**not** execute the standalone `DO ... UNTIL LCE` with the count already in LCNTR (type 13a: "unsupported form 13a"). The rest is
+policy, not a missing opcode: `scripts/gate_hwrules.py` (complex-ping's hwrules.py) fails any loop violating the PRM's rules (last
+11 instructions of a loop must be 48-bit legacy encodings, no `IF NOT LCE` in them, no CALL in the last 5, nested loops must not
+share an end address) because "each silenced or crashed someone's unit once". Our loops are software (`loop`, `loop0`, `loop_r`) to
+stay out of that.
+
+**Smallest change that would allow them** (not started; waiting for a go):
+1. Multifunction: emit Type 1a as raw opcode words from our own encoder (not selas), restricted to the legal operand groups; make
+   selmap's reading agree (fix or special-case its Type 1a decode to the PRM's: the multiply is float unless the MRF/SSF bits say
+   otherwise), or accept digikit alone for this form with a recorded reason. Verify each distinct encoding by (i) round-trip decode in
+   digikit and selmap, (ii) executing it in the runner's emulator against the reference interpretation (`Prog.par` run mode) on random
+   and edge inputs (NaN, denormals, +-0, all register groups), (iii) one check on the unit if the User agrees (the silicon is not
+   known to differ, but no unit has run one of ours). PRM p.4-53 gives the flag semantics.
+2. Hardware loops: emit only `LCNTR = ureg, DO` (12a_ureg, the firmware's form), pad so the last 11 instructions are 48-bit forms
+   (our compute-plus-move forms are 48-bit already; a loop shorter than 11 must be all 48-bit), keep CALLs and `IF NOT LCE` out of
+   the tail; hwrules stays the gate. Emulator: nothing new for 12a_ureg.
+
+**Effort and gain (estimates, not measured).** Encoder + tests + gate agreement: about 2 days for multifunction (the risky part is
+selmap/digikit agreement and the unit check), 1 day for hardware loops on top of the existing loop0 shape. Gain from the instruction
+mix: PI-SD's `res` body (3 products + 3 adds + 2 saturations a sample, 256 samples a block) 14 -> about 9 instructions, plus 3
+loop instructions an iteration gone (505 iterations a block, about 1.5k): PI-SD / PI-RS -20..-25 %; TB303: the decimator and ladder
+are chains of multiply-add pairs, -20..-25 % of 28k; CHOR / PLAITS MDAL (55 % fp compute): -10..-20 %; EFM / TRX (SSF products
+beside adds): -10 %. Registers are the limit (multiplier inputs F0-F7, ALU F8-F15 in a pair), so rescheduling by hand is needed, not
+a rewrite of the DSL's one-op emitters; the DSL would need a pairing pass for adjacent independent mul / add.
+## PLAITS PART / STRG (2026-11-11, branch claude/speed-plaits-00ec7a, on sophie-v047-os112-perf 81113ac3)
+
+Task: 16 voices of PART / STRG on one DSP (the poly16 step: `DNFW_POLY16_ONLY=PART,STRG`, runner
+clock). Commits, in order (each `rr:` line regenerates perc.asm/json and sharc_code.json for the one
+before):
+
+| commit | what | est a block (golden basis) | proof |
+|---|---|---|---|
+| `a4ce77ea` | PART: the particle loop x4 with the rng's multiplier and scale held in R12/R14 (reloaded after a fire), the loop's `one` in R9; the five fixed all-pass stages two samples a pass with x0/x1 swapping registers (no copy); AP4 / DEL walked by pointers (I0 read, I1 head; I0 moved by the integer part's change when the LFO moves) when the half's read window (guard: integer part 396..446 / 3040..3440, measured 399.98..443.02 / 3069.9..3410.1 over 10^6 LFO updates) and head do not wrap, else the old masked loop | PART 21,318 -> 19,254 (-9.7 %) | golden 13/13 (output and every memory word), poison 13/13, PART 900 blocks x morph 0/40/100 per-block output and DDR hash identical to the base |
+| `03f4f886` | STRG: the stretch line's base worked out once a string (U_SB) | STRG 18,946 -> 18,774 (-0.9 %) | output identical (golden, poison, 700 blocks); only the new word U_SB differs in memory |
+| `5f584784` | PART: a half whose diffuser windows wrap round the 8192-word ring runs stage by stage masked (`_fixed_masked`, masked mix, `_moving_masked`) instead of the whole chain a sample at a time (old wrap half +5 k, now +3.3 k; the old chain and `_stage_sub` are gone) | PART 19,221 (steady unchanged) | as above, plus `_fast_ok` forced to 0 for 300 blocks (all masked): output and DDR hash identical |
+| `9eae60d1` | PART: the diffuser's write pointer starts at 32 x 17 x slot (a multiple of 32, so the LFO's every-32nd update falls where it did; the ring is cleared), so the voices' ring wraps come at different blocks | same | slots 5 and 13 x morph 0/40, 900 blocks: output word for word identical to the base (the ring's memory words are rotated); golden/poison slot 0 identical |
+
+What the golden hashes do and do not see: at the default MORP the diffuser's amount is 0, so the
+output hash `ho` does not depend on the diffuser at all; the memory-word hash `h` does (and caught a
+clobbered register in the first AP4 version). Always run `h`, and morph 0/40/100 for 900+ blocks (the
+ring wraps once in 256 blocks; the DEL line's 3,410-sample delay is 106 blocks).
+
+### Where it stands (poly16 step, 16 voices, notes C2 .. D#3, all triggered in block 1)
+
+| | base (81113ac3) | now (`9eae60d1`) | + CLR_CHUNK 512 (`CLEAR_SPREAD`, default ON, declared) |
+|---|---|---|---|
+| PART voices sounding at the end | 13 (skips 28 by block 19) | 14 (skips 11, all in the clear blocks 1-5, none after block 6) | 15, 16 in one block (skips 4) |
+| PART per-voice steady max / mean (cycles) | 23.2k / 19.9k | 21.0k / 17.6k | 21.0k / 16.6k |
+| STRG voices sounding at the end | 14 (skips 25) | 14 (skips 25) | 14 (skips 6) |
+| STRG per-voice steady max / mean | 22.97k / 20.35k | 22.67k / 20.08k | 22.67k / 18.9k |
+
+So: **16 voices are not reached on either engine, and no run of the poly16 step passes** (the step also
+needs every voice sounding from block 4, which the deferred clear makes impossible for PART: it is silent
+until block 6; STRG until block 4).
+
+* **PART** is within reach. What is left is the note's start: the deferred clear (`plk.defer_clear`,
+  8,192 DDR stores, CLR_CHUNK 1,024 a half) makes blocks 1-5 cost 24.9k a voice (silent, only the clear:
+  ~9.2k a half), 16 voices at once exceed the guard's limit and two or three are refused for good.
+  Measured (farm): CLR_CHUNK 512 gives 14.3k blocks over 8 blocks, 15 voices (16 in one block). **Declared
+  change, `plk.CLEAR_SPREAD` (default True; False = 1,024): a PART note starts 4 blocks later (2.9 ms), a
+  STRG note 2 blocks later (1.5 ms); a block is 32 samples = 0.73 ms.** Output is not identical to the base in
+  time (PART/STRG golden `ho` differs; the other 11 engines identical); after the start the engine renders
+  the same, and the stale data is never audible: a voice area pre-filled with random floats gives the same
+  output as a clean one over 200 blocks with retriggers (PART/STRG x morph 0/40, `dirty.py`). Committed on
+  Wed 11 Nov at the Main session's request. The exact alternative (not done) is a just-in-time clear:
+  every line is read at its tail first (offset l - 1 below the write pointer, the moving taps at 400..443 /
+  3070..3410), so only ~7 x 17 words a half need zeros ahead of the read sweep (DEL's band 341 words wide),
+  instead of all 8,192 up front; it would also remove the silent start.
+* **STRG** is not: 22.67k a voice vs the ~20.7k the step needs (-9 %); this pass found -1.7 %. Its cost
+  is a per-string-sample ~190 instructions (stretched path: four masked line addresses of 6 instructions
+  each, a 17-instruction SVF, the DC blocker, three-way phase bookkeeping) and 5 DDR accesses (2.5k of the
+  est). Ideas measured or reasoned, not done: (1) the slot's union words sit at I3 offsets 111..135, past
+  the +-32 a compute can fold, so every `K.ld/K.sv` of them is a lone instruction (a free I3 bias would fold
+  them: measured with the folding forced in the model: STRG -250, PART -66, i.e. small); (2) a silent-string
+  skip (strings 1 and 2 of a voice triggered once never sound) would cut the step's STRG cost by about
+  half but must replay the RNG and phase state exactly and does nothing for a voice whose three strings ring:
+  not done, it would pass the test without lowering the real worst case; (3) byte-scaled WP (-4 a sample).
+* **MDAL / FM / ADD** not touched: MDAL's cost is the 12 modes x 56 sample-steps of fp (672 x 12 instr a
+  block); only SIMD pairs of modes would cut it, a restructure.
+
+Code size: perc.asm 31,691 -> 32,469 instructions (+4.7 KB; the masked stages are the bulk of the last
++0.3 k): DSP upload 1,041,010 of 1,048,575 (7,565 B free; it was 13,635 at the start of the perf branch).
+
+Traps found: `K.mulk/K.addk` clobber F12 by default (their constant register), so a loop that keeps a value
+in F12 must pass `t=`; `loop()`'s `one` register is clobbered every pass (pass a register the body writes
+first); the I-registers I6/I7 are not saved by PERC (`SAVE_REGS`), do not use them; only I0..I3 fold a
+memory move into a compute; `L.W["tmp"]` is the half-pair loop's counter in `machines._render`, `tmp2` is
+free; the python models run natively on the Mac with `MD_OS_BIN/MNM_OS/DT2_*` from `bench/run112.sh`
+(perf scripts: `~/GitHub/dn2mk2-scratch/perf/`, profvoice.py per call site).

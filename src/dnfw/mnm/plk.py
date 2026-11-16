@@ -50,7 +50,13 @@ BIG_WORDS = BIG_STRIDE // 4
 # voice's start block costs an engine half, not 8,192 DDR stores. S_CLR is GRAIN's first state
 # word (free since GRAIN went); dnfw.mnm.plaits clears it at init and on a change of engine.
 S_CLR = 7
-CLR_CHUNK = 1024                               # words a half: 2,048 a block
+# 2026-11-11 (declared, not bit-exact in time): CLEAR_SPREAD halves the chunk, so the note start's
+# silent clear takes twice the halves (PART 8 -> 16 halves = 4 -> 8 blocks, STRG 4 -> 8 halves) and a
+# block costs ~half as much: sixteen voices started at once no longer exceed the frame guard's limit in
+# their start blocks (poly16 step). A note sounds PART 4 blocks / STRG 2 blocks (a block is 32 samples:
+# 0.73 ms at 44.1 kHz, so 2.9 / 1.5 ms) later; after that the output is the same sample for sample.
+CLEAR_SPREAD = True
+CLR_CHUNK = 512 if CLEAR_SPREAD else 1024      # words a half
 
 
 def defer_clear(p: Prog, words: int) -> None:

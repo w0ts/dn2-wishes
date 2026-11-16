@@ -619,11 +619,82 @@ def _ellip(p: Prog, x: int) -> None:
         p.fpass(x, 6)
 
 
+ELLIP_MF = True                                  # (perf, 2026-11-11) the multifunction schedule; False = one op at a time
+
+
+def _section_mf(p: Prog, k: int, coef, last: bool) -> None:
+    """One elliptic section over the four samples at T_Y0.. (read, and written back as the next section's input; the
+    last section keeps only the fourth sample, in F4), a software-pipelined schedule, one multiplier and one ALU
+    operation a cycle (II 5, the multiplier's five products a sample): the same operations on the same operands as
+    the one-at-a-time form, so bit for bit what it computes. Registers (the multiplier's operands F0-F3 x F4-F7, the
+    ALU's F8-F11 x F12-F15): F0 / F3 the sample (alternating), F4 b0, F5 b1, F6 b2, F1 -a1, F2 -a2, F7 y,
+    F8 b0 x, F11 b1 x, F10 b2 x, F9 b0 x + s0... (see below), F12 s0, F13 s1, F14 y (-a1), F15 y (-a2)."""
+    b0, b1, b2, a1, a2 = coef
+    s0, s1 = S_E + 2 * k, S_E + 2 * k + 1
+    for reg, c in ((4, b0), (5, b1), (6, b2), (1, -a1), (2, -a2)):
+        p.fconst(reg, c)
+    _ld(p, 0, T_Y0)                                  # x0
+    xr = (0, 3, 0, 3)
+    cyc: dict[int, dict] = {}
+
+    def put(c: int, kind: str, v) -> None:
+        d = cyc.setdefault(c, {})
+        assert kind not in d, (c, kind)
+        d[kind] = v
+    for j in range(4):
+        base, x = 5 * j, xr[j]
+        put(base + 0, "mul", (8, x, 4))              # F8 = x b0
+        put(base + 1, "mul", (11, x, 5))             # F11 = x b1
+        put(base + 1, "alu", ("+", 7, 8, 12))        # y = x b0 + s0
+        put(base + 2, "mul", (14, 1, 7))             # F14 = y (-a1)
+        put(base + 2, "alu", ("+", 9, 11, 13))       # F9 = x b1 + s1
+        put(base + 3, "mul", (15, 2, 7))             # F15 = y (-a2)
+        put(base + 3, "alu", ("+", 12, 9, 14))       # s0 = (x b1 + s1) + y (-a1)
+        put(base + 4, "mul", (10, x, 6))             # F10 = x b2
+        put(base + 5, "alu", ("+", 13, 10, 15))      # s1 = x b2 + y (-a2)
+        if not last:
+            put(base + 2, "mv", ("stk", T_Y0 + j - S_MID, 0, 7))
+        if j < 3:
+            put(base + 4, "mv", ("ldk", xr[j + 1], T_Y0 + j + 1 - S_MID, 0))
+    put(0, "mv", ("ldk", 12, s0 - S_MID, 0))
+    put(1, "mv", ("ldk", 13, s1 - S_MID, 0))
+    put(19, "mv", ("stk", s0 - S_MID, 0, 12))        # s0 is final after the ALU op of cycle 18
+    for c in sorted(cyc):
+        d = cyc[c]
+        ops = []
+        if "mul" in d and "alu" in d:
+            ops += [("*", *d["mul"]), (d["alu"][0], *d["alu"][1:])]
+        elif "mul" in d:
+            m = d["mul"]
+            ops.append(("op", m[0], m[1], "*", m[2]))
+        else:
+            al = d["alu"]
+            ops.append(("op", al[1], al[2], al[0], al[3]))
+        if "mv" in d:
+            ops.append(d["mv"])
+        p.par(*ops)
+    _sv(p, s1, 13)
+    if last:
+        p.fpass(4, 7)
+
+
 def _ellip4(p: Prog) -> None:
     """F4 = the elliptic decimation filter's output for the fourth of the four ladder outputs (T_Y0..), the
     first three run through it for its states. perf, 2026-11-11: section by section over the four samples
     (a section's five coefficients and two states loaded once, not four times), the same operations in the same
-    order on every sample, so bit for bit what _ellip did sample by sample. Clobbers R0-R3, R5-R15."""
+    order on every sample, so bit for bit what _ellip did sample by sample; then (ELLIP_MF) the multiplier and
+    the ALU working together (_section_mf). Clobbers R0-R3, R5-R15."""
+    if ELLIP_MF:
+        p.fconst(12, ELLIP_GAIN)
+        _ld(p, 0, T_Y0)
+        for j in range(4):                       # x_j G, written back for the first section
+            p.par(("op", j, j, "*", 12), *((("ldk", j + 1, T_Y0 + j + 1 - S_MID, 0),) if j < 3 else
+                                              (("stk", T_Y0 - S_MID, 0, 0),)))
+        for j in (1, 2, 3):
+            _sv(p, T_Y0 + j, j)
+        for k, coef in enumerate(ELLIP):
+            _section_mf(p, k, coef, k == len(ELLIP) - 1)
+        return
     xs = (13, 14, 15, 11)
     for j, r in enumerate(xs):
         _ld(p, r, T_Y0 + j)

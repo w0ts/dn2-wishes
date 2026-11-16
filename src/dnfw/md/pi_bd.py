@@ -610,40 +610,40 @@ def _render(p: Prog, L: K.Layout) -> None:
             _sbase(p, L, 12, SCR_CO)
         p.iop(0, 12, "+", 0)
         p.seti(5, 0)
-        p.ldi(6, 0, 5)
-        p.ldi(7, 1, 5)
-        p.ldi(8, 2, 5)
-        p.ldi(4, 0, 0)                         # y[n-1]
-        p.ldi(5, 1, 0)                         # y[n-2] (limited)
+        p.ldi(8, 0, 0)                         # a = y[n-1]
+        p.ldi(4, 1, 0)                         # b = y[n-2] (limited)
         _dbase(p, L, 1, SCR_H)
         p.seti(1, 1)
         p.ld(1, C["mdb"])
         p.iconst(12, 4 * K.OUT0)
         p.iop(1, 12, "+", 1)
         p.seti(2, 1)
-        p.fconst(9, TOP)
-        p.fconst(10, -1.0)
+        p.ldi(1, 0, 5)                         # c1, c2, c3
+        p.ldi(2, 1, 5)
+        p.ldi(3, 2, 5)
+        p.fconst(10, TOP)
+        p.fconst(11, -1.0)
+        p.fop(12, 4, "*", 1)                   # p1 = b c1
 
-        def one():
-            p.ldpost(11, 1)                    # h
-            p.fop(13, 4, "MIN", 9)
-            p.fop(13, 13, "MAX", 10)
-            p.fop(14, 5, "*", 6)
-            p.fop(4, 4, "+", 14)
-            p.fop(14, 13, "*", 7)
-            p.fop(4, 4, "+", 14)
-            p.fop(14, 8, "*", 11)
-            p.fop(4, 4, "+", 14)
-            p.fpass(5, 13)
-            p.ldi(14, 0, 2)
-            p.fop(14, 14, "+", 4)
-            p.fop(14, 14, "MIN", 9)
-            p.fop(14, 14, "MAX", 10)
-            p.stpost(2, 14)
-        p.loop0(32, one)
-        _clamp(p, 4, 9, 10)                    # stored through the limiter
-        p.sti(0, 0, 4)
-        p.sti(1, 0, 5)
+        # (perf, 2026-11-11) the multiplier || ALU, 8 cycles a sample (was 14), the same operations on the same
+        # operands: y = limit(a); a = ((a + b c1) + y c2) + c3 h; b = y; the output stream += a, limited. F12 carries
+        # the next sample's p1; a hardware loop (31 samples); the stream's store of one sample is in the next's first
+        # cycle (the first sample has none, the epilogue the last)
+        def sample(first: bool):
+            p.par(("op", 4, 8, "MIN", 10), *(() if first else (("st", 2, 9),)))
+            p.par(("op", 4, 4, "MAX", 11), ("ldk", 6, 0, 0))                # y (the harmless read: 48 bits)
+            p.par(("*", 13, 2, 4), ("+", 8, 8, 12), ("ld", 5, 1))          # p2 = y c2; a + p1; h
+            p.par(("*", 14, 3, 5), ("+", 8, 8, 13))                        # p3 = c3 h; + p2
+            p.par(("*", 12, 1, 4), ("+", 8, 8, 14), ("ldk", 15, 0, 2))     # the next p1 = y c1; + p3; the stream's word
+            p.par(("op", 9, 15, "+", 8), ("ldk", 6, 0, 0))
+            p.par(("op", 9, 9, "MIN", 10), ("ldk", 6, 0, 0))
+            p.par(("op", 9, 9, "MAX", 11), ("ldk", 6, 0, 0))
+        sample(True)
+        p.loop_hw(31, lambda: sample(False), cnt=7)    # (F12 carries p1: LCNTR from R7)
+        p.par(("op", 8, 8, "MIN", 10), ("st", 2, 9))                       # the last sample's word; a's limit
+        p.fop(8, 8, "MAX", 11)
+        p.sti(0, 0, 8)
+        p.sti(1, 0, 4)
         p.ld(0, C["k"])
         p.iconst(12, 1)
         p.iop(0, 12, "+", 0)

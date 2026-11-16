@@ -596,13 +596,16 @@ class Prog:
             if self.run:
                 results.append((d, fval(op, a, b)))
         elif comp:
-            # 2026-11-10: the gate's decode step: selmap reads selas's `Fm = Fx * Fy, Fa = ...` as
-            # `Fm = MRF + Fx * Fy, ...` (a fixed-point multiply-accumulate) where digikit reads a float
-            # multiply; which the silicon does is not known: no multifunction compute
-            raise AssertionError(f"multifunction computes are refused (selmap / digikit disagree): {comp}")
+            # 2026-11-11: allowed again (was refused 2026-11-10 for selmap reading selas's `Fm = Fx * Fy, Fa = ...`
+            # as `Fm = MRF + Fx * Fy, ...`): selas encodes the + and - forms as the firmware does (compute
+            # 0x58c830 for `F12 = F0 * F7, F8 = F8 + F12`, dnfw.perc.mf checks every such line against its own
+            # encoding in sharc_waverider_m3._selas), digikit decodes them, and the gate reads selmap's MRF
+            # text for them as the multiply (sharc_waverider_m5.decode_check). MIN / MAX / ABS / average
+            # forms: selas drops the ALU half in silence, so not here.
+            assert not [c for c in comp if c[0] == "op"], comp
             mul = [c for c in comp if c[0] == "*"]
             alu = [c for c in comp if c[0] in ("+", "-", "+-")]
-            assert len(mul) <= 1 and len(alu) <= 1 and not [c for c in comp if c[0] == "op"], comp
+            assert len(mul) == 1 and len(alu) == 1, comp
             if mul:
                 _, d, a, b = mul[0]
                 assert a in range(0, 4) and b in range(4, 8), f"multifunction multiply F{a} * F{b}"
@@ -657,6 +660,9 @@ class Prog:
                         self.mem.put(self.i[i] + 4 * k, self.r[m[3]])
         assert len(writes) == len(set(writes)), f"two results in one register: {texts}"
         self.e(", ".join(texts) + ";")
+        if comp and not single and not self.run:
+            from . import mf                    # (a multifunction line must be one selas and mf.verify can check)
+            assert mf.parse(self.lines[-1]) is not None, self.lines[-1]
         if self.run:
             for d, v in results:
                 self.r[d] = v
@@ -756,6 +762,34 @@ class Prog:
             for name in subs:
                 self.loop0_subs.setdefault(name, []).append(where)
         return self.loop_r(0, n_from, checked, one)
+
+    def loop_hw(self, n_from: int, body, cnt: int = 12) -> None:
+        """perf, 2026-11-11: a hardware loop, `R<cnt> = N; LCNTR = R<cnt>, DO end UNTIL LCE;`, the firmware's own
+        form (type 12a_ureg: digikit's executor runs it; the standalone 13a it does not): no counter, no jump, no
+        loop instructions at all. BODY: straight-line, at least two instructions, no jump or call, and (the
+        PRM's VISA rule, gate_hwrules.py) its last 11 instructions all 48-bit encodings, that is each with a
+        memory move or a condition (a plain compute is a 32-bit one): the caller adds a harmless move. R<cnt>
+        keeps N (LCNTR is loaded from it). The end label sits on the body's last instruction."""
+        assert n_from >= 2
+        self.iconst(cnt, n_from)
+        if self.run:
+            self.e(f"LCNTR = R{cnt}, DO 0x0 UNTIL LCE;")
+            for _ in range(n_from):
+                body()
+            return
+        end = self.label("hwend")
+        self.e(f"LCNTR = R{cnt}, DO {end}. UNTIL LCE;")
+        at = len(self.lines)
+        body()
+        last = max(k for k in range(at, len(self.lines)) if not self.lines[k].lstrip().startswith((".", "//"))
+                   and not self.lines[k].split("//")[0].strip().endswith(":"))
+        assert last - at >= 1, "a hardware loop of one instruction"
+        for ln in self.lines[at:]:
+            t = ln.split("//", 1)[0].strip()
+            assert not t.endswith(":") and "JUMP" not in t and "CALL" not in t, f"hardware loop body: {t}"
+        self.lines[last:last] = [f".GLOBAL {end}.;", f"{end}.:"]
+        self._mg = self._mv = self._last_mv = None
+        self.known.clear()
 
     def loop_r(self, counter: int, n_from: int | None, body, one: int = 12) -> None:
         """v0.42: loop() with the count in register COUNTER (no scratch word: two L2 accesses

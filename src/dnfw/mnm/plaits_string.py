@@ -40,8 +40,8 @@ BIG_USED = N_STR * REC + 48
 STW = 20
 # the slot's union words
 (U_BIG, U_ACT, U_FWP, U_BR, U_DA, U_NL, U_STR, U_K, U_SRCR, U_INC, U_NA, U_NF, U_BC, U_APG,
- U_SP, U_SPK, U_SC, U_DISP, U_LB, U_D, U_S, U_AP, U_MAIN, U_OK, U_STA) = (K.U0 + k for k in range(25))
-NU_USED = 25
+ U_SP, U_SPK, U_SC, U_DISP, U_LB, U_D, U_S, U_AP, U_MAIN, U_OK, U_STA, U_SB) = (K.U0 + k for k in range(26))
+NU_USED = 26
 from ..md import core as _MDK
 STATE_W = (9, 29, _MDK.S0 + K.U0 + NU_USED)      # slot words: W[9..28], W[29..48], the union's tail
 assert STATE_W[1] + STW <= _MDK.NW and STATE_W[2] + STW <= _MDK.S0 + _MDK.NS
@@ -484,13 +484,14 @@ def _string_params(p: Prog) -> None:
 
 def _line_at(p: Prog, d: int, idx: int, mask: int, off: int) -> None:
     """Id = the string's line word (Ridx & MASK) + OFF (words from its record). Clobbers R8, R12,
-    Ridx."""
+    Ridx. 2026-11-11: OFF = O_STR through U_SB (the stretch line's base, worked out once a string),
+    no add of it a sample."""
     p.iconst(12, mask)
     p.iop(idx, idx, "AND", 12)
     p.lsh(idx, idx, 2)
-    K.ld(p, 8, U_LB)
+    K.ld(p, 8, U_SB if off == O_STR else U_LB)
     p.iop(idx, 8, "+", idx)
-    if off:
+    if off and off != O_STR:
         p.iconst(12, 4 * off)
         p.iop(idx, 12, "+", idx)
     p.seti(d, idx)
@@ -697,6 +698,9 @@ def _voice(p: Prog, L) -> None:
     K.ld(p, 0, U_STR)
     line_at(p, 4, 0)
     K.sv(p, U_LB, 4)                             # the record (its line)
+    p.iconst(12, 4 * O_STR)
+    p.iop(4, 12, "+", 4)
+    K.sv(p, U_SB, 4)                             # its stretch line
     K.ld(p, 0, K.S_TRIG)
 
     def trig():

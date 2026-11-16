@@ -707,49 +707,45 @@ class _PI:
         p.iop(1, 12, "+", 1)
         p.seti(2, 1)
 
-        # (perf, 2026-11-10) the limiter's bounds held in F13, F14 through the modes (the loops
-        # take R0, R12 only): the same MIN, MAX, without loading them each time
-        p.fconst(13, TOP)
-        p.fconst(14, -1.0)
+        # (perf, 2026-11-11) the modes on the multiplier || ALU (the same operations on the same operands as the
+        # one-at-a-time form before it, res, I0 at X40 word k + 16: X60 is +16, X40 -16): the limiter's bounds in F10, F11, the three coefficients in
+        # F0-F2, 8 cycles a sample (the ALU's 8 operations: two limiter pairs and four adds; the three products
+        # ride on three of the adds)
+        p.fconst(10, TOP)
+        p.fconst(11, -1.0)
+        K40, K60 = X40 - MID - 1, X60 - MID - 1
 
-        def sat_r(x):
-            p.fop(x, x, "MIN", 13)
-            p.fop(x, x, "MAX", 14)
-
-        def mode():
-            p.ldpost(8, 1)
-            p.ldpost(9, 1)
-            p.ldpost(10, 1)
-            p.ldpost(12, 1)
-            p.ldi(4, 0, 2)
-            p.ldi(5, 1, 2)
-
-            # (perf, 2026-11-11) I0 at X40 word k + 16 (a compute's move reaches -32..31 words; I5's offsets
-            # X40, X60 cannot, nor can its post-modify): X60 is +16, X40 -16, the step moves I0 one word on
-            def res():
-                p.ldi(6, X60 - MID, 0)
-                p.fpass(7, 4)
-                sat_r(7)
-                p.fop(11, 5, "*", 8)
-                p.fop(4, 4, "+", 11)
-                p.fop(11, 7, "*", 9)
-                p.fop(4, 4, "+", 11)
-                p.fop(11, 10, "*", 6)
-                p.fop(4, 4, "+", 11)
-                p.fpass(5, 7)
-                p.ldi(6, X40 - MID, 0)
-                p.ldpost(12, 0)
-                p.fop(6, 6, "+", 4)
-                sat_r(6)
-                p.sti(X40 - MID - 1, 0, 6)
+        def mode_mf():
+            p.ldpost(1, 1)                         # c1, c2, c3 (and a word the pair of states skips)
+            p.ldpost(2, 1)
+            p.ldpost(3, 1)
+            p.ldpost(6, 1)
+            p.ldi(8, 0, 2)                         # a
+            p.ldi(4, 1, 2)                         # b
             _scr(p, L, 15, MID)
             p.seti(0, 15)
-            p.loop0(32, res)
-            sat_r(4)
-            p.sti(0, 2, 4)
-            p.sti(1, 2, 5)
+            p.fop(12, 4, "*", 1)                   # p1 = b c1
+
+            def sample(first: bool):               # a sample's 8 cycles; z of the one before is stored in the first
+                p.par(("op", 4, 8, "MIN", 10), *(() if first else (("stk", K40, 0, 9),)))
+                p.par(("op", 4, 4, "MAX", 11), ("ld", 6, 0))          # y; I0 on a word
+                p.par(("*", 13, 2, 4), ("+", 8, 8, 12), ("ldk", 5, K60, 0))     # p2 = y c2; a + p1; x60
+                p.par(("*", 14, 3, 5), ("+", 8, 8, 13))                # p3 = x60 c3; + p2
+                p.par(("*", 12, 1, 4), ("+", 8, 8, 14), ("ldk", 15, K40, 0))   # p1 of the next = y c1; + p3; x40
+                # (a plain compute is a 32-bit instruction; the loop's last 11 must be 48-bit: a harmless read)
+                p.par(("op", 9, 15, "+", 8), ("ldk", 6, 0, 0))      # z = x40 + a
+                p.par(("op", 9, 9, "MIN", 10), ("ldk", 6, 0, 0))
+                p.par(("op", 9, 9, "MAX", 11), ("ldk", 6, 0, 0))
+            sample(True)
+            p.loop_hw(31, lambda: sample(False), cnt=7)    # (F12 carries p1: LCNTR from R7)
+            p.par(("op", 8, 8, "MIN", 10), ("stk", K40, 0, 9))        # the last z; a's limit
+            p.fop(8, 8, "MAX", 11)
+            p.sti(0, 2, 8)
+            p.sti(1, 2, 4)
             p.ldpost(12, 2)
             p.ldpost(12, 2)
+
+        mode = mode_mf
         p.loop(C["n2"], 8, mode)
 
         # out
