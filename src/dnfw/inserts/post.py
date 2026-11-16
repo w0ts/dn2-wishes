@@ -12,8 +12,12 @@ which then runs as if the engine had called it.
 
 from __future__ import annotations
 
+import functools
+import math
+
 from ..fdn8 import program as FP
 from ..perc import guard as G
+from ..perc import msched as MS
 from ..perc.dsl import Mem, Prog
 from . import design as D
 from . import program as PR
@@ -198,6 +202,33 @@ def ring_at(p: Prog, idx: int, tmp: int) -> None:
     p.seti(4, idx)
 
 
+# 2026-11-14 (insmf): WIDE's first pass, four samples a pass as msched multifunction code (the same operations, the
+# same bits): I0 l, I1 r, I2 the ring (the block's last word at R7), I3 WR (the side; m into WL 32 words before it);
+# R4 0.5, R5 WDTH x 2; R13 and R15 (the second pass's) kept
+WF = {"h": "F4", "wg": "F5", "last": "F7", "l": "F8", "r": "F12", "m": "F10", "m2": "F10", "s": "F2", "s2": "F2",
+      "s3": "F6"}
+
+
+@functools.cache
+def _wide_first_ops(last: bool) -> list:
+    v = WF
+    ops = []
+    for k in range(4):
+        ops += [("mov", "ld", (v["l"],), (), "I0"),
+                ("mov", "ld", (v["r"],), (), "I1"),
+                ("alu", "+", (v["m"],), (v["l"], v["r"]), None),
+                ("mul", "*", (v["m2"],), (v["m"], v["h"]), None)]            # m
+        if last and k == 3:
+            ops.append(("x", _seti(2, int(v["last"][1:])), ("I2",), (v["last"],), False))
+        ops += [("mov", "st", (), (v["m2"],), "I2"),                         # the ring
+                ("mov", "stk", (), (v["m2"],), ("I3", -D.BLOCK)),
+                ("alu", "-", (v["s"],), (v["l"], v["r"]), None),
+                ("mul", "*", (v["s2"],), (v["s"], v["h"]), None),
+                ("mul", "*", (v["s3"],), (v["s2"], v["wg"]), None),          # the side x WDTH x 2
+                ("mov", "st", (), (v["s3"],), "I3")]
+    return ops
+
+
 def wide(p: Prog) -> None:
     """WIDE (postref.PostRef.wide); p0 MIX, p1 WDTH, p2 TIME, p3 BASS, p4 TONE; s0 wp, s1 lb, s2 lt"""
     p.ld(0, C["p1"])
@@ -245,14 +276,14 @@ def wide(p: Prog) -> None:
     p.iop(8, 8, "AND", 12)
     p.lsh(8, 8, 2)
     p.iop(8, 13, "+", 8)
-    p.seti(4, 8)                                 # the first word
+    p.seti(2, 8)                                 # the first word
     p.iconst(12, D.BLOCK)
-    p.iop(10, 12, "+", 9)
+    p.iop(7, 12, "+", 9)
     p.iconst(12, MASK)
-    p.iop(10, 10, "AND", 12)
-    p.st(C["s0"], 10)                            # wp + 32
-    p.lsh(10, 10, 2)
-    p.iop(10, 13, "+", 10)                       # the last word's
+    p.iop(7, 7, "AND", 12)
+    p.st(C["s0"], 7)                             # wp + 32
+    p.lsh(7, 7, 2)
+    p.iop(7, 13, "+", 7)                         # the last word's
     p.iconst(12, 1)
     p.iop(15, 12, "+", 9)
     p.lsh(15, 15, 2)
@@ -263,35 +294,12 @@ def wide(p: Prog) -> None:
     p.seti(0, 4)
     p.ld(4, C["rp"])
     p.seti(1, 4)
-    p.iconst(4, WL)
-    p.seti(2, 4)
     p.iconst(4, WR)
     p.seti(3, 4)
-    p.fconst(0, 0.5)
-    p.ld(1, C["wg"])
-    p.ldpost(8, 0)
-    p.ldpost(9, 1)
-
-    def first(last: bool = False):
-        p.fop(2, 8, "+", 9)
-        p.fop(2, 2, "*", 0)                      # m
-        if last:
-            p.seti(4, 10)
-        p.stpost(4, 2)                           # the ring
-        p.stpost(2, 2)
-        p.fop(3, 8, "-", 9)
-        p.fop(3, 3, "*", 0)
-        p.ldpost(8, 0)                           # the next sample's l, r
-        p.fop(3, 3, "*", 1)                      # the side x WDTH x 2
-        p.ldpost(9, 1)
-        p.stpost(3, 3)
-
-    def four():
-        for _ in range(4):
-            first()
-    p.loop_r(11, D.BLOCK // 4 - 1, four)
-    for k in range(4):
-        first(k == 3)
+    p.fconst(4, 0.5)
+    p.ld(5, C["wg"])
+    p.loop_r(11, D.BLOCK // 4 - 1, lambda: MS.emit(p, _wide_first_ops(False), chain=False))
+    MS.emit(p, _wide_first_ops(True), chain=False)
     p.ld(4, C["lp"])
     p.seti(0, 4)
     p.ld(4, C["rp"])
@@ -382,6 +390,38 @@ def chor_params(p: Prog) -> None:
     p.st(C["s0"], 0)                             # ph1
 
 
+# 2026-11-14 (insmf): a voice's samples, four a pass as msched multifunction code (the same operations, the same
+# bits; FLOAT R BY R4 (R4 = 0) is now FLOAT R, the same value). R0 d, R1 step, R2 gl, R3 gr, R7 4, R15 LINE's base +
+# 4 pos (_span); I0 / I1 the wet words, I2 the read (LINE); R10 the voices' count (kept)
+CV = {"d": "F0", "step": "F1", "gl": "F2", "gr": "F3", "four": "F7", "pos": "F15",
+      "i": "F4", "t": "F8", "a": "F8", "y0": "F13", "fi": "F12", "y1": "F5", "fr": "F8", "dy": "F5", "dy2": "F12",
+      "y": "F4", "wl": "F14", "pl": "F9", "wr": "F8", "pr": "F12"}
+
+
+@functools.cache
+def _chor_voice_ops() -> list:
+    v = CV
+    ops = []
+    for _k in range(4):
+        ops += _addr_ops(v)
+        ops += [("mov", "ldk", (v["y0"],), (), ("I2", 0))]
+        ops += _frac_ops(v)[:1]
+        ops += [("mov", "ldk", (v["y1"],), (), ("I2", -1))]   # the word before (the ring's mirror at its first)
+        ops += _frac_ops(v)[1:]
+        ops += [("alu", "-", (v["dy"],), (v["y1"], v["y0"]), None),
+                ("mul", "*", (v["dy2"],), (v["dy"], v["fr"]), None),
+                ("alu", "+", (v["y"],), (v["y0"], v["dy2"]), None),
+                ("mov", "ldk", (v["wl"],), (), ("I0", 0)),
+                ("mul", "*", (v["pl"],), (v["y"], v["gl"]), None),
+                ("mov", "ldk", (v["wr"],), (), ("I1", 0)),
+                ("alu", "+", (v["wl"],), (v["wl"], v["pl"]), None),
+                ("mov", "st", (), (v["wl"],), "I0"),
+                ("mul", "*", (v["pr"],), (v["y"], v["gr"]), None),
+                ("alu", "+", (v["wr"],), (v["wr"], v["pr"]), None),
+                ("mov", "st", (), (v["wr"],), "I1")]
+    return ops
+
+
 def chor_voice(p: Prog) -> None:
     """one voice into the wet (WL, WR); leaves R10 (the voices' count) alone"""
     for ph, dst in (("ph0", "a0"), ("s0", "step")):
@@ -436,44 +476,13 @@ def chor_voice(p: Prog) -> None:
     p.ld(1, C["step"])
     p.ld(2, C["gl"])
     p.ld(3, C["gr"])
-    p.iconst(4, 0)
-    p.iconst(5, 4 * MASK)
     p.ld(6, C["rb"])
     p.iconst(7, 4)
     p.ld(15, C["pos"])
     p.lsh(15, 15, 2)
-    if LINE:
-        span(p)                                  # y0, y1 (the span reaches two words further back: copied, unread)
-
-    def one():
-        p.fop(0, 0, "+", 1)                      # d
-        p.trunc(8, 0)                            # i
-        p.lsh(9, 8, 2)
-        p.iop(9, 15, "-", 9)                     # t = 4 (pos - i)
-        p.iop(13, 9, "AND", 5)
-        p.iop(13, 13, "+", 6)
-        p.seti(2, 13)
-        p.ldi(14, 0, 2)                          # y0
-        p.float_(12, 8, 4)
-        p.ldi(13, -1, 2)                         # y1: the word before (the ring's mirror at its first)
-        p.fop(12, 0, "-", 12)                    # fr
-        p.iop(15, 15, "+", 7)                    # pos
-        p.fop(13, 13, "-", 14)
-        p.fop(13, 13, "*", 12)
-        p.fop(13, 14, "+", 13)                   # y
-        p.ldi(9, 0, 0)                           # wet l
-        p.fop(8, 13, "*", 2)
-        p.ldi(14, 0, 1)                          # wet r
-        p.fop(9, 9, "+", 8)
-        p.stpost(0, 9)
-        p.fop(8, 13, "*", 3)
-        p.fop(14, 14, "+", 8)
-        p.stpost(1, 14)
-
-    def four():
-        for _ in range(4):
-            one()
-    p.loop_r(11, D.BLOCK // 4, four)
+    span(p)                                      # y0, y1 (the span reaches two words further back: copied, unread)
+    p.iop(15, 15, "+", 6)                        # LINE's word of pos 0
+    p.loop_r(11, D.BLOCK // 4, lambda: MS.emit(p, _chor_voice_ops(), chain=False))
     p.ld(0, C["v"])
     p.iconst(12, 1)
     p.iop(0, 12, "+", 0)
@@ -503,19 +512,61 @@ def chor(p: Prog) -> None:
     p.st(C["v"], 0)
     p.ld(10, C["nv"])
     p.loop_r(10, None, lambda: chor_voice(p))
+    _chor_mix(p)
+
+
+# 2026-11-14 (insmf): CHOR's mix, four samples a pass as msched multifunction code (the same operations, the
+# same bits). I0 l (read, then the output written back), I1 r, I3 the wet: wr post-modified, wl 32 words
+# before it (WL, WR one run); I2 the ring (post-modified; the block's last word at R7: only it can wrap).
+# R4 0.5, R5 FDBK, R6 MIX, R7 the ring's last word; R11 the loop's count
+CM = {"h": "F4", "fb": "F5", "mix": "F6", "last": "F7", "l": "F8", "r": "F14", "wl": "F12", "wr": "F10",
+      "x7": "F3", "x": "F9", "w": "F1", "w2": "F1", "w3": "F15", "x2": "F9", "o": "F2", "o2": "F13", "o3": "F13",
+      "q": "F0", "q2": "F13", "q3": "F1"}
+
+
+def _seti(i: int, r: int):
+    def f(p):
+        p.seti(i, r)
+    f.tag = f"seti{i}"
+    return f
+
+
+@functools.cache
+def _chor_mix_ops(last: bool) -> list:
+    v = CM
+    ops = []
+    for k in range(4):
+        ops += [("mov", "ldk", (v["l"],), (), ("I0", 0)),
+                ("mov", "ldk", (v["r"],), (), ("I1", 0)),
+                ("mov", "ldk", (v["wl"],), (), ("I3", -D.BLOCK)),
+                ("mov", "ld", (v["wr"],), (), "I3"),
+                ("alu", "+", (v["x7"],), (v["l"], v["r"]), None),
+                ("mul", "*", (v["x"],), (v["x7"], v["h"]), None),          # x
+                ("alu", "+", (v["w"],), (v["wl"], v["wr"]), None),
+                ("mul", "*", (v["w2"],), (v["w"], v["h"]), None),
+                ("mul", "*", (v["w3"],), (v["w2"], v["fb"]), None),
+                ("alu", "+", (v["x2"],), (v["x"], v["w3"]), None)]         # the ring's
+        if last and k == 3:
+            ops.append(("x", _seti(2, int(v["last"][1:])), ("I2",), (v["last"],), False))
+        ops += [("mov", "st", (), (v["x2"],), "I2"),
+                ("alu", "-", (v["o"],), (v["wl"], v["l"]), None),
+                ("mul", "*", (v["o2"],), (v["o"], v["mix"]), None),
+                ("alu", "+", (v["o3"],), (v["l"], v["o2"]), None),         # l out
+                ("mov", "st", (), (v["o3"],), "I0"),
+                ("alu", "-", (v["q"],), (v["wr"], v["r"]), None),
+                ("mul", "*", (v["q2"],), (v["q"], v["mix"]), None),
+                ("alu", "+", (v["q3"],), (v["r"], v["q2"]), None),         # r out
+                ("mov", "st", (), (v["q3"],), "I1")]
+    return ops
+
+
+def _chor_mix(p: Prog) -> None:
     p.ld(4, C["lp"])
     p.seti(0, 4)
     p.ld(4, C["rp"])
     p.seti(1, 4)
-    p.iconst(4, WL)
-    p.seti(2, 4)
     p.iconst(4, WR)
     p.seti(3, 4)
-
-    # perf (2026-11-11): the block's ring writes go through I4 one word on each (the write place is a
-    # multiple of 32 from a fresh slot on, +32 a block: only the block's last word can wrap, so its
-    # address is set apart, R10), R0 MIX, R1 0.5, R4 FDBK; the next sample's four inputs are loaded in
-    # this one's compute instructions
     p.ld(9, C["s1"])                             # wp
     if p.run:
         assert p.r[9] % 32 == 0, "CHOR: the write place moves 32 a block from 0"
@@ -526,51 +577,19 @@ def chor(p: Prog) -> None:
     p.iop(8, 8, "AND", 12)
     p.lsh(8, 8, 2)
     p.iop(8, 13, "+", 8)
-    p.seti(4, 8)                                 # the first word
+    p.seti(2, 8)                                 # the first word
     p.iconst(12, D.BLOCK)
-    p.iop(10, 12, "+", 9)
+    p.iop(7, 12, "+", 9)
     p.iconst(12, MASK)
-    p.iop(10, 10, "AND", 12)
-    p.st(C["s1"], 10)                            # wp + 32
-    p.lsh(10, 10, 2)
-    p.iop(10, 13, "+", 10)                       # the last word's
-    p.ld(0, C["p0"])
-    p.fconst(1, 0.5)
-    p.ld(4, C["fb"])
-    p.ldi(5, 0, 0)
-    p.ldi(6, 0, 1)
-    p.ldpost(2, 2)
-    p.ldpost(3, 3)
-
-    def sample(last: bool = False):
-        p.fop(7, 5, "+", 6)
-        p.fop(7, 7, "*", 1)                      # x
-        p.fop(8, 2, "+", 3)
-        p.fop(8, 8, "*", 1)
-        p.fop(8, 8, "*", 4)
-        p.fop(7, 7, "+", 8)
-        if last:
-            p.seti(4, 10)
-        p.stpost(4, 7)                           # the ring
-        p.fop(8, 2, "-", 5)
-        p.ldpost(2, 2)                           # the next sample's wet l, r, l, r
-        p.fop(8, 8, "*", 0)
-        p.fop(8, 5, "+", 8)
-        p.stpost(0, 8)
-        p.fop(9, 3, "-", 6)
-        p.fop(9, 9, "*", 0)
-        p.ldpost(3, 3)
-        p.fop(9, 6, "+", 9)
-        p.ldi(5, 0, 0)
-        p.ldi(6, 1, 1)
-        p.stpost(1, 9)
-
-    def four():
-        for _ in range(4):
-            sample()
-    p.loop_r(11, D.BLOCK // 4 - 1, four)
-    for k in range(4):
-        sample(k == 3)
+    p.iop(7, 7, "AND", 12)
+    p.st(C["s1"], 7)                             # wp + 32
+    p.lsh(7, 7, 2)
+    p.iop(7, 13, "+", 7)                         # the last word's
+    p.ld(6, C["p0"])
+    p.fconst(4, 0.5)
+    p.ld(5, C["fb"])
+    p.loop_r(11, D.BLOCK // 4 - 1, lambda: MS.emit(p, _chor_mix_ops(False), chain=False))
+    MS.emit(p, _chor_mix_ops(True), chain=False)
 
 
 def _tri(p: Prog, d: int, ph: int) -> None:
@@ -633,14 +652,84 @@ def juno_params(p: Prog) -> None:
     p.st(C["gr"], 1)                             # the taps'
 
 
+# 2026-11-14 (insmf): a tap's samples, two a pass as msched multifunction code (the same operations, the same bits).
+# R6 d, R1 step, R3 0.5, R7 4, R15 LINE's base + 4 pos (_span); I0 the wet, I2 the read (LINE)
+JT = {"d": "F6", "step": "F1", "h": "F3", "four": "F7", "pos": "F15",
+      "i": "F14", "t": "F12", "a": "F4", "y0": "F8", "y1": "F12", "y2": "F5", "y3": "F10", "fi": "F0", "fr": "F2",
+      "t1": "F9", "e": "F4", "e2": "F10", "f": "F14", "f2": "F14", "c3": "F10", "g": "F5", "c1": "F5", "k": "F13",
+      "k2": "F14", "c2": "F13", "o1": "F9", "o2": "F8", "o3": "F9", "o4": "F0", "o5": "F9", "o6": "F9"}
+
+
+def _x(tag: str, emit, w: tuple, r: tuple, carry: bool = True) -> tuple:
+    emit.tag = tag
+    return ("x", emit, w, r, carry)
+
+
+def _n(reg: str) -> int:
+    return int(reg[1:])
+
+
+def _iadd(p: Prog, d: str, a: str, b: str) -> None:
+    """Rd = Ra + Rb, the operand in R8..R15 first (the DSL's integer add; the same sum)"""
+    x, y = (a, b) if 8 <= _n(a) <= 15 else (b, a)
+    p.iop(_n(d), _n(x), "+", _n(y))
+
+
+def _addr_ops(v: dict) -> list:
+    """d += step; i = trunc d; I2 = LINE's word for 4 (pos - i): pos (R15) is LINE's base + 4 pos (_span)"""
+    return [("alu", "+", (v["d"],), (v["d"], v["step"]), None),
+            _x("trunc", lambda p: p.trunc(_n(v["i"]), _n(v["d"])), (v["i"],), (v["d"],)),
+            _x("lsh", lambda p: p.lsh(_n(v["t"]), _n(v["i"]), 2), (v["t"],), (v["i"],), False),
+            _x("sub", lambda p: p.iop(_n(v["a"]), _n(v["pos"]), "-", _n(v["t"])), (v["a"],), (v["pos"], v["t"])),
+            _x("seti", lambda p: p.seti(2, _n(v["a"])), ("I2",), (v["a"],), False)]
+
+
+def _frac_ops(v: dict) -> list:
+    """fr = d - float i; pos += 4"""
+    return [_x("float", lambda p: p.float0(_n(v["fi"]), _n(v["i"])), (v["fi"],), (v["i"],)),
+            ("alu", "-", (v["fr"],), (v["d"], v["fi"]), None),
+            _x("add", lambda p: _iadd(p, v["pos"], v["pos"], v["four"]), (v["pos"],),
+               (v["pos"], v["four"]))]
+
+
+@functools.cache
+def _juno_tap_ops() -> list:
+    v = JT
+    ops = []
+    for _k in range(2):
+        ops += _addr_ops(v)
+        ops += [("mov", "ldk", (v["y0"],), (), ("I2", 0)),            # y0 .. y3 (the mirror words before the ring)
+                ("mov", "ldk", (v["y1"],), (), ("I2", -1)),
+                ("mov", "ldk", (v["y2"],), (), ("I2", -2)),
+                ("mov", "ldk", (v["y3"],), (), ("I2", -3))]
+        ops += _frac_ops(v)
+        ops += [("alu", "-", (v["t1"],), (v["y1"], v["y2"]), None),
+                ("alu", "-", (v["e"],), (v["y3"], v["y0"]), None),
+                ("mul", "*", (v["e2"],), (v["e"], v["h"]), None),
+                ("mul", "*", (v["f"],), (v["t1"], v["h"]), None),
+                ("alu", "+", (v["f2"],), (v["f"], v["t1"]), None),
+                ("alu", "+", (v["c3"],), (v["e2"], v["f2"]), None),
+                ("alu", "-", (v["g"],), (v["y2"], v["y0"]), None),
+                ("mul", "*", (v["c1"],), (v["g"], v["h"]), None),
+                ("alu", "-", (v["k"],), (v["y0"], v["y1"]), None),
+                ("alu", "+", (v["k2"],), (v["k"], v["c1"]), None),
+                ("alu", "-", (v["c2"],), (v["k2"], v["c3"]), None),
+                ("mul", "*", (v["o1"],), (v["c3"], v["fr"]), None),
+                ("alu", "+", (v["o2"],), (v["o1"], v["c2"]), None),
+                ("mul", "*", (v["o3"],), (v["o2"], v["fr"]), None),
+                ("alu", "+", (v["o4"],), (v["o3"], v["c1"]), None),
+                ("mul", "*", (v["o5"],), (v["o4"], v["fr"]), None),
+                ("alu", "+", (v["o6"],), (v["o5"], v["y1"]), None),
+                ("mov", "st", (), (v["o6"],), "I0")]
+    return ops
+
+
 def juno_tap(p: Prog) -> None:
     """one tap over the block (Hermite, postref.PostRef.herm), from C['d'] by C['step'] into the words at C['v'];
     then the right tap's values move into those three. R0 d, R1 step, R2 0.5, R5 0xffc, R6 the ring's base,
     R7 4, R15 4 x the write place; I0 the wet, I2 the ring's read"""
     p.ld(0, C["d"])
     p.ld(1, C["step"])
-    p.fconst(2, 0.5)
-    p.iconst(5, 4 * MASK)
     p.ld(6, C["rb"])
     p.iconst(7, 4)
     p.ld(15, C["s1"])
@@ -649,47 +738,11 @@ def juno_tap(p: Prog) -> None:
     p.lsh(15, 15, 2)
     p.ld(4, C["v"])
     p.seti(0, 4)
-    if LINE:
-        span(p)                                  # y0 .. y3: the word read and the three before it
-
-    def one():
-        p.fop(0, 0, "+", 1)                      # d
-        p.trunc(8, 0)                            # i
-        p.lsh(9, 8, 2)
-        p.iop(9, 15, "-", 9)
-        p.iop(13, 9, "AND", 5)
-        p.iop(13, 13, "+", 6)
-        p.seti(2, 13)                            # the ring at pos - i
-        p.ldi(14, 0, 2)                          # y0 .. y3 (the mirror words before the ring at its first)
-        p.ldi(3, -1, 2)
-        p.ldi(4, -2, 2)
-        p.ldi(10, -3, 2)
-        p.float0(9, 8)
-        p.fop(9, 0, "-", 9)                      # fr
-        p.iop(15, 15, "+", 7)                    # pos
-        p.fop(8, 3, "-", 4)                      # t1
-        p.fop(10, 10, "-", 14)
-        p.fop(10, 10, "*", 2)
-        p.fop(13, 8, "*", 2)
-        p.fop(13, 13, "+", 8)
-        p.fop(10, 10, "+", 13)                   # c3
-        p.fop(4, 4, "-", 14)
-        p.fop(4, 4, "*", 2)                      # c1
-        p.fop(14, 14, "-", 3)
-        p.fop(14, 14, "+", 4)
-        p.fop(14, 14, "-", 10)                   # c2
-        p.fop(13, 10, "*", 9)
-        p.fop(13, 13, "+", 14)
-        p.fop(13, 13, "*", 9)
-        p.fop(13, 13, "+", 4)
-        p.fop(13, 13, "*", 9)
-        p.fop(13, 13, "+", 3)
-        p.stpost(0, 13)
-
-    def two():
-        one()
-        one()
-    p.loop_r(11, D.BLOCK // 2, two)
+    span(p)                                      # y0 .. y3: the word read and the three before it
+    p.iop(15, 15, "+", 6)                        # LINE's word of pos 0
+    p.ipass(6, 0)                                # d
+    p.fconst(3, 0.5)
+    p.loop_r(11, D.BLOCK // 2, lambda: MS.emit(p, _juno_tap_ops(), chain=False))
     for dst, src in (("d", "a0"), ("step", "k")):
         p.ld(0, C[src])
         p.st(C[dst], 0)
@@ -698,6 +751,12 @@ def juno_tap(p: Prog) -> None:
 
 
 SPAN_BACK = 3                    # the words before the one read that a tap reads (JUNO 3; CHOR 1, the span is one longer)
+# 2026-11-14 (insmf): a span (_span) holds i's range (at most the block's move of d + 3: trunc and one more each
+# side) + BLOCK + SPAN_BACK words. CHOR's d moves at most DPTH's 192 samples x the sine's step over a block (RATE 5 Hz:
+# 0.021 rad), JUNO's at most twice its depth x the triangle's step (0.1 sample): the taps read LINE only, so it fits
+SPAN_MOVE = max(D.CH_DEP_MAX * 2 * math.pi * D.CH_RATE_LO * D.CH_RATE_SPAN * D.BLOCK / D.FS,
+                max(2 * dep * D.BLOCK * inc / 65536 for dep, inc in zip(D.JN["dep"], D.JN["inc"])))
+assert D.BLOCK + SPAN_BACK + 3 + SPAN_MOVE <= LINE_WORDS
 
 
 def span(p: Prog) -> None:
@@ -708,9 +767,12 @@ def span(p: Prog) -> None:
 def _span(p: Prog, back: int) -> None:
     """2026-11-12: before a tap's block (R0 d, R1 step, R6 the ring's base, R15 4 x its first read's pos): the
     words it will read, 4 (pos - i) - 4 BACK .. 4 (pos - i) for pos = first .. first + 31 and i = trunc(d) as d
-    moves by step, copied to LINE when they lie inside the ring unwrapped and fit; then R6 = LINE's base for
-    them. i is bounded by d's first and last values (the last by a multiply, so one more each side for the
-    rounding of the sum). Clobbers R8, R9, R11-R14, I3, I4; leaves R0-R7, R10, R15, I0-I2."""
+    moves by step, copied to LINE; then R6 = LINE - the span's first word (bytes, from the ring's first word): a
+    read at 4 (pos - i) is at R6 + 4 (pos - i). i is bounded by d's first and last values (the last by a multiply,
+    so one more each side for the rounding of the sum). 2026-11-14 (insmf): always copied (the taps' loops read
+    LINE only, no mask): a span before the ring's first word is read from its last words, a span across it in two
+    runs (its end, then its start); the design bounds a span at LINE_WORDS (SPAN_MOVE), the model asserts it, the
+    code copies at most that many. Clobbers R8, R9, R11-R14, I3, I4; leaves R0-R5, R7, R10, R15, I0-I2."""
     p.fop(8, 0, "+", 1)                          # d after the first step
     p.fconst(12, float(D.BLOCK))
     p.fop(9, 1, "*", 12)
@@ -730,77 +792,87 @@ def _span(p: Prog, back: int) -> None:
     p.iop(9, 15, "-", 13)
     p.iconst(12, 4 * (D.BLOCK - 1))
     p.iop(9, 9, "+", 12)                         # its last word
+    p.iop(11, 9, "-", 8)
+    p.lsh(11, 11, -2)
+    p.iconst(12, 1)
+    p.iop(11, 11, "+", 12)                       # its words
+    if p.run:
+        assert 0 < p.r[11] <= LINE_WORDS, f"a tap's span of {p.r[11]} words (LINE holds {LINE_WORDS})"
+    p.iconst(12, LINE_WORDS)
+    p.iop(11, 11, "MIN", 12)
+    p.ipass(13, 6)                               # the ring's base
+    p.iconst(12, LINE)
+    p.seti(4, 12)
+    p.iop(6, 12, "-", 8)                         # LINE - the first word
 
-    def up():                                    # all of it before the ring's first word: the AND puts it a
-        p.iconst(12, 4 * D.POST_RING)            # ring's length up, in one run (a span across 0 is two)
-        p.iop(8, 8, "+", 12)
-        p.iop(9, 9, "+", 12)
-    p.ifz(9, "LT", up)
-    p.iconst(13, 0)                              # R13 = 1: it lies inside the ring (or its mirror) and fits
-    p.iconst(12, -4 * back)
+    def word():
+        p.ldpost(14, 3)
+        p.stpost(4, 14)
+
+    def before():                                # its first words are the ring's last
+        p.iconst(12, 4 * D.POST_RING)
+        p.iop(14, 8, "+", 12)
+        p.iop(14, 14, "+", 13)
+        p.seti(3, 14)
+        p.iconst(12, 0)
+        p.iop(9, 12, "-", 8)
+        p.lsh(9, 9, -2)                          # the words before the ring's first
+        p.iop(9, 9, "MIN", 11)
+        p.iop(11, 11, "-", 9)                    # then the rest from its first word
+        p.loop_r(9, None, word)
+        p.seti(3, 13)
 
     def inside():
-        p.iconst(12, 4 * MASK)
+        p.iop(14, 8, "+", 13)
+        p.seti(3, 14)
+    p.ifz(8, "LT", before, inside)
+    p.ifz(11, "NE", lambda: p.loop_r(11, None, word))
 
-        def below_end():
-            p.iop(11, 9, "-", 8)
-            p.iconst(12, 4 * (LINE_WORDS - 1))
-            p.if_(11, "LE", 12, lambda: p.iconst(13, 1), kind="i")
-        p.if_(9, "LE", 12, below_end, kind="i")
-    p.if_(8, "GE", 12, inside, kind="i")
 
-    def copy():
-        p.iop(11, 8, "+", 6)
-        p.seti(3, 11)                            # the ring's span
-        p.iop(11, 9, "-", 8)
-        p.lsh(11, 11, -2)
-        p.iconst(12, 1)
-        p.iop(11, 11, "+", 12)                   # its words
-        p.iconst(12, LINE)
-        p.seti(4, 12)
-        p.iop(14, 12, "-", 8)
-        p.ipass(6, 14)                           # the base that maps the span's first word to LINE
+# 2026-11-14 (insmf): the two low-passes, four samples a pass as msched multifunction code (the same operations, the
+# same bits): their states R0 R14 (left) and R2 R15 (right), R4 a1, R6 a2, R7 g; I0 WL, I1 WR; R11 the loop's count
+JL_STATE = ("F0", "F14", "F2", "F15")            # s2 .. s5
+JL = {"a1": "F4", "a2": "F6", "g": "F7",
+      "L": {"x": "F9", "v3": "F1", "a": "F12", "b": "F9", "v1": "F1", "c": "F9", "v2": "F12", "t": "F1", "u": "F9"},
+      "R": {"x": "F10", "v3": "F3", "a": "F8", "b": "F13", "v1": "F3", "c": "F8", "v2": "F5", "t": "F9", "u": "F13"}}
 
-        def word():
-            p.ldpost(14, 3)
-            p.stpost(4, 14)
-        p.loop_r(11, None, word)
-    p.ifz(13, "NE", copy)
+
+@functools.cache
+def _juno_lp_ops() -> list:
+    ops = []
+    for _k in range(4):
+        for side, ir, s0, s1 in (("L", "I0", JL_STATE[0], JL_STATE[1]), ("R", "I1", JL_STATE[2], JL_STATE[3])):
+            v = JL[side]
+            ops += [("mov", "ldk", (v["x"],), (), (ir, 0)),
+                    ("alu", "-", (v["v3"],), (v["x"], s1), None),
+                    ("mul", "*", (v["a"],), (s0, JL["a1"]), None),
+                    ("mul", "*", (v["b"],), (v["v3"], JL["a2"]), None),
+                    ("alu", "+", (v["v1"],), (v["a"], v["b"]), None),
+                    ("mul", "*", (v["c"],), (v["v1"], JL["g"]), None),
+                    ("alu", "+", (v["v2"],), (s1, v["c"]), None),
+                    ("alu", "+", (v["t"],), (v["v1"], v["v1"]), None),
+                    ("alu", "-", (s0,), (v["t"], s0), None),
+                    ("alu", "+", (v["u"],), (v["v2"], v["v2"]), None),
+                    ("alu", "-", (s1,), (v["u"], s1), None),
+                    ("mov", "st", (), (v["v2"],), ir)]
+    return ops
 
 
 def juno_lp(p: Prog) -> None:
-    """the two low-passes over WL, WR in place (postref.PostRef.lp): R0 R1 the left's states, R2 R3 the right's,
-    R4 a1, R5 a2, R6 g"""
+    """the two low-passes over WL, WR in place (postref.PostRef.lp)"""
+    st = [int(r[1:]) for r in JL_STATE]
     for k in range(4):
-        p.ld(k, C[f"s{2 + k}"])
-    p.fconst(4, D.JN["a1"])
-    p.fconst(5, D.JN["a2"])
-    p.fconst(6, D.JN["g"])
-    p.iconst(7, WL)
-    p.seti(0, 7)
-    p.iconst(7, WR)
-    p.seti(1, 7)
-
-    def side(i: int, s0: int, s1: int):
-        p.ldi(7, 0, i)
-        p.fop(8, 7, "-", s1)                     # v3
-        p.fop(9, s0, "*", 4)
-        p.fop(10, 8, "*", 5)
-        p.fop(9, 9, "+", 10)                     # v1
-        p.fop(10, 9, "*", 6)
-        p.fop(10, s1, "+", 10)                   # v2
-        p.fop(13, 9, "+", 9)
-        p.fop(s0, 13, "-", s0)
-        p.fop(13, 10, "+", 10)
-        p.fop(s1, 13, "-", s1)
-        p.stpost(i, 10)
-
-    def both():
-        side(0, 0, 1)
-        side(1, 2, 3)
-    p.loop_r(11, D.BLOCK, both)
+        p.ld(st[k], C[f"s{2 + k}"])
+    p.fconst(int(JL["a1"][1:]), D.JN["a1"])
+    p.fconst(int(JL["a2"][1:]), D.JN["a2"])
+    p.fconst(int(JL["g"][1:]), D.JN["g"])
+    p.iconst(8, WL)
+    p.seti(0, 8)
+    p.iconst(8, WR)
+    p.seti(1, 8)
+    p.loop_r(11, D.BLOCK // 4, lambda: MS.emit(p, _juno_lp_ops(), chain=False))
     for k in range(4):
-        p.st(C[f"s{2 + k}"], k)
+        p.st(C[f"s{2 + k}"], st[k])
 
 
 def juno(p: Prog) -> None:
@@ -822,12 +894,46 @@ def juno(p: Prog) -> None:
     p.st(C["v"], 0)
     p.loop(C["bk"], 2, lambda: juno_tap(p))      # the left tap into WL, then the right into WR
     juno_lp(p)
+    _juno_mix(p)
+
+
+# 2026-11-14 (insmf): JUNO's mix, four samples a pass as msched multifunction code (the same operations, the same
+# bits). I0 l (read, then the output written back), I1 r, I3 the taps: R post-modified, L 32 words before it; I2 the
+# ring (post-modified; the block's last word at R7). R4 0.5, R5 the dry's gain, R6 the taps', R7 the ring's last word
+JM = {"h": "F4", "gd": "F5", "gw": "F6", "last": "F7", "l": "F10", "r": "F15", "m": "F1", "m2": "F8", "a": "F14",
+      "tl": "F0", "tl2": "F9", "a2": "F12", "b": "F12", "tr": "F2", "tr2": "F13", "b2": "F15"}
+
+
+@functools.cache
+def _juno_mix_ops(last: bool) -> list:
+    v = JM
+    ops = []
+    for k in range(4):
+        ops += [("mov", "ldk", (v["l"],), (), ("I0", 0)),
+                ("mov", "ldk", (v["r"],), (), ("I1", 0)),
+                ("alu", "+", (v["m"],), (v["l"], v["r"]), None),
+                ("mul", "*", (v["m2"],), (v["m"], v["h"]), None)]          # the ring's
+        if last and k == 3:
+            ops.append(("x", _seti(2, int(v["last"][1:])), ("I2",), (v["last"],), False))
+        ops += [("mov", "st", (), (v["m2"],), "I2"),
+                ("mul", "*", (v["a"],), (v["l"], v["gd"]), None),
+                ("mov", "ldk", (v["tl"],), (), ("I3", -D.BLOCK)),
+                ("mul", "*", (v["tl2"],), (v["tl"], v["gw"]), None),
+                ("alu", "+", (v["a2"],), (v["a"], v["tl2"]), None),         # l out
+                ("mov", "st", (), (v["a2"],), "I0"),
+                ("mul", "*", (v["b"],), (v["r"], v["gd"]), None),
+                ("mov", "ld", (v["tr"],), (), "I3"),
+                ("mul", "*", (v["tr2"],), (v["tr"], v["gw"]), None),
+                ("alu", "+", (v["b2"],), (v["b"], v["tr2"]), None),         # r out
+                ("mov", "st", (), (v["b2"],), "I1")]
+    return ops
+
+
+def _juno_mix(p: Prog) -> None:
     p.ld(4, C["lp"])
     p.seti(0, 4)
     p.ld(4, C["rp"])
     p.seti(1, 4)
-    p.iconst(4, WL)
-    p.seti(2, 4)
     p.iconst(4, WR)
     p.seti(3, 4)
     p.ld(9, C["s1"])                             # wp (a multiple of 32: only the block's last write can wrap)
@@ -840,38 +946,19 @@ def juno(p: Prog) -> None:
     p.iop(8, 8, "AND", 12)
     p.lsh(8, 8, 2)
     p.iop(8, 13, "+", 8)
-    p.seti(4, 8)                                 # the first word
+    p.seti(2, 8)                                 # the first word
     p.iconst(12, D.BLOCK)
-    p.iop(10, 12, "+", 9)
+    p.iop(7, 12, "+", 9)
     p.iconst(12, MASK)
-    p.iop(10, 10, "AND", 12)
-    p.st(C["s1"], 10)                            # wp + 32
-    p.lsh(10, 10, 2)
-    p.iop(10, 13, "+", 10)                       # the last word's
-    p.ld(0, C["gl"])
-    p.ld(1, C["gr"])
-    p.fconst(2, 0.5)
-
-    def sample(last: bool = False):
-        p.ldi(8, 0, 0)                           # l
-        p.ldi(9, 0, 1)                           # r
-        p.fop(13, 8, "+", 9)
-        p.fop(13, 13, "*", 2)
-        if last:
-            p.seti(4, 10)
-        p.stpost(4, 13)                          # the ring
-        p.fop(13, 8, "*", 0)
-        p.ldpost(14, 2)
-        p.fop(14, 14, "*", 1)
-        p.fop(13, 13, "+", 14)
-        p.stpost(0, 13)
-        p.fop(13, 9, "*", 0)
-        p.ldpost(14, 3)
-        p.fop(14, 14, "*", 1)
-        p.fop(13, 13, "+", 14)
-        p.stpost(1, 13)
-    p.loop_r(11, D.BLOCK - 1, sample)
-    sample(True)
+    p.iop(7, 7, "AND", 12)
+    p.st(C["s1"], 7)                             # wp + 32
+    p.lsh(7, 7, 2)
+    p.iop(7, 13, "+", 7)                         # the last word's
+    p.ld(5, C["gl"])
+    p.ld(6, C["gr"])
+    p.fconst(4, 0.5)
+    p.loop_r(11, D.BLOCK // 4 - 1, lambda: MS.emit(p, _juno_mix_ops(False), chain=False))
+    MS.emit(p, _juno_mix_ops(True), chain=False)
 
 
 def slot(p: Prog) -> None:

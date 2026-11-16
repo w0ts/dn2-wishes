@@ -430,7 +430,12 @@ assert XDLY_LINES_DDR + XDLY_INSTANCES * XDLY_LINES_STRIDE <= POOL_DDR
 # margin over the measured cost: FUZZ 6,100 TAPE 8,200 FOLD 6,700 HARM 5,100 SUB 3,900 DIST 5,900 GATER 2,900 RING
 # 3,400 XDLY 20,000 until then (unit costs 4,900 6,713 5,107 4,058 3,921 4,976 3,454 3,718, XDLY reading 9,594 ->
 # 3,794 5,962 4,349 3,366 3,291 3,870 3,138 3,434, 9,134); FDN8 1.2 x its dearest steady block (FDN8_MEASURED)
-COST = {FUZZ: 4_800, TAPE: 7_300, FOLD: 5_800, HARM: 4_300, CHOR: 13_000, WIDE: 4_700,
+# 2026-11-14 (insmf, the post inserts' loops as multifunction code and the taps reading LINE only, bit for bit): CHOR
+# 13,000 and JUNO 7,100 until then, each x the larger of its body's mean and dearest block new / old on the shared
+# scale (the post pass's model, 14 knob settings x 32 blocks, the insert's own code inside the gate), rounded up:
+# CHOR mean 4,459 -> 3,879, dearest 6,052 -> 5,235; JUNO mean 4,800 -> 3,795, dearest 6,315 -> 3,820 (its dearest
+# was a span across the ring's start, read from DDR word by word); WIDE 1,813 -> 1,793 keeps 4,700
+COST = {FUZZ: 4_800, TAPE: 7_300, FOLD: 5_800, HARM: 4_300, CHOR: 11_400, WIDE: 4_700,
         # FDN8 (2026-11-12, opt-inserts): 32,000 until then, under its own cost: a fresh instance clears its
         # 512 KB ring for 32 blocks, 4,096 DDR writes each (FDN8_MEASURED). The bound must never be under a
         # block's cost, or the guard lets it run past the deadline: 1.2 x the clearing block (64,000, r11f). Since
@@ -442,7 +447,7 @@ COST = {FUZZ: 4_800, TAPE: 7_300, FOLD: 5_800, HARM: 4_300, CHOR: 13_000, WIDE: 
         SUB: 3_300, DIST: 4_600, GATER: 2_700, RING: 3_200,
         # JUNO (2026-11-12): the runner's 3,530 a voice slot (16 slots 58,926 less 1 slot 5,931, / 15) x 2 (DDR-heavy:
         # eight ring reads and a write a sample)
-        JUNO: 7_100}
+        JUNO: 5_700}
 # FDN8's cost a block as a bus insert, the model on the shared scale (instructions + 4 L2 + 10 DDR accesses,
 # docs/dsp-cost.md), one instance less the pass with none: a clearing block (its first 32) and a steady one.
 # test_inserts_bus measures the clearing block again and holds COST[FDN8] >= 1.2 x it (53,073 / 32,606 until the bus

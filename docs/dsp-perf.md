@@ -559,3 +559,49 @@ random ring and every tap across the ring's start at 6 places), `test_xdly` + `t
 Traps: the pre pass's walk counts in `C['cnt']` (not a free scratch word); `loop_r(..., one=11)` keeps R12 usable
 across a loop's passes (run mode poisons ONE otherwise); the L2 diffuser ring's mask is 0xfff (its low bits set),
 the ring's MASK4 0x7fffc: a wrap step is (mask | 3) + 1; the pass's static table (TABLE_WORDS, before TABLE) is full.
+
+## 2026-11-14: the post inserts (CHOR, WIDE, JUNO) as multifunction code, bit-identical (session insmf, branch `claude/insfx-mf` on `claude/insfx-fast` 7300294a)
+
+The same operations in the same order of dependence, scheduled by `dnfw.perc.msched` so a multiply and an add share an
+instruction and every memory move rides on a compute (one move an instruction, through I0..I3). msched gained an `x`
+kind (an integer compute, FLOAT / TRUNC, an I register load, emitted by a callback; never paired; a move rides on it
+when it is a plain compute), the I registers as registers (a move reads its I, a post-modify writes it), and
+`chain=False`: moves through one I register ordered only where they may touch the same word (their words followed
+from the I register's loads and post-modifies). PLAITS MDAL's schedules are unchanged (the default, `chain=True`).
+Registers per loop were found by a hill-climb over msched's slot count, each candidate checked against the program
+order on symbolic values over two loop passes (the loop-carried and constant registers too).
+
+| commit | loop | instructions a sample (the model's steps, loop overhead in), before -> after |
+|---|---|---|
+| `096baa57` | CHOR's mix (four samples a pass; the ring written through I2, the wet read through I3: wl 32 words before wr) | 15 -> 8.25 |
+| `096baa57` | JUNO's mix (likewise) | 14 -> 7.5 |
+| `2cfc6a34` | JUNO's two low-passes (four samples a pass; the ALU's floor is 14) | 22.75 -> 14.75 |
+| `ba693ce2` | JUNO's Hermite taps (two samples a pass; the masked address chain as x ops) | 30.5 -> 25.5 a tap |
+| `c7f688da` | CHOR's voice loop (four samples a pass; FLOAT R BY R4, R4 = 0, is now FLOAT R: the same value) | 17.3 -> 15.5 a voice |
+| `8a4466a6` | WIDE's first pass | 6.6 -> 6 |
+| `82fa2504` | **The taps read LINE only**: `_span` always copies (a span before the ring's first word from its last words, one across it in two runs; the design bounds a span at 42 of LINE's 48 words, `SPAN_MOVE`, asserted), so the taps' loops lose the mask and the base add, and a block whose span crossed the ring's start no longer reads DDR word by word | CHOR 15.5 -> 13.5 a voice-sample, JUNO 25.5 -> 23 a tap-sample (msched's slots) |
+
+The insert's own code (inside the gate), the post pass's model on the shared scale, 14 knob settings x 32 blocks:
+
+| type | mean before -> after | dearest block before -> after | the guard's bound (`design.COST`) |
+|---|---|---|---|
+| CHOR | 4,459 -> 3,879 (-13.0 %) | 6,052 -> 5,235 | 13,000 -> 11,400 |
+| JUNO | 4,800 -> 3,795 (-20.9 %) | 6,315 -> 3,820 | 7,100 -> 5,700 |
+| WIDE | 1,813 -> 1,793 (-1.1 %) | 1,813 -> 1,793 | 4,700 (kept) |
+
+(Each bound x the larger of its body's mean and dearest new / old, rounded up: JUNO's old dearest was a span across
+the ring's start read from DDR word by word, so its mean ratio sets the bound. Before `82fa2504`: CHOR 4,089 /
+5,618, JUNO 4,014 / 5,529.)
+
+The JUNO chorus send (`jsend`) runs the same JUNO code and gets the same saving.
+
+Proof: `test_inserts_post` and `test_jsend` (model = postref, bit for bit), every output word and every memory word of
+the post pass identical to 7300294a's over 40 blocks of six settings (but the gate's stored bound, `icost`), the
+span copy's three ways (before the ring's start 1,271 times, across it 66, inside 1,049 in those two tests), `test_msched` (random op lists with x ops and
+offset moves: the schedule = the program order, registers, I registers and memory). Runner: see the hand-over.
+
+What stops here: inspost.asm was 6,994 of its 7,168 B span before `82fa2504` (110 B usable; the hand-over has the
+final size), so no loop can grow. WIDE's second pass (23 a sample) keeps its per-sample ring address (AND, add, I
+load, + 4): with ten live registers there is no room to pair, and a span copy would not fit the code. The DDR
+traffic (each ring's 32 writes a block, each span's ~39 reads) is now most of what is left, and needs memory, not
+code. Once a block, whenever any post insert is set, the pass walks all 32 slots (~1,800).
