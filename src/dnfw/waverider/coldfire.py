@@ -120,6 +120,9 @@ WISH_KEEP = (0x400031A8,                # lea memcpy,%a3 in the Overbridge packe
              0x40003436,                # lea memcpy,%fp in the Overbridge input (0x40003376)
              0x400CF958,                # jsr memcpy, a DSP-side block from 0x80001a20 (the audio interrupt's path)
              0x400D7ED4)                # move.l #memcpy,%d4, 108 B records (the audio interrupt's path)
+# v0.52 merge: references another hook already takes, left to it: the frame ISR's 14-byte frame copy (MUTE_SITE's jsr,
+# upstream v0.52's ms_frame; the audio interrupt's path, as WISH_KEEP's)
+WISH_HOOKED = (0x400275B2,)
 WISH_REFS = {WISH_MEMCPY: 694, WISH_MEMSET: 307}     # every reference in stock 1.12's MAIN OS (measured)
 # the instructions a reference may be the operand of: jsr / jmp abs.l, lea abs.l,An, move.l #imm,Dn
 WISH_OPS = {0x4EB9, 0x4EF9} | {0x41F9 | r << 9 for r in range(8)} | {0x203C | r << 9 for r in range(8)}
@@ -1192,7 +1195,7 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
         if len(refs) != WISH_REFS[target] or (target == WISH_MEMCPY and not set(WISH_KEEP) <= set(refs)):
             raise ComposeError(f"{len(refs)} references to {word}, not the {WISH_REFS[target]} measured on 1.12")
         for va in refs:
-            if va not in WISH_KEEP:
+            if va not in WISH_KEEP and va not in WISH_HOOKED:
                 edit(va, _long(csyms[stub]), f"wishes: a {word} reference names {stub}", _long(target))
     for name in ("wish_memcpy_stub", "wish_memset_stub", "wish_load_stub", "wish_save_stub", "wish_load_displaced",
                  "wish_save_displaced", "wish_poll", "wish_n",

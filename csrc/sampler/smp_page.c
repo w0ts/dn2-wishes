@@ -2131,7 +2131,18 @@ static void clear(void *c, int x0, int y0, int x1, int y1)
             SET_PIXEL(c, x, y, 0);
 }
 
-/* (meter_x, the old RECORDER panel's meter, is gone with it: rec_dt2.c's meter_px draws the DT2's) */
+/* a meter position for a level 0..32767: about 60 dB across W pixels (6 dB a step of W/10). (v0.52 merge: the old
+ * RECORDER panel that used it is gone, rec_dt2.c's meter_px draws the DT2's; FLEX REC's bn_view_draw still uses it) */
+static int meter_x(int v, int w)
+{
+    int x = 0, t = 32767;
+    while (t > 32 && v < t) {                   /* each halving of the level: W/10 to the left */
+        t >>= 1;
+        x++;
+    }
+    int pos = w - x * w / 10;
+    return pos < 0 ? 0 : pos;
+}
 
 /* v0.22: the DT2's steps after a recording (rec.c): TRIM, NAME, ASSIGN */
 extern int rec_phase, trim_slot, nm_cur, as_done, smp_saved;
