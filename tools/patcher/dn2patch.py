@@ -6,7 +6,12 @@ is shipped with it: the DN2 OS 1.12 file is patched, the DT2's DSP image (sectio
 OS 1.17), the Machinedrum's OS 1.63 and (v0.26 on) the Monomachine's OS 1.32B are read for
 their tables.
 
-    build(dn2, dt2, md, out, mnm=None) -> the sha256 of OUT
+    build(dn2, dt2, md, out, mnm=None, noboot=False) -> the sha256 of OUT
+
+On OS 1.12 the build also reads the DN2's own DSP image (section 7, `DT2_SECTIONS`: stock's L1
+sine, dnfw.waverider.dsp.stock_sine). It is taken here from the DN2 file being patched, so the
+browser needs no file beyond the four above. noboot=True builds the way every 1.12 build is made
+(scripts/noboot.py, carried in the bundle beside this file: no boot-screen stamp).
 """
 
 from __future__ import annotations
@@ -84,11 +89,28 @@ def dt2_section7(data: bytes) -> bytes:
     return body
 
 
-def build(dn2: str, dt2: str, md: str, out: str, mnm: str | None = None) -> str:
+def dn2_sections(data: bytes, into: pathlib.Path) -> pathlib.Path:
+    """The DN2 file's own section 7, unpacked, as INTO/section_7_BLOB.bin (the `DT2_SECTIONS`
+    folder the 1.12 build reads) -> INTO"""
+    from dnfw.firmware.load import load
+    try:
+        sec = load(data).container.find(7)
+    except Exception as e:                       # noqa: BLE001 -- any parse failure
+        raise PatchError(f"that is not a Digitone II OS file ({e})") from None
+    body = sec.unpack() if sec is not None else None
+    if not body:
+        raise PatchError("that Digitone II file has no DSP image (section 7)")
+    into.mkdir(parents=True, exist_ok=True)
+    (into / "section_7_BLOB.bin").write_bytes(body)
+    return into
+
+
+def build(dn2: str, dt2: str, md: str, out: str, mnm: str | None = None, noboot: bool = False) -> str:
     WORK.mkdir(parents=True, exist_ok=True)
     d = WORK / "dn2.syx"
     d.write_bytes(unzip(pathlib.Path(dn2).read_bytes(), (".syx",)))
     dn2 = str(d)
+    os.environ["DT2_SECTIONS"] = str(dn2_sections(d.read_bytes(), WORK / "dn2_sections"))
     s7 = WORK / "dt2_section7.bin"
     s7.write_bytes(dt2_section7(unzip(pathlib.Path(dt2).read_bytes(), (".syx",))))
     mdb = WORK / "md_os163.bin"
@@ -111,6 +133,9 @@ def build(dn2: str, dt2: str, md: str, out: str, mnm: str | None = None) -> str:
             raise PatchError(f"that is not the Monomachine SFX-6 OS 1.32B ({e})") from None
     else:                                        # (v0.24, v0.25: none)
         os.environ["MNM_OS"] = str(WORK / "no-mnm")
+    if noboot:                                   # every 1.12 build (after the tables above: it imports the mods)
+        import noboot as nb
+        nb.install()
     from dnfw.cli.main import main
     from dnfw.mods import SHIPPED                # waverider, then lfowaves (2026-11-14)
     rc = main(["mods", "apply", dn2, *[x for mid in SHIPPED for x in ("--mod", mid)], "-o", out])

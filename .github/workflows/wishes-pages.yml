@@ -1,0 +1,55 @@
+# The Wishes builder page on GitHub Pages of w0ts/dn2-wishes (https://w0ts.github.io/dn2-wishes/builder.html).
+#
+# MANUAL ONLY (workflow_dispatch): someone starts it from the Actions tab. Nothing here builds firmware or
+# reads Elektron's files: the page builds in the user's browser from their own. What it publishes is
+# wishes/ on the branch it runs on (scripts/web_bundle.py --wishes writes it locally: wishes.json, one
+# code zip per cleared preset, the published gate records), plus the page's own files.
+#
+# It refuses to publish unless every listed file has a gate record that clears it and every zip is the
+# one listed (scripts/web_bundle.py --check-site). An --uncleared-test bundle ("gate": null) never passes.
+# A repository has one Pages site: upstream's pages.yml (site/) stays manual and is not run here.
+name: wishes-pages
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: wishes-pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.repository == 'w0ts/dn2-wishes'
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: only cleared files
+        run: python scripts/web_bundle.py --check-site wishes
+      - name: the site
+        run: |
+          set -eu
+          mkdir _site
+          cp tools/web/builder.html tools/web/builder-worker.js tools/web/wishes-verdict.js tools/web/wishes.css _site/
+          if [ -f tools/web/help.html ]; then cp tools/web/help.html _site/; fi
+          cp LICENSE THIRD-PARTY.md _site/
+          cp -R wishes _site/wishes
+          cp _site/builder.html _site/index.html
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4

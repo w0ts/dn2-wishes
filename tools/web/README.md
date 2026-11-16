@@ -25,3 +25,23 @@ file is opened on its own). `icons/` holds the same mark for a desktop shortcut:
   then **Properties > Change Icon...** and pick `icons/dn2-import.ico`.
 - `icons/dn2-import-512.png` and `icons/dn2-import-180.png` for anything else (macOS, a
   home-screen icon).
+
+# Wishes builder (browser)
+
+`builder.html` (+ `builder-worker.js`, `wishes-verdict.js`, `wishes.css`) builds Wishes for
+Digitone II OS 1.12 in the browser (Pyodide 0.27.7, numpy, lzma), from the user's own
+Elektron files, by the command line's route: `tools/patcher/dn2patch.build(..., noboot=True)`,
+which takes the DSP image the 1.12 build reads (`DT2_SECTIONS`) from the DN2 file itself.
+One card per cleared preset (today: Full only). **Save appears only when the build's sha256
+is the one a gate record clears** (`wishes-verdict.js`); otherwise the page says "not the
+cleared file; do not flash" and shows both hashes.
+
+- **Bundle:** `python scripts/web_bundle.py --wishes BUILD.syx RELEASE Full wishes`
+  (`DN2_OS112`, `DN2_STOCK_DIR` name Elektron's files) refuses a build without a CLEARED
+  `BUILD.syx.gate.json`, rebuilds it from the zip alone in a clean interpreter, and writes
+  `wishes/wishes.json`, `wishes/vRELEASE/full-<sha>.zip` and the record's verdicts (no paths).
+  `--uncleared-test` runs the same pipeline with `"gate": null` (no Save; never published).
+- **Publish:** `.github/workflows/wishes-pages.yml`, manual only; it runs
+  `web_bundle.py --check-site wishes` and stops unless every listed file is cleared.
+- **Try it locally:** serve a folder holding these four files and `wishes/` over http.
+- `test/test_wishes_builder.py`: the refuse-unless-cleared rule (bundler, site check, page).

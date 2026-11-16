@@ -1,6 +1,12 @@
 """Bundle the build's Python for dn2mk2's in-browser patcher (tools/patcher).
 
     python scripts/web_bundle.py BUILD.syx VERSION NAME OUTDIR [--test]
+    python scripts/web_bundle.py --wishes BUILD.syx RELEASE PRESET OUTDIR [--uncleared-test]
+    python scripts/web_bundle.py --check-site OUTDIR
+
+--wishes: the bundle of the Wishes builder page (tools/web/builder.html; scripts/wishes_bundle.py):
+OS 1.12, NOBOOT, the DN2's own section 7. --check-site: what the Pages workflow runs before it
+publishes OUTDIR: every zip is the one listed and every listed file has a record that clears it.
 
 --test (owner, 2026-11-14): a test build, from a feature branch (e.g. stereo). Gated like any
 other; the patcher lists it apart, under TEST, never as the latest, with a warning.
@@ -44,6 +50,16 @@ def worker_version(zname: str) -> str | None:
     return m.group(1) if m else None
 
 
+def cleared(record: dict | None, sha: str) -> bool:
+    """Does this gate record (scripts/ship_gate.py's BUILD.syx.gate.json) clear the file SHA?
+    Its sha256 is SHA and every gate passed (n/a: a step that did not apply, e.g. a data-only chunk)."""
+    if not isinstance(record, dict) or record.get("sha256") != sha or not sha:
+        return False
+    gates = record.get("gates")
+    return isinstance(gates, dict) and bool(gates) and \
+        all(str(v).startswith(("PASS", "n/a")) for v in gates.values())
+
+
 def isolated_rebuild(zbytes: bytes, version: str) -> str:
     """the zip's build, run as the browser runs it -> its sha256 (or an error's text)"""
     import subprocess
@@ -74,14 +90,19 @@ def isolated_rebuild(zbytes: bytes, version: str) -> str:
 
 
 def main() -> int:
+    if sys.argv[1:2] == ["--wishes"]:
+        import wishes_bundle                     # the Wishes builder page's bundle (OS 1.12, NOBOOT)
+        return wishes_bundle.main(sys.argv[2:])
+    if sys.argv[1:2] == ["--check-site"]:
+        import wishes_bundle
+        return wishes_bundle.check_site(pathlib.Path(sys.argv[2]))
     test = "--test" in sys.argv
     build, version, name, outdir = [a for a in sys.argv[1:] if a != "--test"][:4]
     build = pathlib.Path(build)
     outdir = pathlib.Path(outdir)
     want = hashlib.sha256(build.read_bytes()).hexdigest()
     gate = json.loads(pathlib.Path(str(build) + ".gate.json").read_text())
-    if gate.get("sha256") != want or not gate.get("gates") or \
-            not all(str(v).startswith(("PASS", "n/a")) for v in gate["gates"].values()):   # n/a: a data-only chunk
+    if not cleared(gate, want):
         print("not a gated build: its .gate.json does not clear this sha256")
         return 1
     touched: set[str] = set()
