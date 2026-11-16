@@ -97,6 +97,7 @@ def main(argv=None) -> int:
             inserts = assemble("inserts", dsp.INS_SW, work)
             inspost = assemble("inspost", dsp.POST_SW, work)
             insbus = assemble("insbus", dsp.INSBUS_SW, work)
+            jsend = assemble("jsend", dsp.JSEND_SW, work)
             a2f = assemble("a2f", dsp.A2F_SW, work) if _a2f_built() else None
             pjump = one_jump(PVMIX_LINE, dsp.PVMIX_SITE_SW, work)
             ejump = one_jump(EMARK_LINE, dsp.CALL_SITE_SW, work)
@@ -118,6 +119,7 @@ def main(argv=None) -> int:
             inserts = committed("inserts")
             inspost = committed("inspost")
             insbus = committed("insbus")
+            jsend = committed("jsend")
             a2f = committed("a2f") if _a2f_built() else None
             pjump = old["pvmix_jump"]
             ejump = old["emark_jump"]
@@ -147,7 +149,8 @@ def main(argv=None) -> int:
             "inserts": {k: v for k, v in inserts.items() if k != "instruction_offsets"},
             "inspost": {k: v for k, v in inspost.items() if k != "instruction_offsets"},
             "insbus": {k: v for k, v in insbus.items() if k != "instruction_offsets"},
-            "insbus_jump": bjump}
+            "insbus_jump": bjump,
+            "jsend": {k: v for k, v in jsend.items() if k != "instruction_offsets"}}
     if a2f is not None:                                  # 2026-11-09: the A2 filter machines' pass (dnfw.a2f)
         spec["a2f"] = {k: v for k, v in a2f.items() if k != "instruction_offsets"}
     dsp.CODE.write_text(json.dumps(spec, indent=2) + "\n", encoding="utf-8", newline="\n")

@@ -536,7 +536,7 @@ def main(argv=None):
     p.add_argument("--frame-be", help="a frame as the ColdFire holds it at 0x80005e60 (16-bit BE)")
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
-    p.add_argument("--steps", default="decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,flexlevel,mainrec,recwhole,pvmix,fdn8,xdly,inserts,insall,a2f,inspost,insbus,mainmix,insorder,tdm,twin,stock,mnm,frame")   # v0.27: shft, gran removed; v0.45: ping removed   # voice: PERC
+    p.add_argument("--steps", default="decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,flexlevel,mainrec,recwhole,pvmix,fdn8,xdly,jsend,inserts,insall,a2f,inspost,insbus,mainmix,insorder,tdm,twin,stock,mnm,frame")   # v0.27: shft, gran removed; v0.45: ping removed   # voice: PERC
     p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
@@ -741,6 +741,13 @@ def main(argv=None):
             results["3h_xdly"] = xdly_step.run(sys.modules[__name__], snap, m2mach, m5, stock_img)
             gc.collect()
             show(results["3h_xdly"])
+
+        if "jsend" in steps:
+            print("\nstep 3h2: JUNO in the stock chorus's slot (the chorus send's TYPE)")
+            jsend_step = importlib.import_module("sharc_jsend_step")
+            results["3h2_jsend"] = jsend_step.run(sys.modules[__name__], snap, m2mach, m5, stock_img)
+            gc.collect()
+            show(results["3h2_jsend"])
 
         if "inserts" in steps:
             print("\nstep 3i: the per-track inserts")

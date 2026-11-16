@@ -305,6 +305,19 @@ def juno_consts(fs: float = FS) -> dict:
 
 
 JN = juno_consts()
+
+# the chorus SEND's TYPE JUNO (dnfw.inserts.jsend, docs/inserts.md "The chorus send"): TYPE the send pages' twelfth
+# word (csrc/fxpage fxp_words w[11], sent by link.c at 0xED0 + 44; 0 until sent: STOCK); MIX and MODE the chorus
+# page's DPTH and SPD, kit slots 25 and 26 in the DSP's frame image (0x25c48c + 0x9c8 + 2 k: 0x9fa the high half of
+# 0x25ce84, 0x9fc the low half of 0x25ce88), 8.8 (knob x 256); its state words and ring in DDR after the moved TAPE rings
+JS_TYPE = POOL_DDR + 0xED0 + 4 * 11
+JS_STOCK, JS_JUNO = 0, 1
+JS_DPTH_WORD, JS_SPD_WORD = 0x25CE84, 0x25CE88
+JS_KNOB_K = 1.0 / (127 * 256)
+JS_STATE = 0x82550000                             # 8 words: s0..s5, the last TYPE run (then 8 spare)
+JS_RING = JS_STATE + 0x40 + 4 * POST_MIRROR       # 1,024 floats, three mirror words before them
+JS_END = JS_RING + 4 * POST_RING
+assert JS_STATE >= MV_RING_DDR + MV_INSTANCES * 2048 and JS_END <= 0x82800000   # (FDN8_RING_DDR, below)
 assert JN["base"] - JN["dep"][0] * 32768 - 3 >= BLOCK    # every read is of an earlier block's samples
 assert JN["base"] + JN["dep"][0] * 32768 + 3 < POST_RING - BLOCK
 

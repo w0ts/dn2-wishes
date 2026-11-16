@@ -30,6 +30,8 @@ POST = importlib.import_module("dnfw.inserts.post")
 OUT_POST = ROOT / "csrc" / "waverider" / "sharc" / "inspost.asm"
 BUS = importlib.import_module("dnfw.inserts.bus")
 OUT_BUS = ROOT / "csrc" / "waverider" / "sharc" / "insbus.asm"
+JSEND = importlib.import_module("dnfw.inserts.jsend")
+OUT_JSEND = ROOT / "csrc" / "waverider" / "sharc" / "jsend.asm"
 
 
 def main(argv=None) -> int:
@@ -38,7 +40,8 @@ def main(argv=None) -> int:
     a = ap.parse_args(argv)
     from dnfw.a2f import design as AD, program as AP     # 2026-11-10: wr_ins -> wr_a2f -> PING
     jobs = [(P.program(dsp.A2F_SW if AD.BUILT_MODELS else dsp.PING_SW), dsp.INS_SW, OUT),
-            (POST.program(), dsp.POST_SW, OUT_POST), (BUS.program(), dsp.INSBUS_SW, OUT_BUS)]
+            (POST.program(), dsp.POST_SW, OUT_POST), (BUS.program(), dsp.INSBUS_SW, OUT_BUS),
+            (JSEND.program(), dsp.JSEND_SW, OUT_JSEND)]
     A2F_OUT = ROOT / "csrc" / "waverider" / "sharc" / "a2f.asm"
     if AD.BUILT_MODELS:
         jobs.append((AP.program(dsp.PING_SW), dsp.A2F_SW, A2F_OUT))

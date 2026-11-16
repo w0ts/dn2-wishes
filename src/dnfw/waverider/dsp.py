@@ -182,6 +182,15 @@ INSBUS_L2_LOAD = 0x200BC000
 INSBUS_L2_SPAN = 0x1000                      # (0xc00 until 2026-11-11: the unrolled copy loops, insbus.asm 3,154 B)
 INSBUS_SW = 0xB80000 + (INSBUS_L2_LOAD - 0x20000000) // 2    # 0xbde000
 INSBUS_STATE_L2 = INSBUS_L2_LOAD + INSBUS_L2_SPAN            # 0x200bd000
+# 2026-11-12: the chorus SEND's TYPE JUNO (dnfw.inserts.jsend, docs/inserts.md "The chorus send"): its code in L2 in
+# the old MD state room after opt-samples' 0x200a0000..0x200a1800 (claimed in docs/memory-map.md's SHARC list); the
+# FX bus's CALL of the stock chorus retargeted to it; its scratch is the post pass's (L1), its words and ring in DDR
+JSEND_L2_LOAD = 0x200A1800
+JSEND_L2_SPAN = 0x1000
+JSEND_SW = 0xB80000 + (JSEND_L2_LOAD - 0x20000000) // 2       # 0xbd0c00
+CHORUS_SITE_SW = 0x1C1BE1                    # the FX bus: CALL 0xb84d5c (DB), then its two pushes
+CHORUS_SITE_STOCK = bytes.fromhex("0418b8005c4d")
+assert JSEND_L2_LOAD + JSEND_L2_SPAN <= MNM_SCRATCH_L2
 ROUTE_SITE_SW = 0x1C1FEF                     # the routing, after its per-track loop: R2 = DM(0x257980)
 ROUTE_SITE_STOCK = bytes.fromhex("021025008079")
 ROUTE_RESUME_SW = 0x1C1FF2
@@ -377,7 +386,8 @@ def objects() -> dict[str, bytes]:
     return {name: sharc_object.load_bytes(bytes.fromhex(spec[name]["object_parcels_be"]))
             for name in ("perc", "smp", "entry_jump", "idle_load", "idle_jump", "block_count",
                          "entry_mark", "emark_jump", "lookup_ptr", "ping", "trackbuf",
-                         "pvmix", "pvmix_jump", "fdn8", "xdly", "inserts", "inspost", "insbus", "insbus_jump", "a2f")
+                         "pvmix", "pvmix_jump", "fdn8", "xdly", "inserts", "inspost", "insbus", "insbus_jump", "a2f",
+                         "jsend")
             if name in spec}
 
 
@@ -493,6 +503,14 @@ def delay_call() -> bytes:
     return DELAY_SITE_STOCK[:2] + struct.pack("<HH", XDLY_SW >> 16, XDLY_SW & 0xFFFF)
 
 
+def chorus_call() -> bytes:
+    """the FX bus's CALL at CHORUS_SITE_SW with wr_jsend as its target: the same instruction (parcels 0x1804, then the
+    24-bit address), only the address changed (2026-11-12, the chorus send's TYPE JUNO)"""
+    if JSEND_SW >> 24:
+        raise DspError("wr_jsend is beyond a 24-bit address")
+    return CHORUS_SITE_STOCK[:2] + struct.pack("<HH", JSEND_SW >> 16, JSEND_SW & 0xFFFF)
+
+
 def _ins():
     from ..inserts import design as ins_design
     return ins_design
@@ -573,6 +591,8 @@ def ddr_spans() -> list[tuple[str, int, bytes]]:
         ("the inserts' TAPE rings: 16 tracks x 512 float32 (zeros)", _ins().TP_RING_DDR, bytes(16 * 4 * _ins().TP_RING)),
         ("the post inserts' rings (CHOR, WIDE): 16 voice slots x 1024 float32 (zeros)", _ins().POST_RING_DDR,
          bytes(16 * 4 * _ins().POST_RING)),
+        ("the chorus send's JUNO: its words and ring (zeros; 2026-11-12)", _ins().JS_STATE,
+         bytes(_ins().JS_END - _ins().JS_STATE)),
         ("sample pool: its empty directory's magic and count (v0.17: no test sounds; the +Drive's load in)",
          SMP_POOL_DDR, _smp_pool()[:8]),
         ("sample pool: the rest of its directory and names (zeros)", SMP_POOL_DDR + 8,
@@ -661,6 +681,10 @@ def l2_spans() -> list[tuple[str, int, bytes]]:
     assert PING_CODE_DM + 0x400 <= INS_STATE_DM
     assert INS_STATE_DM + len(ins_program.state_bytes()) <= POST_STATE_DM
     assert POST_STATE_DM + len(ins_post.state_bytes()) <= MNM_RENDER_DM
+    code = obj["jsend"]
+    if JSEND_L2_SPAN - len(code) < L2_TAIL:
+        raise DspError(f"jsend.asm ({len(code)} bytes) leaves fewer than 64 bytes of its L2 span")
+    out.append(("jsend.asm (wr_jsend: the chorus send's JUNO), in L2", JSEND_L2_LOAD, code + bytes(L2_TAIL)))
     code = obj["insbus"]
     if INSBUS_L2_SPAN - len(code) < L2_TAIL:
         raise DspError(f"insbus.asm ({len(code)} bytes) leaves fewer than 64 bytes of its L2 span")
@@ -769,6 +793,10 @@ def placements() -> list[dict]:
                      "(XDLY, which JUMPs on to the stock delay when TYPE asks for it)",
              "load_address": f"{sw_to_load(DELAY_SITE_SW):#010x}", "bytes": len(DELAY_SITE_STOCK),
              "stock": DELAY_SITE_STOCK.hex(), "new": delay_call().hex()},
+            {"what": f"patch: the FX bus's call of the stock chorus at sw {CHORUS_SITE_SW:#x} -> target {JSEND_SW:#x} "
+                     "(the chorus send's JUNO, which JUMPs on to the stock chorus when TYPE asks for it)",
+             "load_address": f"{sw_to_load(CHORUS_SITE_SW):#010x}", "bytes": len(CHORUS_SITE_STOCK),
+             "stock": CHORUS_SITE_STOCK.hex(), "new": chorus_call().hex()},
             {"what": f"patch: the engine's call of the FX sends at sw {SENDS_SITE_SW:#x} -> target {POST_SW:#x} "
                      "(the post inserts, which JUMP on to the sends)",
              "load_address": f"{sw_to_load(SENDS_SITE_SW):#010x}", "bytes": len(SENDS_SITE_STOCK),
@@ -930,6 +958,8 @@ def section7(stock: bytes) -> bytes:
         raise DspError("sw 0x1c1d11 is not the stock `CJUMP 0xb836bc (DB)`")
     if bootstream.read_span(stock, sw_to_load(DELAY_SITE_SW), len(DELAY_SITE_STOCK)) != DELAY_SITE_STOCK:
         raise DspError("sw 0x1c1c58 is not the stock `CALL 0xb8482c (DB)`")
+    if bootstream.read_span(stock, sw_to_load(CHORUS_SITE_SW), len(CHORUS_SITE_STOCK)) != CHORUS_SITE_STOCK:
+        raise DspError("sw 0x1c1be1 is not the stock `CALL 0xb84d5c (DB)`")
     if bootstream.read_span(stock, sw_to_load(SENDS_SITE_SW), len(SENDS_SITE_STOCK)) != SENDS_SITE_STOCK:
         raise DspError("sw 0x1c3054 is not the stock `CJUMP 0x1c1738 (DB)`")
     if bootstream.read_span(stock, sw_to_load(ROUTE_SITE_SW), len(ROUTE_SITE_STOCK)) != ROUTE_SITE_STOCK:
@@ -962,6 +992,7 @@ def section7(stock: bytes) -> bytes:
     bootstream.write_span(out, sw_to_load(REVERB_SITE_SW), reverb_cjump())
     bootstream.write_span(out, sw_to_load(DELAY_SITE_SW), delay_call())
     bootstream.write_span(out, sw_to_load(SENDS_SITE_SW), sends_cjump())
+    bootstream.write_span(out, sw_to_load(CHORUS_SITE_SW), chorus_call())
     bootstream.write_span(out, sw_to_load(ROUTE_SITE_SW), obj["insbus_jump"])
     result = drop_twin(bytes(out))            # 2026-11-10: entry_mark.asm copies A over B
     walked = bootstream.walk(result)

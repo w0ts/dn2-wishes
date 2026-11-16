@@ -16,7 +16,15 @@
  *
  * The page hooks, as the INSERT pages' (csrc/inserts/ins.c): fxp_pop (rec.c smp_ui_pop, before stock sees an
  * item), fxp_begin / fxp_draw (page.c wr_screen), fxp_seen (fdn8/ui.c rvt_cell and xdly/ui.c dlt_cell say which
- * page stock drew and which type it holds). */
+ * page stock drew and which type it holds).
+ *
+ * 2026-11-12 (the User): the send CHORUS page's TYPE on its empty place E: STOCK (first) or JUNO (Optimist's
+ * Juno-106 chorus, dnfw.inserts.jsend). The chorus has no spare stock record (its kit slots 25..31 are all its
+ * knobs'; record 111 "Chorus Mix Vol." shares 110's index), so TYPE is ours, the project's: fxp_v[0][7] (the Delay
+ * page 2's unused place H, saved with the rest), sent as the twelfth word (w[11]; 0 until sent: STOCK). The page
+ * is known by stock drawing its DPTH cell (fxp_cell). With JUNO, DPTH is the MIX and SPD the MODE (I / II / I+II):
+ * their values stay stock's, kit-stored; their labels are drawn over and their names and value texts swapped
+ * (fxp_chorus_poll; stock 1.12's own pointers as constants, never saved at run time). */
 typedef unsigned int u32;
 typedef unsigned char u8;
 typedef signed char s8;
@@ -30,6 +38,10 @@ typedef signed char s8;
 #define K_FUNC    17
 #define PAGE_DELAY  1                           /* fxp_seen's and fxp_up's page: the Delay page (XDLY), */
 #define PAGE_REVERB 2                           /* the Reverb page (FDN8 / LONG) */
+#define CHR_DPTH  105u                          /* the Chorus page's DPTH record: its cell drawn = the page is up */
+#define CHR_SPD   106u
+#define CHR_TYPE  fxp_v[0][7]                   /* the chorus send's TYPE: 0 STOCK, 1 JUNO (dnfw.inserts.design.JS_*) */
+#define CHR_PLACE 4                             /* E */
 
 #include "../waverider/widgets.h"
 extern int smp_values_held(void);
@@ -51,6 +63,10 @@ static int seen __attribute__((section(".data"))) = 0;  /* the page stock drew t
 static int armed __attribute__((section(".data"))) = 0; /* FUNC went down on one of our pages and nothing since */
 static int touched __attribute__((section(".data"))) = -1;
 static int inited __attribute__((section(".data"))) = 0;
+static int chr_seen __attribute__((section(".data"))) = 0;     /* stock drew the Chorus page this time */
+static int chr_touched __attribute__((section(".data"))) = 0;
+
+static const char *text(int page, int i, int v);
 
 static const struct fxp_param *table(int page)
 {
@@ -135,6 +151,57 @@ void fxp_words(u32 *w)
     }
     w[9] = fbits(wl);
     w[10] = fbits(wr);
+    w[11] = CHR_TYPE ? 1u : 0u;                 /* the chorus send's TYPE (dnfw.inserts.design.JS_TYPE) */
+}
+
+/* page.c wr_poll, once a UI loop: with JUNO, records 105 / 106 named Mix / Mode, their values MIX % and I / II / I+II;
+ * stock's names and formatter otherwise (stock 1.12's own: 0x40210a01 "Depth", 0x40210a3b "Speed", 0x400e3030) */
+#define REC_AT(id)    (0x401F83A4u + 60u * (id))
+#define REC_LONG(id)  (*(const char **)(REC_AT(id) + 0x28u))
+#define REC_FMT(id)   (*(void **)(REC_AT(id) + 0x34u))
+#define STOCK_FMT     0x400E3030u
+static int chr_state __attribute__((section(".data"))) = -1;
+
+static void put(char *b, const char *s)
+{
+    int k = 0;
+    while (s[k]) {
+        b[k] = s[k];
+        k++;
+    }
+    b[k] = 0;
+}
+
+static void chr_mix(int v, char *b)
+{
+    if (!CHR_TYPE) {
+        ((void (*)(int, char *))STOCK_FMT)(v, b);
+        return;
+    }
+    put(b, text(0, 0, (v >> 8) & 0x7F));
+}
+
+static void chr_mode(int v, char *b)
+{
+    static const char *const m[3] = {"I", "II", "I+II"};
+    if (!CHR_TYPE) {
+        ((void (*)(int, char *))STOCK_FMT)(v, b);
+        return;
+    }
+    put(b, m[(((v >> 8) & 0x7F) * 3) >> 7]);
+}
+
+void fxp_chorus_poll(void)
+{
+    init();
+    int j = CHR_TYPE != 0;
+    if (j == chr_state)
+        return;
+    REC_FMT(CHR_DPTH) = (void *)chr_mix;
+    REC_FMT(CHR_SPD) = (void *)chr_mode;
+    REC_LONG(CHR_DPTH) = j ? "Mix" : (const char *)0x40210A01u;
+    REC_LONG(CHR_SPD) = j ? "Mode" : (const char *)0x40210A3Bu;
+    chr_state = j;
 }
 
 /* 1 when any value is not at its default: the DSP then needs the words (link.c); at the defaults it runs the old constants */
@@ -152,6 +219,20 @@ int fxp_active(void)
 void fxp_begin(void)
 {
     seen = 0;
+    chr_seen = 0;
+}
+
+/* page.c wr_cell: stock drew cell ID (the Chorus page's DPTH: that page is up) */
+void fxp_cell(u32 id)
+{
+    if (id == CHR_DPTH)
+        chr_seen = 1;
+}
+
+int fxp_chorus_type(void)
+{
+    init();
+    return CHR_TYPE ? 1 : 0;
 }
 
 /* fdn8/ui.c rvt_cell, xdly/ui.c dlt_cell: stock drew the TYPE cell of page PAGE, whose type is ours (1) or stock's (0) */
@@ -222,6 +303,17 @@ int fxp_pop(u8 *it)
     }
     if (it[0] == IT_KNOB) {
         armed = 0;
+        if (chr_seen && code == CHR_PLACE + 1) {        /* the Chorus page's TYPE: a turn right JUNO, left STOCK */
+            int v = (s8)it[8] > 0 ? 1 : (s8)it[8] < 0 ? 0 : CHR_TYPE;
+            if (v != CHR_TYPE) {
+                CHR_TYPE = (u8)v;
+                fxp_gen++;
+                ins_edits++;
+            }
+            chr_touched = 1;
+            smp_overlay_dirty = 1;
+            return 1;
+        }
         if (fxp_visible() && code >= 1 && code <= 8 && !(fxp_up == PAGE_DELAY && code == 1)) {
             turn((int)code, (s8)it[8]);
             smp_overlay_dirty = 1;
@@ -265,10 +357,25 @@ static const char *text(int page, int i, int v)
     return b;
 }
 
+/* the Chorus page: TYPE at E; with JUNO, A and B relabelled MIX and MODE */
+static void chorus_draw(void *c)
+{
+    int j = CHR_TYPE != 0;
+    fill(c, wg_x(CHR_PLACE) - 2, wg_y(CHR_PLACE), wg_x(CHR_PLACE) + 24, wg_y(CHR_PLACE) + 26, 0);
+    wg_choice(c, CHR_PLACE, j ? "JUNO" : "STCK");
+    wg_label(c, CHR_PLACE, "TYPE");
+    if (j && !smp_values_held()) {
+        wg_label(c, 0, "MIX");
+        wg_label(c, 1, "MODE");
+    }
+}
+
 /* page.c wr_screen, after stock's screen (and the other pages' dots) */
 void fxp_draw(void *c)
 {
     init();
+    if (chr_seen)
+        chorus_draw(c);
     if (fxp_up && fxp_up != seen)
         fxp_up = 0;                             /* stock moved to another page (or the TYPE is stock's) */
     if (!seen)

@@ -428,6 +428,8 @@ int wr_poll(void *screen)
     rvt_poll();                                 /* FDN8: the Reverb page's TYPE and names (csrc/fdn8) */
     extern void dlt_poll(void);
     dlt_poll();                                 /* XDLY: the Delay page's TYPE and names (csrc/xdly) */
+    extern void fxp_chorus_poll(void);
+    fxp_chorus_poll();                          /* the chorus send's JUNO: DPTH / SPD names and values (csrc/fxpage) */
     /* the RECORDER's meter and state move: a redraw asked for as stock asks (the dirty
      * byte), 25 times a second. v0.15..v0.19 answered 1 here without setting the byte:
      * the loop then pushed its other buffer undrawn (0x4011d60a draws only when the byte
@@ -713,6 +715,8 @@ void wr_cell(void *view, void *canvas, int x0, int y0, u32 id)
     rvt_cell(view, canvas, x0, y0, id);         /* FDN8: the Reverb page's TYPE (csrc/fdn8) */
     extern void dlt_cell(void *view, void *canvas, int x, int y, u32 id);
     dlt_cell(view, canvas, x0, y0, id);         /* XDLY: the Delay page's TYPE (csrc/xdly) */
+    extern void fxp_cell(u32 id);
+    fxp_cell(id);                               /* the Chorus page is up (its TYPE, csrc/fxpage) */
 #if FLT_SETS
     flt_cell(view, canvas, x0, y0, id);         /* the A2 filter machines' MODE, MOD2 (2026-11-10) */
 #endif

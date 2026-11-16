@@ -349,6 +349,39 @@ limiter is left out, as Optimist's own header says (below its knee the two are t
   scratch are CHOR's (`post.STATE`, `post.C`). Code: `inspost.asm` 4,496 -> 5,674 B (+1,178 B), 342 B
   left of its 0x1800 L2 span (with the 128 B tail).
 
+## The chorus send: TYPE JUNO (2026-11-12)
+
+The send **Chorus** page (FUNC + FX) gets a **TYPE** on its empty place **E**: **STOCK** (first, every project)
+or **JUNO**, the same Juno-106 chorus as the JUNO insert, in the stock chorus's slot on the FX bus. With JUNO the
+page's **DPTH** is the **MIX** and **SPD** the **MODE** (I / II / I+II); their labels are drawn as MIX / MODE, their
+long names and value texts follow (Mix %, I / II / I+II). HPF, WDTH, DEL, REV, VOL keep doing what the bus does with
+them (VOL the return's level, DEL / REV its sends on); HPF and WDTH are the stock chorus's own and do nothing to JUNO.
+
+- **Why TYPE is ours, not a stock record** (delay and reverb use their spare stock records 122 / 131): the stock
+  parameter table gives the chorus kit slots 25..31, all its knobs'. Record 111 "Chorus Mix Vol." has no slot of its
+  own: its index word is 0x1f, the same as 110 "Reverb Send"'s (as 120 "Delay Mix Vol." shares 119's). So TYPE is the
+  project's (`csrc/fxpage`: `fxp_v[0][7]`, the Delay page 2's unused place H, saved with the send pages' values in
+  the inserts' record sector), not the kit's; MIX and MODE are DPTH and SPD, stock's, kit-stored.
+- **ColdFire** (`csrc/fxpage/fxp.c`): the page is known by stock drawing its DPTH cell (`fxp_cell`, from page.c
+  `wr_cell`); knob E's turns are ours there (right JUNO, left STOCK); `fxp_draw` draws TYPE's box and the MIX / MODE
+  labels; `fxp_chorus_poll` (page.c `wr_poll`) swaps records 105 / 106's long names and formatters (stock 1.12's own
+  pointers as constants). TYPE goes to the DSP as the send pages' twelfth word (`fxp_words` w[11], directory page
+  0xEFC; 0 until a value is sent: STOCK).
+- **DSP** (`dnfw.inserts.jsend`, `jsend.asm`, L2 `0x200a1800`, sw `0xbd0c00`, 1,976 B in a 4 KB span): the FX bus's
+  `CALL 0xb84d5c (DB)` at sw `0x1c1be1` (R4 the chorus's DDR state `0x80459388`, R8 its parameters `0x257950`,
+  R12 the bus's I/O descriptor `0x257e6c`, measured in the runner) is retargeted to `wr_jsend`. TYPE not JUNO:
+  everything restored, `JUMP 0xb84d5c`, the stock chorus as the bus called it (its state untouched while JUNO ran).
+  JUNO: in L / R copied to out L / R, then `post.juno` (the insert's very code) in place there, MIX and MODE from
+  the frame image's kit slots 25 / 26 (`0x25ce84` high half, `0x25ce88` low half; 8.8); back by the stock C
+  epilogue. Its scratch is the post pass's (that pass has ended when the bus runs); its eight words and its ring
+  (1,024 floats, three mirror words) in DDR `0x82550000..0x82551050` (zeros at power-on); a switch to JUNO starts
+  from zeros.
+- **Checked**: `test/test_jsend.py` (the model against `postref.JsendRef` bit for bit through switches and knob
+  moves; STOCK leaves the send to the stock chorus; every register back), `test/test_fxpage.py` (knob E, the word);
+  SHARC runner step `jsend` (`scripts/sharc_jsend_step.py`): TYPE STOCK bit-identical to the stock image (outputs,
+  registers, every word written but the send's own), TYPE JUNO bit-exact to the reference, registers back, no stray
+  DDR write, its cost.
+
 ## On the track's bus: FDN8 and XDLY
 
 `dnfw.inserts.bus` (`csrc/waverider/sharc/insbus.asm`, L2 `0x200bc000`, sw `0xbde000`, between the sample

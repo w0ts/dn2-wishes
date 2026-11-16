@@ -121,6 +121,8 @@ extern void fxp_begin(void);
 extern void fxp_seen(int page, int ours);
 extern int fxp_pop(u8 *it);
 extern void fxp_defaults(void);
+extern void fxp_cell(u32 id);
+extern void fxp_words(u32 *w);
 static int item(int type, int code, int flags, int delta)
 {
     u8 it[16] = {0};
@@ -142,6 +144,8 @@ int main(void)
         else if (c == 'k') { scanf("%d %d", &a, &b); printf("took=%d ", item(1, a, 0, b)); }
         else if (c == '?') printf("up=%d\n", fxp_up);
         else if (c == 'v') { scanf("%d %d", &a, &b); printf("v=%d\n", fxp_v[a][b]); }
+        else if (c == 'c') { scanf("%d", &a); fxp_begin(); fxp_cell((u32)a); }        /* stock drew cell A */
+        else if (c == 'w') { u32 w[12]; fxp_words(w); printf("w11=%u\n", w[11]); }
     }
     return 0;
 }
@@ -272,3 +276,17 @@ def test_active_means_not_at_the_defaults(tmp_path):
     assert r.returncode == 0, r.stderr[-1500:]
     out = subprocess.run([str(tmp_path / "h")], capture_output=True, text=True, check=True).stdout.split()
     assert out == ["0", "0", "1", "1"]
+
+
+CHORUS_PAGE = "c 105"                                       # stock drew the Chorus page's DPTH cell
+
+
+def test_the_chorus_page_takes_knob_e_for_its_type(tap):
+    """2026-11-12: the Chorus page's TYPE on E (knob 5): right JUNO, left STOCK; the twelfth word carries it (0 until
+    then); E is stock's (nothing there) off the Chorus page, and the other knobs stay stock's on it"""
+    assert feed(tap, "w ") == ["w11=0"]
+    assert feed(tap, f"{CHORUS_PAGE} k 5 1 v 0 7 w ") == ["took=1", "v=1", "w11=1"]
+    assert feed(tap, f"{CHORUS_PAGE} k 5 1 {CHORUS_PAGE} k 5 -2 v 0 7 w ") == ["took=1", "took=1", "v=0", "w11=0"]
+    assert feed(tap, f"{CHORUS_PAGE} k 1 3 k 2 -3 k 6 2 v 0 7 ") == ["took=0", "took=0", "took=0", "v=0"]
+    assert feed(tap, "c 113 k 5 1 v 0 7 ") == ["took=0", "v=0"]           # the Delay page: not ours
+    assert feed(tap, f"{CHORUS_PAGE} c 0 k 5 1 v 0 7 ") == ["took=0", "v=0"]     # the page left

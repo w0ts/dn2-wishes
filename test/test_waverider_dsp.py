@@ -158,10 +158,15 @@ def test_the_five_patches_and_nothing_else_in_the_stock_blocks(stock7, built):
     assert bootstream.read_span(stock7, sn, 6) == dsp.SENDS_SITE_STOCK
     assert bootstream.read_span(built, sn, 6) == dsp.sends_cjump()
     sn_off = bootstream.spans(stock7, sn, 6)[0][0]
+    # the chorus send's TYPE JUNO (2026-11-12): the FX bus's CALL of the stock chorus, its target wr_jsend
+    ch = dsp.sw_to_load(dsp.CHORUS_SITE_SW)
+    assert bootstream.read_span(stock7, ch, 6) == dsp.CHORUS_SITE_STOCK
+    assert bootstream.read_span(built, ch, 6) == dsp.chorus_call()
+    ch_off = bootstream.spans(stock7, ch, 6)[0][0]
     allowed = (set(range(entry_off, entry_off + 8)) | set(range(look_off, look_off + 6))
                | set(range(idle_off, idle_off + 6)) | set(range(call_off, call_off + 6))
                | set(range(pv_off, pv_off + 6)) | set(range(rv_off, rv_off + 6)) | set(range(dl_off, dl_off + 6))
-               | set(range(sn_off, sn_off + 6)))
+               | set(range(sn_off, sn_off + 6)) | set(range(ch_off, ch_off + 6)))
     assert diff and set(diff) <= allowed
 
 
@@ -181,6 +186,7 @@ def test_ddr_spans_are_clear_of_the_stock_image_and_the_engine():
                                       dsp.FDN8_RING_DDR,                        # FDN8's ring, zeroed
                                       0x82500000,                               # the inserts' TAPE rings, zeroed
                                       0x82510000,                               # the post inserts' rings, zeroed
+                                      0x82550000,                               # the chorus send's JUNO: words, ring
                                       dsp.SMP_POOL_DDR, dsp.SMP_POOL_DDR + 8]   # v0.17: the MD's
     assert not any(ddr[-1][2])
     # v0.45: PING's tables went: every index one lower than b4's; 2026-11-10: the sine's, one more;

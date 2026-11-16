@@ -274,3 +274,27 @@ class PostRef:
             R[j] = o + q
         s[0], s[1] = ph1, wp
         s[2:6] = st
+
+
+class JsendRef:
+    """the chorus SEND's JUNO (dnfw.inserts.jsend): TYPE not JUNO -> None (the stock chorus runs; the next JUNO starts
+    from zeros), else out L / R = PostRef.juno on in L / R, MIX = DPTH, MODE = SPD (the frame's 8.8 half words)"""
+
+    def __init__(self):
+        self.r = PostRef()
+        self.on = False
+
+    def block(self, typ: int, dpth_hw: int, spd_hw: int, inl, inr):
+        if typ != D.JS_JUNO:
+            self.on = False
+            return None
+        if not self.on:
+            self.r.st[0] = [0] * 6
+            self.r.ring[0][:] = 0
+            self.on = True
+        k = F(D.JS_KNOB_K)
+        p = [F(float(dpth_hw & 0xFFFF)) * k, F(float(spd_hw & 0xFFFF)) * k] + [F(0.0)] * 5
+        L = [F(x) for x in inl]
+        R = [F(x) for x in inr]
+        self.r.juno(0, p, L, R)
+        return L, R
