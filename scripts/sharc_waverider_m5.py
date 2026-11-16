@@ -746,6 +746,7 @@ def main(argv=None):
             results["3f_flexlevel"] = step_flexlevel(init, sound, machines)
             gc.collect()
             show(results["3f_flexlevel"])
+            show_flexlevel(results["3f_flexlevel"])
 
         if "mainrec" in steps:
             print("\nstep 3m: MAIN recorded, previewed and played, in the instrument's order (v0.38)")
@@ -3121,8 +3122,10 @@ def step_flexlevel(init, sound, machines) -> dict:
 
         def db(x, y):
             return 20 * _m.log10((rms(y) or 1e-30) / (rms(x) or 1e-30))
-        return {"out_db": db(flat[per * (n - w): per * n], flat[per * p0: per * (p0 + w)]),
-                "render_db": db(ren[per * (n - w): per * n], ren[per * p0: per * (p0 + w)]),
+        src, back = slice(per * (n - w), per * n), slice(per * p0, per * (p0 + w))
+        return {"out_db": db(flat[src], flat[back]), "render_db": db(ren[src], ren[back]),
+                "source_render_rms": rms(ren[src]), "take_render_rms": rms(ren[back]),
+                "source_out_rms": rms(flat[src]), "take_out_rms": rms(flat[back]),
                 "take_rms": rms(take[per * (n - w): per * n]), "take_frames": ent[1],
                 "take_peak": max((abs(v) for v in take), default=0.0)}
     unity, recorder, minus6 = run(SM.GAIN_ZERO), run(0), run(SM.GAIN_ZERO - 6)
@@ -3141,6 +3144,19 @@ def step_flexlevel(init, sound, machines) -> dict:
     }
     return {"ok": all(checks.values()), "checks": checks,
             "numbers": {"unity": unity, "recorder": recorder, "minus6": minus6}}
+
+
+def show_flexlevel(step) -> None:
+    """step 3f's measured levels: RMS over the same window, the source and its take, at the chain (track 0's voice,
+    before the stock chain) and at the amp's output, and the take's own frames"""
+    for name, r in (step.get("numbers") or {}).items():
+        if not r:
+            print(f"  {name:8s} did not run")
+            continue
+        print(f"  {name:8s} chain: source RMS {r['source_render_rms']:.5f}, take {r['take_render_rms']:.5f}"
+              f" ({r['render_db']:+.2f} dB) | amp out: source {r['source_out_rms']:.5f},"
+              f" take {r['take_out_rms']:.5f} ({r['out_db']:+.2f} dB) | take frames RMS {r['take_rms']:.5f},"
+              f" peak {r['take_peak']:.4f}")
 
 
 # -- step 3e: the fast link (v0.16, docs/sampler.md) -------------------------------------------------
