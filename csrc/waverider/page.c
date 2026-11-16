@@ -414,6 +414,7 @@ int wr_poll(void *screen)
     smp_boot();
     jmp_poll();                                 /* DIRECT JUMP's setting, read and written (csrc/jump) */
     { extern void msel_poll(void); msel_poll(); }   /* LIVE SELECT: MACHINE SEL's resting cursor, FUNC + G (csrc/msel) */
+    { extern void load_poll(void); load_poll(); }   /* the DSP load budget: each track's cost (csrc/load) */
     rec_poll();
     { extern void mono_poll(void); mono_poll(); }   /* 2026-11-11: MONOMACHINE's engine turned: its start (rec.c) */
     { extern void hold_poll(void); hold_poll(); }   /* DRONE's HOLD latch (csrc/hold) */
@@ -735,8 +736,10 @@ static const char *perc_name(int i, int arg)
 
 static const char *perc_tag(int i, int arg)
 {
+    extern const char *load_tag_md(int i);      /* 2026-11-12: "N VOICES" when fewer than 16 fit (csrc/load) */
+    const char *v = load_tag_md(i);
     (void)arg;
-    return perc_what_upper[i];
+    return v ? v : perc_what_upper[i];
 }
 
 void wr_page_draw(void *view, void *canvas)

@@ -82,4 +82,5 @@ void live_row(u32 view)
     for (i = 3; i >= 0; i--)
         FN_DTOR(&f[i]);
     live_rows++;
+    { extern void load_row(u32); load_row(view); }   /* 2026-11-12: VOICE BUDGET's row after it (csrc/load) */
 }

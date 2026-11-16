@@ -483,6 +483,10 @@ ENG_CTOR_STOCK = bytes.fromhex("1541058415410585")
 USB_REBUILD_SITE = 0x40105220           # movea.l (%a2),%a0 ; clr.l -(%sp) ; move.l %d6,-(%sp)
 USB_REBUILD_STOCK = bytes.fromhex("205242a72f06")
 # 2026-11-12: LIVE SELECT's row in SETTINGS > PERSONALIZE (csrc/msel/live.c, live.S)
+# 2026-11-12, the DSP load budget at note-on (csrc/load, docs/load-budget.md): the audio ISR's note-on call of the
+# voice allocator (jsr 0x4002a6a2), its nine arguments pushed just before
+LOAD_ALLOC_SITE = 0x400269E6
+LOAD_ALLOC_STOCK = bytes.fromhex("4eb94002a6a2")
 LIVE_MENU_SITE = 0x400987A2             # PersonalizeMenuView's constructor ends: movem.l 24(%sp),%d2-%d6/%a2-%a6
 LIVE_MENU_STOCK = bytes.fromhex("4cef7c7c0018")
 LINK_RX_SITE = 0x4012197A               # lea 0x40207f9e,%a3: F0 00 20 3C, before the compare
@@ -678,7 +682,8 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     from .. import slides as SL
     from .. import modversion                   # v0.39: the mod's version (VERSION), shown at the browser's top
     from ..a2f import pages as flt_pages        # 2026-11-10: the A2 filter machines' FLTR names
-    cimage, csyms, cbss = compile_c(pages.c_header() + _msel.c_header() + _eng.c_header() + flt_pages.c_header() + SL.c_header(stock)
+    from .. import load as _load                  # 2026-11-12: the DSP load budget's cost table (csrc/load)
+    cimage, csyms, cbss = compile_c(pages.c_header() + _msel.c_header() + _eng.c_header() + _load.c_header() + flt_pages.c_header() + SL.c_header(stock)
                                     + modversion.c_define(),
                                      base=pages.C_LOAD)
     if cbss:
@@ -1024,6 +1029,11 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     edit(ENG_CTOR_SITE, bytes.fromhex("4eb9") + _long(csyms["eng_ctor_hook"]) + bytes.fromhex("4e71"),
          "the preset view's constructor: the engines cleared with stock's filters", ENG_CTOR_STOCK)
     # 2026-11-12: LIVE SELECT (csrc/msel): its row, the last of PERSONALIZE
+    # 2026-11-12: the DSP load budget at note-on (csrc/load/hooks.S load_alloc_hook): the allocator through our check
+    _need(content, LOAD_ALLOC_SITE - 2, bytes.fromhex("2f03"), "the note-on's last argument: move.l %d3,-(%sp) (the track)")
+    _need(content, LOAD_ALLOC_SITE + 6, bytes.fromhex("2d42ff984fef0024"), "... after it: move.l %d2,-104(%fp) ; lea 36(%sp),%sp")
+    edit(LOAD_ALLOC_SITE, bytes.fromhex("4eb9") + _long(csyms["load_alloc_hook"]),
+         "the audio ISR's note-on allocation: the DSP load budget first (load_pre / load_post)", LOAD_ALLOC_STOCK)
     _need(content, LIVE_MENU_SITE - 10, bytes.fromhex("4e932f054e932f044e93"), "PERSONALIZE's last row's functions destroyed")
     _need(content, LIVE_MENU_SITE + 6, bytes.fromhex("4fef00804e75"), "... then lea 128(%sp),%sp ; rts")
     edit(LIVE_MENU_SITE, bytes.fromhex("4ef9") + _long(csyms["live_menu_hook"]),
@@ -1193,6 +1203,9 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
         layout[name] = csyms[name]              # 2026-11-11: the wishes record (csrc/wishes): the checks read them
     for name in ("wish_item", "wish_item_loads", "wish_item_saves", "wish_item_nolane", "wish_item_dropped"):
         layout[name] = csyms[name]              # 2026-11-12: kits and patterns (csrc/wishes/item.c)
+    from . import cpage as _cpage
+    for name in _cpage.LOAD_ENTRIES:
+        layout[name] = csyms[name]              # 2026-11-12: the DSP load budget (csrc/load): the check reads its state
     for name in ("mx_poll", "mx_eval", "mx_lay", "mx_compiles"):
         layout[name] = csyms[name]              # 2026-11-12: the matrix (csrc/matrix): the checks call them
     for name in ("mod_mask_hook", "mod_lfo_mask", "mod_eval", "mod_eval_pre", "mod_wb", "mod_wb_cell",

@@ -570,6 +570,10 @@ static const char *mnm_pop_tag(int i, int arg)      /* 2026-11-11: the tag besid
 {                                                   /* arg as mnm_pop_name's: mi * MNM_J + j */
     int mi = arg / MNM_J, j = arg % MNM_J, r = mnm_retired_at(mi, j);
     int c = r >= 0 && i >= r ? i + 1 : i;
+    extern const char *load_tag_mnm(int mi, int j, int c);     /* 2026-11-12: "N VOICES" when fewer than 16 fit */
+    const char *v = load_tag_mnm(mi, j, c);
+    if (v)
+        return v;
     for (int k = 0; k < MNM_TAG_LISTS; k++)
         if (mnm_tag_list[k][0] == mi && mnm_tag_list[k][1] == j) {
             const char *t = mnm_choice_tags[mnm_tag_list[k][2] + c];

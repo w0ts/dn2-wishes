@@ -80,7 +80,8 @@ typedef signed char s8;
 #define BOOT_FLAGS (*(volatile u32 *)0x40287A60u)
 #define BOOT_FACTORY_RESET 2u
 #define SET_OWN (SET_JUMP | SET_REMOTE_OFF)                     /* the flags this file keeps itself */
-/* the other flags (bit 2 up) are other settings' (set_flag, set_flag_put): bit 2 LIVE SELECT off (csrc/msel/live.c) */
+/* the other flags (bit 2 up) are other settings' (set_flag, set_flag_put): bit 2 LIVE SELECT off (csrc/msel/live.c),
+ * bit 3 VOICE BUDGET off (csrc/load/load.c) */
 _Static_assert(SET_SECTOR >= POOL_STORE_END && SET_SECTOR < LIB_SECTOR && SET_SECTOR >= STOCK_STORE_END,
                "the settings sector lies in our region, between the pool's image and the library");
 

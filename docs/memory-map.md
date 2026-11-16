@@ -274,7 +274,7 @@ each region checked against its bounds before the stock block driver (`0x4012c59
 | `0x6E8000` .. `0x6E8800` | the DSP program's copy (`csrc/waverider/lzma7cache.c`, `docs/lzma7.md`) | header (`DN7C`, written last), then the program decoded from section 7 (up to 1 MiB) |
 | `0x6F0000` .. `0x6F0700` | the +Drive library's extension (`csrc/sampler/lib.c` `LIB_X_AT`) | entries 2,048..16,383 |
 | `0x6F0800` .. `0x6FEFFF` | the wishes record (`csrc/wishes/store.c`, `docs/wishes-record.md`) | 59,392 cells of one sector (`DN2W`), each a sound's record filed under its hash; written once |
-| `0x6FF000` | DIRECT JUMP (`csrc/jump/jump.c`, `docs/jump.md`) | the mod's settings sector (`DN2S`, version, flags, check); bit 0: DIRECT JUMP, bit 1: REMOTE CONTROL OFF (`csrc/devtest/usbcfg.c`) |
+| `0x6FF000` | DIRECT JUMP (`csrc/jump/jump.c`, `docs/jump.md`) | the mod's settings sector (`DN2S`, version, flags, check); bit 0: DIRECT JUMP, bit 1: REMOTE CONTROL OFF (`csrc/devtest/usbcfg.c`), bit 2: LIVE SELECT OFF (`csrc/msel/live.c`), bit 3: VOICE BUDGET OFF (`csrc/load/load.c` SET_BUDGET_OFF, 2026-11-12); bits 2.. carried through by jump.c's writes |
 | `0x700000` .. the device's end | the +Drive library (`csrc/sampler/lib.c`) | superblock (`DN2L`), index, folders, then the samples' frames |
 
 Free between them: `0x6C8001..0x6CFFFF`, `0x6D0002..0x6D00FF`, `0x6E0300..0x6E03FF`, `0x6E0502..0x6E7FFF`,

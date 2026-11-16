@@ -407,9 +407,50 @@ def cases():
                     slot, w = plaits_word(mi)
                     h._half(PMx.frame_offset(slot), w)
                 yield "PLAITS-" + (m or "?"), "PLAITS", pl
+        elif n in VARIANTS:                    # 2026-11-12 (the load check): each choice of the cost-changing control
+            names, rec, kind = VARIANTS[n]()
+            for c, cname in enumerate(names):
+                def var(h, k=k, c=c, rec=rec, kind=kind, nn=len(names)):
+                    from dnfw.perc import machines as PMx
+                    _mnm_setup(h, k)
+                    slot, w = choice_word(rec, nn, c, kind)
+                    h._half(PMx.frame_offset(slot), w)
+                yield f"{n}-{cname}", n, var
         else:
             fam = "MONOMACHINE" if n in MM.MONO_ENGINES else n
             yield n, fam, (lambda h, k=k: _mnm_setup(h, k))
+
+
+def _sophie_models():
+    from dnfw.mnm import machines as MM, sophie as SO
+    from dnfw.perc import machines as PMx
+    from dnfw.waverider import pages as PG
+    M = MM.MACHINES[MM.NAMES.index("SOPHIE")]
+    return PG._choices(M)["MODL"], PMx.PARAMS[SO.MODL_K], "knob"
+
+
+def _analog2_filters():
+    from dnfw.mnm import machines as MM, analog2 as A2
+    from dnfw.perc import machines as PMx
+    from dnfw.waverider import pages as PG
+    M = MM.MACHINES[MM.NAMES.index("ANALOG2")]
+    return PG._choices(M)["FLT2"], PMx.FX_PARAMS[A2.PNAMES2.index("FLT2")], "frac"
+
+
+VARIANTS = {"SOPHIE": _sophie_models, "ANALOG2": _analog2_filters}   # name -> () -> (choice names, record, kind)
+
+
+def choice_word(rec, n: int, c: int, kind: str = "knob") -> tuple[int, int]:
+    """(frame slot, word) of record REC = (rid, slot, lo, top) choosing choice C of N as the DSP reads it: "knob"
+    (dnfw.mnm.core.knob: trunc(v / top x 128) x N >> 7: PLAITS', SOPHIE's MODL, the page's choice) or "frac"
+    (ANALOG 2's page-2 choices: min(N - 1, trunc(v / top x N))); the record value in the middle of C's range, away
+    from float edges"""
+    _rid, slot, lo, top = rec
+    if kind == "knob":
+        vs = [v for v in range(top + 1) if (int(v / top * 128) * n) >> 7 == c]
+    else:
+        vs = [v for v in range(top + 1) if min(n - 1, int(v / top * n)) == c]
+    return slot, (vs[len(vs) // 2] + lo) << 8
 
 
 def plaits_word(mi: int) -> tuple[int, int]:

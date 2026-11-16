@@ -46,6 +46,8 @@ LINK_SOURCES = [SOURCE.parents[1] / "sampler" / "link.c", SOURCE.parents[1] / "s
                 SOURCE.parent / "popup.c",                            # the list popup (2026-11-09)
                 SOURCE.parents[1] / "msel" / "msel.c",               # MACHINE SEL in two columns (2026-11-11)
                 SOURCE.parents[1] / "msel" / "live.c",               # ... LIVE SELECT, its PERSONALIZE row (2026-11-12)
+                SOURCE.parents[1] / "load" / "load.c",               # the DSP load budget at note-on (2026-11-12)
+                SOURCE.parents[1] / "load" / "hooks.S",
                 SOURCE.parents[1] / "msel" / "live.S",
                 SOURCE.parent / "popup_stock.c",                      # ... on stock parameters' lists
                 SOURCE.parents[1] / "devtest" / "devtest.c",          # the test channel (docs/remote-ui.md, 2026-11-11)
@@ -128,7 +130,10 @@ ENG_ENTRIES = ["eng_test_hook", "eng_sort_hook", "eng_ctor_hook", "eng_label", "
 # LIVE SELECT (csrc/msel/msel.c, live.c, live.S): its hooks and the state the checks read
 LIVE_ENTRIES = ["live_menu_hook", "live_label", "live_box", "live_yes", "live_delta", "live_row", "live_on", "live_rows",
                 "msel_poll", "ls_commits", "ls_reverts", "set_bits"]
-LINK_ENTRIES = LINK_ENTRIES + WISH_ENTRIES + LIVE_ENTRIES + ENG_ENTRIES + DEVTEST_ENTRIES + LZMA7_ENTRIES + MOD_ENTRIES + SLIDE_ENTRIES + METER_ENTRIES + FDN8_ENTRIES + XDLY_ENTRIES + FXP_ENTRIES + INS_ENTRIES + HOLD_ENTRIES
+# 2026-11-12: the DSP load budget (csrc/load): its hook and the state the emulator check reads
+LOAD_ENTRIES = ["load_alloc_hook", "load_poll", "load_voice", "load_stock", "load_fx", "load_off", "load_checks",
+                "load_over", "load_keyups", "load_sp_min", "load_last_sum", "load_last_need", "load_rows"]
+LINK_ENTRIES = LINK_ENTRIES + WISH_ENTRIES + LOAD_ENTRIES + LIVE_ENTRIES + ENG_ENTRIES + DEVTEST_ENTRIES + LZMA7_ENTRIES + MOD_ENTRIES + SLIDE_ENTRIES + METER_ENTRIES + FDN8_ENTRIES + XDLY_ENTRIES + FXP_ENTRIES + INS_ENTRIES + HOLD_ENTRIES
 
 
 # the list popup (csrc/waverider/popup.c, docs/popups.md): on our machines' and FX's list parameters,
