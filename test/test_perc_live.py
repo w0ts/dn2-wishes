@@ -282,6 +282,7 @@ def test_v026_the_monomachine_machines_play_the_dn2s_note():
     octave over it, within 3 %"""
     from dnfw.md import core as MDK
     from dnfw.mnm import dpro, machines as MNM
+    from dnfw.mnm import plaits as PLT
     from dnfw.mnm import rom as MROM
     if not MROM.available():
         pytest.skip("needs the owner's Monomachine OS")
@@ -291,8 +292,9 @@ def test_v026_the_monomachine_machines_play_the_dn2s_note():
              "DPRO-DDRW": (0, 0, 0, 0, 0, 0, 0, 64), "DPRO-DENS": (63, 63, 63, 0, 0, 0, 0, 64),
              "VO-6": (64, 64, 127, 0, 0, 0, 0, 64),
              "SOPHIE": (127, 0, 0, 0, 64, 0, 0, 64),   # FUSE, no metal, no sweep: the carrier alone
-             "PLAITS": (64, 0, 64, 0, 0, 64, 0, 64),   # WS, linear shape, the least fold; FINE (2026-11-09)
-                                                        # at its centre: 0 is -64 cents
+             "PLAITS": (64, 0, 64, 0, 0, 64, 64, PLT.knob_of(PLT.MODELS.index("WS"))),   # WS, linear shape, the
+                                                        # least fold; FINE (2026-11-09) at its centre: 0 is -64 cents;
+                                                        # TUNE G, MODL H (2026-11-11: plaits.MODL_K)
              "TB303": (127, 0, 0, 64, 0, 0, 0, 64)}    # the filter open, no resonance or env mod: the saw
     for k, name in enumerate(MNM.NAMES):    # each voice (2026-11-11: MONOMACHINE's engines by ENGN)
         f = []
