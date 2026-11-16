@@ -172,6 +172,10 @@ class _Cfg:
 
 BD, MT = _Cfg(False), _Cfg(True)
 CF = 26                            # the state words init sets (see _init)
+# (opt-md, 2026-11-12) MT: the host words TUNE and POS the multipliers were last made from (S 36, 37; init: -1, no
+# word's bits) and the 24 multipliers themselves (S 38..61: frequency, curve, gain, 8 each), made again only when
+# either word changed (they depended on nothing else; perf made them every block)
+MT_KEY, MT_MUL = 36, 38
 
 
 def _tbl_s(p: Prog, L: K.Layout, d: int, x: int) -> None:
@@ -238,6 +242,9 @@ def _init(p: Prog, L: K.Layout, cfg: _Cfg) -> None:
         ss(p, k, 0)
     p.iconst(0, 0)
     ss(p, 9, 0)
+    p.iconst(0, -1)
+    ss(p, MT_KEY, 0)
+    ss(p, MT_KEY + 1, 0)
     # the machine's constants, for the render both share: CF the machine (1: MT), +1 the
     # decay a block, +2 the excitation's zero tail, +3 its clamp, +4 DEC's gain index
     # multiplier, +5 the junction's input gain, +6..8 the taps, +9 the excitation's table
@@ -313,6 +320,7 @@ def _render(p: Prog, L: K.Layout) -> None:
     w(p, 5, 4)                                 # HAMR
     _dbase(p, L, 0, SCR_H)
     p.seti(1, 0)
+    p.ld(1, C["h"])                            # (opt-md) the table's end, held in R1
 
     def exc():
         p.iop(7, 9, "+", 7)                    # the fraction
@@ -320,8 +328,7 @@ def _render(p: Prog, L: K.Layout) -> None:
         p.iop(7, 7, "AND", 10)
         p.iop(6, 8, "+", 6)                    # the offset, and the carry
         p.iop(6, 13, "+", 6)
-        p.ld(12, C["h"])                       # past the table's end it is all zeros
-        p.iop(13, 6, "MIN", 12)
+        p.iop(13, 6, "MIN", 1)                 # past the table's end (R1) it is all zeros
         p.lsh(13, 13, 2)
         p.iop(13, 11, "+", 13)
         p.seti(2, 13)
@@ -383,6 +390,9 @@ def _render(p: Prog, L: K.Layout) -> None:
         p.ifz(0, "NE", tap_mt, tap_bd)
         p.iconst(10, LINE - 1)
         p.iop(6, 6, "AND", 10)
+        p.lsh(6, 6, 2)                         # (opt-md, 2026-11-12) the tap in bytes, R9 its step, R10 the mask
+        p.iconst(10, 4 * (LINE - 1))
+        p.iconst(9, 4)
         _dbase(p, L, 11, LINE * i)
         _dbase(p, L, 0, SCR_H + 32 * (i + 1))
         p.seti(1, 0)
@@ -393,8 +403,7 @@ def _render(p: Prog, L: K.Layout) -> None:
         p.fconst(3, -1.0)
 
         def damp():
-            p.lsh(13, 6, 2)
-            p.iop(13, 11, "+", 13)
+            p.iop(13, 11, "+", 6)
             p.seti(2, 13)
             p.ldi(14, 0, 2)                    # the line's sample
             p.fop(13, 4, "MIN", 2)
@@ -403,8 +412,7 @@ def _render(p: Prog, L: K.Layout) -> None:
             p.fop(14, 14, "-", 13)
             p.fop(14, 5, "*", 14)
             p.fop(4, 4, "+", 14)
-            p.iconst(12, 1)
-            p.iop(6, 12, "+", 6)
+            p.iop(6, 9, "+", 6)
             p.iop(6, 6, "AND", 10)
         p.loop0(32, damp)
         ss(p, 4 + i, 4)
@@ -489,38 +497,44 @@ def _render(p: Prog, L: K.Layout) -> None:
     ss(p, 8, 5)
     # -- MT: the multipliers, interpolated by TUNE (frequency) and POS (curve, gain)
     def mt_mul():
-        p.iconst(0, 0)
-        p.st(C["k"], 0)
+        def state_at(d, k):                    # Rd = the address of state word K (I3 is biased: shrink)
+            p.geti(d, 3)
+            p.iconst(12, p.ioff(3, 4 * (K.S0 + k)))
+            p.iop(d, 12, "+", d)
 
-        def mul():
+        def fill():
+            ss(p, MT_KEY, 1)
+            ss(p, MT_KEY + 1, 3)
+            # array by array: p, q = 1 - p and the two pointers set once an array (I2 the table's words, I1 the
+            # state's), not once a word; the same products in the same order
             for arr, (off, word) in enumerate(((0, 5), (16, 6), (32, 6))):
-                p.ld(0, C["k"])
-                p.lsh(0, 0, 2)
-                p.iconst(12, L.T["PIMT_COEF"] + 4 * off)
-                p.iop(0, 12, "+", 0)
+                p.iconst(0, L.T["PIMT_COEF"] + 4 * off)
                 p.seti(2, 0)
-                p.ldi(14, 0, 2)
-                p.ldi(15, 8, 2)
+                state_at(0, MT_MUL + 8 * arr)
+                p.seti(1, 0)
                 w(p, 7, word)                  # p
                 p.fconst(12, TOP)
                 p.fop(6, 12, "-", 7)           # q = 1 - p (exact)
-                _clear(p)
-                _mac(p, 6, 14)
-                _mac(p, 7, 15)
-                _floor(p, 11, 23)
-                _q(p, 4, 11)
-                p.ld(0, C["k"])
-                p.lsh(0, 0, 2)
-                _sbase(p, L, 12)
-                p.iop(0, 12, "+", 0)
-                p.seti(2, 0)
-                p.sti(SCR_MUL + 8 * arr, 2, 4)
-            p.ld(0, C["k"])
-            p.iconst(12, 1)
-            p.iop(0, 12, "+", 0)
-            p.st(C["k"], 0)
-        p.loop(C["n2"], 8, mul)
-        _dbase(p, L, 0, SCR_MUL)
+
+                def mul():
+                    p.ldi(15, 8, 2)            # the table's word k + 8
+                    p.ldpost(14, 2)            # word k, and I2 on a word
+                    _clear(p)
+                    _mac(p, 6, 14)
+                    _mac(p, 7, 15)
+                    _floor(p, 11, 23)
+                    _q(p, 4, 11)
+                    p.stpost(1, 4)
+                p.loop(C["n2"], 8, mul)
+        w(p, 1, 5)
+        s(p, 2, MT_KEY)
+        w(p, 3, 6)
+        s(p, 4, MT_KEY + 1)
+        p.iop(5, 1, "-", 2)
+        p.iop(6, 3, "-", 4)
+        p.iop(5, 5, "OR", 6)
+        p.ifz(5, "NE", fill)                   # TUNE or POS moved (or the first block after init)
+        state_at(0, MT_MUL)
         p.st(C["d"], 0)
 
     def bd_mul():
@@ -533,6 +547,43 @@ def _render(p: Prog, L: K.Layout) -> None:
     p.iconst(0, 0)
     p.st(C["k"], 0)
 
+    # (opt-md, 2026-11-12) on integer words: every operand is an exact Q23 word, so trunc(F 2^23) is the word itself
+    # and _mac_body's SSF / SSI products are taken on the words directly (inline, no call, no float halves); the
+    # same products, floors and limiter in the same order, floats again only for the three stored coefficients
+    def mac_i(a, b, neg=False):            # R8 += floor(A B / 2^24), R10 += A B mod 2^24 (Ra, Rb words)
+        if neg:
+            p.iconst(12, 0)
+            p.iop(0, 12, "-", a)
+            a = 0
+        p.lsh(1, a, 7)
+        p.mul_ssf(13, 1, b)
+        p.iop(8, 13, "+", 8)
+        p.mul_ssi(13, a, b)
+        p.iconst(12, 0xFFFFFF)
+        p.iop(13, 13, "AND", 12)
+        p.iop(10, 13, "+", 10)
+
+    def clamp_i(r):                        # _q's limiter
+        p.iconst(12, (1 << 23) - 1)
+        p.iop(r, r, "MIN", 12)
+        p.iconst(12, -(1 << 23))
+        p.iop(r, r, "MAX", 12)
+
+    def prod_i(d, a, b, add=0, sh=23, neg=False):
+        _clear(p)
+        mac_i(a, b, neg)
+        _floor(p, 11, sh)
+        if add:
+            p.iconst(12, add)
+            p.iop(11, 12, "+", 11)
+        clamp_i(11)
+        p.ipass(d, 11)
+
+    def word(r):                           # Rr = the Q23 float Fr as its word (exact)
+        p.fconst(12, 2.0 ** 23)
+        p.fop(r, r, "*", 12)
+        p.trunc(r, r)
+
     def coef():
         p.ld(0, C["k"])
         p.lsh(0, 0, 2)
@@ -543,33 +594,42 @@ def _render(p: Prog, L: K.Layout) -> None:
         p.ldi(5, 8, 2)                         # the curve's
         p.ldi(6, 16, 2)                        # the gain
         p.ld(7, C["e"])
-        _prod(p, 4, 4, 7)                      # w
-        _prod(p, 14, 4, 4, neg=True)           # -w^2
-        p.fconst(15, 0x155555 * Q)
-        _prod(p, 15, 14, 15)                   # -w^2 / 6
+        for r in (4, 5, 6, 7):
+            word(r)
+        prod_i(14, 4, 7)                       # w
+        prod_i(15, 14, 14, neg=True)           # -w^2
+        p.iconst(3, 0x155555)
+        prod_i(3, 15, 3)                       # -w^2 / 6
         _clear(p)
-        _mac(p, 4, 4, neg=True)
-        _mac(p, 15, 14)
+        mac_i(14, 14, neg=True)
+        mac_i(3, 15)
         _floor(p, 11, 23)
         p.iconst(12, 0x7FFFFF)
         p.iop(11, 12, "+", 11)
-        _q(p, 4, 11)                           # C
-        w(p, 7, 2)
+        clamp_i(11)
+        p.ipass(4, 11)                         # C
+        w(p, 3, 2)                             # DEC (R3: _clear zeroes R8..R10)
+        word(3)
         _clear(p)
-        _mac(p, 5, 7)
+        mac_i(5, 3)
         _floor(p, 11, 23)
         K.table_f(p, L, 5, "PI_CURVE_142949", 11, 12)    # r
-        _prod(p, 7, 5, 4, sh=22, add=-0x800000)     # c1
-        _prod(p, 14, 5, 5, neg=True)                # c0
+        word(5)
+        prod_i(7, 5, 4, sh=22, add=-0x800000)       # c1
+        prod_i(14, 5, 5, neg=True)                  # c0
         _clear(p)
-        _mac(p, 5, 4)
-        _mac(p, 5, 4)
-        _mac(p, 5, 5, neg=True)
+        mac_i(5, 4)
+        mac_i(5, 4)
+        mac_i(5, 5, neg=True)
         _floor(p, 11, 23)
         p.iconst(12, -0x800000)
         p.iop(11, 12, "+", 11)
-        _q(p, 15, 11)
-        _prod(p, 15, 6, 15, sh=22)                  # c2
+        clamp_i(11)
+        p.ipass(15, 11)
+        prod_i(15, 6, 15, sh=22)                    # c2
+        p.iconst(12, -23)
+        for r in (14, 7, 15):
+            p.float_(r, r, 12)
         p.ld(0, C["k"])
         p.lsh(1, 0, 3)
         p.lsh(0, 0, 2)

@@ -101,28 +101,40 @@ def _each(p: Prog, L: K.Layout, body) -> None:
 
 
 def _line(p: Prog, L: K.Layout, j: int, pos: int, tap: int | None, ri: int, rb: int) -> None:
-    """Rri = line j's index (state POS + state TAP, mod 512), Rrb = line j's address."""
+    """Rri = line j's index (state POS + state TAP, mod 512) in bytes (opt-md, 2026-11-12: x 4),
+    Rrb = line j's address; R1 = 4, R3 = 0x7FC (_at's step and mask)."""
     s(p, ri, pos)
     if tap is not None:
         s(p, 12, tap)
         p.iop(ri, 12, "+", ri)
-        p.iconst(12, 511)
-        p.iop(ri, ri, "AND", 12)
+    p.iconst(12, 511)
+    p.iop(ri, ri, "AND", 12)
+    p.lsh(ri, ri, 2)
     p.ld(rb, L.C["g"])
     if j:
         p.iconst(12, 2048 * j)
         p.iop(rb, 12, "+", rb)
+    p.iconst(1, 4)
+    p.iconst(3, 0x7FC)
 
 
 def _at(p: Prog, ri: int, rb: int) -> None:
-    """I2 = line word Rri (Rrb its line), and Rri moves on one (mod 512). Clobbers R12, R13."""
-    p.lsh(12, ri, 2)
-    p.iop(13, 12, "+", rb)
+    """I2 = line word Rri / 4 (Rri a byte index, Rrb its line), and Rri moves on a word (mod 512
+    words: R1 = 4, R3 = 0x7FC, _line's). Clobbers R13."""
+    p.iop(13, ri, "+", rb)
     p.seti(2, 13)
-    p.iconst(12, 1)
-    p.iop(ri, 12, "+", ri)
-    p.iconst(12, 511)
-    p.iop(ri, ri, "AND", 12)
+    p.iop(ri, ri, "+", 1)
+    p.iop(ri, ri, "AND", 3)
+
+
+def _satr(p: Prog, x: int, top: int, bot: int | None) -> None:
+    """K.sat with the bounds held in registers (opt-md, 2026-11-12): F<top> = TOP, F<bot> = -1 (None:
+    -1 loaded into R12)."""
+    p.fop(x, x, "MIN", top)
+    if bot is None:
+        p.fconst(12, -1.0)
+        bot = 12
+    p.fop(x, x, "MAX", bot)
 
 
 def _onepole(p: Prog, L: K.Layout, st: int, coef, src, dst: int, extra=None) -> None:
@@ -134,6 +146,9 @@ def _onepole(p: Prog, L: K.Layout, st: int, coef, src, dst: int, extra=None) -> 
     line = isinstance(src, tuple)
     if line:
         _line(p, L, src[0], src[1], src[2], 10, 11)
+    if extra is None:                          # (opt-md) the limiter's bounds in F14, F15
+        p.fconst(14, TOP)
+        p.fconst(15, -1.0)
 
     def body():
         if line:
@@ -142,7 +157,10 @@ def _onepole(p: Prog, L: K.Layout, st: int, coef, src, dst: int, extra=None) -> 
         else:
             p.ldi(6, src, 5)
         p.fpass(7, 4)
-        K.sat(p, 7)
+        if extra is None:
+            _satr(p, 7, 14, 15)
+        else:
+            K.sat(p, 7)
         p.sti(dst, 5, 7)
         p.fop(13, 8, "*", 6)
         p.fop(4, 4, "+", 13)
@@ -497,6 +515,8 @@ class _PI:
         K.sat(p, 6)
         K.mul_k(p, 8, 6, 0x266666 * Q)
         K.mul_k(p, 9, 6, 0x59999A * Q)
+        p.fconst(14, TOP)                          # (opt-md) the limiter's bounds
+        p.fconst(15, -1.0)
 
         def mix():
             p.ldi(5, N, 5)
@@ -508,12 +528,12 @@ class _PI:
                 p.fop(4, 4, "+", 4)
                 p.fop(6, 9, "*", 5)
             p.fop(4, 4, "+", 6)
-            K.sat(p, 4)
+            _satr(p, 4, 14, 15)
             p.sti(X40, 5, 4)
             p.ldi(4, X60, 5)
             p.fop(6, 8, "*", 5)
             p.fop(4, 4, "+", 6)
-            K.sat(p, 4)
+            _satr(p, 4, 14, 15)
             p.sti(X60, 5, 4)
         _each(p, L, mix)
 
@@ -522,24 +542,21 @@ class _PI:
         p.ld(9, C["a"])
         p.ld(10, C["b"])
         p.ld(11, C["g"])
+        # (opt-md, 2026-11-12) the three lines' write positions (state 20..22) start at 0 together (_init)
+        # and move on together, a word a sample: one index R1 for all three, the address worked out once
+        # a sample, line j at + 512 j words (R3 = 511: the mask)
         s(p, 1, 20)
-        s(p, 2, 21)
-        s(p, 3, 22)
+        p.iconst(3, 511)
+        p.iop(1, 1, "AND", 3)
+        p.fconst(2, TOP)                           # (opt-md) the limiter's top
 
         def put(ri: int, j: int, v: int) -> None:
-            p.lsh(12, ri, 2)
-            p.iop(13, 11, "+", 12)
-            if j:
-                p.iconst(12, 2048 * j)
-                p.iop(13, 12, "+", 13)
-            p.seti(2, 13)
-            p.sti(0, 2, v)
-            p.iconst(12, 1)
-            p.iop(ri, 12, "+", ri)
-            p.iconst(12, 511)
-            p.iop(ri, ri, "AND", 12)
+            p.sti(512 * j, 2, v)
 
         def junction():
+            p.lsh(12, 1, 2)
+            p.iop(13, 11, "+", 12)
+            p.seti(2, 13)
             p.ldi(4, X60, 5)
             p.ldi(5, X80, 5)
             p.ldi(6, XA0, 5)
@@ -547,23 +564,26 @@ class _PI:
             p.fop(14, 8, "*", 4)
             p.fop(15, 9, "*", 5)
             p.fop(15, 14, "+", 15)
-            K.sat(p, 15)
+            _satr(p, 15, 2, None)
             put(3, 2, 15)
             p.fop(4, 10, "*", 7)
             p.fop(15, 10, "*", 6)
             p.fop(15, 14, "+", 15)
             p.fop(15, 15, "+", 4)
-            K.sat(p, 15)
+            _satr(p, 15, 2, None)
             put(2, 1, 15)
             p.fop(15, 10, "*", 6)
             p.fop(15, 14, "-", 15)
             p.fop(15, 15, "+", 4)
-            K.sat(p, 15)
+            _satr(p, 15, 2, None)
             put(1, 0, 15)
+            p.iconst(12, 1)
+            p.iop(1, 12, "+", 1)
+            p.iop(1, 1, "AND", 3)
         _each(p, L, junction)
         ss(p, 20, 1)
-        ss(p, 21, 2)
-        ss(p, 22, 3)
+        ss(p, 21, 1)
+        ss(p, 22, 1)
 
         # the lines' sum, highpassed by a leaky integrator, onto the body (SD) or as the
         # modes' input (RS)
@@ -571,6 +591,8 @@ class _PI:
         s(p, 4, 32)
         s(p, 5, 33)
         p.fpass(6, 4)
+        p.fconst(14, TOP)                          # (opt-md) the limiter's bounds
+        p.fconst(15, -1.0)
 
         def hp():
             p.ldi(7, XA0, 5)
@@ -583,17 +605,17 @@ class _PI:
             else:
                 p.ldi(9, X40, 5)
                 p.fop(9, 9, "+", 6)
-                K.sat(p, 9)
+                _satr(p, 9, 14, 15)
                 p.sti(X40, 5, 9)
             p.fpass(10, 4)
-            K.sat(p, 10)
+            _satr(p, 10, 14, 15)
             p.fop(4, 4, "-", 5)
             p.fop(4, 4, "+", 7)
             p.fop(11, 8, "*", 10)
             p.fop(4, 4, "-", 11)
             p.fpass(6, 10)
             p.fpass(5, 7)
-            K.sat(p, 5)
+            _satr(p, 5, 14, 15)
         _each(p, L, hp)
         K.sat(p, 4)
         ss(p, 32, 4)

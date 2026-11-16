@@ -34,7 +34,10 @@ Q23 = K.Q23
 
 # -- arithmetic helpers -----------------------------------------------------------------
 def ifloat(p: Prog, d: int, a: int, sc: int = 0, t: int = 12) -> None:
-    """Fd = Ra * 2^sc."""
+    """Fd = Ra * 2^sc. (opt-md, 2026-11-12: SC 0 is the plain FLOAT Ra, no count to load.)"""
+    if sc == 0:
+        p.float0(d, a)
+        return
     p.iconst(t, sc)
     p.float_(d, a, t)
 
@@ -121,13 +124,14 @@ def hp_coefs(p: Prog, k: int, ke: int, kd: int) -> None:
     ss(p, kd, 1)
 
 
-def hp(p: Prog, st: int, ke: int, kd: int, half: float | None) -> None:
+def hp(p: Prog, st: int, ke: int, kd: int, half: float | None, top: int | None = None) -> None:
     """One sample of the high-pass on the integer word R1: R2 = y (an integer word),
     F4 = y as Q23. State S[st] = hi(u[n-1]), S[st+1] = y[n-1] (integers).
       y = sat(x k - hi(u[n-1]) + c y[n-1])     u = x k
     with x k = x - x e and c y = y - y d, so y = (x - s + y) - ceil(x e + y d [- 1/2]) and
     the new state hi(x k) = x - ceil(x e). HALF: 0.5 for the rounded form (macr), None
-    for the truncated (mac); 'reg' to take it from F3. Clobbers R1-R3, R5, R6, R9-R13."""
+    for the truncated (mac); 'reg' to take it from F3. TOP: a register the caller holds
+    0x7FFFFF in (opt-md), else R12 is loaded. Clobbers R1-R3, R5, R6, R9-R13."""
     ifloat(p, 5, 1)
     s(p, 6, ke)
     p.fop(5, 5, "*", 6)                        # x e
@@ -147,8 +151,10 @@ def hp(p: Prog, st: int, ke: int, kd: int, half: float | None) -> None:
     p.iop(2, 1, "-", 2)
     p.iop(2, 9, "+", 2)                        # x - s + y
     p.iop(2, 2, "-", 10)
-    p.iconst(12, 0x7FFFFF)
-    p.iop(2, 2, "MIN", 12)
+    if top is None:
+        p.iconst(12, 0x7FFFFF)
+        top = 12
+    p.iop(2, 2, "MIN", top)
     p.iconst(12, -0x800000)
     p.iop(2, 2, "MAX", 12)
     ss(p, st + 1, 2)
@@ -234,13 +240,23 @@ def xround(p: Prog, d: int, ah: int, al: int, b: int) -> None:
     xround_i(p, d, 1, b)
 
 
-def xround_i(p: Prog, d: int, a: int, b: int) -> None:
+def xround_i(p: Prog, d: int, a: int, b: int, cr: tuple[int, int, int] | None = None) -> None:
     """xround with A = 2a an integer in Ra (0 <= A < 2^25), not halves (perf, 2026-11-10: where the
-    integer is at hand, or kept as one). Clobbers R2, R3, R12, R13."""
+    integer is at hand, or kept as one). CR: registers the caller holds M24, 1 and 0x7FFFFF in
+    (opt-md, 2026-11-12: three constant loads fewer). Clobbers R2, R3, R12, R13."""
     assert a not in (2, 3, 12, 13) and b not in (2, 3, 12, 13)
     p.lsh(2, b, 7)                             # Rb 2^7: |.| < 2^30
     p.mul_ssf(3, a, 2)                         # q = floor(A Rb / 2^24)
     p.mul_ssi(13, a, b)
+    if cr is not None:
+        m24, one, half = cr
+        p.iop(13, 13, "AND", m24)              # r = A Rb mod 2^24
+        p.iop(2, 3, "AND", one)
+        p.iop(13, 13, "+", 2)
+        p.iop(13, 13, "+", half)
+        p.lsh(13, 13, -24)                     # 1 iff r > 2^23, or r = 2^23 and q odd
+        p.iop(d, 13, "+", 3)
+        return
     p.iconst(12, M24)
     p.iop(13, 13, "AND", 12)                   # r = A Rb mod 2^24
     p.iconst(12, 1)
@@ -1255,6 +1271,23 @@ class EFMCY:
         # (perf, 2026-11-11) the four operators unrolled, I0 = slot state word 16 (S0 + 16): every state word is
         # then DM(k - 16, I0), the host words DM(1 + j / 6 + j, I3), all within a compute's move (-32..31); no
         # operator base in C['b'] to reload after each table read, no loop
+        # (opt-md, 2026-11-12) constants held through the block: R8 M24, R14 0x7FFFFF, R15 the sine
+        # table's address; R0 (free inside out_loop's body, loop() reloads it) 1 each sample
+        cr = (8, 0, 14)
+        p.iconst(8, M24)
+        p.iconst(14, 0x7FFFFF)
+        p.iconst(15, L.T["sine"])
+
+        def sine(idx):
+            """R7 = SINE[Ridx] as an integer word, through R15 (sine_i without the address load).
+            Clobbers F4, R12, I1; reads F10."""
+            p.lsh(12, idx, 2)
+            p.iop(4, 15, "+", 12)
+            p.seti(1, 4)
+            p.ldi(4, 0, 1)
+            p.fop(7, 4, "*", 10)               # (F10 = 2^23, set in one())
+            p.trunc(7, 7)
+
         def op(j):
             def ldw(d, k):
                 p.ldi(d, k - 16, 0)
@@ -1264,32 +1297,33 @@ class EFMCY:
             ldw(11, o["mph"] + j)              # the modulator's offset
             p.ldi(3, 6 + j, 3)
             p.iop(13, 11, "+", 3)
-            p.iconst(12, 0x7FFF)
-            p.iop(13, 13, "AND", 12)
+            p.iop(13, 13, "AND", 9)
             stw(o["mph"] + j, 13)
-            sine_i(p, L, 7, 4, 11)
+            sine(11)
             ldw(5, o["w10"])
-            xround_i(p, 7, 5, 7)               # round(MOD * sine)
+            xround_i(p, 7, 5, 7, cr)           # round(MOD * sine)
             ldw(5, o["env2"])
-            xround_i(p, 7, 5, 7)               # * the mod env (rounded)
+            xround_i(p, 7, 5, 7, cr)           # * the mod env (rounded)
             ldw(11, o["fb"] + j)
             p.iop(7, 11, "+", 7)               # b = fb + mod
             ldw(11, o["cph"] + j)
             p.iop(2, 11, "+", 7)
-            p.iconst(12, 0x7FFF)
-            p.iop(2, 2, "AND", 12)
+            p.iop(2, 2, "AND", 9)
             p.ldi(3, 1 + j, 3)
             p.iop(13, 11, "+", 3)              # phase + inc
             stw(o["cph"] + j, 13)
-            sine_i(p, L, 7, 4, 2)
+            sine(2)
             ldw(11, o["sum"])
             p.iop(11, 11, "+", 7)
             stw(o["sum"], 11)
             ldw(5, o["w12"])
-            xround_i(p, 7, 5, 7)               # fb = round(FB * sine)
+            xround_i(p, 7, 5, 7, cr)           # fb = round(FB * sine)
             stw(o["fb"] + j, 7)
 
         def one():
+            p.iconst(0, 1)                     # (opt-md) for the four operators: R0 1, R9 0x7FFF, F10 2^23
+            p.iconst(9, 0x7FFF)                # (the high-passes below clobber R9, R10)
+            p.fconst(10, 2.0 ** 23)
             zero(p, o["sum"])
             p.geti(13, 3)
             p.iconst(12, p.ioff(3, 4 * (K.S0 + 16)))                       # (I3 is biased: shrink)
@@ -1305,13 +1339,13 @@ class EFMCY:
             p.ash(7, 7, -2)                    # the mix
             s(p, 11, o["amp"])
             p.lsh(11, 11, 1)
-            xround_i(p, 7, 11, 7)
+            xround_i(p, 7, 11, 7, cr)
             ss(p, TMP, 7)
             edec(p, o["amp"], o["dec"])
             s(p, 1, TMP)
-            hp(p, o["hp1"], o["hpe"], o["hpd"], 0.5)
+            hp(p, o["hp1"], o["hpe"], o["hpd"], 0.5, 14)
             p.ipass(1, 2)
-            hp(p, o["hp2"], o["hpe"], o["hpd"], 0.5)
+            hp(p, o["hp2"], o["hpe"], o["hpd"], 0.5, 14)
         out_loop(p, L, one)
 
 

@@ -156,6 +156,11 @@ DSP_TABLES = {
 }
 from .pi_tables import TABLES as _PI_TABLES          # noqa: E402  (v0.24: P-I's)
 DSP_TABLES.update(_PI_TABLES)
+# (opt-md, 2026-11-12) tables that are, word for word, a stretch of another one (name -> (that table, word offset)):
+# the DSP keeps only the other, and the name points into it (core._table_layout; checked word for word there).
+# TRX CH's waves 2..5 lie inside wave 1 (juno-engine's table inventory): 1,104 bytes fewer
+DSP_ALIASES = {"TRXCH_W2": ("TRXCH_W1", 8), "TRXCH_W3": ("TRXCH_W1", 11), "TRXCH_W4": ("TRXCH_W1", 22),
+               "TRXCH_W5": ("TRXCH_W1", 25)}
 
 
 @functools.lru_cache(maxsize=None)

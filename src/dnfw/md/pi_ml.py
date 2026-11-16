@@ -93,6 +93,37 @@ def to_word(p: Prog, d: int, a: int) -> None:
     p.trunc(d, d)
 
 
+# (opt-md, 2026-11-12) floor23's constants and the limiter's bounds, where a loop holds them in registers
+F_ONE, F_M23, F_TOP, F_M1, F_P23 = 1, 2, 3, 4, 15
+
+
+def consts(p: Prog) -> None:
+    """F1 = 1, F2 = 2^-23, F3 = TOP, F4 = -1, F15 = 2^23 (floor23r's and satr's)."""
+    p.fconst(F_ONE, 1.0)
+    p.fconst(F_M23, 2.0 ** -23)
+    p.fconst(F_TOP, K.TOP)
+    p.fconst(F_M1, -1.0)
+    p.fconst(F_P23, 2.0 ** 23)
+
+
+def satr(p: Prog, x: int) -> None:
+    """K.sat with the bounds in F3, F4 (consts)."""
+    p.fop(x, x, "MIN", F_TOP)
+    p.fop(x, x, "MAX", F_M1)
+
+
+def floor23r(p: Prog, d: int, a: int, t: int, u: int) -> None:
+    """floor23 with its constants in registers (consts) and no jump: d = float(trunc(u)), one less
+    where d > u (the flags of d - u: a float difference is 0 only where the two are equal, and has
+    the exact difference's sign), then d 2^-23 (exact). Clobbers Rt, Ru (d may be a)."""
+    p.fop(u, a, "*", F_P23)
+    p.trunc(t, u)
+    p.float0(d, t)
+    p.fop(t, d, "-", u)
+    p.fop_if("GT", d, d, "-", F_ONE)
+    p.fop(d, d, "*", F_M23)
+
+
 def floor23(p: Prog, d: int, a: int, t: int, u: int) -> None:
     """Fd = Fa floored to the Q23 grid (either sign). Clobbers R12, Rt, Ru (d may be a)."""
     K.mul_k(p, u, a, 2.0 ** 23)
@@ -383,37 +414,61 @@ class PIML:
         p.fconst(1, 0.0)
         p.loop0(31, lambda: p.stpost(5, 1))
         for i in range(8):
-            s(p, 5, M.COEF + 3 * i)
-            s(p, 6, M.COEF + 3 * i + 1)
-            s(p, 7, M.COEF + 3 * i + 2)
+            # (opt-md, 2026-11-12) the mode on the multiplier || ALU (PI-SD's form), in a hardware loop: the same
+            # operations on the same operands in the same order. F4..F6 k2, k1, g; F1 x1, F2 xw, F3 x; F8 a; the
+            # products in F12..F14; F7 2^23, F9 2^-23, F11 1, F15 TOP, F0 -1 (floor23r's and the limiter's)
+            s(p, 4, M.COEF + 3 * i)
+            s(p, 5, M.COEF + 3 * i + 1)
+            s(p, 6, M.COEF + 3 * i + 2)
             s(p, 8, M.RES + 2 * i)                      # a (48-bit, a float)
-            s(p, 9, M.RES + 2 * i + 1)                  # x1: the word before
-            floor23(p, 10, 8, 13, 14)                   # xw: a's word (stored limited)
-            K.sat(p, 10)
+            s(p, 1, M.RES + 2 * i + 1)                  # x1: the word before
+            floor23(p, 2, 8, 13, 14)                    # xw: a's word (stored limited)
+            K.sat(p, 2)
             p.ld(0, C["mdb"])
             p.iconst(12, 4 * (K.S0 + M.LPB))
-            p.iop(1, 12, "+", 0)
-            p.seti(5, 1)
+            p.iop(3, 12, "+", 0)
+            p.seti(0, 3)                                # (I0: a compute's move reaches I0..I3 only)
             p.iconst(12, 4 * K.OUT0)
-            p.iop(1, 12, "+", 0)
-            p.seti(2, 1)
+            p.iop(3, 12, "+", 0)
+            p.seti(2, 3)
+            p.fconst(7, 2.0 ** 23)
+            p.fconst(9, 2.0 ** -23)
+            p.fconst(11, 1.0)
+            p.fconst(15, K.TOP)
+            p.fconst(0, -1.0)
+
+            def pad():                                  # a harmless read (F3 is dead until the next x): the
+                p.ldi(3, 0, 0)                          # loop's last 11 instructions must be 48-bit (hwrules)
 
             def mode():
-                p.ldpost(11, 5)
-                p.fop(13, 9, "*", 5)
-                p.fop(8, 8, "+", 13)
-                p.fop(13, 10, "*", 6)
-                p.fop(8, 8, "+", 13)
-                p.fop(13, 11, "*", 7)
-                p.fop(8, 8, "+", 13)
-                p.fpass(9, 10)
-                floor23(p, 10, 8, 13, 14)                # a's word, before the limiter
+                p.par(("*", 12, 1, 4), ("ld", 3, 0))    # p1 = x1 k2; x
+                p.par(("*", 13, 2, 5), ("+", 8, 8, 12))  # p2 = xw k1; a + p1
+                p.par(("*", 14, 3, 6), ("+", 8, 8, 13))  # p3 = x g; + p2
+                p.fpass(1, 2)                           # x1 = xw (limited)
+                p.fop(8, 8, "+", 14)                    # + p3
+                p.fop(10, 8, "*", 7)                    # floor23r (F10 u, R13 t), into F2
+                pad()
+                p.trunc(13, 10)
+                pad()
+                p.float0(2, 13)
+                pad()
+                p.fop(13, 2, "-", 10)
+                pad()                                   # (a move on the subtract leaves its flags to the IF)
+                p.fop_if("GT", 2, 2, "-", 11)
+                p.fop(2, 2, "*", 9)                     # a's word, before the limiter
                 p.ldi(14, 0, 2)
-                p.fop(14, 14, "+", 10)
-                K.sat(p, 14)
-                p.stpost(2, 14)
-                K.sat(p, 10)                            # x1 takes it through the limiter
-            p.loop0(32, mode)
+                p.fop(14, 14, "+", 2)
+                pad()
+                p.fop(14, 14, "MIN", 15)
+                pad()
+                p.fop(14, 14, "MAX", 0)
+                pad()
+                p.stpost(2, 14)                         # (on the next instruction)
+                p.fop(2, 2, "MIN", 15)                  # x1 takes it through the limiter
+                p.fop(2, 2, "MAX", 0)
+                pad()
+            p.loop_hw(32, mode, cnt=12)
+            p.fpass(9, 1)                               # (x1 where the code below keeps it)
             # stored as the firmware stores it: A1 through the limiter, A0 as it is
             floor23(p, 11, 8, 13, 14)
             p.fop(13, 8, "-", 11)                       # A0
@@ -436,10 +491,12 @@ class PIML:
         p.iop(1, 12, "+", 0)
         p.seti(2, 1)
 
+        consts(p)
+
         def out():
             p.ldi(6, 0, 2)
             p.fop(6, 6, "*", 5)
-            floor23(p, 6, 6, 13, 14)
+            floor23r(p, 6, 6, 13, 14)
             p.stpost(2, 6)
         p.loop0(32, out)
 

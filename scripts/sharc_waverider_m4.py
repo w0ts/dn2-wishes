@@ -200,12 +200,19 @@ def unpack_call(state_runner, frame: bytes, i7: int | None = None):
     the engine task's caller restores its stack every call)"""
     s = state_runner.state
     idx = m2.word(s, RX_INDEX) or 0
+    # 2026-11-12 (opt-md): every block from the caller's same I7. A block's run stops on the routine's return
+    # jump, before its delay slots put I7 back, so the I7 a finished block leaves is its frame's, not the
+    # caller's: taken from there, the software stack sank 288 bytes a block into L1 and a saved return word
+    # was overwritten (every run halted at block ~351, "return target ... differs from recorded return").
+    # The caller's I7 is the first block's, carried on each block's runner.
+    i7 = getattr(state_runner, "entry_i7", None)
     if i7 is None:
         i7 = m2.word_reg(state_runner, "I7")
     rx = RX_BASE + (idx << 8)
     r = state_runner.fresh_call(UNPACK, regs={"R4": 0x268438, "R8": UNPACK_LOCAL, "R12": rx,
                                               "I6": i7, "I7": i7 - 16},
                                 return_address=UNPACK_CALLER)
+    r.entry_i7 = i7
     for k in range(10):
         m2.poke(r.state, UNPACK_LOCAL + 4 * k, 0)
     m2.poke(r.state, i7 + 4, 0)

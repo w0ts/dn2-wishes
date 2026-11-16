@@ -70,7 +70,6 @@ XB = 4 * LSTRIDE                 # DSP2's internal X:$00..$FF
 NZ = XB + 256                    # the noise words (Y:$00..$21), ints << 8
 SB = XB + 0x40                   # the mix's 32 outputs
 XB_WORDS = 256
-XB_KEEP = 64                     # words copied between the slot and L1 (perf)
 
 
 _L1 = [False]                    # emit-time: inside render() XB is the L1 rows (host / init keep the slot's)
@@ -78,9 +77,12 @@ _L1 = [False]                    # emit-time: inside render() XB is the L1 rows 
 
 def _xb(p: Prog, L: K.Layout, d: int, k: int = 0) -> None:
     """Rd = the address of XB word k. Clobbers R12. perf, 2026-11-11: in a PERC layout XB is the render scratch's
-    L1 rows (core.Layout.pi_scr, shared: every voice renders alone) and not the slot's DDR delay area: its words
-    0..XB_KEEP-1 (read-first in a block: state that lives from block to block, 8..37 observed) are copied in from
-    the slot at the start of render and back at its end (_xb_copy); the rest are written before they are read"""
+    L1 rows (core.Layout.pi_scr, shared: every voice renders alone) and not the slot's DDR delay area. opt-md,
+    2026-11-12: render writes every XB word before it reads it (the state between blocks is in the slot's S
+    words), so nothing is copied in or out any more (perf copied words 0..63 both ways, ~1,300 a block): no XB
+    word read before it was written in 90 runs x 150 blocks a machine (random and extreme knobs, notes, trigs),
+    and the output without the copies, the L1 rows poisoned before every block, identical to the output with
+    them (54 runs); host / init / trig never touch XB"""
     if _L1[0] and L.pi_scr is not None:
         assert XB_WORDS <= K.PI_SCR_WORDS
         p.iconst(d, L.pi_scr + 4 * k)
@@ -90,34 +92,26 @@ def _xb(p: Prog, L: K.Layout, d: int, k: int = 0) -> None:
     p.iop(d, 12, "+", d)
 
 
-def _xb_copy(p: Prog, L: K.Layout, to_l1: bool) -> None:
-    """XB_KEEP words between the slot's DDR XB (C['k']) and the L1 rows. Clobbers R3, R11, R12, I1, I2"""
-    p.ld(12, L.C["k"])
-    p.iconst(3, 4 * XB)
-    p.iop(12, 12, "+", 3)
-    src, dst = (12, None) if not to_l1 else (12, None)
-    p.seti(1 if to_l1 else 2, 12)
-    p.iconst(12, L.pi_scr)
-    p.seti(2 if to_l1 else 1, 12)
-
-    def one():
-        p.ldpost(3, 1)
-        p.stpost(2, 3)
-    p.loop_r(11, XB_KEEP, one)
-
-
-def _qf(p: Prog, x: int) -> None:
-    """Fx floored to the Q23 grid, clamped (the 56300's store). Clobbers R12-R14."""
-    p.fconst(12, 2.0 ** 23)
-    p.fop(x, x, "*", 12)
+def _qf(p: Prog, x: int, cr: tuple[int, int, int] | None = None) -> None:
+    """Fx floored to the Q23 grid, clamped (the 56300's store). CR (opt-md, 2026-11-12): registers the caller
+    holds 2^23 (a float), 0x7FFFFF and -0x800000 in. Clobbers R12-R14."""
+    if cr is None:
+        p.fconst(12, 2.0 ** 23)
+        k23, top, bot = 12, None, None
+    else:
+        k23, top, bot = cr
+    p.fop(x, x, "*", k23)
     p.trunc(13, x)
-    p.iconst(12, 0)
-    p.float_(14, 13, 12)
+    p.float0(14, 13)                          # (opt-md: the plain FLOAT, no count to load)
     p.if_(x, "LT", 14, lambda: (p.iconst(12, -1), p.iop(13, 12, "+", 13)))
-    p.iconst(12, 0x7FFFFF)
-    p.iop(13, 13, "MIN", 12)
-    p.iconst(12, -0x800000)
-    p.iop(13, 13, "MAX", 12)
+    if top is None:
+        p.iconst(12, 0x7FFFFF)
+        top = 12
+    p.iop(13, 13, "MIN", top)
+    if bot is None:
+        p.iconst(12, -0x800000)
+        bot = 12
+    p.iop(13, 13, "MAX", bot)
     p.iconst(12, -23)
     p.float_(x, 13, 12)
 
@@ -344,8 +338,6 @@ class _Cym:
         K.delay_base(p, L, 0)
         p.st(C["k"], 0)
         _L1[0] = L.pi_scr is not None
-        if _L1[0]:
-            _xb_copy(p, L, True)
         cls._envelopes(p, L)
         cls._noise(p, L)
         if cls.KIND == "RC":
@@ -358,8 +350,6 @@ class _Cym:
         cls._gain(p, L)
         cls._lines(p, L)
         cls._click(p, L)
-        if _L1[0]:
-            _xb_copy(p, L, False)
         _L1[0] = False
 
     # 1 ---------------------------------------------------------------------------------
@@ -613,6 +603,10 @@ class _Cym:
         p.iop(0, 12, "+", 0)
         p.seti(2, 0)
         s(p, 5, sa)
+        cr = (10, 11, 15)                       # (opt-md) _qf's constants, held through the loop
+        p.fconst(10, 2.0 ** 23)
+        p.iconst(11, 0x7FFFFF)
+        p.iconst(15, -0x800000)
 
         def one():
             p.fop(8, 1, "*", 6)
@@ -629,7 +623,7 @@ class _Cym:
             p.fop(8, 4, "*", 8)
             p.fop(5, 5, "+", 8)
             p.fpass(9, 5)
-            _qf(p, 9)
+            _qf(p, 9, cr)
             p.stpost(2, 9)
             p.fpass(6, 7)
             p.fpass(7, 9)
@@ -908,19 +902,18 @@ class _Cym:
             p.fop(0, 0, "*", 12)                # h e
             p.fconst(12, -0.5 * Q)              # the stores' floor, on average
             p.fop(0, 0, "+", 12)
-            p.ld(5, C["f"])                     # kc
             p.seti(5, 10)
             p.fop(6, 3, "-", 4)                 # Q - R
-            p.fop(6, 6, "*", 5)
+            p.fop(6, 6, "*", 7)                 # (F7: kc, opt-md)
             p.fop(6, 0, "+", 6)                 # line 0
             p.fop(13, 3, "+", 4)                # Q + R
-            p.fop(13, 13, "*", 5)
+            p.fop(13, 13, "*", 7)
             p.fop(13, 0, "-", 13)               # line 1
             p.fop(14, 1, "-", 2)                # S - P
-            p.fop(14, 14, "*", 5)
+            p.fop(14, 14, "*", 7)
             p.fop(14, 0, "+", 14)               # line 2
             p.fop(15, 1, "+", 2)                # S + P
-            p.fop(15, 15, "*", 5)
+            p.fop(15, 15, "*", 7)
             p.fop(15, 0, "+", 15)               # line 3
             for j, r in enumerate((6, 13, 14, 15)):
                 p.sti(j * LSTRIDE, 5, r)
@@ -953,6 +946,7 @@ class _Cym:
             p.fop(4, 4, "+", 0)
 
         def chunk():
+            p.ld(7, C["f"])                     # (opt-md) kc in F7 through the samples (_qf below takes R12-R14)
             p.loop(C["n2"], 8, sample, one=12)
             for j in range(4):                  # the states are stored as words
                 p.fpass(5, 1 + j)
@@ -1104,6 +1098,20 @@ class _Cym:
         p.iop(bl, 13, "+", bl)
 
     @staticmethod
+    def _mac_i(p: Prog, bh: int, bl: int, ks: int, k: int, ys: int, y: int) -> None:
+        """_mac on the fixed-point multiplier (opt-md, 2026-11-12): (Rbh, Rbl) += 2 K y, K and y integer
+        words, Rks Rys = K y 2^8 (the operands shifted up, each still a 32-bit word): Rbh += floor(2 K y / 2^24)
+        (SSF), Rbl += 2 K y mod 2^24 (SSI's low word): the same sum Rbh 2^24 + Rbl as _mac's, so the same
+        words once normalised. Clobbers R12-R14."""
+        p.mul_ssf(13, ks, ys)
+        p.iop(bh, 13, "+", bh)
+        p.mul_ssi(14, k, y)
+        p.lsh(14, 14, 1)
+        p.iconst(12, 0xFFFFFF)
+        p.iop(14, 14, "AND", 12)
+        p.iop(bl, 14, "+", bl)
+
+    @staticmethod
     def _norm(p: Prog, bh: int, bl: int) -> None:
         """Carry Rbl's bits from 24 up into Rbh. Clobbers R12, R13."""
         p.lsh(13, bl, -24)
@@ -1157,23 +1165,23 @@ class _Cym:
                 p.stpost(2, h)
                 p.stpost(2, l)
         p.ifz(0, "NE", build)
-        # the coefficients' halves: K0 = C0 in F3, F4; K1 = 2 C1 in F5, F6
-        p.ld(0, C["a"])
-        cls._split(p, 3, 4, 0)
+        # (opt-md, 2026-11-12) the products on the fixed-point multiplier (_mac_i): K0 = C0 and K0 2^8 in
+        # C['b'], C['a']; K1 = 2 C1 (25 bits) and K1 2^7 in C['d'], C['c'], times y_(j-1) 2^1 (R10)
         p.ld(0, C["b"])
-        p.lsh(0, 0, 1)
-        cls._split(p, 5, 6, 0)
-        p.st(C["a"], 3)
-        p.st(C["b"], 4)
-        p.st(C["c"], 5)
-        p.st(C["d"], 6)
+        p.lsh(0, 0, 1)                          # K1 = 2 C1
+        p.st(C["d"], 0)
+        p.lsh(0, 0, 7)
+        p.st(C["c"], 0)
+        p.ld(0, C["a"])                         # K0 = C0
+        p.st(C["b"], 0)
+        p.lsh(0, 0, 8)
+        p.st(C["a"], 0)
         s(p, 1, BH)
         s(p, 2, BL)
-        s(p, 0, Y330)
-        cls._split(p, 7, 8, 0)                  # y_(j-2)
-        p.ipass(0, 1)
-        _sat(p, 0)
-        cls._split(p, 9, 10, 0)                 # y_(j-1)
+        s(p, 7, Y330)                           # y_(j-2)
+        p.ipass(9, 1)
+        _sat(p, 9)                              # y_(j-1)
+        p.lsh(10, 9, 1)
         _xb(p, L, 0, 0x60)
         p.seti(2, 0)                            # U
         _xb(p, L, 0, 2)
@@ -1184,10 +1192,10 @@ class _Cym:
         def one():
             p.ld(3, C["a"])
             p.ld(4, C["b"])
-            cls._mac(p, 1, 2, 3, 4, 7, 8)
+            cls._mac_i(p, 1, 2, 3, 4, 7, 7)
             p.ld(3, C["c"])
             p.ld(4, C["d"])
-            cls._mac(p, 1, 2, 3, 4, 9, 10)
+            cls._mac_i(p, 1, 2, 3, 4, 10, 9)
             p.ldpost(3, 2)
             p.ipass(13, 3)
             p.iop(1, 13, "+", 1)
@@ -1201,9 +1209,9 @@ class _Cym:
             p.iconst(12, -23)
             p.float_(3, 0, 12)
             p.stpost(1, 3)
-            p.fpass(7, 9)
-            p.fpass(8, 10)
-            cls._split(p, 9, 10, 0)
+            p.ipass(7, 9)                       # y_(j-2), y_(j-1) (and 2 y_(j-1)) move on
+            p.ipass(9, 0)
+            p.lsh(10, 0, 1)
         p.loop(C["n1"], 32, one)
         ss(p, BH, 1)
         ss(p, BL, 2)

@@ -323,6 +323,11 @@ def _table_layout() -> dict[str, tuple[int, int]]:
             out[f"host{name}"] = (at, n)
             at += 4 * n
     for name, (_a, n) in rom.DSP_TABLES.items():
+        if name in rom.DSP_ALIASES:            # (opt-md) inside another table, word for word
+            base, off = rom.DSP_ALIASES[name]
+            assert rom.dsp_table(name) == rom.dsp_table(base)[off:off + n], name
+            out[name] = (out[base][0] + 4 * off, n)
+            continue
         out[name] = (at, n)
         at += 4 * n
     out["sine"] = (at, SINE_N)                 # last: the tables are whole first (13 blocks)
@@ -353,7 +358,8 @@ def _z_values() -> list[int]:
         if name != "P":
             vals += [_s24(x) for x in rom.host_table(name)]
     for name in rom.DSP_TABLES:
-        vals += [_s24(x) for x in rom.dsp_table(name)]
+        if name not in rom.DSP_ALIASES:
+            vals += [_s24(x) for x in rom.dsp_table(name)]
     vals += md_sine_words()
     vals += [0] * (-len(vals) % Z_PER_BLOCK)
     vals += _mnm_values()

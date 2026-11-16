@@ -185,3 +185,39 @@ The P-I machines' code and tables took the DSP image over its 1 MiB upload buffe
 - **No constant loaded twice**: the DSL leaves out a load of a register already known
   to hold that constant (only along straight code: a label or a jump forgets them all).
 
+
+## 2026-11-12 (opt-md): the dearest models cut, bit-exact
+
+Measured with opt-host's `scripts/dsp_cost.py` (docs/dsp-cost.md's scale: instructions + 4 x L2 + 10 x DDR,
+instruction-exact against the assembled code; the engine's own part of a steady voice-block, blocks 4..7 after a
+note; the voice host's ~2,400 is on top). The target for 16 voices with room is an engine part of ~11,100.
+
+| model | before | after | what |
+|---|---|---|---|
+| TRX-CY | 15,896 | 13,276 | (v0.52 merge, rule b: dropped; v0.51's float hp1/res2 kept instead, cost measured in the v0.52 report) its 8 filters inline (`path_inline`: one I1 a path, every offset within a compute's move); the limiter's bounds in R15 / R0; the wavetables' levels through I0, each load on the add before it (also TRX-CH/OH: 11,130 -> 10,780) |
+| TRX-S2 | 11,248 | 10,001 | (v0.52 merge, rule b: dropped; v0.51's float hp1/res2 kept instead, cost measured in the v0.52 report) its hpc and res4 inline (`path_inline`) |
+| EFM-CY | 15,142 | 13,161 | xround's constants (M24, 1, 0x7FFFFF), the sine table's address, 0x7FFF and 2^23 held in registers through the sample loop |
+| PI-SD, PI-RS | 14,628 / 14,256 | 13,304 / 12,996 | one write address for the three lines (their positions start at 0 together and move on together); the lines' reads in bytes, step and mask in registers; the limiter's bounds in registers in the one-poles, mix, junction and high-pass |
+| PI-ML | 14,752 | 11,198 | the modes on the multiplier \|\| ALU in a hardware loop (PI-SD's form); floor23 without a jump (below) |
+| PI-MT | 14,096 | 10,848 | the 24 TUNE / POS multipliers kept in state words 38..61, made again only when either host word changes (36, 37 hold the words they were made from; init sets them to -1); the resonators' coefficients on integer words (SSF / SSI inline, no float halves); the damping loop's tap in bytes |
+| PI-BD | 12,133 | 10,959 | the coefficients on integer words; the damping tap in bytes |
+| PI-RC, PI-CC | 14,225 / 14,264 | 10,982 / 11,020 | XB is no longer copied between the slot and L1 (below); the third biquad's 48-bit products on SSF / SSI; _qf's constants and kc in registers |
+| PI-HH | 12,722 | 10,466 | XB not copied; _qf's constants in registers |
+
+Still over the ~11,100 target: PI-SD, TRX-CY, EFM-CY, PI-RS (~1.9..2.2k each) and PI-ML (~100). What is left there is
+mostly DDR: EFM-CY's 256 sine reads a block (~2.5k; the 128 KB table has no exact smaller form: DSP2's recursion
+leaves no half-wave or mirror symmetry, so bit-exact means all 32,768 words, and no L2 that size is free), the P-I
+delay lines (~1.9k). A coarser interpolated sine or shorter lines in L2 would be declared sound changes: not done.
+
+**XB not copied (PI-RC/CC/HH).** perf (2026-11-11) moved XB to the L1 rows and copied its words 0..63 in from
+the slot's DDR at the start of render and back at the end (~1,300 a block). render writes every XB word before it
+reads it (the state between blocks is in the slot's S words), and host, init and trig never touch XB: no word read
+before written in 90 runs x 150 blocks a machine (random and extreme knobs, notes, trigs, knob changes), and the
+output without the copies, the L1 rows poisoned before every block, identical to the output with them (54 runs).
+
+Every output word is as before: the perf session's golden script and its poisoned-scratch run (all 34 MD models),
+and 6 runs x 120 blocks a model of random and extreme knobs changed mid-note, against HEAD's source. One declared
+difference, which no valid state reaches: **PI-ML's floor23r** (`d = FLOAT TRUNC u`, one less where `d - u > 0`)
+equals the old floor23 for every accumulator `|a| < 256` (the 56300's own range; `test/test_pi_ml_floor23.py`);
+for `a <= -256` the old form's TRUNC saturates and its `- 1` wraps to `+256`, floor23r gives `-256`.
+PERC's code: 171,414 of 172,032 bytes (HEAD's 171,446).
