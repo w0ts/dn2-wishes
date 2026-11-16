@@ -20,19 +20,20 @@ F = note x 2048 / 12 + TUNE x 683 / 128 (TUNE 64: in tune), 0..0x5800; A = 2^(F 
 from __future__ import annotations
 
 from . import core as C
-from . import analog2, ddrw, dens, drone, plaits, sid, sophie, tb303, vo6, wave
+from . import analog2, ddrw, dens, drone, juno, plaits, sid, sophie, tb303, vo6, wave
 from ..md import core as K
 from ..perc.dsl import Prog
 from ..builder import selection as _sel
 
 # in the order of PERC's machine index (dnfw.perc.program MNM_TYPES): the Monomachine's own five
 # after the others (2026-11-11), so every machine already here keeps its index
-ALL_MODULES = (sophie, plaits, tb303, drone, analog2, sid, wave, ddrw, dens, vo6)
-# their types: ALL_TYPE_SLOTS below (20, 18, 19, 21, 22, 6, 7, 14, 15, 16)
+ALL_MODULES = (sophie, plaits, tb303, drone, analog2, sid, wave, ddrw, dens, vo6, juno)
+# their types: ALL_TYPE_SLOTS below (20, 18, 19, 21, 22, 6, 7, 14, 15, 16, 23); 2026-11-12: JUNO last, so every
+# machine already here keeps its index
 # the builder (docs/builder.md): a machine left out of this build is emitted nowhere and its type
 # is RESERVED below
 PART = {"SOPHIE": "MNM_SOPHIE", "PLAITS": "MNM_PLAITS", "TB303": "MNM_TB303", "DRONE": "MNM_DRONE",
-        "ANALOG2": "MNM_ANALOG2",
+        "ANALOG2": "MNM_ANALOG2", "JUNO": "MNM_JUNO",
         "SID 6581": "MNM_SID", "DPRO-WAVE": "MNM_DPRO_WAVE", "DPRO-DDRW": "MNM_DPRO_DDRW",
         "DPRO-DENS": "MNM_DPRO_DENS", "VO-6": "MNM_VO6"}
 MODULES = tuple(M for M in ALL_MODULES if _sel.on(PART[M.NAME]))
@@ -235,8 +236,9 @@ MONO_TYPE = 6
 MONO_ENGN = "ENGN"                       # the engine's control
 MONO_ENGINE_K = 7                        # its place: page 1 H (PERC's eighth record, PD1: 0..100)
 MONO_TUNE_J = 15                         # the engine's eighth (TUNE): page 2 H (PERC's TYPE record, 0..127)
-ALL_TYPE_SLOTS = (20, 18, 19, 21, 22, 6, 6, 6, 6, 6)   # 20: SOPHIE (docs/sophie.md), 18: PLAITS, 19: TB303,
-                                                       # 2026-11-10: 21 DRONE, 22 ANALOG2; 6: MONOMACHINE's five
+ALL_TYPE_SLOTS = (20, 18, 19, 21, 22, 6, 6, 6, 6, 6, 23)   # 20: SOPHIE (docs/sophie.md), 18: PLAITS, 19: TB303,
+                                                       # 2026-11-10: 21 DRONE, 22 ANALOG2; 6: MONOMACHINE's five;
+                                                       # 2026-11-12: 23 JUNO
 # the four engines' former types (2026-11-11): a project's track on one stays there, silent, its page empty
 RETIRED = {7: "DPRO-WAVE", 14: "DPRO-DDRW", 15: "DPRO-DENS", 16: "VO-6"}
 TYPE_SLOTS = tuple(t for M, t in zip(ALL_MODULES, ALL_TYPE_SLOTS) if M in MODULES)   # each voice's type
@@ -281,7 +283,7 @@ from ..sampler import machines as _smp  # noqa: E402
 assert not set(_smp.TYPES) & (set(TYPES) | set(RESERVED)), "a machine type of ours is a sample machine's (v0.44 BOUNCE: 17)"
 # MACHINE SEL's names (long, short), as the DN2 lists its own
 LIST_NAMES = {"SOPHIE": ("Sophie", "SOP"), "PLAITS": ("Plaits", "PLT"), "TB303": ("TB-303", "303"),
-              "DRONE": ("Drone", "DRN"), "ANALOG2": ("Analog 2", "AN2"),
+              "DRONE": ("Drone", "DRN"), "ANALOG2": ("Analog 2", "AN2"), "JUNO": ("Juno", "JNO"),
               MONO_NAME: ("Monomachine", "MNM")}
 REMOVED_NAMES = ("Removed", "---")       # a reserved type's name (MACHINE SEL never lists it)
 

@@ -770,7 +770,7 @@ def _mnm_scratch() -> bytes:
     (2026-11-09; dnfw.mnm.analog2.ctx: nothing writes there at run time)"""
     raw = bytearray(MNM_SCRATCH_BYTES)
     from ..mnm import machines as _mm
-    if "ANALOG2" in _mm.NAMES:
+    if "ANALOG2" in _mm.NAMES or "JUNO" in _mm.NAMES:        # 2026-11-12: JUNO's ladder reads them too
         from ..mnm import analog2 as A2
         from ..perc import program as _pp
         words = A2.table_words()

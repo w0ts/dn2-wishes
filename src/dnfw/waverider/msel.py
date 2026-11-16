@@ -21,7 +21,7 @@ MACHINE_NAMES = {0: "FM TONE", 1: "WAVETONE", 2: "FM DRUM", 3: "SWARMER", 4: "MI
 # Schwung Sophie, PLAITS Mutable's Plaits, TB303 Open303, DRONE and ANALOG2 Optimist's; MONOMACHINE the five ports
 # as one machine (2026-11-11, dnfw.mnm.machines MONO_NAME, on type 6: _ours)
 OUR_NAMES = {"SOPHIE": "SOPHIE", "PLAITS": "PLAITS", "TB303": "TB-303", "DRONE": "DRONE", "ANALOG2": "ANALOG",
-             "MONOMACHINE": "MONOMACHINE"}
+             "JUNO": "JUNO", "MONOMACHINE": "MONOMACHINE"}
 FILTER_NAMES = {0: "MULTI-MODE", 1: "LOWPASS 4", 2: "EQUALIZER", 3: "COMB -", 4: "LEGACY LP/HP", 5: "COMB +",
                 7: "ANALOG SVF", 8: "ANALOG LADR", 9: "ANALOG OTA", 10: "ANALOG DIODE", 11: "ANALOG MS-20"}
 # the icons, 7 x 5, rows top to bottom (scratch/lists/mock_e.py, the mock-up the User approved)
@@ -51,6 +51,7 @@ OUR_ICONS = {
     "TB303": [".#...#.", ".......", "#.....#", ".#...#.", "..###.."],       # the acid smiley
     "DRONE": ["#######", ".......", "#######", ".......", "#######"],       # held tones
     "ANALOG2": ["...#..#", "..##.##", ".#.#.#.", "#..##..", "...#..."],     # two saws
+    "JUNO": ["#.##.##", "#.##.##", "#######", "#.#.#.#", "#######"],        # the Juno's keys
     "MONOMACHINE": ["#######", "#.#.#.#", "#.#.#.#", "#.....#", "#######"],  # a keyboard
 }
 

@@ -147,6 +147,9 @@ MNM_LONG = {"TUNE": "Tune", "---": "Unused",
             "DTN": "Detune", "MIX": "Osc Mix", "NOIS": "Noise", "DRV": "Drive", "KTR": "Key Track",
             "SWRM": "Swarm", "SEMI": "Osc2 Semi", "SDTN": "Swarm Spread", "SYNC": "Hard Sync",
             "WAV2": "Osc2 Wave", "FLT2": "Filter 2 Type", "WDTH": "Stereo Width",
+            # JUNO (docs/mnm.md "JUNO"; PW, NOIS, CUT, RES, ENV, DEC: above)
+            "SUB": "Sub Osc", "KEY": "Key Track", "ATK": "Attack", "SUS": "Sustain", "REL": "Release", "PWM": "PW Mod",
+            "RNGE": "Range",
             # SID 6581, DPRO WAVE / DDRW / DENS, VO-6 (v0.26; removed 2026-11-08, back 2026-11-11):
             # their names as at 28eb110's parent (MIX, SYNC, WAV2, WAVE: below, by machine)
             "PW": "Pulse Width", "PWAD": "PW Sweep", "PWRS": "PW Restart",
@@ -175,7 +178,8 @@ def _choices(M) -> dict:
 
 
 # a name one machine means otherwise (MNM_LONG is by short name across machines)
-MNM_LONG_BY = {("ANALOG2", "WAVE"): "Waveform",
+MNM_LONG_BY = {("ANALOG2", "WAVE"): "Waveform", ("JUNO", "WAVE"): "Waveform", ("JUNO", "ENV"): "VCF Env",
+               ("JUNO", "HPF"): "High-Pass",
                ("SID 6581", "WAVE"): "Waveform", ("DPRO-WAVE", "WAVE"): "Waveform", ("DPRO-DENS", "WAVE"): "Waveform",
                ("DPRO-DDRW", "MIX"): "Wave Mix", ("DPRO-DDRW", "WAV2"): "Wave 2", ("DPRO-WAVE", "SYNC"): "Sync"}
 # parameters the port does not run (DENS's chorus is the Monomachine's effect after the
@@ -228,6 +232,8 @@ MNM_CHOICES = {
                 "FLT2": tuple(m[0] + md.replace("NTCH", "NT") for m in ("SVF", "LADR", "OTA", "DIOD", "MS20")
                              for md in ("L12", "L24", "BP", "HP", "NTCH")),
                 "GLTY": ("OFF", "RATE", "TIME")},           # 2026-11-11: page 3 (OFF: the record's stock default)
+    "JUNO": {"WAVE": ("OFF", "SAW", "PULS", "BOTH"), "HPF": ("BOOS", "FLAT", "236", "754"), "PWM": ("MAN", "ENV"),
+             "RNGE": ("16'", "8'", "4'")},
     "DRONE": {"TOPO": ("PAIR", "CHN", "RING"), "GLTY": ("RATE", "TIME"), "HOLD": ("OFF", "ON"),
               # 2026-11-11, the User: an octave knob, -3..+3 (dnfw.mnm.drone q2), in its unit
               "OCT": ("-3oc", "-2oc", "-1oc", "0oct", "+1oc", "+2oc", "+3oc")},
@@ -251,6 +257,7 @@ MNM_WIDGET = {("SOPHIE", "MODL"): 5, ("PLAITS", "MODL"): 5, (_mnm.MONO_NAME, _mn
               ("DRONE", "TOPO"): 5, ("ANALOG2", "WAVE"): 5, ("ANALOG2", "WAV2"): 5, ("ANALOG2", "SYNC"): 5,
               ("ANALOG2", "SWRM"): 5, ("ANALOG2", "FLT2"): 5, ("ANALOG2", "SEMI"): 6, ("DRONE", "GLTY"): 5, ("DRONE", "HOLD"): 5, ("DRONE", "OCT"): 5,
               ("ANALOG2", "GLTY"): 5,
+              ("JUNO", "WAVE"): 5, ("JUNO", "HPF"): 5, ("JUNO", "PWM"): 5, ("JUNO", "RNGE"): 5,
               # 2026-11-09: 6 MW_SEMIS, the step - n / 2 as +7 / -12 / 0 (the User, build #3: semitones,
               # not the note name); 7 MW_CENTS, the step - n / 2 as +12c / -30c
               ("PLAITS", "TUNE"): 6, ("PLAITS", "FINE"): 7}   # 2026-11-09: md_page.c draws a choice as a

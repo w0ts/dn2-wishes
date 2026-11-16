@@ -57,7 +57,7 @@ def table_mem(L: C.Layout) -> dict[int, int]:
         # as table_fill stores them (dnfw.mnm.tables): the Monomachine's own (its pairs fixed:
         # rom.table_words), then PLAITS's (2026-11-11: the five back beside PLAITS)
         from . import tables as T
-        words = (tuple(rom.table_words()) if T.mnm_os_on() else ()) + T.plaits_words()
+        words = (tuple(rom.table_words()) if T.mnm_os_on() else ()) + T.plaits_words() + T.juno_words()
         for k, v in enumerate(words):
             _TM[L.tables + 4 * k] = bits(v * C.Q23)
         if T.mnm_os_on():

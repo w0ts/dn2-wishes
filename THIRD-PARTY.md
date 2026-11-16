@@ -141,7 +141,7 @@ FM's frequency quantizer is rebuilt from `lookup_tables.py`'s formula.
 > DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 > OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-## Optimist (GPL-3.0-only): DRONE, ANALOG 2's filters, inserts SUB DIST GATER RING
+## Optimist (GPL-3.0-only): DRONE, ANALOG 2's filters, JUNO, inserts SUB DIST GATER RING
 
 The User's own synth firmware (`~/GitHub/optimist`, GPL-3.0-only), ported to the DSL (float32 at
 44.1 kHz; what changed is in each module's docstring). GPL-3.0-only code combined with this
@@ -152,6 +152,14 @@ AGPL-3.0 work, as GPL-3.0 section 13 allows; each module keeps its SPDX line and
   (<https://github.com/bonszaimusic/caravel>, firmware/src/eng_drone.c, GPL-3.0-only).
 - **ANALOG 2's filters** (`src/dnfw/a2f/`): firmware/src/engines/analog/a2_models.c and the SVF of
   eng_analog2.c (eng_analog.c: Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments).
+- **JUNO** (`src/dnfw/mnm/juno.py`, its tables `src/dnfw/mnm/juno_data.py`): firmware/src/engines/juno/
+  (eng_juno.c, juno_dsp.h, juno_tables.h), itself fm-106 by PatttF (<https://github.com/PatttF/fm-106> at
+  `be74757`, GPL-3.0-only), a fixed-point port of Ultramaster KR-106 by Kayrock Screenprinting
+  (<https://github.com/kayrockscreenprinting/ultramaster_kr106>, GPL-3.0; its commits are Karl LaRocca's). Neither
+  project puts a copyright line in its files: the copyright is their authors'. The tables are KR-106's
+  measurements and models (one Juno-106 voice card's cutoff at 93 DAC codes, the resonance's tables, the sub and
+  noise levels). A model of the Roland Juno-106; not affiliated with or endorsed by Roland. Roland's factory
+  patches are not included.
 - **Inserts SUB, DIST, GATER, RING** (`src/dnfw/inserts/`): firmware/src/fx/insfx/insfx.c (ifx_mod),
   firmware/src/fx/fx.c (dist_gains, dist_run), firmware/src/fx/insfx/gater.c (its patterns).
 

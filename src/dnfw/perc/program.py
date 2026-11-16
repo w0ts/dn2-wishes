@@ -75,6 +75,7 @@ MNM_COST = {"SOPHIE": 34_000,   # SOPHIE: 29,979 measured (test_perc_live, the t
                                 # stay under MNM_BUDGET, so a cost per engine would change nothing)
             "TB303": 70_000,    # TB303: 63,577 measured (WAVE square; saw 52,140), the voice in a DN2 block
             "DRONE": 36_000,    # DRONE: 17,251 + the voice ~14,700 with BEAT (two ears); ~24k without
+            "JUNO": 27_000,     # JUNO (2026-11-12): worst steps 11,501 (BOTH+SUB+NOIS, BOOST, its note block) + ~14,700; runner cost step: 3,991 a voice-block (defaults)
             "ANALOG2": 32_000,  # ANALOG2: 16,168 (6 copies, sync, DIOD LP24, note 127) + ~14,700; 2026-11-11 WDTH on: 21,034 (MS20 LP24, DRV) steps    # DRONE: 17,251 + the voice ~14,700 with BEAT (two ears); ~24k without
             # the Monomachine's five (28eb110's parent; back 2026-11-11)
             "SID 6581": 60_000, "DPRO-WAVE": 34_000, "DPRO-DDRW": 78_000, "DPRO-DENS": 70_000,

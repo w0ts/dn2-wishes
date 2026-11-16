@@ -179,3 +179,31 @@ The shipped tables came to 65 KB (94 KB with the words as they are).
 `test/test_mnm.py`: every golden case of every machine in run mode, with the increments
 exactly the Monomachine's, at 60 dB signal-to-error or better (DPRO-WAVE 63.8..99 dB, SID
 94..110 dB so far); each machine's float `pitch` within 1e-4 of the exact increments.
+
+## JUNO (2026-11-12): the Juno-106 voice, machine type 23
+
+Optimist's JUNO engine (fm-106 / KR-106, GPL-3.0-only: THIRD-PARTY.md) as a Monomachine-style machine on PERC's
+voice, `dnfw.mnm.juno`; a voice a note, as many as the DSP budget (`perc.program.MNM_COST`) lets start.
+
+- **Page 1:** WAVE (OFF SAW PULS BOTH: the Juno's two buttons), PW (50..95 %), SUB, NOIS | CUT, RES, KEY (key
+  tracking around C4), HPF (BOOST FLAT 236 754 Hz).
+- **Page 2:** ENV (the VCF envelope's depth, -127..+127 about knob 64: negative inverts it), ATK (1.5 ms .. 3 s),
+  DEC, SUS, REL (1.5 ms .. 12 s), PWM (MAN; ENV: the width follows the envelope), RNGE (16' 8' 4'). The envelope
+  drives the VCF only; the DN2's AMP page shapes the level, its LFOs move the knobs (PW, CUT: the Juno's LFO).
+- **The ladder** is ANALOG 2's OTA core (`dnfw.a2f.models.ladder_core`, one subroutine for both machines, PERC's
+  room) on the Juno's own coefficients once every 16 samples: the cutoff DAC routine (CUT, ENV, KEY), its RC slew,
+  KR-106's measured cutoff curve pulled to the resonance's peak, the resonance's k. The core's Pade saturation
+  stands for fm-106's BA662 table: a drive by RES and a makeup gain fitted on the host against Optimist's voice
+  (scratch/juno-engine/cmp). Measured there, sustained, cutoffs 30..100: harmonics within 0.2 dB up to RES 110,
+  0.7 dB at RES 120; RES 127's self-oscillation within ~2 dB (a few harmonics up to 6 dB). End to end (this
+  program in the model against Optimist's voice with its HPF): levels within 0.5 dB, harmonics within ~2 dB
+  (0.6..0.9 rms) over saw, pulse, sub, BOOST and the cuts; at RES 120 the self-oscillating tone ~4 dB weaker.
+- **Its tables** (KR-106's cutoff curve, 1,025 points; by RES its k, peak pull, the drive; the sub's and noise's
+  levels: 1,793 words) follow PLAITS's in the Monomachine tables (`mnm.tables.juno_values`, `Layout.JU`), read
+  once a block or once every 16 samples.
+- **Cost** (the model, steady, one voice): ~6,000 instructions a block (a saw), ~8,100 with pulse, sub and noise;
+  PERC code +2,988 B (+720 instructions, ANALOG 2's ladder moved into the shared subroutine with it). ANALOG 2 is
+  bit-identical (test_juno pins it) and ~1 % slower on its ladders (the shared loop tests the model a second time
+  a sample).
+- **Known:** BOOST with every source at full (BOTH, SUB, NOIS) reaches the voice stream's +-8 bound; every other
+  setting the runner and test_juno try stays under 4.0.

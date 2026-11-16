@@ -74,7 +74,25 @@ UNITS: dict[str, dict[str, tuple]] = {
         "WDTH": ("pct", None, False),                                    # 2026-11-11: the swarm's stereo width
         "GLID": ("glid", None, True),                                    # 2026-11-11, page 3: DRONE's, 0 OFF
     },
+    # 2026-11-12: JUNO (dnfw.mnm.juno): CUT through KR-106's curve at RES 0 (G = g / (1 + g), g = tan(pi f / fs)),
+    # the envelope's times as its rates (page 2's knob k reads q = k / 127)
+    "JUNO": {
+        "PW": ("pct", None, False), "SUB": ("pct", None, True), "NOIS": ("pct", None, True),
+        "CUT": ("hz", lambda k: _juno_hz(k), False), "RES": ("pct", None, False), "KEY": ("pct", None, False),
+        "ENV": ("spct", None, False),
+        "ATK": ("ms", lambda k: 1.5 * 2000.0 ** (k / 127.0), False),    # 1.5 ms .. 3 s
+        "DEC": ("ms", lambda k: 1.5 * 8000.0 ** (k / 127.0), False),    # 1.5 ms .. 12 s
+        "SUS": ("pct", None, False),
+        "REL": ("ms", lambda k: 1.5 * 8000.0 ** (k / 127.0), False),
+    },
 }
+
+
+def _juno_hz(k: int) -> float:
+    """JUNO's CUT k (KEY, ENV 0): the DAC's code k x 128 / 4, KR-106's G there (G1Q, a point every 4 codes)"""
+    from .juno_data import G1Q
+    g = G1Q[min(1024, (k * 128 // 4) // 4)] / 32768.0
+    return math.atan(g / (1.0 - g)) * 44100.0 / math.pi
 
 
 # XDLY's TIME 1 / TIME 2 (dnfw.xdly.design T_MIN .. T_MAX: 1 ms x 10000^(k / 127), the inserts' and the send's

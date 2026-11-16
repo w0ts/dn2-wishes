@@ -100,7 +100,7 @@ class Layout:
         # the tables (dnfw.md.core TABLE_LAYOUT 'mnm', dnfw.mnm.tables): with one of the
         # Monomachine's own machines in this build, its ROM's first (dnfw.mnm.rom.packed_words: the
         # waves, COMB, the DPRO tables, VO-6's, as at 28eb110's parent), then PLAITS's
-        from .tables import PL_TABLES, mnm_os_on
+        from .tables import JU_WORDS, PL_TABLES, mnm_os_on
         t = self.COMB + 4 * 4096
         # v0.36: the DPRO tables are where the fill writes them (DT_SRC, DDR, in the run of the
         # Monomachine tables); with DT_AT given (L2), build() copies them there once and every
@@ -126,6 +126,9 @@ class Layout:
         for name, n in PL_TABLES:
             self.PL[name] = t
             t += 4 * n
+        self.JU = t                                 # 2026-11-12: JUNO's tables (dnfw.mnm.juno), after PLAITS's
+        self.TABLES_END = t + 4 * JU_WORDS
+        assert self.TABLES_END <= self.DIGI, "the tables run into the Digibank stand-in"
 
 
 # v0.43: the bytes of the render scratch Layout lays out (IN .. DG), what dsp.MNM_RENDER_BYTES holds

@@ -71,6 +71,9 @@ PARTS: tuple[Part, ...] = (
          "Optimist's DRONE (after Caravel's, GPL-3.0-only): a coupled network of four generators, BEAT, glide."),
     Part("MNM_ANALOG2", "ANALOG 2", "machines",
          "Optimist's ANALOG 2 (GPL-3.0-only): two oscillators, sync, swarm, drive, its filter and models."),
+    Part("MNM_JUNO", "JUNO", "machines",
+         "Optimist's JUNO (fm-106 / KR-106, GPL-3.0-only): the Juno-106 DCO, VCF on ANALOG 2's OTA core, HPF, "
+         "its ADSR; machine type 23."),
     Part("FLT_A2SVF", "A2 SVF", "filters", "Filter machine: two ANALOG 2 SVFs (LP12 LP24 BP HP NOTCH)."),
     Part("FLT_A2LADR", "A2 Ladder", "filters", "Filter machine: two transistor ladders (Moog-style)."),
     Part("FLT_A2OTA", "A2 OTA", "filters", "Filter machine: two OTA 4-poles (IR3109, Juno-style)."),

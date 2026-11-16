@@ -4022,6 +4022,7 @@ def step_gran(init, sound, machines) -> dict:
 # -- step 8: the Monomachine machines (v0.26, docs/mnm.md) ---------------------------------------
 
 A2_NOTE2, A2_BLOCKS = 12, 40                    # ANALOG 2's glide runs: the second note's block, the length
+JUNO_OFF, JUNO_BLOCKS = 6, 64                    # JUNO's envelope runs (2026-11-12): the released one's note-off, the length
 
 
 def _up_periods(x: list) -> list:
@@ -4039,6 +4040,9 @@ def mnm_words(k: int, knobs=None) -> dict:
     if MM.NAMES[k] == "DRONE":                   # 2026-11-11: q2 OCT at the start MACHINE SEL writes (octave 0;
         _rid, slot, lo, top = PM.FX_PARAMS[2]    # a page-2 word left 0 would be OCT -3)
         words[slot] = PL.knob_word(MM.MACHINES[k].DEFAULTS2[2], top, lo)
+    if MM.NAMES[k] == "JUNO":                    # 2026-11-12: page 2 at the starts MACHINE SEL writes (ENV 0, its ADSR)
+        for (_rid, slot, lo, top), x in zip(PM.FX_PARAMS, MM.MACHINES[k].DEFAULTS2):
+            words[slot] = PL.knob_word(x, top, lo)
     return words
 
 
@@ -4135,6 +4139,24 @@ def step_mnm(init, sound, machines, blocks) -> dict:
         for glty, gn in ((0, "OFF"), (1, "RATE"), (2, "TIME")):
             runs[f"A2_held_{gn}"] = _slim(run_blocks(init, a2_leg(False, glty), A2_BLOCKS))
             runs[f"A2_released_{gn}"] = _slim(run_blocks(init, a2_leg(True, glty), A2_BLOCKS))
+    # 2026-11-12: JUNO's VCF envelope (page 2 q0 ENV up, its ADSR at MACHINE SEL's starts): a saw at CUT 30 RES 60,
+    # note 60 on at block 1; "held" no note-off, "released" its note-off at block JUNO_OFF (the release closes the
+    # filter: the DN2's AMP envelope, not in this buffer, shapes the level)
+    if "JUNO" in MM.NAMES:
+        jk = MM.NAMES.index("JUNO")
+        ENV_SLOT, ENV_LO, ENV_TOP = PM.FX_PARAMS[0][1:]
+
+        def j_env(released):
+            def fb(b):
+                f = base_frame(sound, machines, t0=types[jk], overrides=mnm_words(jk, [32, 0, 0, 0, 30, 60, 0, 48]),
+                               note=0x3C00, trigger=b == 1)
+                f.param(0, ENV_SLOT, PL.knob_word(120, ENV_TOP, ENV_LO))
+                if released and b == JUNO_OFF:
+                    f.put(36, 1)
+                return f.to_bytes()
+            return fb
+        runs["JUNO_held"] = _slim(run_blocks(init, j_env(False), JUNO_BLOCKS))
+        runs["JUNO_released"] = _slim(run_blocks(init, j_env(True), JUNO_BLOCKS))
     # 2026-11-09: every PLAITS model (MODL's choices past WS, which the default runs), triggered at
     # block 1 and again at block 4, its HARM/TIMB/MORP off-centre; and a track whose MODL changes
     # every two blocks through the models (each entry runs the model's init), bit-exact as above
@@ -4296,6 +4318,19 @@ def step_mnm(init, sound, machines, blocks) -> dict:
             a2ok and a2["released_RATE"] == a2["released_OFF"] and a2["released_TIME"] == a2["released_OFF"])
         n["a2_glide_periods_between"] = between
         n["a2_glide_periods"] = {k: v[:24] for k, v in periods.items()}
+    if "JUNO_held" in runs:                      # 2026-11-12: JUNO's VCF envelope
+        jh, jr = perc_series(runs["JUNO_held"], 0), perc_series(runs["JUNO_released"], 0)
+        jok = runs["JUNO_held"]["ok"] and runs["JUNO_released"]["ok"]
+        cut = JUNO_OFF * BLOCK
+        tail = (JUNO_BLOCKS - 8) * BLOCK
+        def rms(x):
+            return math.sqrt(sum(v * v for v in x) / len(x)) if x else 0.0
+        # (measured 2026-11-12 on the runner: the last 8 blocks' RMS 0.175 released against 0.459 held, 0.38; the
+        # peaks ring with the resonance, so the RMS is the measure)
+        checks["JUNO envelope: held and released are the same until the note-off, and the release closes the "
+               "filter (its last 8 blocks' RMS under 0.6 of the held one's)"] = (
+            jok and jh[:cut] == jr[:cut] and rms(jh[tail:]) > 0.05 and rms(jr[tail:]) < 0.6 * rms(jh[tail:]))
+        n["juno_env_tail_rms"] = {"held": rms(jh[tail:]), "released": rms(jr[tail:])} if jok else None
     dynr = runs["dynamic"]
 
     def dpk(b, t):

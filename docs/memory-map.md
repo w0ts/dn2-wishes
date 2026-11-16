@@ -299,7 +299,55 @@ the sample reader, `docs/dsp-cost.md`):
 | L1 `0x2e0080..0x2e0094` | the reader's decimator coefficients and LEV make-up gain | `SMP_DTAB_DM` |
 | L1 `0x2df7f4..0x2df7fc` | the recorder's GAIN index and factor (v0.50; at 0x2e0080 until the v0.52 merge): the sample machines' scratch words `rgain`, `rgfac` | `sampler.machines.REC_GAIN` |
 | L1 `0x2ddff0..0x2ddffc` | the guard's later insert words (INS_DLP, INS_BUSEND, REST_OUT; v0.52 merge: v0.49's words filled the block at 0x2de000), after PERC's scratch (to 0x2ddfe8) | `perc.guard.INS_LO` |
-| L2 `0x2009b400..0x200a0000` | PERC's span 2a: the machines' `host` (knob scaling) bodies, `trx_coefs`, `md_idiv` (perc-layout) | `PERC2A_L2_LOAD` |
-| L2 `0x200a2800..0x200a4000` | PERC's span 2b: the machines' `init` bodies, `vo6_bqx` (perc-layout) | `PERC2B_L2_LOAD` |
 | L1 `0x2e0098..0x2e0100` | the taps' line: its switch, its tag, then 24 words (to `sampler.program.RELATCH`) | `SMP_LINE_DM` |
 | DDR `0x81218000..0x81219824` | freed (the reader's coefficients until 2026-11-12) | `SMP_TABLES_DDR` |
+
+## DSP optimisation claims 2026-11-12 (SHARC L1 / L2)
+
+Arbiter: juno-engine (for main, 2026-11-12). One row per claim, built on `dnfw.waverider.dsp`'s real layout (spans,
+run-time areas) and the stock boot stream (DN2 1.11 = 1.12 section 7, sha256 336e340a...). A claim is a range nobody
+else takes; the owner adds it to `dsp.py` (a span or a constant) in its own commit, and a span check there.
+
+**What is where (measured from the boot stream and `dsp.spans()` / `l2_spans()`, byte addresses):**
+
+| region | stock | ours | free |
+|---|---|---|---|
+| L1 block 0, `0x240000..0x270000` | loaded to `0x26F000` | the frame lookup only | `0x26F000..0x270000` (4 KB, untested) |
+| L1 block 1, `0x2C0000..0x2F0000` | loaded to `0x2DD52C`; DM cache `0x2EC000..` | REGION `0x2DD600..0x2EB000`, packed | holes F1 F2 F3 below (padding today); `0x2EB000..0x2EC000` kept as the cache's safety gap |
+| L1 block 2, `0x300000..0x320000` | nothing loaded; PM cache `0x31C000..` (startup decode, docs/waverider-dsp-silence.md) | nothing | `0x300000..0x31C000` (112 KB): only `0x30B000..0x30C0A0` ever ran on the unit (ONESHOT 2026-09); the runner has no cache model |
+| L1 block 3, `0x380000..0x3A0000` | loaded to `0x39BFFC`; I-cache `0x39C000..` | nothing | none |
+| L2 `0x20000000..0x20100000` | image to `0x2008823C`; non-cacheable window `0x200FA000..0x200FDFFF` | `0x200A4000..0x200EA000` (spans, PERC after the move) | `0x2009823C..0x200A4000` inside dsp.py's floor (image + 64 KB); `0x20088400..0x2009823C` below that floor (complex-ping's mods ran there on units); `0x200EA000..0x200FA000` the User's 64 KB margin above PERC; small gaps between spans (3.5 KB at `0x200A9200`, 3.2 KB at `0x200BD050`, 2.7 KB at `0x200AF542`, 2 KB at `0x200B5800`, 1.5 KB at `0x200B1210`) |
+
+Holes inside REGION (a padded span's zeros; real sizes from `dsp.objects()` and the state constants):
+F1 `0x2E0640..0x2E1000` (2,496 B: after ping.asm's 182 B and its 128 B tail), F2 `0x2E1200..0x2E1C00` (2,560 B: after
+trackbuf.asm's 342 B), F3 `0x2E4080..0x2E5400` (4,992 B: after the stereo inserts' state, which ends `0x2E4044`). Their
+only references in our code are constants (FDN8's LFO step `0x2E41D8`) and GRAN's removed state (`0x2E4B00`).
+
+| range | bytes | owner | what | measured gain (per block) | status |
+|---|---|---|---|---|---|
+| L2 `0x200A0000..0x200A1800` | 6,144 | opt-samples | (their claim) | (theirs) | taken |
+| L1 `0x2E0080..0x2E0100` | 128 | opt-samples | (their claim) | (theirs) | taken |
+| L1 F2 `0x2E1200..0x2E1700` | 1,280 | opt-mnm | DPRO's interp table (`dsp.MNM_INTERP_DM`; trackbuf's span cut to `0x2E1200`) | measured (dsp_cost.py, engine): DPRO-DDRW -5,120 a voice, DPRO-DENS -2,560 (a 3-PCH chord ~-10k) | released (v0.52 merge: opt-mnm dropped, main's rule b) |
+| L1 F1 `0x2E0640..0x2E0E44` | 2,052 | opt-synths | PERC's exp2 table | SOPHIE -2.2..3.9k a voice (with tan), MD too | allotted |
+| L1 F3 `0x2E4080..0x2E4D50` | 3,344 | opt-synths | PERC's tan table (2,056) + SHFT's sine (322 words, SOPHIE's L.sin), as REGION spans (copies; DDR originals and the link stay) | (with exp2) | allotted |
+| L2 `0x20098400..0x2009B400` | 12,288 | opt-stock | the send FX' hot state | -69k (L2); -115k if L1 | allotted (L2, the User 2026-11-12); L1 block 2: **pending unit test** when the User is back |
+| L2 `0x200A1800..0x200A2800` | 4,096 | juno-chorus | jsend.asm, the chorus send's JUNO (1,976 B code, sw `0xBD0C00`) | (a feature, not a saving) | allotted (3b3b1aae / 6e982a5c) |
+| L2 `0x2009B400..0x200A0000` | 19,456 | perc-layout | PERC's event-only code: host bodies (18,074) + trx_coefs / md_idiv (754) | PERC's span -24.3 KB with 2b (0 instructions changed) | **requested, pending main** |
+| L2 `0x200A2800..0x200A4000` | 6,144 | perc-layout | 2b: init bodies (4,788) + vo6_bqx (648) | (with 2a) | **requested, pending main** |
+| L2 128 KB, place open | 131,072 | opt-md | DSP2's sine table (no exact smaller form: no symmetry) | EFM-CY -2.5k a voice, FM / TRX | **decision**: no 128 KB contiguous anywhere today; see below |
+
+Left free: F1 `0x2E0E44..0x2E1000` (444 B), F2 `0x2E1700..0x2E1C00` (1,280 B), F3 `0x2E4D50..0x2E5400` (1,712 B),
+L2 `0x2009B400..0x200A0000` (19,456 B) and `0x200A2800..0x200A4000` (6,144 B), both requested by perc-layout: with them,
+nothing is left inside dsp.py's L2 floor but the small gaps between spans.
+
+DDR (no fast-memory cost; listed so nobody lands on another): juno-chorus `0x82550000..0x82551050` (the send's state +
+a 1,024-float ring with 3 mirror words, zeros at power-on), right after the moved TAPE's rings (`0x82540000..0x82550000`);
+the post rings `0x82510000 + 32 x 4,112 B` end at `0x82530200`; PLAITS' `0x82600000..`. The word `0x84000EFC` (the
+fxpage block's 12th word, link.c FXP_OFFSET `0xED0` + 44): the chorus TYPE, juno-chorus.
+
+**Open, for main / the User:** (1) opt-md's 128 KB table has no contiguous place: below the floor `0x20088400..0x200A0000`
+is 96 KB; it reaches 128 KB (`0x20088400..0x200A8400`) only with dsp.py's floor lowered (complex-ping's mods used it on
+units; a runtime scan of stock should come first) AND opt-samples' 6 KB and the Monomachine scratch, DPRO tables and main
+tap (`0x200A4000..0x200A9200`, 20.5 KB) moved elsewhere (e.g. into `0x200EA000..`, the User's margin above PERC). (2) L1 block 2 (112 KB, 1-cycle) would
+serve opt-stock's -115k and opt-md's table best, but only 4 KB of it has run on the unit and the runner cannot see
+the PM cache: it needs a hardware check by the User before anyone's state goes there.
