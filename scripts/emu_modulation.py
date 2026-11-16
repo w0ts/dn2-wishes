@@ -123,9 +123,10 @@ def resume_ui(m, snap_sec, sec3):
     instruction (an illegal-instruction fault at the first UI pass, measured 2026-11-11). The
     address is moved to the same call's return in this build: the chunk's one such call."""
     from dnfw.mods import platform
+    from dnfw.waverider import pages
     def site(sec):
         for va, blob in platform.runtime(sec):
-            if 0x46AC0000 <= va < 0x46AF0000 and blob.count(QRECV_CALL) == 1:
+            if pages.C_LOAD <= va < pages.MDUI_LOAD and blob.count(QRECV_CALL) == 1:   # (v0.48's 0x46ac0000 within)
                 return va + blob.find(QRECV_CALL) + len(QRECV_CALL)
         return None
     old, new = site(snap_sec), site(sec3)

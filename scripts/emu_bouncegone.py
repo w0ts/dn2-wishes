@@ -172,7 +172,7 @@ def main() -> int:
     call(lay["sl_lock_set"], table, T, 8, 2, 2)       # a one-shot on step 8
     call(lay["sl_lock_set"], table, T, 4, 0, 5)       # a slide on step 4 (the store's first kind)
     before = [rec_lock(table, 4), rec_lock(table, 8), rec_lock(table, 4, 0), rec_lock(table, 5)]
-    machine.at = 0x46A30000
+    machine.at = 0x46A21000                       # above the call stack's sentinel, below the C renderer
     stored = machine.alloc(TABLE_BYTES)
     call(SAVE, stored, table)
     ids = [machine.read(stored + REC * i, 1)[0] for i in range(RECS)]

@@ -81,7 +81,7 @@ FX_SLOT0 = MIRROR + 34 + 202 * 16          # 0x800075a6
 TRACK_BASE = MIRROR + 34                   # block 0, slot 0
 FX_BASE = FX_SLOT0 - 2 * 76                # what the cave loads into %a0
 
-SCRATCH = 0x46A40000             # %a2 / %a3 / %a4, well above BSS
+SCRATCH = 0x46A30000             # %a2 / %a3 / %a4, well above BSS, below the C renderer (0x46a40000)
 STACK = 0x46A00000
 SENTINEL = 0x1234
 FULL = 0x7F00

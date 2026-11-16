@@ -308,7 +308,8 @@ def main() -> int:
     call(BITMAP_CLEAR, V)
 
     # ---- the pattern: FREQ and FDBK locked on steps 0, 4 and 8 ----------------------------
-    machine.at = 0x46A30000
+    machine.at = 0x46980000                       # below the call stack (0x469f0000..): it allocates ~150 KB,
+                                                  # more than fits between the sentinel and the C renderer
     table = machine.alloc(TABLE_BYTES)
     machine.write(table, b"\xff" * (REC * RECS))
     machine.write(table + INDEX, b"\xff" * (16 * 101))

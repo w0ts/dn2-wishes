@@ -216,6 +216,33 @@ RAM above BSS are not.** The mix-and-match registry (backlog §11) must allocate
 caves and RAM, not just check hooks.
 
 
+## The DN2 mod's RAM above BSS, OS 1.12 — 2026-11-12
+
+The RAM the waverider build's loader fills, read from a NOBOOT 1.12 build (`platform.runtime`,
+build `4f848d9a`), plus the RAM it uses without carrying bytes for it (`dnfw.mods.waverider.ram()`
+declares all of them). 1.12's BSS ends at `0x466b84d0`.
+
+| Range | Size | What | Constant |
+|---|---|---|---|
+| `0x4670c000`..`0x4670d1e4` | 4,580 B | the pages assembly | `pages.LOAD` |
+| `0x4670f000`..`0x4670fba0` | 1,352 B | the A2 filters' ColdFire tables | `a2f.coldfire` |
+| `0x46710000`..`0x46710054` | 84 B | the platform runtime's header | `pages.C_END` |
+| `0x469f0000`..`0x46a40000` | — | **emulator harnesses only** (most of them; older ones use `0x467cf000`/`0x467d0000`): their call stack (down from `0x46a00000`/`0x46a20000`) and scratch, never in a build | `emulib.machine.SCRATCH_END` |
+| `0x46a40000`..`0x46af0000` | 720,896 B span | **the C page renderer** (`csrc/waverider` and what it links), 195,108 B on 2026-11-12 | `pages.C_LOAD`, `pages.C_SPAN` |
+| `0x46af0000`..`0x46af1aac` | 6,828 B | the Machinedrum's screen graphics | `pages.MDUI_LOAD` |
+| `0x46af8000`..`0x46af8800` | 2 KB | modulation's state | `pages.MOD_RAM` |
+| `0x46aff000`..`0x46aff100` | 256 B | the system meter's state | `pages.METER_RAM` |
+| `0x46b00000`..`0x47000000` | 5 MB | the sample link's mirror of the pool | `sampler.machines.MIRROR` |
+| `0x47000000`..`0x47013428` | 78,888 B (up to 512 KB) | the DSP's tables | `sampler.machines.TABLE_LOAD` |
+| `0x47100000`.. | 1 MB | the CPU profiler, while PROFILE runs | `pages.PROF_RAM` |
+
+**The renderer moved down on 2026-11-12** (the User's ruling): from `0x46ac0000` with a
+0x30000 span (v0.29..v0.40 0x20000), where it had 1.5 KB left, to `0x46a40000` with 0xB0000,
+up to the MD graphics. The harnesses' scratch had grown into the new range (emu_fxdest at
+`0x46a40000`, emu_slides and emu_bouncegone allocating from `0x46a30000`); it now stays below
+`SCRATCH_END`, which `Machine.alloc` enforces and a test ties to `pages.C_LOAD`.
+
+
 ## The +Drive (eMMC) — whose sectors are whose (2026-11-01)
 
 Not RAM, but the same question: who may write where. The stock store reads and writes

@@ -34,7 +34,7 @@ BUS_HZ, CAP = 132_000_000, 65536
 IDLE_PC, IDLE_TCB, UI_TCB, MIDI_TCB = 0x400CF246, 0x4243D900, 0x4059E1C0, 0x445E7764
 # (pc, sr, tcb, weight): a quiet unit, about as the meter reads it (the audio interrupt about half the CPU)
 PROFILE_MIX = ((IDLE_PC, 0x2000, IDLE_TCB, 44), (0x40025F10, 0x2500, IDLE_TCB, 30), (0x40026200, 0x2500, UI_TCB, 18),
-               (0x40131FE0, 0x2000, UI_TCB, 4), (0x46AC1000, 0x2000, UI_TCB, 2), (0x40121960, 0x2000, MIDI_TCB, 2))
+               (0x40131FE0, 0x2000, UI_TCB, 4), (0x46A41000, 0x2000, UI_TCB, 2), (0x40121960, 0x2000, MIDI_TCB, 2))
 
 
 @dataclass
@@ -323,7 +323,7 @@ class ChannelSim:
         words = (n, CAP, period, int(pr["t0"] * BUS_HZ) & 0xFFFFFFFF, int(t_end * BUS_HZ) & 0xFFFFFFFF,
                  int(pr["t0"] * 1500), int(t_end * 1500), n * 140 if pr["source"] == P.PROF_TIMER else 0, n, 0,
                  1200, 0, dtmr << 16 | 2, 0xFFFFFFFF, (6 if running else 0) << 24 | (0 if running else 1) << 16 | pr["starts"],
-                 0x46AC2000 if running else 0x40001252, 0x47100100)
+                 0x46A42000 if running else 0x40001252, 0x47100100)
         return bytes([pr["state"], pr["source"], pr["why"], P.PROF_RECORD]) + struct.pack(">17I", *words)
 
     def _profile(self, a: bytes) -> tuple[int, bytes]:

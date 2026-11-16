@@ -114,6 +114,15 @@ def test_the_renderer_sits_between_the_assembly_and_the_runtime():
     assert pages.LOAD + len(CHUNK) <= pages.C_END
 
 
+def test_the_harnesses_scratch_ends_where_the_renderer_starts():
+    import ast
+    src = (pathlib.Path(__file__).parents[1] / "scripts/emulib/machine.py").read_text()
+    ends = [n.value.value for n in ast.parse(src).body if isinstance(n, ast.Assign)
+            and any(getattr(t, "id", None) == "SCRATCH_END" for t in n.targets)]
+    assert ends == [pages.C_LOAD]
+    assert pages.C_LOAD + pages.C_SPAN <= pages.MDUI_LOAD
+
+
 def test_no_wave_display_chunk_since_perc():
     from dnfw.mods.waverider import SPEC
     assert "spans_chunk" not in SPEC

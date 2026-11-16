@@ -19,6 +19,7 @@ SYX = f"{ROOT}/00_Resources/00_Firmware/Digitone_II_OS1.11_dist/Digitone_II_OS1.
 SNAP = "/root/dn2-snapshots/Digitone_II_OS1.11/ui1200M.snap"
 
 STACK, SCRATCH = 0x46A00000, 0x46A10000
+SCRATCH_END = 0x46A40000          # dnfw.waverider.pages.C_LOAD: the C renderer starts here (2026-11-12)
 FLAGS = dict(unblock=True, softfloat=True, bitmap=True, dsp=True,
              weakptr=True, slc=True, sdgate=True, esdhc=True)
 
@@ -114,6 +115,8 @@ class Machine:
     def alloc(self, n):
         va = (self.at + 15) & ~15
         self.at = va + n
+        if va < SCRATCH_END < self.at:
+            raise MemoryError(f"scratch {va:#x}+{n:#x} runs into the C renderer at {SCRATCH_END:#x}")
         self.write(va, bytes(n))
         return va
 

@@ -48,8 +48,9 @@ from __future__ import annotations
 LOAD = 0x4670C000                 # RAM above BSS, clear of every declared range (docs/mods-compatibility.md)
 # v0.13: the C page renderer is a CODE chunk of its own, well above the others (it outgrew
 # the room after this assembly, LOAD + 0x600 .. PING's chunk)
-C_LOAD = 0x46AC0000                # clear of the emulator harnesses' stack and scratch (0x46a00000..)
-C_SPAN = 0x30000                   # v0.41: up to the MD graphics, now at 0x46af0000 (v0.29..v0.40: 0x20000,
+C_LOAD = 0x46A40000                # clear of the emulator harnesses' stack and scratch (0x46a00000..0x46a40000)
+C_SPAN = 0xB0000                   # 2026-11-12: down from 0x46ac0000, 704 KB up to the MD graphics at 0x46af0000
+                                  # (the User's ruling; docs/memory-map.md). v0.41..v0.48: 0x30000 (v0.29..v0.40: 0x20000,
                                   # to them at 0x46ae0000, and v0.40's renderer was within 2.5 KB of it;
                                   # REC trigs took it past). 64 KB until v0.28; all unclaimed RAM above
                                   # BSS (docs/memory-map.md); the pool's mirror starts at 0x46b00000

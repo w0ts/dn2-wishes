@@ -52,8 +52,8 @@ This agrees with every 1.11↔1.12 pair in `docs/overtone-map.md` §2 (e.g. `0x4
   (0 exceptions). So the layout inside BSS is unchanged, only shifted.
 - **Fast SRAM `0x80000000..0x80010000`: unchanged** (no aligned operand into it differs).
 - **Our own RAM is still clear.** The lowest address the shipping build uses is
-  `0x46700000` (lfo4's state; then `0x46708000`, `0x4670c000`, `0x46710000` runtime, `0x46ac0000`,
-  `0x46af0000`, `0x46b00000` mirror). 1.12's BSS ends at `0x466b84d0`, 300 KB below.
+  `0x46700000` (lfo4's state; then `0x46708000`, `0x4670c000`, `0x46710000` runtime, `0x46ac0000`
+  (since 2026-11-12 `0x46a40000`), `0x46af0000`, `0x46b00000` mirror). 1.12's BSS ends at `0x466b84d0`, 300 KB below.
 
 ## 2. The mod's sites, classified
 
