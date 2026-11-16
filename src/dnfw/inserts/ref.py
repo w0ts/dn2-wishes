@@ -3,7 +3,7 @@ code (dnfw.inserts.program) does it, so the two agree bit for bit (the SHARC run
 assembled code to this module).
 
     r = Ref()
-    r.block(par_bytes, buffers, route)   # par_bytes: 128 bytes (16 tracks x M.SEL MOD K1..K6),
+    r.block(par_bytes, buffers, route)   # par_bytes: 128 bytes (16 tracks x M.SEL MIX K1..K6),
                                          # buffers: the 16 voice slots' 32 floats, changed in place;
                                          # route: the track each slot plays (default slot s plays
                                          # track s; a value past 15 plays none)

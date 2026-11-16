@@ -509,7 +509,7 @@ def main(argv=None):
     p.add_argument("--frame-be", help="a frame as the ColdFire holds it at 0x80005e60 (16-bit BE)")
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
-    p.add_argument("--steps", default="decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,flexlevel,mainrec,recwhole,pvmix,fdn8,xdly,inserts,tdm,stock,mnm,frame")   # v0.27: shft, gran removed; v0.45: ping removed   # voice: PERC
+    p.add_argument("--steps", "decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,mainrec,recwhole,pvmix,fdn8,xdly,inserts,inspost,tdm,stock,mnm,frame", "decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,flexlevel,mainrec,recwhole,pvmix,fdn8,xdly,inserts,tdm,stock,mnm,frame")   # v0.27: shft, gran removed; v0.45: ping removed   # voice: PERC
     p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
@@ -610,6 +610,23 @@ def main(argv=None):
             results["3k_chords"] = step_chords(warm(), sound, machines, cold=init)
             show(results["3k_chords"])
             gc.collect()
+        if "notestart" in steps:
+            print("\nstep 3n: each Monomachine machine's (PLAITS': each engine's) note-start block against its "
+                  "steady blocks, the memory clock (2026-11-09)")
+            results["3n_notestart"] = step_notestart(warm(), sound, machines)
+            show(results["3n_notestart"])
+            gc.collect()
+        if "rests" in steps:
+            print("\nstep 3q: a Monomachine voice after its note-off and the amp's release rests (2026-11-09)")
+            results["3q_rests"] = step_rests(warm(), sound, machines)
+            show(results["3q_rests"])
+            gc.collect()
+        if "rotate" in steps:
+            print("\nstep 3r: one Monomachine track's notes rotating over four voices, LEN finite and INF, "
+                  "on the memory clock (2026-11-09)")
+            results["3r_rotate"] = step_rotate(warm(), sound, machines)
+            show(results["3r_rotate"])
+            gc.collect()
         if "mainsrc" in steps:
             print("\nstep (probe): the main mix as the recorder sees it")
             results["probe_mainsrc"] = step_mainsrc(warm(), sound, machines, a.blocks)
@@ -699,6 +716,13 @@ def main(argv=None):
             results["3i_inserts"] = ins_step.run(sys.modules[__name__], snap, m2mach, m5, sound, machines)
             gc.collect()
             show(results["3i_inserts"])
+
+        if "inspost" in steps:
+            print("\nstep 3j: the stereo inserts after the pan (CHOR, WIDE)")
+            post_step = importlib.import_module("sharc_inspost_step")
+            results["3j_inspost"] = post_step.run(sys.modules[__name__], snap, m2mach, m5, sound, machines)
+            gc.collect()
+            show(results["3j_inspost"])
 
         if "tdm" in steps:
             print("\nstep 3e: the fast link (TDM)")
@@ -1508,6 +1532,273 @@ def step_chords(init, sound, machines, need=4, cold=None) -> dict:
     sres, snums = step_smp_chords(cold if cold is not None else init, sound, machines, only=only)
     res.update(sres)
     nums.update(snums)
+    return {"ok": all(res.values()), "checks": res, "numbers": nums}
+
+
+def step_notestart(init, sound, machines) -> dict:
+    """2026-11-09 (the User: PLAITS sequenced with voice rotation silent, CPU; Optimist's
+    perf(notestart), its bench scenario 18). Each Monomachine machine, and PLAITS at each MODL
+    engine, on voice 1: type 0 at block 0, the machine from block 1 with a note (a voice
+    changing machine, as rotation does), a second note on the same voice at block 6. On the
+    memory-cost clock, each block's cost of that voice as the guard measures it (its cost
+    word at the next PERC entry): the start block, the steady blocks after it, the second
+    note's block. -> numbers only (ok: every run ran)."""
+    from dnfw.perc import guard as G
+    from dnfw.mnm import machines as MMx
+    from dnfw.mnm import plaits as PLT
+    P = 666_667
+    sites = set(_after_emuclk("perc")) | set(_after_emuclk("smp"))
+    counts, undo_counts = _count_memory()
+    S = float(os.environ.get("DNFW_MEM_SCALE", "0.9"))
+    cases = [("SOPHIE", None), ("TB303", None)] + [("PLAITS", m) for m in range(PLT.N_MODELS) if PLT.MODELS[m]]
+    only = [x for x in os.environ.get("DNFW_NOTESTART_ONLY", "").split(",") if x]
+    nums, ok = {}, True
+    try:
+        for name, m in cases:
+            label = name if m is None else f"PLAITS {PLT.MODELS[m]}"
+            if only and label not in only and name not in only:
+                continue
+            k = MMx.NAMES.index(name)
+            typ = MMx.TYPES[k]
+            knobs = None
+            if m is not None:
+                knobs = list(MMx.DEFAULTS[name])
+                knobs[6] = PLT.knob_of(m)
+            words = mnm_words(k, knobs)
+            b_now = {"b": 0}
+            costs, ours = [], []
+
+            def cycles(r):
+                return int(getattr(r, "steps_n", 0) + S * (4 * counts["L2"] + 10 * counts["DDR"]))
+
+            def clock(r):
+                r.state.uregs[fx.UREG_CODES["R8"]] = fx.Const(((b_now["b"] + 1) * P + cycles(r)) & 0xFFFFFFFF)
+
+            def at_dispatch(r):
+                for x in ("L1", "L2", "DDR"):
+                    counts[x] = 0
+                counts["on"] = True
+
+            def at_perc(r):
+                base = (b_now["b"] + 1) * P
+                costs.append(m2.word(r.state, G.COST_PERC + 4 * 1))
+                ours.append((m2.word(r.state, G.OURS_END) - m2.word(r.state, G.MARK)) & 0xFFFFFFFF)   # the last block's
+                m2.poke(r.state, G.MARK0, base & 0xFFFFFFFF)
+                m2.poke(r.state, G.MARK, (base + cycles(r)) & 0xFFFFFFFF)
+            hooks = {dsp.PERC_SW: at_perc, m3.DISPATCH: at_dispatch}
+            hooks.update({x: clock for x in sites})
+
+            def fb(b, typ=typ, words=words):
+                b_now["b"] = b
+                f = base_frame(sound, machines, t0=0, trigger=False, others={1: typ if b >= 1 else 0})
+                for slot, w in words.items():
+                    f.param(1, slot, w)
+                f.header(FR.NOTE, 1, 0x3C00)
+                if b in (1, 6):
+                    f.trigger(1, masks=(34, 38))
+                return f.to_bytes()
+            rr = run_blocks(init, fb, 10, extra_hooks=hooks)
+            ok = ok and rr["ok"]
+            rr.pop("state", None)
+            per = costs[1:]                       # per[b] = block b's cost (read at block b + 1's entry)
+            our = ours[1:]                        # our[b] = our voices' time in block b (entry to end)
+            nums[label] = {"start": per[1] if len(per) > 1 else None,
+                           "next": per[2:5], "second_note": per[6] if len(per) > 6 else None,
+                           "steady": per[7:9], "all": per, "ours": our}
+            print(f"    {label:12s} cost words: start {nums[label]['start']}  next {nums[label]['next']}  "
+                  f"2nd note {nums[label]['second_note']}  steady {nums[label]['steady']}", flush=True)
+            print(f"    {'':12s} our time:   blocks 0..9 {our}", flush=True)
+    finally:
+        undo_counts()
+    return {"ok": ok, "checks": {"every note-start run ran": ok}, "numbers": nums}
+
+
+REST_BLOCKS, REST_RELEASE = 100, 0x0800
+
+
+def step_rests(init, sound, machines, names=("PLAITS", "SOPHIE")) -> dict:
+    """2026-11-09 (Plaits has no LPG here: its engine sounds on after a note-off, the DN2's amp
+    ends it). One note on voice 1, note-off at block 4, the amp's release short (frame index 85
+    = REST_RELEASE): the voice must stop costing (rest: dnfw.perc.program MNM_QUIET_BLOCKS after
+    its amp output fell under MNM_QUIET_LEVEL) within REST_BLOCKS. On the memory-cost clock: the
+    voice's cost word each block, the block its amp output went quiet, the block it rested."""
+    from dnfw.perc import guard as G
+    from dnfw.mnm import machines as MMx
+    P = 666_667
+    sites = set(_after_emuclk("perc")) | set(_after_emuclk("smp"))
+    counts, undo_counts = _count_memory()
+    S = float(os.environ.get("DNFW_MEM_SCALE", "0.9"))
+    res, nums = {}, {}
+    try:
+        for name in names:
+            k = MMx.NAMES.index(name)
+            typ = MMx.TYPES[k]
+            b_now = {"b": 0}
+            costs = []
+
+            def cycles(r):
+                return int(getattr(r, "steps_n", 0) + S * (4 * counts["L2"] + 10 * counts["DDR"]))
+
+            def clock(r):
+                r.state.uregs[fx.UREG_CODES["R8"]] = fx.Const(((b_now["b"] + 1) * P + cycles(r)) & 0xFFFFFFFF)
+
+            def at_dispatch(r):
+                for x in ("L1", "L2", "DDR"):
+                    counts[x] = 0
+                counts["on"] = True
+
+            def at_perc(r):
+                base = (b_now["b"] + 1) * P
+                costs.append(m2.word(r.state, G.COST_PERC + 4 * 1))
+                m2.poke(r.state, G.MARK0, base & 0xFFFFFFFF)
+                m2.poke(r.state, G.MARK, (base + cycles(r)) & 0xFFFFFFFF)
+            hooks = {dsp.PERC_SW: at_perc, m3.DISPATCH: at_dispatch}
+            hooks.update({x: clock for x in sites})
+
+            def fb(b, typ=typ, k=k):
+                b_now["b"] = b
+                f = base_frame(sound, machines, t0=0, trigger=False, others={1: typ})
+                for slot, w in mnm_words(k).items():
+                    f.param(1, slot, w)
+                f.param(1, 85, REST_RELEASE)
+                f.header(FR.NOTE, 1, 0x3C00)
+                if b == 1:
+                    f.trigger(1, masks=(34, 38))
+                if b == 4:
+                    f.trigger(1, masks=(36, 40))
+                return f.to_bytes()
+            rr = run_blocks(init, fb, REST_BLOCKS, extra_hooks=hooks)
+            rr.pop("state", None)
+            per = costs[1:]
+            amp = [max((abs(x) for x in blk[1]), default=0.0) for blk in rr.get("buffers", [])]
+            quiet = next((b for b in range(5, len(amp)) if all(a < 2.0 ** -16 for a in amp[b:])), None)
+            steady = max(per[2:4]) if len(per) > 4 else 0
+            rested = next((b for b in range(5, len(per)) if all(c < steady / 2 for c in per[b:])), None)
+            nums[name] = {"amp_quiet_from": quiet, "rested_from": rested, "costs": per}
+            print(f"    {name}: amp quiet from block {quiet}, rested (cost < half its steady {steady}) from "
+                  f"block {rested}; costs {per[:6]} .. {per[-4:]}", flush=True)
+            res[f"{name}: after a note-off and the amp's release, the voice rests (stops costing) within "
+                f"{REST_BLOCKS} blocks"] = rr["ok"] and rested is not None
+    finally:
+        undo_counts()
+    return {"ok": all(res.values()), "checks": res, "numbers": nums}
+
+
+ROTATE_VOICES, ROTATE_EVERY, ROTATE_NOTES, ROTATE_GATE = 4, 6, 8, 3
+
+
+def step_rotate(init, sound, machines, names=("PLAITS", "PLAITS:PART", "SOPHIE", "TB303")) -> dict:
+    """2026-11-09 (the User, build b4: PLAITS silent when sequenced with voice rotation, LEV
+    showing CPU; locked to one voice it plays). One track's notes, each on the next voice
+    (ROTATE_VOICES of them, a note every ROTATE_EVERY blocks, ROTATE_NOTES notes), as the
+    DN2's allocation rotates a sequenced track: a voice is type 0 until its first note, the
+    machine's type from then on (measured in the ColdFire's frames, dn2mk2-scratch/seq). Two
+    gates: LEN finite (note-off ROTATE_GATE blocks after the note: masks 36 and 40) and LEN
+    INF (no note-off). On the memory-cost clock (step 3k's), so the frame guard decides as on
+    the unit. Each note must sound from its first block to the next note (no voice of a
+    single track refused for time), our voices done by 0.8 of the frame, everything finite.
+    -> checks, and per machine and gate the guard's view (LIMIT, each slot's cost, skips)."""
+    from dnfw.perc import guard as G
+    from dnfw.mnm import machines as MMx
+    P = 666_667
+    sites = set(_after_emuclk("perc")) | set(_after_emuclk("smp"))
+    counts, undo_counts = _count_memory()
+    S = float(os.environ.get("DNFW_MEM_SCALE", "0.9"))
+    only = [x for x in os.environ.get("DNFW_ROTATE_ONLY", "").split(",") if x]
+    blocks = 2 + ROTATE_EVERY * ROTATE_NOTES
+    res, nums = {}, {}
+    try:
+        for name in [n for n in names if not only or n in only]:
+            base_name, _, eng = name.partition(":")
+            k = MMx.NAMES.index(base_name)
+            typ = MMx.TYPES[k]
+            knobs = None
+            if eng:                                  # PLAITS at one MODL engine
+                from dnfw.mnm import plaits as PLT
+                knobs = list(MMx.DEFAULTS[base_name])
+                knobs[6] = PLT.knob_of(PLT.MODELS.index(eng))
+            words = mnm_words(k, knobs)
+            # PART / STRG defer their DDR clear (dnfw.mnm.plk): four / two blocks silent on a voice
+            # starting the engine
+            late = 1 + {"PART": 4, "STRG": 2}.get(eng, 0)
+            for gate in ("finite", "inf"):
+                b_now = {"b": 0}
+                trace = []
+
+                def cycles(r):
+                    return int(getattr(r, "steps_n", 0) + S * (4 * counts["L2"] + 10 * counts["DDR"]))
+
+                def clock(r):
+                    r.state.uregs[fx.UREG_CODES["R8"]] = fx.Const(((b_now["b"] + 1) * P + cycles(r)) & 0xFFFFFFFF)
+
+                def at_dispatch(r):
+                    for x in ("L1", "L2", "DDR"):
+                        counts[x] = 0
+                    counts["on"] = True
+
+                def at_perc(r):
+                    base = (b_now["b"] + 1) * P
+                    trace.append({"b": b_now["b"], "limit": m2.word(r.state, G.LIMIT),
+                                  "cost": [m2.word(r.state, G.COST_PERC + 4 * t) for t in range(ROTATE_VOICES)],
+                                  "skips": m2.word(r.state, G.SKIPS), "at_entry": cycles(r)})
+                    m2.poke(r.state, G.MARK0, base & 0xFFFFFFFF)
+                    m2.poke(r.state, G.MARK, (base + cycles(r)) & 0xFFFFFFFF)
+                hooks = {dsp.PERC_SW: at_perc, m3.DISPATCH: at_dispatch}
+                hooks.update({x: clock for x in sites})
+
+                def fb(b, typ=typ, words=words, gate=gate):
+                    b_now["b"] = b
+                    n_on = (b - 1) // ROTATE_EVERY if b >= 1 else -1      # the notes struck so far - 1
+                    used = {(j % ROTATE_VOICES) for j in range(n_on + 1)}
+                    # a voice is on the machine from its first note (before: the frame's default, as
+                    # step 3k leaves its other tracks; a type-0 voice with no sound renders non-finite here)
+                    f = base_frame(sound, machines, t0=typ, overrides=words, trigger=False,
+                                   others={t: typ for t in range(1, ROTATE_VOICES) if t in used})
+                    for t in range(ROTATE_VOICES):
+                        if t in used:                   # a voice holds the machine's words once it is on it
+                            for slot, w in words.items():
+                                f.param(t, slot, w)
+                        f.header(FR.NOTE, t, 0x3C00)
+                    if b >= 1 and (b - 1) % ROTATE_EVERY == 0 and n_on < ROTATE_NOTES:
+                        f.trigger(n_on % ROTATE_VOICES, masks=(34, 38))
+                    if gate == "finite" and b >= 1 + ROTATE_GATE and (b - 1 - ROTATE_GATE) % ROTATE_EVERY == 0:
+                        f.trigger(((b - 1 - ROTATE_GATE) // ROTATE_EVERY) % ROTATE_VOICES, masks=(36, 40))
+                    return f.to_bytes()
+                rr = run_blocks(init, fb, blocks, extra_hooks=hooks)
+                st = rr.get("state")
+                end = mark0 = None
+                if rr["ok"]:
+                    end, mark0 = m2.word(st.state, G.OURS_END), m2.word(st.state, G.MARK0)
+                rr.pop("state", None)
+                heard = []                          # per note: its voice sounding, each block to the next note
+                for j in range(ROTATE_NOTES):
+                    t = j % ROTATE_VOICES
+                    b0 = 1 + j * ROTATE_EVERY
+                    heard.append([int(t in rr["perc"][b] and V.peak(rr["perc"][b][t]["out"]) > 1e-4)
+                                  for b in range(b0, min(b0 + ROTATE_EVERY, len(rr.get("perc", []))))])
+                fin = rr["ok"] and all(math.isfinite(x) for blk in rr["buffers"] for t in range(16) for x in blk[t])
+                over = ((end - mark0) & 0xFFFFFFFF) / P if end is not None else None
+                key = f"{name} {gate}"
+                bad = sorted({t for blk in rr.get("buffers", []) for t in range(16)
+                              if not all(math.isfinite(x) for x in blk[t])})
+                nums[key] = {"heard": heard, "our_end_over_P": over and round(over, 3), "run_ok": rr["ok"],
+                             "halt": rr.get("halt"), "nonfinite_tracks": bad,
+                             "skips": trace[-1]["skips"] if trace else None,
+                             "guard": [{**g, "limit": g["limit"]} for g in trace]}
+                print(f"    {key}: heard {heard} skips {nums[key]['skips']} end/P {nums[key]['our_end_over_P']} "
+                      f"run ok {rr['ok']} halt {rr.get('halt')} non-finite tracks {bad}", flush=True)
+                for g in trace:
+                    print(f"      b{g['b']:2d} limit {g['limit']:7d} entry {g['at_entry']:7d} costs {g['cost']} "
+                          f"skips {g['skips']}", flush=True)
+                # a voice's first block on a new machine is silent for every machine (its change
+                # block; SOPHIE's too, which the unit plays): each note heard from its second block
+                res[f"{name}, LEN {gate}: every rotated note sounds from its second block (a voice starting PART / STRG: "
+                    f"after its deferred clear) to the next note (the newest note never refused; older voices may be left out "
+                    f"for time, counted), done by 0.8 of the frame, finite"] = (
+                    rr["ok"] and fin and over is not None and over <= 0.8
+                    and all(len(h) > late and all(h[late if j < ROTATE_VOICES else 1:]) for j, h in enumerate(heard)))
+    finally:
+        undo_counts()
     return {"ok": all(res.values()), "checks": res, "numbers": nums}
 
 

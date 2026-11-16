@@ -26,21 +26,23 @@ P = importlib.import_module("dnfw.inserts.program")
 dsp = importlib.import_module("dnfw.waverider.dsp")
 
 OUT = ROOT / "csrc" / "waverider" / "sharc" / "inserts.asm"
+POST = importlib.import_module("dnfw.inserts.post")
+OUT_POST = ROOT / "csrc" / "waverider" / "sharc" / "inspost.asm"
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--no-resolve", action="store_true")
     a = ap.parse_args(argv)
-    text = P.program(dsp.PING_SW)
-    if not a.no_resolve:
-        R = importlib.import_module("sharc_resolve_jumps")      # (selas)
-        with tempfile.TemporaryDirectory() as tmp:
-            text, be, offs = R.resolve(text, dsp.INS_SW, pathlib.Path(tmp))
-        print(f"resolved at sw {dsp.INS_SW:#x}: {len(offs)} instructions, {len(be)} bytes")
-    OUT.write_text(text, encoding="utf-8", newline="\n")
-    n = sum(1 for ln in text.splitlines() if ln.startswith("      ") and not ln.strip().startswith("//"))
-    print(f"wrote {OUT.relative_to(ROOT)}: {n} instructions")
+    for text, at, out in ((P.program(dsp.PING_SW), dsp.INS_SW, OUT), (POST.program(), dsp.POST_SW, OUT_POST)):
+        if not a.no_resolve:
+            R = importlib.import_module("sharc_resolve_jumps")      # (selas)
+            with tempfile.TemporaryDirectory() as tmp:
+                text, be, offs = R.resolve(text, at, pathlib.Path(tmp))
+            print(f"resolved at sw {at:#x}: {len(offs)} instructions, {len(be)} bytes")
+        out.write_text(text, encoding="utf-8", newline="\n")
+        n = sum(1 for ln in text.splitlines() if ln.startswith("      ") and not ln.strip().startswith("//"))
+        print(f"wrote {out.relative_to(ROOT)}: {n} instructions")
     return 0
 
 

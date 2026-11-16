@@ -74,7 +74,9 @@ def init(p: Prog, L: C.Layout) -> None:
     """ParticleEngine::Init + Reset: the particles' pre-gains and filters at 0 (their g, r, h too:
     Plaits' Init sets them, but a particle's filter only ever ticks a 0 input with zero state
     until its first frequency is drawn, which sets them), the post filter at 0, the diffuser's
-    LFO started, its low-pass at 0, its buffer cleared and its write pointer at 0."""
+    LFO started, its low-pass at 0, its buffer cleared and its write pointer at 0. 2026-11-09:
+    the buffer's clear deferred (plk.defer_clear: 8,192 DDR words over the next eight halves,
+    silent, the trigger kept), so a voice's start block is not 8,192 DDR stores."""
     p.iconst(0, 0)
     for k in range(NU_USED):
         K.sv(p, K.U0 + k, 0)
@@ -82,10 +84,7 @@ def init(p: Prog, L: C.Layout) -> None:
     K.sv(p, Y0, 0)
     p.fconst(0, LFO_Y1)
     K.sv(p, Y1, 0)
-    K.big_at(p, L, 0)
-    p.seti(1, 0)
-    p.iconst(2, 0)
-    p.loop_r(3, BIG_USED, lambda: p.stpost(1, 2))
+    K.defer_clear(p, BIG_USED)
 
 
 def _params(p: Prog) -> None:

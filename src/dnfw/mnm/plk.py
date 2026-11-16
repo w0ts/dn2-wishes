@@ -2,7 +2,7 @@
 their memory in DDR, and the arithmetic they are written with. A leaf module: the engine modules
 (plaits_*.py) import it, dnfw.mnm.plaits imports them.
 
-The slot's state words (dnfw.md.core S0, 96 of them): WS's and GRAIN's at 0..43 (dnfw.mnm.plaits),
+The slot's state words (dnfw.md.core S0, 96 of them): WS's at 0..43 (GRAIN's, removed 2026-11-09, unused) (dnfw.mnm.plaits),
 then the words every engine reads (the note, the model last rendered, the trigger, the random
 generator), then the UNION: each other engine's own words, from U0. An engine's words are its own
 only while it is the model: on a change of model the new one's `init` runs (Plaits' Reset; its
@@ -35,13 +35,50 @@ HALF = 16                                      # a half: Plaits' block (its inte
 F_MAX, F_MIN = 0.25, 0.000001                  # plaits::kMaxFrequency, kMinFrequency
 A0 = 440.0 / SR                                # a note's frequency: A0 x 2^((note - 69) / 12)
 
-S_BASE = 17                                    # dnfw.mnm.plaits: WS's and GRAIN's f0 (PERC's exp2)
+S_BASE = 17                                    # dnfw.mnm.plaits: WS's f0 (PERC's exp2)
 S_NOTE, S_LAST, S_TRIG, S_RNG = 44, 45, 46, 47
 U0 = 48                                        # the engines' own words: U0 .. K.NS - 1
 NU = K.NS - U0                                 # 48
 
 BIG_DDR, BIG_STRIDE = 0x82600000, 0x8000       # 32 KB a voice (8192 words), 16 voices: 512 KB
 BIG_WORDS = BIG_STRIDE // 4
+# 2026-11-09 (the User: PLAITS silent sequenced with voice rotation, CPU; Optimist's
+# perf(notestart)): an engine whose init would clear thousands of DDR words (PART 8,192, STRG
+# 3,984) defers it: its init sets S_CLR to the words to clear (a multiple of CLR_CHUNK), and
+# each half then clears CLR_CHUNK of them, from the top down, and renders silence (the trigger
+# kept) until none are left; then the engine's `init_tail`, if it has one, and its halves. A
+# voice's start block costs an engine half, not 8,192 DDR stores. S_CLR is GRAIN's first state
+# word (free since GRAIN went); dnfw.mnm.plaits clears it at init and on a change of engine.
+S_CLR = 7
+CLR_CHUNK = 1024                               # words a half: 2,048 a block
+
+
+def defer_clear(p: Prog, words: int) -> None:
+    """an engine's init: clear WORDS of this voice's DDR words over the next halves (rounded up
+    to CLR_CHUNK). Clobbers R0."""
+    n = -(-words // CLR_CHUNK) * CLR_CHUNK
+    assert 0 < n <= BIG_WORDS
+    p.iconst(0, n)
+    sv(p, S_CLR, 0)
+
+
+def clear_half(p: Prog, L: C.Layout, out: int) -> None:
+    """one half while S_CLR > 0: CLR_CHUNK of the voice's DDR words cleared (the top ones left),
+    S_CLR less CLR_CHUNK; HALF zeros stored at I4 (OUT: a free register). Clobbers R0-R3, R8,
+    R12, I1."""
+    ld(p, 1, S_CLR)
+    p.iconst(12, -CLR_CHUNK)
+    p.iop(1, 12, "+", 1)
+    sv(p, S_CLR, 1)                            # the words left after this half: the first to clear
+    big_at(p, L, 0)
+    p.lsh(8, 1, 2)
+    p.iop(0, 8, "+", 0)
+    p.seti(1, 0)
+    p.iconst(2, 0)
+    p.loop_r(3, CLR_CHUNK, lambda: p.stpost(1, 2))
+    p.iconst(out, 0)
+    for _ in range(HALF):
+        p.stpost(4, out)
 ACCENT = 0.8                                   # Plaits' accent with LEVEL unpatched (voice.cc)
 
 

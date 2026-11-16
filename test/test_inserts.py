@@ -77,7 +77,7 @@ def script(blocks=120, seed=3):
             rows[3] = [D.FOLD, 127, 30, 100, 64, 30, 90, 0]         # FOLD half triangle, half sine
             rows[6] = [D.HARM, 64, 127, 127, 0, 127, 127, 0]          # HARM odd only, open
         if b == 90:
-            rows[2] = [D.FUZZ, 0, 127, 127, 127, 127, 127, 127]  # MOD 0: dry (the input clamped)
+            rows[2] = [D.FUZZ, 0, 127, 127, 127, 127, 127, 127]  # MIX 0: dry (the input clamped)
         loud = 6.0 if 20 <= b < 24 else 0.8
         bufs = [[rnd.uniform(-loud, loud) * (0.0 if 100 <= b < 110 else 1.0) for _ in range(32)]
                 for _ in range(D.TRACKS)]

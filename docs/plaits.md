@@ -5,6 +5,8 @@ SOPHIE. A port of Mutable Instruments Plaits' engines (two at first, thirteen si
 see *The other engines*) (Emilie Gillet,
 github.com/pichenettes/eurorack `plaits/`, MIT; THIRD-PARTY.md): **WS** (waveshaping) and
 **GRAIN** (granular formant). More engines can join MODL later, each one a DSL routine.
+**GRAIN was removed on 2026-11-09** (the User: DSP room for the CHOR and WIDE inserts): see
+*GRAN removed*; what is written about it below is its history.
 
 `src/dnfw/mnm/plaits.py`, in the DSL (`dnfw.perc.dsl`): one program for the SHARC code and its
 run-mode model, in PERC's voice like the Monomachine machines (`docs/mnm.md`).
@@ -16,7 +18,7 @@ run-mode model, in PERC's voice like the Monomachine machines (`docs/mnm.md`).
 | HARM | WS: the waveshaper (Plaits' five Tides tables, crossfaded); GRAIN: the second formant's ratio (-24..+24 semitones) and, below the middle, the carrier's bleed | 0..100 % |
 | TIMB | WS: the wavefolder's gain; GRAIN: the formant (24..108 semitones) | 0..100 % |
 | MORP | WS: the slope oscillator's shape (its pulse width, 0.5..0.95); GRAIN: the carrier's shape | 0..100 % |
-| MODL | the engine: WS, GRAN (GRAIN), then the engines below (2026-11-09), in MODL's order | one choice each |
+| MODL | the engine: WS, then the engines below (2026-11-09), in MODL's order (GRAN's slot retired: plays and shows WS) | one choice each |
 | FINE | cents on the note (2026-11-09), shown as +0 at the centre | -64..+63 cents |
 | TUNE | whole semitones on the note (2026-11-09; continuous until then), shown as +7, -12 | -24..+24 (+0 at the centre) |
 
@@ -208,3 +210,75 @@ code) so it could.
 **Checks of the final build**: the SHARC runner (`sharc:mnm+frame`) holds every model's track
 (triggered at blocks 1 and 4, off-centre knobs) and a track walking MODL through every model to the
 model, bit for bit, every block; WS and GRAIN are bit-identical to the build before.
+
+## GRAN removed (2026-11-09)
+
+The User removed GRAIN (granular formant) to make DSP room for the CHOR and WIDE inserts. The
+other twelve engines are untouched.
+
+- **MODL keeps its 13 knob slots.** GRAN's slot (choice 1, knob 10..19) is *retired*: an empty
+  name in `plaits.MODELS`. The DSP plays WS there (`half`'s first arm takes choices <= 1); the page
+  shows it as WS and a turn steps past it (`pages.MNM_RETIRED`, used by md_page.c, page.c and
+  fmt.c's `mnm_quant`; a jump that lands on it goes to WS). So every saved knob and p-lock keeps its
+  engine: VA is still 20..29, HH still 119..127, and an old GRAN p-lock now plays WS.
+- **Size** (base sophie-v043-os112-b4 8e14c9a, build 03f28370): PERC code 150,454 -> 148,496 B;
+  DSP upload 2,607 -> 4,567 B free (**1,960 B freed**); USB image 26,147 -> 26,753 B free
+  (**606 B freed**).
+- **Unchanged engines.** The run-mode model's output, hashed for every MODL slot at both ends of its
+  knob range and four knob sets (`same_all.py`), is identical to b4's for WS and VA..HH; the retired
+  slot hashes as WS. Each half is 4 steps cheaper (one compare fewer in the dispatcher).
+  `MNM_COST["PLAITS"]` stays 60,000 (PART / STRG set it).
+- GRAIN's state words (slot words 7..16) and per-half words are kept, unused, so WS's layout is
+  bit-identical.
+
+## A voice's start (2026-11-09)
+
+The User: PLAITS played by key and locked to one voice, but sequenced with voice rotation it
+stayed silent and LEV read `CPU` (the frame guard leaving voices out for time). As Optimist's
+`perf(notestart)` did for its Plaits, the start of a voice is made light:
+
+- **PART's and STRG's DDR clear is deferred** (`plk.defer_clear` / `clear_half`): their init no
+  longer clears 8,192 / 3,984 DDR words in the voice's start block; each half then clears 1,024
+  of them (top down) and is silent, the note's trigger kept, until none are left (PART four
+  blocks, 2.7 ms; STRG two, 1.3 ms; then STRG's `init_tail`). Only when the engine starts on a
+  voice (a voice changing machine, or MODL); a voice already on it plays its next note at once.
+  `S_CLR` is slot word 7 (GRAIN's, free).
+- **The guard keeps a start block's cost out of its expectation** (`guard.FRESH`, set by PLAITS'
+  change of engine, which a voice changing machine to PLAITS also makes): the next block is
+  expected at FLOOR, then at what it measures, so one heavy start cannot get the note's next
+  blocks refused twice and the note stolen.
+- **A PLAITS note's first two blocks are expected at a fixed bound** (`program.MNM_START`, its
+  MNM_COST 60,000; per slot at `BOUNDS_OFF` each block, `guard.START_BLOCKS`), not at 1.5 x the
+  slot's stored cost, which on a rotated voice is another note's or a start block's.
+- **A refusal in a PLAITS note's trig block is no strike**: it is tried again the next block; only
+  the refusals after it count towards the steal (two in a note).
+- All three are PLAITS' only: for every other slot the bound is 0 and FRESH never set, so SOPHIE,
+  TB303, PERC and the sample machines decide exactly as before (the runner's `rotate` and
+  `stress` guard traces compared, below).
+- Old voices: Plaits has no LPG here (OUT goes to the DN2's filter and amp); after a note-off and
+  the amp's release a voice rests 64 quiet blocks later and costs nothing (runner step `rests`:
+  PLAITS from block 65, as SOPHIE).
+
+Runner (memory-cost clock, `scripts/sharc_waverider_m5.py --steps notestart,rests,rotate`): a
+voice changing machine to PLAITS, its start block, our time above the silent block (cycles):
+
+| engine | start before | start after | steady |
+|---|---|---|---|
+| WS | 59,548 | 59,573 | 15,892 |
+| VA | 64,717 | 64,742 | 18,538 |
+| FM | 73,208 | 73,233 | 29,058 |
+| ADD | 95,293 | 95,318 | 48,870 |
+| SWRM | 65,534 | 65,559 | 18,104 |
+| NOIS | 58,001 | 58,026 | 11,633 |
+| PART | 190,748 | 74,604 | 41,414 |
+| STRG | 176,277 | 74,392 | 70,542 |
+| MDAL | 147,586 | 147,611 | 99,755 |
+| BD | 60,761 | 60,786 | 15,098 |
+| SD | 67,045 | 67,070 | 20,116 |
+| (SOPHIE) | 69,959 | 69,963 | 26,671 |
+| (TB303) | 117,552 | 117,556 | 71,166 |
+
+The run-mode model renders every engine but PART and STRG bit for bit as before (those two start
+four / two blocks later). **Not measured: the unit.** On the memory-cost clock even the old build
+admits every rotated PLAITS note (WS at 0.17 of the frame); what the unit measures differently is
+not known, so whether this is enough is the User's test on the instrument.

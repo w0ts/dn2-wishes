@@ -142,6 +142,8 @@ static int mnm_quant(int mi, int slot, int old, int value)
     }
     if (c < 0) c = 0;
     if (c > count - 1) c = count - 1;
+    if (MNM_RETIRED(mi, j, c))                  /* 2026-11-09: stepped past (PLAITS' GRAN): on */
+        c += d > 0 && d <= 8 ? 1 : -1;          /* up, else to the one before, as it is shown */
     return mnm_rep(j, n, c) << 8;
 }
 

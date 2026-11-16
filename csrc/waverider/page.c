@@ -185,6 +185,8 @@ void wr_screen(void *screen, void *canvas)
     extern int smp_list_visible(void);
     extern void smp_list_draw(void *canvas);
     extern void sl_screen(int phase, int covered);      /* parameter slides (csrc/slides) */
+    extern void ins_title(void);
+    ins_title();                                /* the FX key's page names (csrc/inserts) */
     sl_screen(0, 0);
     SCREEN_DRAW(screen, canvas);
     extern int sn_up(void);
@@ -204,8 +206,11 @@ void wr_screen(void *screen, void *canvas)
     else {
         extern int ins_visible(void);
         extern void ins_draw(void *canvas);
+        extern void ins_dots(void *canvas);
         if (ins_visible())                      /* the per-track inserts' page (csrc/inserts) */
             ins_draw(canvas);
+        else
+            ins_dots(canvas);                   /* stock's FX page: FX 1/2's dots */
     }
     extern void mtr_draw(void *canvas);
     mtr_draw(canvas);                           /* the system meter's corner, over everything */
@@ -371,6 +376,8 @@ static const char *mnm_text(void *view, int m, int j)
         num[0] = 'S'; num[1] = '0' + (c + 1) / 10; num[2] = '0' + (c + 1) % 10; num[3] = 0;
         return num;
     }
+    if (MNM_RETIRED(m, j, c))                       /* 2026-11-09: shown as the one before */
+        c--;
     return mnm_choice_names[mnm_choice_at[m][j] + c];
 }
 

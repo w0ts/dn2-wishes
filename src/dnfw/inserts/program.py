@@ -34,7 +34,7 @@ def state_bytes() -> bytes:
 
 
 def fuzz(p: Prog) -> None:
-    """FUZZ over the buffer at C['buf'] (ref.Ref.fuzz); values p0 MOD, p1..p6, state s0..s5"""
+    """FUZZ over the buffer at C['buf'] (ref.Ref.fuzz); values p0 MIX, p1..p6, state s0..s5"""
     p.ld(0, C["p1"])
     p.fconst(1, D.FZ_DRIVE_OCT)
     p.fop(0, 0, "*", 1)
@@ -357,7 +357,7 @@ def dc_tone_out(p: Prog, y: int, sx: str, sy: str, st: str) -> None:
 
 
 def fold(p: Prog) -> None:
-    """FOLD (ref.Ref.fold); values p0 MOD, p1 AMNT, p2 SYMM, p3 SHPE, p4 TONE, p5 LEV; s0 dx s1 dy s2 tl"""
+    """FOLD (ref.Ref.fold); values p0 MIX, p1 AMNT, p2 SYMM, p3 SHPE, p4 TONE, p5 LEV; s0 dx s1 dy s2 tl"""
     p.ld(0, C["p1"])
     p.fconst(1, D.FD_GAIN_OCT)
     p.fop(0, 0, "*", 1)
@@ -570,7 +570,7 @@ def track(p: Prog) -> None:
         for k in range(D.STATE_WORDS):
             p.ldi(8, k, 4)
             p.st(C[f"s{k}"], 8)
-        for k in range(7):                       # MOD, K1..K6: byte k + 1, / 127
+        for k in range(7):                       # MIX, K1..K6: byte k + 1, / 127
             w, sh = ("w0", 8 * (k + 1)) if k < 3 else ("w1", 8 * (k - 3))
             p.ld(8, C[w])
             if sh:

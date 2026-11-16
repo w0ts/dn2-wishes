@@ -184,6 +184,27 @@ def mnm_named(k: int) -> dict[int, tuple[str, str]]:
     return out
 
 
+def mnm_retired() -> str:
+    """MNM_RETIRED's C test: the (machine, control, choice) whose name is empty (one at most);
+    "0" for none"""
+    hits = []
+    for mi, M in enumerate(_mnm.CF_MACHINES):
+        for j, sh in enumerate(M.PNAMES):
+            names = MNM_CHOICES.get(M.NAME, {}).get(sh, 0)
+            if isinstance(names, tuple):
+                hits += [(mi, j, c) for c, n in enumerate(names) if n == ""]
+    if len(hits) > 1:
+        raise ValueError(f"one retired choice at most, not {hits}")
+    if not hits:
+        return "0"
+    mi, j, c = hits[0]
+    if c == 0:
+        raise ValueError("a retired choice needs one before it")
+    if c == len(MNM_CHOICES[_mnm.CF_MACHINES[mi].NAME][_mnm.CF_MACHINES[mi].PNAMES[j]]) - 1:
+        raise ValueError("a retired choice needs one after it")
+    return f"((mi) == {mi} && (j) == {j} && (c) == {c})"
+
+
 def mnm_c_header() -> str:
     q = chr(34)
     names, rows_n, rows_at = [], [], []
@@ -240,6 +261,10 @@ def mnm_c_header() -> str:
         # the words the eight records take (perc.live.knob_word), and the records' ids
         f"static const unsigned short mnm_rid[8] = {{{', '.join(str(r) for r, _s, _lo, _t in _perc.PARAMS)}}};",
         f"static const unsigned short mnm_default[MNM_N][8] = {{{arr([[_knob_word(x, t, lo) for (_r, _s, lo, t), x in zip(_perc.PARAMS, d)] for d in _mnm.CF_DEFAULTS])}}};",
+        # 2026-11-09: a RETIRED choice (an empty name: PLAITS' GRAN, removed): shown as the choice
+        # before it, stepped past (md_page.c, page.c, fmt.c); its knob slot stays, so saved knobs keep
+        # their choice
+        f"#define MNM_RETIRED(mi, j, c) {mnm_retired()}",
         "enum { MW_KNOB, MW_EMPTY, MW_GRID, MW_SLIDE, MW_VU, MW_SWITCH, MW_SEMIS, MW_CENTS };",
         f"static const unsigned char mnm_widget[MNM_N][8] = {{{arr([[MNM_WIDGET.get((M.NAME, sh), 1 if sh == '---' or sh in MNM_UNPORTED else 0) for sh in M.PNAMES] for M in _mnm.CF_MACHINES])}}};",
     ]

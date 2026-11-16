@@ -1,7 +1,8 @@
-"""PLAITS: two of Mutable Instruments Plaits' engines, WAVESHAPING (WS) and GRANULAR FORMANT
-(GRAIN), as a Monomachine-style machine (docs/plaits.md). A port of Emilie Gillet's C++
-(github.com/pichenettes/eurorack, plaits/dsp/engine/waveshaping_engine.cc, grain_engine.cc,
-dsp/oscillator/oscillator.h, grainlet_oscillator.h; MIT, THIRD-PARTY.md).
+"""PLAITS: Mutable Instruments Plaits' engines as a Monomachine-style machine (docs/plaits.md):
+WAVESHAPING (WS) here, the others in their own modules (dnfw.mnm.plaits_*). A port of Emilie
+Gillet's C++ (github.com/pichenettes/eurorack, plaits/dsp/engine/waveshaping_engine.cc,
+dsp/oscillator/oscillator.h; MIT, THIRD-PARTY.md). GRANULAR FORMANT (GRAIN) was here until
+2026-11-09 (removed for the inserts' DSP room; its MODL choice is RETIRED and plays WS).
 
 One voice per track at 44.1 kHz (PERC's stream; every frequency is Hz / 44100, so a note
 sounds at its pitch), 16-sample halves as Plaits' blocks (its parameter interpolators run
@@ -12,9 +13,6 @@ engines run on (a reset per note is what clicked in the Digitakt II ports).
 - WS: a band-limited slope oscillator (integrated poly-BLEP), morph = its pulse width; the
   waveshaper (HARM crossfades Plaits' five Tides tables), the wavefolder (TIMB: the fold
   table, Hermite-interpolated), both tamed by the pitch as Plaits does.
-- GRAIN: two grainlet oscillators on the note's carrier (their carrier phase, shape and bleed
-  are the same, so they share them), formants at TIMB (24..108 semitones) and TIMB x HARM's
-  ratio, poly-BLEP at the carrier's reset, then the DC blocker.
 
 Sines are PERC's sine table (256 a turn, linear) where Plaits' is 512; exp2 PERC's table; a
 division PERC's reciprocal. The tables (WS's five shapes, the fold) ship in zpack
@@ -25,25 +23,28 @@ Parameters: HARM TIMB MORP --- --- --- MODL TUNE.
 
 from __future__ import annotations
 
-import math
-
 from . import core as C
 from . import plk as K
 from . import plaits_va, plaits_fm, plaits_add, plaits_swarm, plaits_noise, plaits_part, plaits_string, plaits_modal, plaits_bd, plaits_sd, plaits_hh
+from ..perc import guard as G
 from ..perc.dsl import Prog
 
 NAME, ID = "PLAITS", 65
 PNAMES = ("HARM", "TIMB", "MORP", "---", "---", "FINE", "MODL", "TUNE")   # FINE 2026-11-09
-WS, GRAIN = range(2)
+WS, RETIRED = range(2)
 # 2026-11-09: Plaits' other engines, each its own module (dnfw.mnm.plk their common ground), after
-# WS and GRAIN in MODL's choices
+# WS and the retired choice in MODL's choices
 ENGINES = (plaits_va, plaits_fm, plaits_add, plaits_swarm, plaits_noise, plaits_part, plaits_string, plaits_modal, plaits_bd, plaits_sd, plaits_hh)
-MODELS = ("WS", "GRAN") + tuple(E.MODEL for E in ENGINES)   # the page shows four characters
+# 2026-11-09 (the User): GRAN (Plaits' granular formant) removed for the CHOR and WIDE inserts'
+# DSP room. Its choice stays, RETIRED (an empty name): MODL keeps its 13 knob slots, so every
+# saved knob and p-lock keeps its engine; the retired one plays WS, the page shows it as WS and
+# steps past it (pages.MNM_RETIRED, md_page.c / page.c / fmt.c)
+MODELS = ("WS", "") + tuple(E.MODEL for E in ENGINES)   # the page shows four characters
 N_MODELS = len(MODELS)
 # 2026-11-09: Plaits' OUT stage after each of those engines (voice.cc RegisterInstance's out_gain,
 # voice.h ChannelPostProcessor): a fixed gain, the result clipped to +-1 (Plaits' Clip16), or, for a
 # negative figure, stmlib's Limiter with that pre-gain (its peak follower, x 0.8), then clipped too. The raw engines go
-# well past +-1 (PART to 8, MDAL to 3.6). WS and GRAIN stay as they were, without it.
+# well past +-1 (PART to 8, MDAL to 3.6). WS stays as it was, without it.
 OUT_GAIN = {"VA": 0.8, "FM": 0.6, "ADD": 0.8, "SWRM": -3.0, "NOIS": -1.0, "PART": -2.0, "STRG": -1.0,
             "MDAL": -1.0, "BD": 0.8, "SD": 0.8, "HH": 0.8}
 POST = True                                     # False: the raw engines (the references' comparisons)
@@ -53,7 +54,8 @@ SR = 44100.0
 F_MAX, F_MIN = 0.25, 0.000001                    # plaits::kMaxFrequency, kMinFrequency
 HALF = 16
 
-# state (slot words S0..): WS's oscillator and interpolators, GRAIN's
+# state (slot words S0..): WS's oscillator and interpolators, then GRAIN's (unused since 2026-11-09,
+# kept so the layout and WS stay bit-identical)
 (S_WPH, S_WNX, S_WHI, S_WF, S_WPW, S_WSH, S_WGN,
  S_GCP, S_GF0, S_GCS, S_GCB, S_GFP0, S_GFP1, S_GF1A, S_GF1B, S_GNX, S_GDC, S_BASE) = range(18)
 # per half (slot words): the interpolators' steps, the DC blocker's g and gi, the model
@@ -106,11 +108,6 @@ def _abs(p: Prog, d: int, x: int) -> None:
     p.fop(d, x, "MAX", 12)
 
 
-def sinw(p: Prog, L: C.Layout, d: int, x: int) -> None:
-    """Fd = sin(2 pi Fx), any Fx. Clobbers R0-R3, R12, R15, I1, I12."""
-    _pm().sin_(p, L.perc, d, x, wrap=True)
-
-
 def recip(p: Prog, d: int, x: int) -> None:
     """Fd = 1 / Fx. Clobbers R12-R15, I12."""
     _pm().recip(p, d, x)
@@ -147,7 +144,7 @@ def exact(A: int, F: int, knobs, pre: int = 0) -> dict:
 
 def init(p: Prog, L: C.Layout) -> None:
     """Every engine as Plaits' Init: the slope oscillator at phase 0.5, its frequency 0.001,
-    its pulse width 0.5; the grainlets and the DC blocker at 0."""
+    its pulse width 0.5; the rest at 0."""
     p.iconst(0, 0)
     for k in range(S_BASE + 1):
         _sv(p, k, 0)
@@ -196,7 +193,7 @@ def pitch(p: Prog, L: C.Layout) -> None:
     _mulk(p, 3, 3, 0.01)                         # FINE, cents
     p.fop(2, 2, "+", 3)
     p.fop(1, 1, "+", 2)
-    _sv(p, K.S_NOTE, 1)                          # the note, for the engines after GRAIN
+    _sv(p, K.S_NOTE, 1)                          # the note, for the engines after WS
     _addk(p, 1, 1, -69.0)
     _mulk(p, 1, 1, 1.0 / 12.0)
     _pm().exp2(p, L.perc, 1, 1)
@@ -449,315 +446,6 @@ def _ws_half(p: Prog, L: C.Layout) -> None:
     p.loop(L.W["n4"], HALF, one)
 
 
-# -- GRAIN -------------------------------------------------------------------------------------
-def _grain_params(p: Prog, L: C.Layout) -> None:
-    PM = _pm()
-    _ld(p, 4, S_BASE)                            # f0, unclamped
-    _unit(p, 5, 0)                               # harmonics
-    _unit(p, 6, 1)                               # timbre
-    _unit(p, 7, 2)                               # morph
-    # carrier_shape = 0.33 + (morph - 0.33) max(1 - 24 f0, 0)
-    _mulk(p, 8, 4, -24.0)
-    _addk(p, 8, 8, 1.0)
-    p.fconst(12, 0.0)
-    p.fop(8, 8, "MAX", 12)
-    _addk(p, 7, 7, -0.33)
-    p.fop(7, 7, "*", 8)
-    _addk(p, 7, 7, 0.33)
-    _step(p, D_GCSI, S_GCS, 7)
-    # carrier_bleed = 1 - 2 harm below 0.5, else 0; fixed = b (2 - b)
-    p.fop(8, 5, "+", 5)
-    p.fconst(12, 1.0)
-    p.fop(8, 12, "-", 8)
-    p.fconst(12, 0.0)
-    p.fop(8, 8, "MAX", 12)
-    p.fconst(12, 2.0)
-    p.fop(9, 12, "-", 8)
-    p.fop(8, 8, "*", 9)
-    _step(p, D_GCBI, S_GCB, 8)
-    # the carrier, clamped below kMaxFrequency / 2
-    p.fpass(8, 4)
-    p.fconst(12, F_MAX * 0.5)
-    p.fop(8, 8, "MIN", 12)
-    _step(p, D_GF0I, S_GF0, 8)
-    # f1 = NoteToFrequency(24 + 84 timbre); ratio = 2^((-24 + 48 harm) / 12)
-    _mulk(p, 6, 6, 84.0 / 12.0)
-    _addk(p, 6, 6, (24.0 - 69.0) / 12.0)
-    PM.exp2(p, L.perc, 6, 6)
-    _mulk(p, 6, 6, 440.0 / SR)
-    _mulk(p, 5, 5, 4.0)
-    _addk(p, 5, 5, -2.0)
-    PM.exp2(p, L.perc, 5, 5)
-    p.fop(5, 5, "*", 6)
-    p.fconst(12, F_MAX)
-    p.fop(6, 6, "MIN", 12)
-    _step(p, D_GF1AI, S_GF1A, 6)
-    p.fop(5, 5, "MIN", 12)
-    _step(p, D_GF1BI, S_GF1B, 5)
-    # the DC blocker at 0.3 f0 (FREQUENCY_DIRTY): g = f (pi + a f^2), gi = 1 / (1 + g)
-    _mulk(p, 4, 4, 0.3)
-    p.fop(5, 4, "*", 4)
-    _mulk(p, 5, 5, 3.736e-01 * math.pi ** 3)
-    _addk(p, 5, 5, math.pi)
-    p.fop(5, 5, "*", 4)
-    _sv(p, D_GG, 5)
-    _addk(p, 5, 5, 1.0)
-    recip(p, 5, 5)
-    _sv(p, D_GGI, 5)
-
-
-def _carrier_sub(p: Prog) -> None:
-    """F15 = the grainlet carrier's shaped phase (Carrier before its sine) for phase F8,
-    shape F9 (GrainletOscillator::Carrier). Clobbers R0, R1, R8-R10, R13, R14."""
-    def body():
-        _mulk(p, 9, 9, 3.0, t=13)
-        p.trunc(0, 9)
-        p.iconst(13, 0)
-        p.float_(10, 0, 13)
-        p.fop(9, 9, "-", 10)                     # shape_fractional
-        p.fconst(13, 1.0)
-        p.fop(10, 13, "-", 9)                    # t
-        p.fop(14, 10, "*", 10)
-        p.fop(14, 14, "*", 10)                   # t^3
-        p.iconst(1, 0)
-
-        def s0():
-            _mulk(p, 14, 14, 15.0, t=13)
-            _addk(p, 14, 14, 1.0, t=13)
-            p.fop(8, 8, "*", 14)
-            p.fconst(13, 1.0)
-            p.fop(8, 8, "MIN", 13)
-            _addk(p, 15, 8, 0.75, t=13)
-
-        def s1():
-            _mulk(p, 14, 14, 0.499, t=13)
-            _addk(p, 14, 14, 0.001, t=13)        # breakpoint
-
-            def before():
-                _pm()._recip_inline(p, 10, 14, 13)
-                p.fop(8, 8, "*", 10)
-                _mulk(p, 15, 8, 0.5, t=13)
-
-            def after():
-                p.fop(8, 8, "-", 14)
-                p.fconst(13, 1.0)
-                p.fop(14, 13, "-", 14)
-                p.fpass(9, 14)
-                _pm()._recip_inline(p, 10, 9, 13)
-                p.fop(8, 8, "*", 10)
-                _mulk(p, 8, 8, 0.5, t=13)
-                _addk(p, 15, 8, 0.5, t=13)
-            p.if_(8, "LT", 14, before, after)
-            _addk(p, 15, 15, 0.75, t=13)
-
-        def s2():
-            p.fop(14, 9, "*", 9)
-            p.fop(14, 14, "*", 9)                # shape_fractional^3
-            _mulk(p, 14, 14, 14.5, t=13)
-            _addk(p, 14, 14, 0.5, t=13)
-            p.fop(8, 8, "*", 14)
-            _addk(p, 15, 8, 0.25, t=13)
-            p.fconst(13, 0.75)
-            p.fop(15, 15, "MIN", 13)
-        p.if_(0, "EQ", 1, s0, lambda: (p.iconst(1, 1), p.if_(0, "EQ", 1, s1, s2, kind="i")), kind="i")
-    p.call("pl_carrier", body)
-
-
-def _carrier(p: Prog, L: C.Layout, d: int, ph: int, sh: int) -> None:
-    """Fd = Carrier(Fph, Fsh) = (sin(2 pi shaped) + 1) / 4. Clobbers R0-R3, R8-R10, R12-R15,
-    I1, I12."""
-    if ph != 8:
-        p.fpass(8, ph)
-    if sh != 9:
-        p.fpass(9, sh)
-    _carrier_sub(p)
-    sinw(p, L, d, 15)
-    _addk(p, d, d, 1.0)
-    _mulk(p, d, d, 0.25)
-
-
-def _blep(p: Prog, dd: int) -> None:
-    """this += d ThisBlep(rt), next += d NextBlep(rt): d in Fdd, rt at T_RT. Clobbers R4-R6."""
-    _ld(p, 4, T_RT)
-    p.fop(5, 4, "*", 4)
-    _mulk(p, 5, 5, 0.5)
-    p.fop(5, 5, "*", dd)
-    _ld(p, 6, T_THIS)
-    p.fop(6, 6, "+", 5)
-    _sv(p, T_THIS, 6)
-    p.fconst(12, 1.0)
-    p.fop(4, 12, "-", 4)
-    p.fop(5, 4, "*", 4)
-    _mulk(p, 5, 5, -0.5)
-    p.fop(5, 5, "*", dd)
-    _ld(p, 6, T_NXT)
-    p.fop(6, 6, "+", 5)
-    _sv(p, T_NXT, 6)
-
-
-def _formant(p: Prog, L: C.Layout, d: int, fp: int, f1: int, k: float | None) -> None:
-    """Fd = sin(fp + k f1) + bleed at T_CB (k None: sin(fp) + bleed). Clobbers as sinw, R4."""
-    _ld(p, 4, fp)
-    if k is not None:
-        _ld(p, 5, f1)
-        _ld(p, 6, T_RT)
-        p.fconst(12, 1.0)
-        p.fop(6, 12, "-", 6)
-        p.fop(5, 5, "*", 6)
-        p.fop(4, 4, "+", 5)
-    sinw(p, L, d, 4)
-    _ld(p, 4, T_CB)
-    p.fop(d, d, "+", 4)
-
-
-def _grain_reset(p: Prog, L: C.Layout) -> None:
-    """The carrier's reset: rt = phase / f0; the two grainlets before (at 1 - rt) and after,
-    their step through the poly-BLEP; the formants restart at rt f1."""
-    _ld(p, 4, S_GCP)
-    _ld(p, 5, T_F)
-    recip(p, 5, 5)
-    p.fop(4, 4, "*", 5)
-    _sv(p, T_RT, 4)
-    # before: shape and bleed at 1 - rt (subsample from the values before this sample's step)
-    p.fconst(12, 1.0)
-    p.fop(5, 12, "-", 4)
-    _ld(p, 6, D_GCSI)
-    p.fop(6, 6, "*", 5)
-    _ld(p, 7, T_CS0)
-    p.fop(6, 6, "+", 7)
-    _ld(p, 7, D_GCBI)
-    p.fop(7, 7, "*", 5)
-    _ld(p, 8, T_CB0)
-    p.fop(7, 7, "+", 8)
-    _sv(p, T_CB, 7)
-    p.fpass(9, 6)
-    p.fconst(8, 1.0)
-    _carrier(p, L, 10, 8, 9)
-    _sv(p, T_CAR, 10)
-    _ld(p, 7, T_CB)
-    _addk(p, 7, 7, 1.0)
-    recip(p, 7, 7)
-    _sv(p, T_INV, 7)
-    _formant_before(p, L)
-    # after: Grainlet(0, 0, shape(1), bleed(1)) twice = 2 Carrier(0, s1) b1 / (1 + b1)
-    _ld(p, 9, T_CS)
-    p.fconst(8, 0.0)
-    _carrier(p, L, 10, 8, 9)
-    _ld(p, 7, D_GCBI)
-    _ld(p, 8, T_CB0)
-    p.fop(7, 7, "+", 8)                          # b1
-    p.fop(10, 10, "*", 7)
-    _addk(p, 7, 7, 1.0)
-    recip(p, 7, 7)
-    p.fop(10, 10, "*", 7)
-    p.fop(10, 10, "+", 10)
-    _ld(p, 11, T_OUT)                            # before (both)
-    p.fop(10, 10, "-", 11)                       # the discontinuity
-    _blep(p, 10)
-    # the formants restart
-    _ld(p, 4, T_RT)
-    _ld(p, 5, S_GF1A)
-    p.fop(5, 5, "*", 4)
-    _sv(p, S_GFP0, 5)
-    _ld(p, 5, S_GF1B)
-    p.fop(5, 5, "*", 4)
-    _sv(p, S_GFP1, 5)
-
-
-def _formant_before(p: Prog, L: C.Layout) -> None:
-    """T_OUT = the two grainlets before the reset: Carrier(1, s) (sin(fp + (1 - rt) f1) +
-    b) / (1 + b), summed."""
-    _formant(p, L, 10, S_GFP0, S_GF1A, 1.0)
-    _sv(p, T_OUT, 10)
-    _formant(p, L, 10, S_GFP1, S_GF1B, 1.0)
-    _ld(p, 11, T_OUT)
-    p.fop(10, 10, "+", 11)
-    _ld(p, 11, T_CAR)
-    p.fop(10, 10, "*", 11)
-    _ld(p, 11, T_INV)
-    p.fop(10, 10, "*", 11)
-    _sv(p, T_OUT, 10)
-
-
-def _grain_sample(p: Prog, L: C.Layout) -> None:
-    """One sample of both grainlets, summed, through the DC blocker, stored at I4."""
-    _ld(p, 0, S_GCS)
-    _sv(p, T_CS0, 0)
-    _ld(p, 0, S_GCB)
-    _sv(p, T_CB0, 0)
-    _interp(p, 4, S_GF0, D_GF0I)
-    _sv(p, T_F, 4)
-    _interp(p, 5, S_GF1A, D_GF1AI)
-    _interp(p, 5, S_GF1B, D_GF1BI)
-    # the shape's and bleed's Next (the reset's subsamples read T_CS0, T_CB0)
-    _ld(p, 5, T_CS0)
-    _ld(p, 11, D_GCSI)
-    p.fop(5, 5, "+", 11)
-    _sv(p, T_CS, 5)
-    _ld(p, 5, S_GNX)
-    _sv(p, T_THIS, 5)
-    p.fconst(0, 0.0)
-    _sv(p, T_NXT, 0)
-    _ld(p, 6, S_GCP)
-    p.fop(6, 6, "+", 4)
-    _sv(p, S_GCP, 6)
-    p.fconst(12, 1.0)
-
-    def reset():
-        p.fop(6, 6, "-", 12)
-        _sv(p, S_GCP, 6)
-        _grain_reset(p, L)
-
-    def run():
-        for fp, f1 in ((S_GFP0, S_GF1A), (S_GFP1, S_GF1B)):
-            _ld(p, 7, fp)
-            _ld(p, 8, f1)
-            p.fop(7, 7, "+", 8)
-            _pm().wrap1(p, 7)
-            _sv(p, fp, 7)
-    p.if_(6, "GE", 12, reset, run)
-    # the shape's and bleed's Next, then the grainlets at this sample
-    _interp(p, 9, S_GCS, D_GCSI)
-    _interp(p, 7, S_GCB, D_GCBI)
-    _sv(p, T_CB, 7)
-    _addk(p, 7, 7, 1.0)
-    recip(p, 7, 7)
-    _sv(p, T_INV, 7)
-    _ld(p, 8, S_GCP)
-    _carrier(p, L, 10, 8, 9)
-    _sv(p, T_CAR, 10)
-    _formant(p, L, 10, S_GFP0, S_GF1A, None)
-    _sv(p, T_OUT, 10)
-    _formant(p, L, 10, S_GFP1, S_GF1B, None)
-    _ld(p, 11, T_OUT)
-    p.fop(10, 10, "+", 11)
-    _ld(p, 11, T_CAR)
-    p.fop(10, 10, "*", 11)
-    _ld(p, 11, T_INV)
-    p.fop(10, 10, "*", 11)
-    _ld(p, 11, T_NXT)
-    p.fop(10, 10, "+", 11)
-    _sv(p, S_GNX, 10)
-    # the DC blocker: lp = (g x + s) gi; s = g (x - lp) + lp; out x - lp
-    _ld(p, 4, T_THIS)
-    _ld(p, 5, D_GG)
-    p.fop(6, 5, "*", 4)
-    _ld(p, 7, S_GDC)
-    p.fop(6, 6, "+", 7)
-    _ld(p, 7, D_GGI)
-    p.fop(6, 6, "*", 7)                          # lp
-    p.fop(7, 4, "-", 6)                          # x - lp: the output
-    p.fop(8, 5, "*", 7)
-    p.fop(8, 8, "+", 6)
-    _sv(p, S_GDC, 8)
-    p.stpost(4, 7)
-
-
-def _grain_half(p: Prog, L: C.Layout) -> None:
-    _grain_params(p, L)
-    p.loop(L.W["n4"], HALF, lambda: _grain_sample(p, L))
-
-
 def model_of(knob: int) -> int:
     """MODL's knob -> the model (the page's choice: knob x N >> 7)."""
     return (knob * N_MODELS) >> 7
@@ -770,7 +458,8 @@ def knob_of(model: int) -> int:
 
 def half(p: Prog, L: C.Layout) -> None:
     """16 samples at I4: the model MODL chooses (the choice, knob x N >> 7, as the page's). A
-    model other than WS and GRAIN starts (its init) when it is chosen; the trigger is this half's."""
+    model other than WS starts (its init) when it is chosen; the trigger is this half's. Choice 1
+    (GRAN until 2026-11-09, RETIRED) plays WS."""
     C.knob(p, 0, 6)
     p.iconst(1, N_MODELS)
     p.mul_ssi(0, 0, 1)
@@ -779,28 +468,52 @@ def half(p: Prog, L: C.Layout) -> None:
 
     def change():
         _sv(p, K.S_LAST, 0)
+        G.fresh(p, 12)                           # 2026-11-09: a start block for the frame guard
+        p.iconst(2, 0)
+        _sv(p, K.S_CLR, 2)                       # no clear pending (an engine's init may defer one)
         for k, E in enumerate(ENGINES):
             p.iconst(1, 2 + k)
             p.if_(0, "EQ", 1, lambda E=E: E.init(p, L), kind="i")
             _ld(p, 0, K.S_LAST)
         _limiter_init(p)
     p.if_(0, "NE", 1, change, kind="i")
-    _ld(p, 0, K.S_LAST)
-    arms = [lambda: _ws_half(p, L), lambda: _grain_half(p, L)] + [lambda E=E: E.half(p, L) for E in ENGINES]
+    # the arms by choice; WS takes choices 0 and RETIRED (<= 1)
+    arms = [lambda: _ws_half(p, L)] + [lambda E=E: E.half(p, L) for E in ENGINES]
 
     def chain(k):
         if k == len(arms) - 1:
             arms[k]()
             return
-        p.iconst(1, k)
+        if k == 0:
+            p.iconst(1, RETIRED)
+            p.if_(0, "LE", 1, arms[0], lambda: chain(1), kind="i")
+            return
+        p.iconst(1, 1 + k)
         p.if_(0, "EQ", 1, arms[k], lambda: chain(k + 1), kind="i")
-    chain(0)
-    if POST and ENGINES:
+
+    def render():
         _ld(p, 0, K.S_LAST)
-        p.iconst(1, 2)
-        p.if_(0, "GE", 1, lambda: _post(p, L), kind="i")
-    p.iconst(0, 0)
-    _sv(p, K.S_TRIG, 0)
+        chain(0)
+        if POST and ENGINES:
+            _ld(p, 0, K.S_LAST)
+            p.iconst(1, 2)
+            p.if_(0, "GE", 1, lambda: _post(p, L), kind="i")
+        p.iconst(0, 0)
+        _sv(p, K.S_TRIG, 0)
+
+    def clearing():                              # 2026-11-09: a deferred clear (plk.defer_clear):
+        K.clear_half(p, L, 5)                    # silent, the trigger kept for the engine's start
+        tails = [(2 + k, E) for k, E in enumerate(ENGINES) if hasattr(E, "init_tail")]
+        if tails:
+            def done():
+                for m, E in tails:
+                    _ld(p, 0, K.S_LAST)
+                    p.iconst(1, m)
+                    p.if_(0, "EQ", 1, lambda E=E: E.init_tail(p, L), kind="i")
+            _ld(p, 0, K.S_CLR)
+            p.ifz(0, "EQ", done)
+    _ld(p, 0, K.S_CLR)
+    p.ifz(0, "GT", clearing, render)
 
 
 def _limiter_init(p: Prog) -> None:

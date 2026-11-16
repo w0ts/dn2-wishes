@@ -279,6 +279,8 @@ static const char *mnm_value_text(int mi, int j, int c)
         num[0] = 'S'; num[1] = (char)('0' + w / 10); num[2] = (char)('0' + w % 10); num[3] = 0;
         return num;
     }
+    if (MNM_RETIRED(mi, j, c))                  /* 2026-11-09: shown as the one before (GRAN: WS) */
+        c--;
     return mnm_choice_names[mnm_choice_at[mi][j] + c];
 }
 

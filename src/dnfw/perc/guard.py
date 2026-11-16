@@ -59,7 +59,52 @@ RESERVE = GUARD + 0xD4           # the sample voices' expected cost this block (
 LIMIT_PERC = GUARD + 0xD8        # LIMIT less RESERVE: PERC's and the Monomachine's limit
 STRUCK = GUARD + 0xDC            # bit t: sample slot t left out once in its current note
 RES_I = GUARD + 0xE0             # perc_limit's loop counter
-END = GUARD + 0xE4
+# 2026-11-09 (the User: PLAITS silent sequenced with voice rotation, CPU): a voice's start block
+# (PLAITS' engine starting: a voice changing machine to PLAITS, or MODL) does its set-up work
+# once; its cost is not what its next blocks cost. PLAITS sets FRESH in such a block (`fresh`), and
+# `around` then keeps 0 as the slot's cost (the next block expected at FLOOR, then at what it
+# measures), so one heavy start cannot get the note's next blocks refused twice and the note
+# stolen. Only PLAITS sets it: every other machine's guard decisions are as before.
+FRESH = GUARD + 0xE4                # (v0.52 merge: after v0.49's RESERVE .. RES_I)
+END = GUARD + 0xE8
+
+
+# 2026-11-09 (the User's choice B): a PLAITS note's first START_BLOCKS blocks are expected at the
+# machine's fixed start bound (dnfw.perc.program MNM_START, from MNM_COST), not at 1.5 x the slot's
+# stored cost (another note's, a start block's: stale or inflated), and a refusal in its trig block
+# is no strike (it is tried again; only refusals after it count towards the steal). The bounds sit
+# 16 words after the keys block's BOUNDS_AFTER_KEYS (0 for every slot not on PLAITS: the other
+# machines decide exactly as before).
+START_BLOCKS = 2
+BOUNDS_AFTER_KEYS = 0x180 // 4                 # program.BOUNDS_OFF - MNM_KEYS_OFF, in words
+
+# 2026-11-10 (b6, the User's choice A + B after b5diag2's record on the unit: 15 PLAITS voices all
+# rendering, each 20,000 .. 48,000 cycles, every one expected at FLOOR's 60,000):
+# A. a PLAITS slot with a measured cost is expected at 1.5 x that cost, at least PLAITS_FLOOR, not
+#    FLOOR (FLOOR is 1.5 x 40,000: a WS voice measures about 20,000). A cost of 0 (a start block,
+#    FRESH: an engine just changed, its steady cost not known yet) is still expected at FLOOR.
+# B. the pages' CPU flag (SKIPMASK) is set only when the refused PERC voice's note is new (its key's
+#    age under NEW_NOTE_BLOCKS, ~100 ms): a ringing voice cut short (refused, then stolen) is counted
+#    in SKIPS but no longer lights CPU, which is meant to say a note was not heard.
+PLAITS_FLOOR = 30_000
+NEW_NOTE_BLOCKS = 150                          # blocks of 32 samples: 100 ms at 48 kHz
+
+
+def _key_and_bound(p, t_word: int, keys: int) -> None:
+    """R10 = this slot's key (age x 16 + slot), R11 = its start bound. Clobbers R12, I5."""
+    p.ld(10, t_word)
+    p.lsh(10, 10, 2)
+    p.iconst(12, keys)
+    p.iop(10, 12, "+", 10)
+    p.seti(5, 10)
+    p.ldi(10, 0, 5)
+    p.ldi(11, BOUNDS_AFTER_KEYS, 5)
+
+
+def fresh(p, r: int = 12) -> None:
+    """the voice code: this block is a voice's start (FRESH = 1). Clobbers Rr."""
+    p.iconst(r, 1)
+    p.st(FRESH, r)
 WHERE_NONE = 0xFFFF              # the voice's delay lines held nothing non-finite (its state, input or effects did)
 WHERE_DELAY = 0x8000             # | the first non-finite delay-line word's index (0..2047)
 LIMIT_DEFAULT = 400_000          # until a frame has been measured: 0.6 of 666,667 (1 GHz, 1,500 frames a second)
@@ -286,7 +331,7 @@ def perc_limit(p, smp_types, smp_state: int, smp_stride: int, on_word: int, trig
 
 def around(p, t_word: int, cost: int, buffers: int, voice, rests: int | None = None,
            rest_blocks: int = 0, strikes: int | None = None, steal_at: int = 1,
-           limit: int = LIMIT, struck: int | None = None, stop=None) -> None:
+           limit: int = LIMIT, struck: int | None = None, stop=None, keys: int | None = None) -> None:
     """VOICE() if it fits, else the slot's buffer zeroed and the skip counted. T_WORD:
     the scratch word holding the slot; COST: the slots' cost words; BUFFERS: the track
     buffers' pointers (0x254a60). v0.36: RESTS (the slots' rest counters) given, a voice
@@ -310,8 +355,31 @@ def around(p, t_word: int, cost: int, buffers: int, voice, rests: int | None = N
     p.ldi(9, 0, 5, "this slot's last cost")
     p.lsh(10, 9, -1)
     p.iop(9, 9, "+", 10)                       # x 1.5
-    p.iconst(10, FLOOR)
-    p.iop(9, 9, "MAX", 10)
+    if keys is None:
+        p.iconst(10, FLOOR)
+        p.iop(9, 9, "MAX", 10)
+    else:
+        p.comment("b6: a PLAITS slot with a measured cost: at least PLAITS_FLOOR, else FLOOR")
+        nob = p.label("gnob")
+        flo = p.label("gflo")
+        _key_and_bound(p, t_word, keys)
+        p.iconst(12, FLOOR)
+        p.e("R11 = PASS R11;")
+        p.jump("EQ", flo)
+        p.e("R9 = PASS R9;")
+        p.jump("EQ", flo)
+        p.iconst(12, PLAITS_FLOOR)
+        p.place(flo)
+        p.iop(9, 9, "MAX", 12)
+        p.comment("2026-11-09: a PLAITS note's first blocks: expected at its fixed bound, not the slot's")
+        p.comment("stored cost (a start block's, another note's: stale)")
+        p.e("R11 = PASS R11;")
+        p.jump("EQ", nob)
+        p.iconst(12, 16 * START_BLOCKS)
+        p.e("COMP(R10, R12);")
+        p.jump("GE", nob)
+        p.e("R9 = PASS R11;", "the machine's start bound")
+        p.place(nob)
     p.iop(8, 8, "+", 9)
     p.ld(10, limit)
     p.e("COMP(R8, R10);")
@@ -320,6 +388,14 @@ def around(p, t_word: int, cost: int, buffers: int, voice, rests: int | None = N
     p.e("R8 = EMUCLK;")
     p.ld(9, START)
     p.e("R8 = R8 - R9;", "what the voice cost")
+    steady = p.label("gsteady")
+    p.ld(10, FRESH)
+    p.e("R10 = PASS R10;")
+    p.jump("EQ", steady)
+    p.comment("2026-11-09: a start block (FRESH): its cost kept as 0, the flag cleared")
+    p.iconst(8, 0)
+    p.st(FRESH, 8)
+    p.place(steady)
     p.ld(9, t_word)
     p.lsh(9, 9, 2)
     p.iconst(10, cost)
@@ -344,6 +420,16 @@ def around(p, t_word: int, cost: int, buffers: int, voice, rests: int | None = N
             steal()
         else:
             p.comment("v0.36: a strike; at STEAL_AT strikes in one note, stolen: it rests until its next note")
+            nostrike = p.label("gnostr")
+            if keys is not None:
+                p.comment("2026-11-09: a PLAITS note's newest block (its trig block): no strike")
+                _key_and_bound(p, t_word, keys)
+                p.e("R11 = PASS R11;")
+                p.jump("EQ", f"{nostrike}x")
+                p.iconst(12, 16)
+                p.e("COMP(R10, R12);")
+                p.jump("LT", nostrike)
+                p.place(f"{nostrike}x")
             p.ld(9, t_word)
             p.lsh(9, 9, 2)
             p.iconst(10, strikes)
@@ -355,6 +441,7 @@ def around(p, t_word: int, cost: int, buffers: int, voice, rests: int | None = N
             p.sti(0, 4, 9)
             p.iconst(10, steal_at)
             p.if_(9, "GE", 10, steal, kind="i")
+            p.place(nostrike)
         p.ld(9, t_word)                        # I5 again: the slot's cost word
         p.lsh(9, 9, 2)
         p.iconst(10, cost)
@@ -383,6 +470,13 @@ def around(p, t_word: int, cost: int, buffers: int, voice, rests: int | None = N
     p.iconst(9, 1)
     p.iop(8, 8, "+", 9)
     p.st(SKIPS, 8)
+    nomask = p.label("gnomask")
+    if keys is not None:
+        p.comment("b6: the CPU flag only for a new note (its key's age under NEW_NOTE_BLOCKS)")
+        _key_and_bound(p, t_word, keys)
+        p.iconst(12, 16 * NEW_NOTE_BLOCKS)
+        p.e("COMP(R10, R12);")
+        p.jump("GE", nomask)
     p.ld(9, t_word)                            # v0.30: and which slot, for the page's CPU flag
     p.iconst(10, 1)
     p.e("R10 = LSHIFT R10 BY R9;")
@@ -391,6 +485,7 @@ def around(p, t_word: int, cost: int, buffers: int, voice, rests: int | None = N
     p.ld(8, SKIPMASK)
     p.iop(8, 8, "OR", 10)
     p.st(SKIPMASK, 8)
+    p.place(nomask)
     p.ld(9, t_word)
     p.lsh(9, 9, 2)
     p.iconst(10, buffers)

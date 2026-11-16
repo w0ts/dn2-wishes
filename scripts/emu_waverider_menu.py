@@ -2409,6 +2409,20 @@ def main() -> int:
                 node = machine.long(node)
             key = "walk" if "walk" not in mems else f"walk@{len(mems)}"
             mems[key] = ",".join(classes)
+        elif step.startswith("views:"):
+            # views:SCREENPTR_VA: as walk:, and per view its address, its +120 (the message line a
+            # view's SAY 0x4005628c takes, jump.c say()), that object's +0x40..+0x60 bytes
+            _, va = step.split(":")
+            scr = machine.long(int(va, 0))
+            node, rows = machine.long(scr + 28), []
+            while node and node != scr + 20 and len(rows) < 32:
+                view = machine.long(node + 8)
+                if view:
+                    obj = machine.long(view + 120)
+                    rows.append(f"{view:08x}/{machine.long(view):08x}/{obj:08x}/"
+                                + (machine.read(obj + 0x40, 0x20).hex() if 0x40000000 <= obj < 0x48000000 else "-"))
+                node = machine.long(node)
+            mems[f"views@{len(mems)}"] = ",".join(rows)
         elif step.startswith("mem:"):
             _, va, n = step.split(":")
             # a second read of the same address keeps the first: key it by its order

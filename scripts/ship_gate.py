@@ -172,7 +172,8 @@ TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platfo
          "test/test_libtree.py", "test/test_web_tool.py",   # v0.40: nested folders (the model, the page's levels)
          "test/test_fdn8.py",                                 # FDN8: its DSP program against the reference
          "test/test_xdly.py",                                 # XDLY: the same
-         "test/test_inserts.py"]                              # the inserts: the same
+         "test/test_inserts.py",                              # the inserts: the same
+         "test/test_inserts_post.py"]                         # the post inserts (CHOR, WIDE): the same
 HIT = re.compile(r"^\s+([0-9a-f]{8}):", re.M)
 
 # v0.38 (owner, 2026-11-01): the steps by name, for --only and --list, in the order a full run

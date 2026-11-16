@@ -138,6 +138,16 @@ INS_L2_LOAD = 0x200AE000
 INS_L2_SPAN = 0x1800                         # the code; then the state (dnfw.inserts.program.STATE)
 INS_SW = 0xB80000 + (INS_L2_LOAD - 0x20000000) // 2          # 0xbd7000
 INS_STATE_L2 = INS_L2_LOAD + INS_L2_SPAN                     # 0x200af800
+# the stereo inserts after the pan (docs/inserts.md "After the pan", dnfw.inserts.post): their code in
+# L2 after the inserts' state (below the sample machines' span), their state after the code, their rings
+# in DDR. The engine's call of the FX sends (sw 0x1c3054) gets wr_inpost as its target; wr_inpost JUMPs on
+# to the sends.
+POST_L2_LOAD = 0x200B0000
+POST_L2_SPAN = 0x1000                        # the code; then the state (dnfw.inserts.post.STATE)
+POST_SW = 0xB80000 + (POST_L2_LOAD - 0x20000000) // 2        # 0xbd8000
+POST_STATE_L2 = POST_L2_LOAD + POST_L2_SPAN                  # 0x200b1000
+SENDS_SITE_SW = 0x1C3054                     # the engine: CJUMP 0x1c1738 (DB), then its two pushes
+SENDS_SITE_STOCK = bytes.fromhex("04181c003817")
 REVERB_SITE_SW = 0x1C1D11                    # the FX bus: CJUMP 0xb836bc (DB), then its two pushes
 REVERB_SITE_STOCK = bytes.fromhex("0418b800bc36")
 STOCK_REVERB_SW = 0xB836BC
@@ -301,7 +311,7 @@ def objects() -> dict[str, bytes]:
     return {name: sharc_object.load_bytes(bytes.fromhex(spec[name]["object_parcels_be"]))
             for name in ("perc", "smp", "entry_jump", "idle_load", "idle_jump", "block_count",
                          "entry_mark", "emark_jump", "lookup_ptr", "ping",
-                         "pvmix", "pvmix_jump", "fdn8", "xdly", "inserts")}
+                         "pvmix", "pvmix_jump", "fdn8", "xdly", "inserts", "inspost")}
 
 
 def pvmix_object() -> bytes:
@@ -387,6 +397,14 @@ def _ins():
     return ins_design
 
 
+def sends_cjump() -> bytes:
+    """the engine's CJUMP at SENDS_SITE_SW with wr_inpost as its target: the same instruction
+    (type 8a CJUMP (DB), parcels 0x1804, then the 24-bit address), only the address changed"""
+    if POST_SW >> 24:
+        raise DspError("wr_inpost is beyond a 24-bit address")
+    return SENDS_SITE_STOCK[:2] + struct.pack("<HH", POST_SW >> 16, POST_SW & 0xFFFF)
+
+
 def reverb_cjump() -> bytes:
     """the FX bus's CJUMP at REVERB_SITE_SW with wr_fdn8 as its target: the same instruction
     (type 8a CJUMP (DB), parcels 0x1804, then the 24-bit address), only the address changed"""
@@ -432,6 +450,8 @@ def ddr_spans() -> list[tuple[str, int, bytes]]:
          bytes(16 * _md_core().PI_DELAY_STRIDE)),
         ("FDN8's ring: 64 K float32 (zeros)", FDN8_RING_DDR, bytes(FDN8_RING_BYTES)),
         ("the inserts' TAPE rings: 16 tracks x 512 float32 (zeros)", _ins().TP_RING_DDR, bytes(16 * 4 * _ins().TP_RING)),
+        ("the post inserts' rings (CHOR, WIDE): 16 voice slots x 1024 float32 (zeros)", _ins().POST_RING_DDR,
+         bytes(16 * 4 * _ins().POST_RING)),
         ("sample pool: its empty directory's magic and count (v0.17: no test sounds; the +Drive's load in)",
          SMP_POOL_DDR, _smp_pool()[:8]),
         ("sample pool: the rest of its directory and names (zeros)", SMP_POOL_DDR + 8,
@@ -499,6 +519,15 @@ def l2_spans() -> list[tuple[str, int, bytes]]:
     assert ins_program.STATE == INS_STATE_L2
     out.append(("the inserts' state: 16 tracks x 32 bytes, then the pass's words (zeros)", INS_STATE_L2,
                 ins_program.state_bytes()))
+    code = obj["inspost"]
+    if POST_L2_SPAN - len(code) < 64:
+        raise DspError(f"inspost.asm ({len(code)} bytes) leaves fewer than 64 bytes of its L2 span")
+    out.append(("inspost.asm (wr_inpost), in L2", POST_L2_LOAD, code + bytes(POST_L2_SPAN - len(code))))
+    from ..inserts import post as ins_post
+    assert ins_post.STATE == POST_STATE_L2
+    assert POST_STATE_L2 + len(ins_post.state_bytes()) <= SMP_L2_LOAD
+    out.append(("the post inserts' state: 16 slots x 32 bytes, CHOR's wet, the pass's words (zeros)",
+                POST_STATE_L2, ins_post.state_bytes()))
     return out
 
 
@@ -565,7 +594,11 @@ def placements() -> list[dict]:
             {"what": f"patch: the FX bus's call of the stock delay at sw {DELAY_SITE_SW:#x} -> target {XDLY_SW:#x} "
                      "(XDLY, which JUMPs on to the stock delay when TYPE asks for it)",
              "load_address": f"{sw_to_load(DELAY_SITE_SW):#010x}", "bytes": len(DELAY_SITE_STOCK),
-             "stock": DELAY_SITE_STOCK.hex(), "new": delay_call().hex()}]
+             "stock": DELAY_SITE_STOCK.hex(), "new": delay_call().hex()},
+            {"what": f"patch: the engine's call of the FX sends at sw {SENDS_SITE_SW:#x} -> target {POST_SW:#x} "
+                     "(the post inserts, which JUMP on to the sends)",
+             "load_address": f"{sw_to_load(SENDS_SITE_SW):#010x}", "bytes": len(SENDS_SITE_STOCK),
+             "stock": SENDS_SITE_STOCK.hex(), "new": sends_cjump().hex()}]
     return out
 
 
@@ -694,6 +727,8 @@ def section7(stock: bytes) -> bytes:
         raise DspError("sw 0x1c1d11 is not the stock `CJUMP 0xb836bc (DB)`")
     if bootstream.read_span(stock, sw_to_load(DELAY_SITE_SW), len(DELAY_SITE_STOCK)) != DELAY_SITE_STOCK:
         raise DspError("sw 0x1c1c58 is not the stock `CALL 0xb8482c (DB)`")
+    if bootstream.read_span(stock, sw_to_load(SENDS_SITE_SW), len(SENDS_SITE_STOCK)) != SENDS_SITE_STOCK:
+        raise DspError("sw 0x1c3054 is not the stock `CJUMP 0x1c1738 (DB)`")
     if len(obj["emark_jump"]) != len(CALL_SITE_STOCK):
         raise DspError(f"the entry-mark JUMP is {len(obj['emark_jump'])} bytes, not {len(CALL_SITE_STOCK)}")
     lookup = struct.unpack("<8I", bootstream.read_span(stock, dm_to_load(LOOKUP_DM), 32))
@@ -719,6 +754,7 @@ def section7(stock: bytes) -> bytes:
     bootstream.write_span(out, sw_to_load(PVMIX_SITE_SW), obj["pvmix_jump"])
     bootstream.write_span(out, sw_to_load(REVERB_SITE_SW), reverb_cjump())
     bootstream.write_span(out, sw_to_load(DELAY_SITE_SW), delay_call())
+    bootstream.write_span(out, sw_to_load(SENDS_SITE_SW), sends_cjump())
     result = bytes(out)
     walked = bootstream.walk(result)
     if not walked.complete or walked.stopped_at != len(result):

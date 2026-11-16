@@ -1,10 +1,10 @@
 """Per-track inserts (docs/inserts.md): the design's numbers.
 
-One insert per track at a time, chosen by M.SEL, mixed in by MOD (dry / wet), with up to six knobs
+One insert per track at a time, chosen by M.SEL, mixed in by MIX (dry / wet), with up to six knobs
 of its own. Each runs per voice slot on the track's buffer in our own per-block pass, before the
 stock chain (filter, amp, pan): mono, 32 samples, the machine's output (H1, docs additions-scope
 §12). Their values come from the ColdFire in the sample pool's directory page: a byte a value,
-0..127, 8 bytes a track (M.SEL, MOD, K1..K6).
+0..127, 8 bytes a track (M.SEL, MIX, K1..K6).
 """
 
 from __future__ import annotations
@@ -18,13 +18,14 @@ TRACKS = 16
 # M.SEL: 0 OFF, then the inserts in their build order
 OFF, FUZZ, TAPE, FOLD, CHOR, WIDE, HARM = range(7)
 NAMES = ("OFF", "FUZZ", "TAPE", "FOLD", "CHOR", "WIDE", "HARM")
-BUILT = (FUZZ, TAPE, FOLD, HARM)                 # the types this build runs (others: as OFF)
+BUILT = (FUZZ, TAPE, FOLD, HARM)                 # the types the pass before the filter runs
+POST = (CHOR, WIDE)                              # the types the pass after the pan runs (stereo)
 
 # where the values are: the pool's directory page, after the command block (dnfw.sampler.machines:
 # names to 0xc08, the library ids to 0xe0c, the command block 0xf00..0xf18)
 POOL_DDR = 0x84000000
 PAR_OFFSET = 0xF80
-PAR = POOL_DDR + PAR_OFFSET                       # 16 x 8 bytes: M.SEL, MOD, K1..K6 (little-endian words)
+PAR = POOL_DDR + PAR_OFFSET                       # 16 x 8 bytes: M.SEL, MIX, K1..K6 (little-endian words)
 BUFFERS = 0x254A60                                # the 16 voice slots' buffers (dnfw.perc.program.BUFFERS)
 ROUTE = 0x257898                                  # 16 x s16: the track each voice slot plays (the frame's
                                                   # 0xa5a + 2 s, from the ColdFire's slot map 0x80005308;
@@ -80,3 +81,32 @@ HM_DRIVE = 4.0
 HM_AMNT_MAX = 0.5
 W_HM = -2 * math.pi * HM_FREQ_LO / FS / math.log(2)
 LOG2_HM_SPAN = math.log2(HM_FREQ_SPAN)
+
+# -- after the pan: the voice in stereo (dnfw.inserts.post). Each voice slot's stereo block, as the
+# stock voice chain leaves it for the FX sends (sw 0x1c1738) and the routing (0x1c1f1e): L 32 floats at
+# STEREO + 0x100 s, R at + 0x80 (byte addresses; docs/inserts.md "After the pan")
+STEREO = 0x257EE8
+STEREO_STRIDE = 0x100
+STEREO_R = 0x80
+POST_RING = 1024                                  # samples a voice slot (21.3 ms), CHOR's or WIDE's
+POST_RING_DDR = 0x82510000                        # 16 x 4 KB (after TAPE's rings; zeros at power-on)
+
+# WIDE: K1 WDTH, K2 TIME, K3 BASS, K4 TONE. Mid and side; the side times 2 WDTH, plus the mid delayed by
+# TIME (0.5 .. 20 ms), high-passed at BASS (40 .. 640 Hz: the lows stay mono) and TONE'd, times WDTH.
+WD_D_MIN, WD_D_SPAN = 24.0, 936.0                 # TIME: 24 + 936 p samples
+WD_BASS_LO, WD_BASS_SPAN = 40.0, 16.0
+W_WB = -2 * math.pi * WD_BASS_LO / FS / math.log(2)
+LOG2_WB_SPAN = math.log2(WD_BASS_SPAN)
+
+# CHOR: K1 DPTH, K2 RATE, K3 DLY, K4 VOIC, K5 WDTH, K6 FDBK. One to four voices reading one ring (the
+# mid, plus FDBK x the wet), each its own delay DLY + DPTH x a sine a quarter turn from the last, spread
+# left / right by WDTH; MIX the dry / wet.
+CH_DLY_MIN, CH_DLY_SPAN = 240.0, 480.0            # DLY: 5 .. 15 ms
+CH_DEP_MAX = 192.0                                # DPTH: up to 4 ms either way (so a read is >= 48 back)
+CH_RATE_LO, CH_RATE_SPAN = 0.05, 100.0            # RATE: 0.05 .. 5 Hz
+LOG2_CR_SPAN = math.log2(CH_RATE_SPAN)
+CH_VOICES_K = 3.99                                # VOIC: 1 + trunc(3.99 p) voices
+CH_FB_MAX = 0.7
+assert CH_DLY_MIN - CH_DEP_MAX >= BLOCK + 2       # every read is of an earlier block's samples
+assert CH_DLY_MIN + CH_DLY_SPAN + CH_DEP_MAX + BLOCK + 2 < POST_RING
+assert WD_D_MIN + WD_D_SPAN < POST_RING

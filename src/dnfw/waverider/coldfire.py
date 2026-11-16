@@ -532,6 +532,17 @@ METER_SITES = (
     (0x40000438, "203cffffdfff", "mtr_switch", "the context switch, interrupts masked: move.l #0xffffdfff,%d0"),
     (0x40027B82, "52b94058f8d4", "mtr_isr_out", "the audio ISR's frame count before its rte: addq.l #1,0x4058f8d4"),
 )
+# the per-track inserts (csrc/inserts/hooks.S, docs/inserts.md): stock's mode header 0x40063f56
+# ends here; its first three exit instructions (6 bytes, also its one-page bge's target) jsr to
+# ins_hdr_tail, which renames a bare "FX" (the one-page track FX mode) "FX (1/2)" / "FX (2/2)" and
+# replays them
+INS_HDR_SITE = 0x40063FCC               # move.l %a3,%d0 ; movea.l (%sp)+,%a2 ; movea.l (%sp)+,%a3
+INS_HDR_STOCK = bytes.fromhex("200b245f265f")
+INS_HDR_GUARDS = (
+    (0x40063F84, "202a0080720790aa007cb280", "inserts: the header's page count (end - begin) against 7"),
+    (0x40063F90, "6c3a", "inserts: ... one page: straight to the exit (bge)"),
+    (0x40063FD2, "588f4e75", "inserts: the exit's last two (addq.l #4,%sp ; rts), left as stock"),
+)
 METER_GUARDS = (                         # read, never written: what the hooks rely on
     (0x40000410, "46fc2700", "meter: the switch masks interrupts"),
     (0x40000452, "4ce8ffff000c4e73", "meter: ... and reloads every register from the incoming TCB"),
@@ -789,6 +800,13 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
         edit(va, bytes.fromhex("4eb9") + _long(csyms[sym]),
              f"the system meter: {what} -> {sym}, which replays it", bytes.fromhex(stock_hex))
 
+    # the per-track inserts: the FX mode's header as a mode of two pages
+    for va, want, why in INS_HDR_GUARDS:
+        _need(content, va, bytes.fromhex(want), why)
+    edit(INS_HDR_SITE, bytes.fromhex("4eb9") + _long(csyms["ins_hdr_tail"]),
+         "the mode header's exit: a bare \"FX\" (the track FX mode, one page) becomes \"FX (1/2)\", "
+         "or \"FX (2/2)\" with the INSERT page up (ins.c ins_header)", INS_HDR_STOCK)
+
     # DIRECT JUMP (csrc/jump, docs/jump.md): off unless PTN + YES turns it on
     for va, want, why in JUMP_GUARDS:
         _need(content, va, bytes.fromhex(want), why)
@@ -912,7 +930,8 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
                  # XDLY (csrc/xdly): the Delay page's TYPE and names
                  "dlt_poll", "dlt_cell", "dlt_state", "dlt_placed", "dlt_seen",
                  # the per-track inserts (csrc/inserts)
-                 "ins_pop", "ins_draw", "ins_visible", "ins_words", "ins_gen", "ins_up", "ins_sel", "ins_selv", "ins_mod", "ins_kv"):   # the sample link's state (v0.15)
+                 "ins_pop", "ins_draw", "ins_visible", "ins_words", "ins_gen", "ins_up", "ins_sel", "ins_selv", "ins_mod", "ins_kv",
+                 "ins_hdr_tail"):   # the sample link's state (v0.15)
         layout[name] = csyms[name]
     layout["mtr_ram"] = pages.METER_RAM      # the system meter's state block (csrc/meter/meter.c MTR_*)
     # v0.45: PING removed (owner, 2026-11-08): its chunk (the FLTR list's 'Ping', the filter

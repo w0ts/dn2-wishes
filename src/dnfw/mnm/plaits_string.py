@@ -163,17 +163,20 @@ def inc_word(p: Prog, k: int, mask: int | None = None, by: int = 1) -> None:
 # -- init --------------------------------------------------------------------------------------
 def init(p: Prog, L) -> None:
     """StringEngine::Init + Reset: the lines and states cleared, f0_ 0.01, delay_ 100, the active
-    string the last, the f0 line empty."""
+    string the last, the f0 line empty. 2026-11-09: the lines' clear deferred (plk.defer_clear:
+    4,096 DDR words over the next four halves, silent, the trigger kept); the strings' delay and
+    f0 then (init_tail), in what was cleared."""
     K.big_at(p, L, 4)
     K.sv(p, U_BIG, 4)
-    p.iconst(5, 0)
+    p.iconst(0, N_STR - 1)
+    K.sv(p, U_ACT, 0)
+    p.iconst(0, 0)
+    K.sv(p, U_FWP, 0)
+    K.defer_clear(p, BIG_USED)
 
-    def clear():
-        p.seti(1, 4)
-        p.sti(0, 1, 5)
-        p.iconst(12, 4)
-        p.iop(4, 12, "+", 4)
-    p.loop_r(6, BIG_USED, clear)
+
+def init_tail(p: Prog, L) -> None:
+    """after the deferred clear: each string's delay 100 and f0 0.01 (StringEngine::Reset)."""
     for i in range(N_STR):
         p.iconst(0, i)
         rec_at(p, 4, 0)
@@ -182,10 +185,6 @@ def init(p: Prog, L) -> None:
         p.sti(DLY, 1, 0)
         p.fconst(0, 0.01)
         p.sti(F0, 1, 0)
-    p.iconst(0, N_STR - 1)
-    K.sv(p, U_ACT, 0)
-    p.iconst(0, 0)
-    K.sv(p, U_FWP, 0)
 
 
 # -- the engine, a half --------------------------------------------------------------------------
