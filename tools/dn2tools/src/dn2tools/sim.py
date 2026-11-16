@@ -22,7 +22,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable
 
-from .frame import CMD_TLM, FRAME_CYCLES, FRAMES_PER_S, Telemetry, encode
+from .frame import CMD_TLM, FRAME_CYCLES, FRAMES_PER_S, IDLE_SLOT_CYCLES, SOUNDING_CYCLES, Telemetry, encode
 from .project import Project
 from . import protocol as P
 from .sim_channel import ChannelSim
@@ -104,7 +104,7 @@ class UnitSim:
                        if v.latched or v.released is None or t - v.released < RELEASE_S
                        or ("voices_stale" in self.faults)]
         live = self.voices[:16]
-        cost, total = [0] * 16, float(IDLE_COST)
+        cost, total = [IDLE_SLOT_CYCLES] * 16, float(IDLE_COST)   # every slot's voice code runs, sounding or not
         inserts_on, a2_on = {self.project.tracks[v.track].insert for v in live} - {None}, 0
         total += sum(INSERT_COST[i] for i in inserts_on)     # an engaged insert runs whether or not its voice is kept
         for slot, v in enumerate(live):
@@ -213,7 +213,8 @@ class UnitSim:
             ins_skip_age=None if self.ins_skip_at is None else int((t - self.ins_skip_at) * FRAMES_PER_S),
             hold_count=self.hold_count, hold_drops=self.hold_drops, hold_seq=hold_seq,
             a2_filtered=int(self.a2_filtered) & 0xFFFF, a2_dry=int(self.a2_dry) & 0xFFFF,
-            frame_cost=sum(cost), voices=sum(1 for c in cost if c), slot_cost=tuple((c // 16) * 16 for c in cost))
+            frame_cost=sum(cost), voices=sum(1 for c in cost if c > SOUNDING_CYCLES),
+            slot_cost=tuple((c // 16) * 16 for c in cost))
 
     def handle_sysex(self, sx: bytes) -> bytes | None:
         """one request in, the reply out (None: not ours); HELLO, TLM, and the test channel (sim_channel.py)"""

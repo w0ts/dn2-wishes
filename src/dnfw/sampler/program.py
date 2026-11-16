@@ -2693,7 +2693,8 @@ def tdm_tx(p: Prog, L: Layout) -> None:
         p.iop(6, 6, "AND", 12)                 # for time, the count (the title bar's DSP label, csrc/meter)
         p.st(SM.LINK_BUF + 4 * 23, 6)
         # 2026-11-11 (autotest, docs/device-tests.md): units 24..39, each slot's last cost (PERC or sample, the larger) / 16
-        # (a voice's pass in cycles; 0 for a slot not rendering), units 40, 41, the A2 filter pass's
+        # (a voice's pass in cycles; the guard runs every slot's voice code every block, so an idle slot reads
+        # ~1,500, never 0: the unit, 2026-11-11), units 40, 41, the A2 filter pass's
         # counts of voices filtered and left dry (cumulative, low 16 bits). Read only: the telemetry
         # frame (SysEx 32) reports them; nothing else reads them.
         p.iconst(0, 24)

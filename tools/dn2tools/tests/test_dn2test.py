@@ -216,3 +216,19 @@ def test_parameter_cc_needs_the_users_map():
     unit.param(0, 74, 64)
     with pytest.raises(Refused):
         unit.param(0, 75, 64)
+
+
+def test_idle_slots_cost_but_do_not_sound():
+    """every slot's voice code runs every block (the unit, 2026-11-11): at idle all 16 slots have a cost and none counts
+    as sounding; a held note's slot does (word 23 counts the slots over SOUNDING_CYCLES, not the slots with a cost)"""
+    unit = DirectUnit(PROJECT, ())
+    unit.wait(0.2)
+    idle = unit.tlm()
+    assert all(c >= frame.IDLE_SLOT_CYCLES - 16 for c in idle.slot_cost) and idle.voices == 0
+    unit.note_on(0, 60)
+    unit.wait(0.2)
+    held = unit.tlm()
+    assert held.voices == 1 and max(held.slot_cost) > frame.SOUNDING_CYCLES
+    unit.note_off(0, 60)
+    unit.wait(1.0)
+    assert unit.tlm().voices == 0

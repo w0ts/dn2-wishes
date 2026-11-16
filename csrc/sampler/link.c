@@ -360,7 +360,12 @@ int smp_skipped_any(void)                       /* any voice, or an insert block
 }
 
 /* 2026-11-11 (the telemetry frame, SysEx 32): the DSP's per-slot cost / 16 (units 24..39) and the A2
- * filter pass's voices filtered and left dry (units 40, 41), as the last idle packet sent them */
+ * filter pass's voices filtered and left dry (units 40, 41), as the last idle packet sent them.
+ * A slot's cost is never 0 once our voices run: the guard runs every slot's voice code every block,
+ * sounding or not (measured on the unit 2026-11-11 21:40, cycles a block: idle 1,300..1,500 (one
+ * 2,880), a held note 16,000..28,000, just after its release 2,300..3,300). So the frame's "slots
+ * sounding" (word 23) counts the slots over TLM_SOUNDING, not the slots with a cost. */
+#define TLM_SOUNDING (8000u / 16u)
 volatile u16 smp_tlm_cost[16] __attribute__((section(".data"))) = {0};
 volatile u16 smp_tlm_nfil __attribute__((section(".data"))) = 0;
 volatile u16 smp_tlm_ndry __attribute__((section(".data"))) = 0;
@@ -2964,7 +2969,7 @@ void smp_rx(const u8 *msg, u32 len, u32 source)
                 sk |= 1u << t;
             u32 c = smp_tlm_cost[t];
             cost += c;
-            voices += c != 0;
+            voices += c > TLM_SOUNDING;
             w[24 + (t >> 1)] |= c << ((t & 1) ? 0 : 16);     /* two slots to a word, slot 0 high */
         }
         w[15] = sk | (u32)(ins_full_any() != 0) << 16;

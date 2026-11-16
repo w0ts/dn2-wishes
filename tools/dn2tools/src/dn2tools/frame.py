@@ -7,7 +7,9 @@
     12..14 frames since each label's last event (D, C, M)
     15 voices skipped for time (bit v) | insert full << 16  16 insert blocks passed through for time
     17 periods since the last of those  18 HOLD latches made  19 HOLD same-key drops  20 voices latched (bit v)
-    21 A2 voices filtered | dry << 16 (16 bits each)  22 sum of the slots' cost, cycles  23 slots rendering
+    21 A2 voices filtered | dry << 16 (16 bits each)  22 sum of the slots' cost, cycles
+    23 slots sounding: cost over SOUNDING_CYCLES (every slot's voice code runs every block, sounding or not: an idle
+       slot costs ~1,500 cycles, a held note 16,000..28,000; measured on the unit 2026-11-11)
     24..31 slot costs / 16, two to a word (slot 0 in the high half)
 A value the unit has no figure for reads 0xFFFFFFFF (None here).
 """
@@ -23,6 +25,8 @@ NONE = 0xFFFFFFFF
 WORDS = 32
 FRAMES_PER_S = 1500
 FRAME_CYCLES = 666_667
+SOUNDING_CYCLES = 8_000           # csrc/sampler/link.c TLM_SOUNDING: a slot over this is sounding
+IDLE_SLOT_CYCLES = 1_456          # what an idle slot's voice code costs a block (the unit, 2026-11-11)
 LABELS = ("D", "C", "M")          # the title bar's DSP / CPU / RAM words
 
 
