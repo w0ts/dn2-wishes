@@ -115,6 +115,11 @@ STRIKES_OFF = 0x3140
 # 0 for a slot not on such a machine (the guard decides as before). PLAITS only: its MNM_COST.
 BOUNDS_OFF = 0x3180
 SLOT_N = 0x31C0                            # 2026-11-10 (poly16): mnm_ages' loop over the slots, its counter
+# 2026-11-12 (opt-host): each slot's budget sum, the costs of the slots with smaller keys and its own (mnm_ages, in a
+# block with a Monomachine slot), so a voice's budget reads one word, not sixteen keys and their costs. In the L2
+# scratch below the keys: nothing has used 0..0x3000 since the render scratch went to L1 (v0.43)
+CUM_OFF = 0x2FC0
+assert CUM_OFF + 4 * 16 <= MNM_KEYS_OFF
 # 2026-11-10 (poly16, the User: 16 PLAITS voices on every engine): 30,000, not MNM_COST's 60,000: a
 # note's start costs about a steady block now (the heaviest engine's ~25,000 on the memory clock),
 # and sixteen notes started together must fit the frame at it (16 x 60,000 cannot: only six
@@ -122,6 +127,14 @@ SLOT_N = 0x31C0                            # 2026-11-10 (poly16): mnm_ages' loop
 MNM_START = {"PLAITS": 30_000}
 assert MNM_START["PLAITS"] <= MNM_COST["PLAITS"]
 STEAL_STRIKES = 2
+# 2026-11-12 (opt-host): mnm_ages' type tests, a bit a type: ours (PERC, the Monomachine machines, the sample
+# machines), and the Monomachine machines
+from ..sampler import machines as _smx_types   # noqa: E402
+OURS_TYPES = (*MNM_TYPES, MACHINE_TYPE, *_smx_types.TYPES)
+assert all(0 <= t < 32 for t in OURS_TYPES)
+OURS_MASK = sum(1 << t for t in set(OURS_TYPES))
+MNM_MASK = sum(1 << t for t in MNM_TYPES)
+VOICE_MASK = MNM_MASK | 1 << MACHINE_TYPE      # PERC's loop: the slots its voice plays
 MNM_QUIET_LEVEL = 2.0 ** -16                # -96 dB: an AMP envelope's tail and a filter's are under it
 MNM_QUIET_BLOCKS = 64                      # 43 ms
 MNM_SCRATCH = 0x200A4000                   # dsp.MNM_SCRATCH_L2 (v0.32: L2; test_waverider_dsp holds them equal)
@@ -157,6 +170,49 @@ def half(p: Prog, d: int, off: int, k146: int) -> None:
     p.iop(d, d, "AND", 12)
 
 
+# 2026-11-12 (opt-host): a voice's frame records read through two pointers set once a voice (frame_regs), not
+# by half()'s address arithmetic each record: the same 16-bit halves, the same bytes. FRAME_BIAS (words) puts the
+# records' offsets (frame_offset: 168 + 2 slot, slots 25..47) in -32..31: 4-byte loads that ride on computes
+FRAME_BIAS = 52
+assert M.FRAME % 4 == 0
+
+
+def frame_regs(p: Prog) -> None:
+    """For frame_byte, the slot in R9 and 146 t in R10: I1 = the slot's frame halves' word-aligned base (FRAME +
+    146 t, less 2 for an odd slot), I0 = that + 4 for an odd slot (both + 4 FRAME_BIAS, biased); R13, R14 the
+    shifts that bring a record's high byte down for a record at an offset = 0, = 2 (mod 4): a half at an address
+    = 2 (mod 4) is a word's upper one (half()); R11 = 0xFF, R15 = 0. Clobbers R0, R1, R12."""
+    p.iconst(12, M.FRAME + 4 * FRAME_BIAS)
+    p.iop(0, 12, "+", 10)
+    p.iconst(12, -4)
+    p.iop(0, 0, "AND", 12)
+    p.seti(1, 0, "the slot's frame words (+ FRAME_BIAS)", bias=FRAME_BIAS)
+    p.iconst(12, 1)
+    p.iop(1, 9, "AND", 12)                    # t & 1
+    p.lsh(12, 1, 2)
+    p.iop(0, 12, "+", 0)
+    p.seti(0, 0, "the same, a word on for an odd slot", bias=FRAME_BIAS)
+    p.lsh(12, 1, 4)                           # 16 (t & 1)
+    p.iconst(13, -8)
+    p.iop(13, 13, "-", 12)                    # offset = 0 (mod 4): even slot the lower half (-8), odd the upper (-24)
+    p.iconst(14, -24)
+    p.iop(14, 12, "+", 14)                    # = 2: even slot the upper half (-24), odd the lower (-8)
+    p.iconst(11, 0xFF)
+    p.iconst(15, 0)
+
+
+def frame_byte(p: Prog, d: int, slot: int) -> None:
+    """Rd = frame record SLOT's high byte for this slot (half() >> 8), after frame_regs (whose registers it
+    keeps)."""
+    off = M.frame_offset(slot)
+    if off & 2:
+        p.ldi(d, (off - 2) // 4, 0)
+    else:
+        p.ldi(d, off // 4, 1)
+    MDK._shift_r(p, d, d, 14 if off & 2 else 13)
+    p.iop(d, d, "AND", 11)
+
+
 def raw_type(p: Prog, d: int) -> None:
     """Rd = this slot's machine type as the ColdFire sent it: the frame's header word at
     148 + 2 t (v0.13). The record's copy (+0x1b4) is the lookup's answer, which is 5 for
@@ -181,9 +237,8 @@ def mono_engine(p: Prog, d: int, s: int, k146: int) -> None:
 
 def mnm_ages(p: Prog, L: M.Layout) -> None:
     """v0.29: every slot's key and Monomachine cost for this block (MNM_KEYS_OFF), and the
-    slots in key order (ORDER_OFF). Clobbers R0-R14, I1."""
+    slots in key order (ORDER_OFF), and (2026-11-12) the budget sums (CUM_OFF). Clobbers R0-R15, I0-I2."""
     from ..mnm import machines as MNM
-    from ..sampler import machines as SMx
     keys = L.md.mnm.scratch + MNM_KEYS_OFF
     costs = L.md.mnm.scratch + MNM_COSTS_OFF
     p.ld(3, TRIG_WORD)
@@ -191,35 +246,53 @@ def mnm_ages(p: Prog, L: M.Layout) -> None:
     # 2026-11-10 (poly16): one pass of a loop a slot (until then the 16 slots unrolled: about 1,900
     # instructions, 10 KB of the DSP upload); the same operations in the same order, slot u in the
     # word U_WORD, I5 at the scratch + 4 u (the per-slot words), R3 the triggers shifted to it
+    # 2026-11-12 (opt-host): slot u in I0 (it was the L2 word U_WORD, read four times a slot), the count in R15
+    # (it was the L2 word SLOT_N); both words left after the loop as it left them (16, 0)
     U_WORD = L.md.mnm.scratch + RANK_U         # (free until the ordering below starts it at 0)
     p.iconst(0, 0)
-    p.st(U_WORD, 0)
+    p.seti(0, 0)
+    p.seti(2, 0)
     p.iconst(0, L.md.mnm.scratch)
     p.seti(5, 0)
 
     def slot():
-        p.ld(10, U_WORD)
+        p.geti(10, 0)
         p.iop(10, 10, "+", 10)                 # 2 u
         half(p, 2, 148, 10)                    # the slot's machine type, as raw_type
         p.iconst(4, 0)
-        p.iconst(14, 0)                        # R14: ours (PERC, Monomachine, a sample machine)
-        for typ, k in MNM_TYPES.items():
-            p.iconst(12, typ)
-            p.if_(2, "EQ", 12, lambda c=MNM_COST[MNM.NAMES[k]]: (p.iconst(4, c), p.iconst(14, 1)), kind="i")
-        for typ in (MACHINE_TYPE, *SMx.TYPES):      # v0.44: 8..13 and BOUNCE's 17
-            p.iconst(12, typ)
-            p.if_(2, "EQ", 12, lambda: p.iconst(14, 1), kind="i")
+        p.iconst(14, 0)                        # R14: ours (PERC, Monomachine, a sample machine): nonzero
+        # 2026-11-12 (opt-host): which types are ours, and Monomachine machines, by one bit each of two masks
+        # (a type under 32), the costs' compares only for a Monomachine machine: the same R4 and R14 (as a
+        # flag) as the compare for each type
+        p.iconst(12, 32)
+
+        def small():                           # (its 1 << type: a count under 32)
+            p.iconst(13, 1)
+            MDK._shift_r(p, 13, 13, 2)
+            p.iconst(12, OURS_MASK)
+            p.iop(14, 13, "AND", 12)
+            p.iconst(12, MNM_MASK)
+            p.iop(12, 13, "AND", 12)
+
+            def mnm_cost():
+                p.iconst(12, 1)
+                p.seti(2, 12)                  # I2: a Monomachine slot this block (for the budget sums)
+                for typ, k in MNM_TYPES.items():
+                    p.iconst(12, typ)
+                    p.if_(2, "EQ", 12, lambda c=MNM_COST[MNM.NAMES[k]]: p.iconst(4, c), kind="i")
+            p.ifz(12, "NE", mnm_cost)
+        p.if_(2, "LT", 12, small, kind="i")
         if MONO_THRESHOLDS:                    # 2026-11-11: MONOMACHINE's cost is its engine's
 
             def mono_cost():
-                p.ld(8, U_WORD)
+                p.geti(8, 0)
                 t146(p, 11, 8)
                 mono_engine(p, 6, 7, 11)
                 for e, name in enumerate(MNM.MONO_ENGINES[1:], start=1):
                     p.iconst(12, e)
                     p.if_(6, "EQ", 12, lambda c=MNM_COST[name]: p.iconst(4, c), kind="i")
                 # ... or the engine the voice still plays (ENGN turned, no note yet), whichever costs more
-                p.ld(8, U_WORD)
+                p.geti(8, 0)
                 p.lsh(12, 8, 10)
                 p.iconst(11, L.md.state + 4 * MDK.VW["mach"])
                 p.iop(12, 11, "+", 12)
@@ -256,9 +329,9 @@ def mnm_ages(p: Prog, L: M.Layout) -> None:
                 p.iop(0, 12, "+", 0)           # BUFFERS + 4 u
                 p.seti(4, 0)
                 p.ldi(0, 0, 4)
-                p.seti(4, 0)
+                p.seti(1, 0)                   # (2026-11-12: I1, not I4: a load rides on a compute)
                 p.fconst(7, 0.0)
-                MDV.peak32(p, 4, counter=5)
+                MDV.peak32(p, 1, counter=5)
                 p.ldi(0, RESTS_OFF // 4, 5)
                 p.fconst(12, MNM_QUIET_LEVEL)
                 p.if_(7, "LT", 12, lambda: (p.iconst(12, 1), p.iop(0, 12, "+", 0)), lambda: p.iconst(0, 0))
@@ -275,51 +348,81 @@ def mnm_ages(p: Prog, L: M.Layout) -> None:
             p.iop(12, 3, "AND", 12)
             p.ifz(12, "NE", lambda: p.iconst(13, 0))    # a note this block: the newest
             p.lsh(13, 13, 4)
-            p.ld(12, U_WORD)
+            p.geti(12, 0)
             p.iop(13, 13, "OR", 12)
             p.sti(MNM_KEYS_OFF // 4, 5, 13)
 
         def none():
             p.iconst(12, MNM_NONE)
-            p.ld(5, U_WORD)
+            p.geti(5, 0)
             p.iop(5, 12, "+", 5)               # MNM_NONE | u (its low four bits are 0)
             p.sti(MNM_KEYS_OFF // 4, 5, 5)
         p.ifz(14, "NE", mnm, none)
         p.lsh(3, 3, -1)                        # the next slot's trigger to bit 0
-        p.ld(12, U_WORD)
+        p.geti(12, 0)
         p.iconst(13, 1)
         p.iop(12, 12, "+", 13)
-        p.st(U_WORD, 12)
+        p.seti(0, 12)
         p.geti(0, 5)
         p.iconst(12, 4)
         p.iop(0, 12, "+", 0)
         p.seti(5, 0)
-    p.loop(L.md.mnm.scratch + SLOT_N, 16, slot)
-    # the slots in key order: slot u goes to place (how many keys are smaller)
+    p.loop_r(15, 16, slot)
+    p.iconst(0, 16)
+    p.st(U_WORD, 0)
+    p.iconst(0, 0)
+    p.st(L.md.mnm.scratch + SLOT_N, 0)
+    # the slots in key order: slot u goes to place (how many keys are smaller). 2026-11-12 (opt-host): six slots'
+    # keys at a time held in R0..R5, each pass over the sixteen keys (one L2 read each) counting for all six at
+    # once (a compare and a conditional add): the same places, 48 key reads a block instead of 256; ORDER
+    # written place by place as before (its words the same), RANK_U left at 16 by the loop above (as the old
+    # count left it), RANK_N at 0 (as its loop left it)
     order = L.md.mnm.scratch + ORDER_OFF
     p.iconst(0, 0)
-    p.st(L.md.mnm.scratch + RANK_U, 0)
+    p.st(L.md.mnm.scratch + RANK_N, 0)
+    counts = (8, 9, 10, 11, 13, 15)            # (integer adds take R8..R15 first; R12 is loop_r's, R14 its count)
+    for lo in range(0, 16, len(counts)):
+        us = list(range(lo, min(lo + len(counts), 16)))
+        for j, u in enumerate(us):
+            p.ld(j, keys + 4 * u)              # slot u's key in Rj
+        for j in range(len(us)):
+            p.iconst(counts[j], 0)
+        p.iconst(7, 1)
+        p.iconst(12, keys)
+        p.seti(1, 12)
 
-    def place():
-        p.ld(9, L.md.mnm.scratch + RANK_U)
-        p.lsh(12, 9, 2)
-        p.iconst(11, keys)
-        p.iop(12, 11, "+", 12)
-        p.seti(1, 12)
-        p.ldi(6, 0, 1)                         # slot u's key
+        def each_v(n=len(us)):
+            p.ldpost(6, 1)                     # key v
+            for j in range(n):
+                p.comp_iop_if(6, j, "LT", counts[j], counts[j], "+", 7)
+        p.loop_r(14, 16, each_v)
+        p.iconst(14, order)
+        for j, u in enumerate(us):
+            p.lsh(12, counts[j], 2)
+            p.iop(12, 14, "+", 12)
+            p.seti(1, 12)
+            p.iconst(7, u)
+            p.sti(0, 1, 7)                     # ORDER[place] = u
+    # 2026-11-12 (opt-host): the budget sums (CUM_OFF), in a block with a Monomachine slot: the costs in key order,
+    # summed (the same integers budget() added up, in another order)
+    p.geti(12, 2)
+
+    def sums():
         p.iconst(8, 0)
-        for v in range(16):
-            p.ld(7, keys + 4 * v)
-            p.if_(7, "LT", 6, lambda: (p.iconst(12, 1), p.iop(8, 8, "+", 12)), kind="i")
-        p.lsh(12, 8, 2)
-        p.iconst(11, order)
-        p.iop(12, 11, "+", 12)
+        p.iconst(11, costs)
+        p.iconst(12, order)
         p.seti(1, 12)
-        p.sti(0, 1, 9)                         # ORDER[place] = u
-        p.iconst(12, 1)
-        p.iop(9, 9, "+", 12)
-        p.st(L.md.mnm.scratch + RANK_U, 9)
-    p.loop(L.md.mnm.scratch + RANK_N, 16, place)
+
+        def one():
+            p.ldpost(9, 1)                     # the next slot in key order
+            p.lsh(10, 9, 2)
+            p.iop(10, 11, "+", 10)
+            p.seti(0, 10)
+            p.ldi(10, 0, 0)
+            p.iop(8, 8, "+", 10)
+            p.sti((CUM_OFF - MNM_COSTS_OFF) // 4, 0, 8)
+        p.loop_r(14, 16, one)
+    p.ifz(12, "NE", sums)
 
 
 def order_slot(p: Prog, idx: int) -> None:
@@ -377,8 +480,8 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
     # TYPE and the eight parameters from the frame
     p.ld(9, C["t"])
     t146(p, 10, 9)
-    half(p, 4, M.frame_offset(M.TYPE_REC[1]), 10)
-    p.lsh(4, 4, -8)
+    frame_regs(p)
+    frame_byte(p, 4, M.TYPE_REC[1])
     p.iconst(12, 127)
     p.iop(4, 4, "MIN", 12)
     p.iconst(12, 0)
@@ -390,12 +493,11 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
     p.ifz(5, "NE", lambda: (p.iconst(12, MDV.N - 1), p.iop(4, 12, "+", 5)))
     p.st(C["type"], 4)
     def param(k, slot, lo, top, word=None):
-        half(p, 4, M.frame_offset(slot), 10)
-        p.lsh(4, 4, -8)
-        p.iconst(12, -lo)
-        p.iop(4, 12, "+", 4)
-        p.iconst(12, 0)
-        p.iop(4, 4, "MAX", 12)
+        frame_byte(p, 4, slot)
+        if lo:                                 # (+ 0 left out: the same word)
+            p.iconst(12, -lo)
+            p.iop(4, 12, "+", 4)
+        p.iop(4, 4, "MAX", 15)                 # (R15 = 0: frame_regs)
         p.iconst(12, top)
         p.iop(4, 4, "MIN", 12)
         p.iconst(12, 0)
@@ -508,14 +610,7 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
         p.iconst(11, keys)
         p.iop(12, 11, "+", 12)
         p.seti(1, 12)
-        p.ldi(6, 0, 1)                         # this slot's key
-        p.ldi(1, (MNM_COSTS_OFF - MNM_KEYS_OFF) // 4, 1)   # and its cost
-        p.iconst(8, 0)
-        for u in range(16):
-            p.ld(7, keys + 4 * u)
-            p.if_(7, "LT", 6, lambda u=u: (p.ld(5, L.md.mnm.scratch + MNM_COSTS_OFF + 4 * u),
-                                           p.iop(8, 8, "+", 5)), kind="i")
-        p.iop(8, 8, "+", 1)
+        p.ldi(8, (CUM_OFF - MNM_KEYS_OFF) // 4, 1)    # 2026-11-12: their costs and its own, summed by mnm_ages
         p.ldi(5, (RESTS_OFF - MNM_KEYS_OFF) // 4, 1)    # v0.29: resting (its sound died away)
         p.iconst(12, MNM_QUIET_BLOCKS)
         p.if_(5, "GE", 12, lambda: p.iconst(8, MNM_BUDGET + 1), kind="i")
@@ -583,13 +678,13 @@ def out_guard(p: Prog, L: M.Layout) -> None:
     reverb, where it stays). Every sample of the block our voice wrote is held to
     +-OUT_LIMIT; and if one is not finite (infinite or NaN: its exponent all ones), the whole
     block is zeroed and the voice's state cleared (its 'on' word with it: the next block starts
-    it fresh, as a new machine), so nothing non-finite ever leaves our code. Uses R0, R12,
-    R13, F0, F12, I2, I4 and fxy (a flag, free after the effects)."""
+    it fresh, as a new machine), so nothing non-finite ever leaves our code. Uses R0-R2, R5,
+    R10-R14, I1, I2, I4 and fxy (a flag, free after the effects)."""
     C = L.C
     p.iconst(0, 0)
     p.st(C["fxy"], 0)
     p.ld(0, C["buf"])
-    p.seti(4, 0, "the slot's buffer, the guard")
+    p.seti(1, 0, "the slot's buffer, the guard")
     # 2026-11-10 (poly16): the non-finite test as a sum of x x 0 (0 for every finite x, NaN from
     # an infinite or NaN one, and a NaN stays), tested once after the block; the limits in
     # registers: the same block written, the same verdict, 5 instructions a sample, not 10
@@ -599,13 +694,24 @@ def out_guard(p: Prog, L: M.Layout) -> None:
     p.fconst(10, 0.0)                          # the sum
 
     def four():
-        for k in range(4):
-            p.ldi(0, 0, 4)
-            p.fop(1, 0, "*", 11)
-            p.fop(0, 0, "MIN", 14)
+        # 2026-11-12 (opt-host): each sample's operations as before (x 0, MIN, the sum, MAX, the store), the
+        # samples in turn in R0 and R2 through I1, so the next sample's load and each store but the pass's
+        # last ride on a compute: 20 instructions the four samples, not 24
+        def sample(x: int, y: int | None, first: bool) -> None:
+            p.fop(1, x, "*", 11)               # (takes in the store before it, if any)
+            if y is not None and first:
+                p.ldi(y, 1, 1)                 # the next sample (I1 still at this one)
+            p.fop(x, x, "MIN", 14)
+            if y is not None and not first:
+                p.ldi(y, 1, 1)                 # the next sample (I1 at the one before it)
             p.fop(10, 10, "+", 1)
-            p.fop(0, 0, "MAX", 13)
-            p.stpost(4, 0)
+            p.fop(x, x, "MAX", 13)
+            p.stpost(1, x)
+        p.ldi(0, 0, 1)
+        sample(0, 2, True)
+        sample(2, 0, False)
+        sample(0, 2, False)
+        sample(2, None, False)
     p.loop_r(5, 8, four)
     p.ipass(12, 10)
     p.lsh(12, 12, -23)
@@ -704,14 +810,18 @@ def fx(p: Prog, L: M.Layout) -> None:
     p.iconst(5, 0)
     p.st(C["fxam"], 5)
     p.fconst(6, 0.0)
-    p.if_(4, "GT", 6, lambda: (p.iconst(5, 1), p.st(C["fxam"], 5)))
-    q(8, 1)
-    p.fconst(one, 14.5)
-    p.fop(8, 8, "*", one)
-    M.exp2(p, L, 8, 8)
-    p.fconst(one, 0.1 * M.DT)
-    p.fop(8, 8, "*", one)
-    p.st(C["amdt"], 8)
+
+    def am_on():
+        p.iconst(5, 1)
+        p.st(C["fxam"], 5)
+        q(8, 1)                               # 2026-11-12 (opt-host): the step only when AM is on (only the
+        p.fconst(one, 14.5)                   # AM pass reads amdt): the same word then
+        p.fop(8, 8, "*", one)
+        M.exp2(p, L, 8, 8)
+        p.fconst(one, 0.1 * M.DT)
+        p.fop(8, 8, "*", one)
+        p.st(C["amdt"], 8)
+    p.if_(4, "GT", 6, am_on)
     # EQ: gain in dB, (EQG - 0.5) x 36: +-18, 0 at the record's default
     q(4, 3)
     p.fconst(one, 0.5)
@@ -934,25 +1044,17 @@ def _emit(L: M.Layout, rings_sw: int, prefix: str) -> Prog:
     p.place(top)
     order_slot(p, L.md.mnm.scratch + PERC_I)   # v0.29: the newest first
     p.st(L.C["t"], 9)
-    p.lsh(12, 9, 9)
-    p.lsh(13, 9, 5)
-    p.iop(12, 12, "+", 13)
-    p.lsh(13, 9, 4)
-    p.iop(12, 12, "+", 13)
-    p.lsh(13, 9, 2)
-    p.iop(12, 12, "+", 13)
-    p.iconst(11, RECORDS)
-    p.iop(12, 11, "+", 12)
-    p.seti(4, 12, "record: 0x2554b8 + 0x234 t")
+    # 2026-11-12 (opt-host): no record pointer (I4 = 0x2554b8 + 0x234 t was set here and read by nothing: the
+    # voice sets I4 to its buffer before any use), and PERC or a Monomachine machine (v0.26: PERC's voice too)
+    # by one bit of VOICE_MASK, not a compare a type
     raw_type(p, 2)
-    for typ in MNM_TYPES:                     # v0.26: a Monomachine machine is PERC's voice too
-        p.iconst(12, typ)
-        p.if_(2, "EQ", 12, lambda: p.iconst(2, MACHINE_TYPE), kind="i")
-    p.ipass(0, 2)
-    p.iconst(12, MACHINE_TYPE)
-    p.e("COMP(R0, R12);")
+    p.iconst(0, 0)
+    p.iconst(12, 32)
+    p.if_(2, "LT", 12, lambda: (p.iconst(13, 1), MDK._shift_r(p, 13, 13, 2), p.iconst(12, VOICE_MASK),
+                                p.iop(0, 13, "AND", 12)), kind="i")
+    p.ipass(0, 0)
     other = p.label("other")
-    p.jump("NE", other)
+    p.jump("EQ", other)
     p.ld(0, L.md.C["fill"])                   # v0.26: silent until the tables (sent by the
     p.iconst(12, MDK.Z_N)                     # ColdFire at power-on) are decoded
     p.e("COMP(R0, R12);")

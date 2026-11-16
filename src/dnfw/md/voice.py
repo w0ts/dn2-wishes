@@ -135,15 +135,20 @@ def peak32(p: Prog, i: int, counter: int = 2) -> None:
     """F7 = MAX(F7, |x|) over the 32 words from Ii on, as MAX(F7, x) then MAX(F7, 0 - x) a word
     (2026-11-10, poly16: four words a pass of a register loop, 0.0 held in F13; it was a
     memory-counter loop reloading the 0 every word: 10 instructions a word, ~4.75 now; the same
-    operations). Clobbers F6, F13, Rcounter, R12."""
+    operations). 2026-11-12 (opt-host): the words in turn in F6 and F8, each pass's second to fourth
+    loaded beside the MAX before it when Ii is one of I0..I3 (dsl.PAR_I): ~3.75 a word. Clobbers F6, F8,
+    F13, Rcounter, R12."""
     p.fconst(13, 0.0)
 
     def four():
-        for _ in range(4):
-            p.ldpost(6, i)
-            p.fop(7, 7, "MAX", 6)
-            p.fop(6, 13, "-", 6)
-            p.fop(7, 7, "MAX", 6)
+        p.ldpost(6, i)
+        for k in range(4):
+            x, y = (6, 8) if k % 2 == 0 else (8, 6)
+            p.fop(7, 7, "MAX", x)
+            if k < 3:
+                p.ldpost(y, i)                 # the next word (beside the MAX: it reads x, not y)
+            p.fop(x, 13, "-", x)
+            p.fop(7, 7, "MAX", x)
     p.loop_r(counter, 8, four)
 
 
@@ -302,9 +307,9 @@ def advance(p: Prog, L: K.Layout) -> None:
         p.ld(1, L.C["mdb"])
         p.iconst(12, 4 * K.OUT0)
         p.iop(1, 12, "+", 1)
-        p.seti(5, 1)
+        p.seti(1, 1)                           # (2026-11-12: I1, not I5: a load rides on a compute)
         p.fconst(7, 0.0)
-        peak32(p, 5)
+        peak32(p, 1)
         K.vw(p, 0, "quiet")
         p.fconst(12, QUIET_LEVEL)
         p.if_(7, "LT", 12, lambda: (p.iconst(12, 1), p.iop(0, 12, "+", 0)),
@@ -321,19 +326,20 @@ def advance(p: Prog, L: K.Layout) -> None:
 
 def inputs(p: Prog, L: K.Layout, knobs: list[int]) -> None:
     """Step 1: the knob words (scratch addresses KNOBS, floats 0..1) -> the eight 14-bit
-    inputs; any change marks the words dirty. Clobbers R0-R2, R12."""
+    inputs; any change marks the words dirty. 2026-11-12 (opt-host): the four constants held in
+    R4, R6-R8 through the eight (the same operations). Clobbers R0-R2, R4, R6-R8, R12."""
+    p.fconst(4, 127.0)
+    p.fconst(6, 0.5)
+    p.iconst(7, 0)
+    p.iconst(8, 16383)
     for k, a in enumerate(knobs):
         p.ld(0, a)
-        p.fconst(12, 127.0)
-        p.fop(0, 0, "*", 12)
-        p.fconst(12, 0.5)
-        p.fop(0, 0, "+", 12)
+        p.fop(0, 0, "*", 4)
+        p.fop(0, 0, "+", 6)
         p.trunc(0, 0)
         p.lsh(0, 0, 7)                         # the Machinedrum's knob, 0..127, << 7
-        p.iconst(12, 0)
-        p.iop(0, 0, "MAX", 12)
-        p.iconst(12, 16383)
-        p.iop(0, 0, "MIN", 12)
+        p.iop(0, 0, "MAX", 7)
+        p.iop(0, 0, "MIN", 8)
         K.inp(p, 1, k)
         p.e("COMP(R0, R1);")
 
@@ -347,8 +353,8 @@ def inputs(p: Prog, L: K.Layout, knobs: list[int]) -> None:
 def block(p: Prog, L: K.Layout, knobs: list[int], note: int, want: int, level: float = 1.0,
           level_word: int | None = None, after_advance=None) -> None:
     """One DN2 block (steps 1-4): KNOBS the scratch words of the eight knobs, Rnote nonzero
-    for a note, Rwant the machine TYPE asks for (0..N-1). Output at I4 (advanced past the
-    block). Clobbers everything but I3. AFTER_ADVANCE (2026-11-11): code run once the stream has
+    for a note, Rwant the machine TYPE asks for (0..N-1). Output from I4 on, written through I2
+    (2026-11-12: I2 left past the block, I4 at its start). Clobbers everything but I3. AFTER_ADVANCE (2026-11-11): code run once the stream has
     moved on (the machine VW['mach'] is the one this block plays), before the level is read."""
     p.ifz(note, "NE", lambda: (K.vws(p, "want", want), p.iconst(0, 1), K.vws(p, "trg", 0)))
     inputs(p, L, knobs)
@@ -377,33 +383,38 @@ def block(p: Prog, L: K.Layout, knobs: list[int], note: int, want: int, level: f
         p.ld(15, level_word)
 
     p.fconst(4, K.STEP)                        # 2026-11-10 (poly16): the step held in F4
+    # 2026-11-12 (opt-host): the same operations on the same values, in an order that lets the four stream
+    # loads ride on computes, with 4.0 held in F7 through the 32 samples and the samples written through I2
+    # (I0..I3 take a move beside a compute; I4 stays at the block's start): 31 instructions a sample, not 36
+    p.fconst(7, 4.0)
+    p.geti(9, 4)
+    p.seti(2, 9)
 
     def one():
-        p.trunc(7, 6)
-        p.float0(8, 7)                         # (FLOAT R7, as FLOAT R7 BY 0)
-        p.fop(8, 6, "-", 8)                    # f
-        p.lsh(7, 7, 2)
-        p.iop(7, 13, "+", 7)
-        p.seti(1, 7)
+        p.trunc(9, 6)
+        p.lsh(11, 9, 2)
+        p.iop(11, 13, "+", 11)
+        p.seti(1, 11)
+        p.float0(8, 9)                         # (FLOAT R9, as FLOAT R9 BY 0)
         p.ldpost(0, 1)                         # a = B[i-1]
+        p.fop(8, 6, "-", 8)                    # f
         p.ldpost(1, 1)                         # b
-        p.ldpost(2, 1)                         # c
-        p.ldpost(3, 1)                         # d
         # y = b + f/2 (c - a + f (2a - 5b + 4c - d + f (3(b - c) + d - a)))
+        p.fop(10, 0, "+", 0)                   # 2a
+        p.ldpost(2, 1)                         # c
+        p.fconst(12, 5.0)
+        p.fop(11, 1, "*", 12)
+        p.ldpost(3, 1)                         # d
+        p.fop(10, 10, "-", 11)                 # - 5b
+        p.fop(11, 2, "*", 7)
+        p.fop(10, 10, "+", 11)                 # + 4c
+        p.fop(10, 10, "-", 3)                  # - d
         p.fop(9, 1, "-", 2)
         p.fconst(12, 3.0)
         p.fop(9, 9, "*", 12)
         p.fop(9, 9, "+", 3)
         p.fop(9, 9, "-", 0)                    # 3(b - c) + d - a
         p.fop(9, 9, "*", 8)
-        p.fop(10, 0, "+", 0)                   # 2a
-        p.fconst(12, 5.0)
-        p.fop(11, 1, "*", 12)
-        p.fop(10, 10, "-", 11)                 # - 5b
-        p.fconst(12, 4.0)
-        p.fop(11, 2, "*", 12)
-        p.fop(10, 10, "+", 11)                 # + 4c
-        p.fop(10, 10, "-", 3)                  # - d
         p.fop(9, 9, "+", 10)
         p.fop(9, 9, "*", 8)
         p.fop(10, 2, "-", 0)
@@ -415,7 +426,7 @@ def block(p: Prog, L: K.Layout, knobs: list[int], note: int, want: int, level: f
         p.fop(10, 1, "*", 15)
         p.fop(9, 9, "+", 10)
         p.fop(6, 6, "+", 4)                    # the position on
-        p.stpost(4, 9)                         # the sample out (2026-11-10: not one instruction: I4)
+        p.stpost(2, 9)                         # the sample out (with the add above: one instruction)
     p.loop_r(5, 32, one)
     K.vws(p, "pos", 6)
     p.st(L.C["n1"], 5)

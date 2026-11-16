@@ -564,6 +564,20 @@ class Prog:
             else:
                 self.setF(d, f32({"+": x + y, "-": x - y, "*": x * y}[op]))
 
+    def comp_iop_if(self, x: int, y: int, cond: str, d: int, a: int, op: str, b: int, note: str = "") -> None:
+        """2026-11-12 (opt-host): `COMP(Rx, Ry); IF cond Rd = Ra op Rb;` (op + or -): an integer compare and a
+        conditional integer compute on its flags, two instructions where a jump over the compute takes three or
+        more (the stock's own form: `IF GE R1 = R1 - R1`)."""
+        assert op in ("+", "-")
+        if op == "+":
+            assert 8 <= a <= 15, "integer adds take R8..R15 first (docs/waverider-m5-dsp.md, G5)"
+        self.e(f"COMP(R{x}, R{y});")
+        self.e(f"IF {cond} R{d} = R{a} {op} R{b};", note)
+        if self.run:
+            c = s32(self.r[x]) - s32(self.r[y])
+            if COND[cond]((c > 0) - (c < 0)):
+                self.setR(d, self.r[a] + self.r[b] if op == "+" else self.r[a] - self.r[b])
+
     def fabs_(self, d: int, a: int, note: str = "") -> None:
         """Fd = ABS Fa (a NaN input: all ones, as the core's other float ops)."""
         self.e(f"F{d} = ABS F{a};", note)

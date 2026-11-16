@@ -1,4 +1,137 @@
-# What each machine costs the DSP (v0.39 source, measured 2026-11-03; v0.33 table below it)
+# What each engine costs the DSP, one method for all (2026-11-12, main f649683c)
+
+**The method** (`python3 scripts/dsp_cost.py --steps cost[,host] [--only NAME,..]`, about a minute for all 61):
+one voice of the engine on track 0, run in the program's model (`dnfw.perc.program.voice`; the sample machines'
+`dnfw.sampler.program.voice`), on the unit's memory map (track buffers in L1, as `trackbuf.asm` puts them). Cost =
+instructions + 4 x L2 + 10 x DDR accesses, as below. The model's count is made instruction-exact: emit mode's
+constant elision and its zero-scale pass are mirrored, every jump, call and the engine dispatch counted.
+Blocks: a fresh voice, notes on blocks 1 and 8; **steady** the mean of blocks 4..7, **trig** the dearer of 8, 9 (a
+retrigger), **start** the dearer of 1, 2 (the first note: the machine's init). **Host** is everything in the voice
+but the engine (the frame's records, the stream move, the resampler and level, the quiet test, the budget, the
+track effects, the output guard); **engine** is the machine's own code (render, trig, init and its knob scaling),
+told apart by the call stack. Report: `out/dsp_cost/report.json`; `--md FILE` writes the table.
+
+**Checked against the assembled code** (`scripts/sharc_cost.py`, the SHARC runner, split by perc.json's addresses):
+engines equal to +-2 for TRX-CY, EFM-CY, GND-IM, PI-SD, SOPHIE, PLAITS ADD and MDAL, SID, DDRW, VO-6 (TB303 +129 and
+ANALOG2 +636 in the runner: its frames carry page-2/3 words the model's harness leaves at 0; not chased); host the
+model's + 36 (the guard's own instructions inside the measured span) + 960 (the runner never runs `trackbuf.asm`,
+so its track buffers stay in DDR: 96 accesses a voice the unit does not make).
+
+**Around the voices** (runner, main, per block; not in the table): PERC's entry 4,846 with no voice of ours
+(`mnm_ages` for 16 slots, the guard's entry), the slot loop 1,305, the sample machines' loop 8,115 (the recorder and
+the fast link): **~14,300 a block, fixed**. Each voice adds ~330 to the slot loop (its guard) and ~520 to the entry
+(`mnm_ages`' quiet test of its buffer, ~320 of it the runner's DDR buffers): **~530 a voice on the unit**.
+The "~14,700 for the voice" noted in MNM_COST's comments is not the host's per-voice cost: the host is ~2,400 a
+voice; the ~14,300 is the block's fixed work, paid once whatever the voice count.
+
+**The stock machines** (runner, the whole block with track 0 on the machine less the same with it on MIDI):
+FM TONE 14,626, FM DRUM 10,998, WAVETONE 9,980, SWARMER 5,228 a block (they render every block, note or not).
+
+**16 voices with room** (the brief: our voices get ~310,000 a frame): 16 x (steady + 530) + 14,300 <= 310,000 needs
+steady <= ~17,950; at 75 % of it (232,500), **steady <= ~13,100 a voice-block**. "voices in 310k" below is 310,000 /
+steady (no fixed work): an upper bound.
+
+| engine | family | steady | host | engine's own | host share | trig | start | voices in 310k | 16 voices, of 310k | steady after opt-host | voices after |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| VO-6 | MONOMACHINE | 35,312 | 2,423 | 32,888 | 7 % | 34,529 | 40,661 | 8 | 182 % | 34,830 | 8 |
+| DPRO-DDRW | MONOMACHINE | 33,618 | 2,419 | 31,199 | 7 % | 33,665 | 33,931 | 9 | 174 % | 33,137 | 9 |
+| TB303 | TB303 | 29,013 | 2,329 | 26,684 | 8 % | 29,194 | 29,478 | 10 | 150 % | 28,544 | 10 |
+| SID 6581 | MONOMACHINE | 28,440 | 2,415 | 26,025 | 8 % | 28,513 | 28,592 | 10 | 147 % | 27,959 | 11 |
+| DPRO-DENS | MONOMACHINE | 20,731 | 2,421 | 18,310 | 12 % | 20,794 | 20,991 | 14 | 107 % | 20,250 | 15 |
+| PLAITS-MDAL | PLAITS | 20,499 | 2,329 | 18,170 | 11 % | 20,636 | 20,817 | 15 | 106 % | 20,030 | 15 |
+| WERP | SAMPLE | 19,965 | (own) | - | - | 40,039 | 20,422 | 15 | 103 % | 19,965 | 15 |
+| REPITCH | SAMPLE | 19,754 | (own) | - | - | 40,086 | 20,326 | 15 | 102 % | 19,754 | 15 |
+| ONESHOT | SAMPLE | 19,592 | (own) | - | - | 39,552 | 19,896 | 15 | 101 % | 19,592 | 15 |
+| SLICE | SAMPLE | 19,468 | (own) | - | - | 39,405 | 19,884 | 15 | 100 % | 19,468 | 15 |
+| GRID | SAMPLE | 19,463 | (own) | - | - | 39,495 | 19,979 | 15 | 100 % | 19,463 | 15 |
+| TRX-CY | TRX | 18,326 | 2,429 | 15,896 | 13 % | 19,993 | 20,729 | 16 | 95 % | 17,838 | 17 |
+| DPRO-WAVE | MONOMACHINE | 18,146 | 2,417 | 15,730 | 13 % | 18,219 | 18,295 | 17 | 94 % | 17,666 | 17 |
+| PLAITS-STRG | PLAITS | 17,902 | 2,330 | 15,572 | 13 % | 16,376 | 14,301 | 17 | 92 % | 17,434 | 17 |
+| EFM-CY | EFM | 17,571 | 2,429 | 15,142 | 14 % | 17,803 | 18,018 | 17 | 91 % | 17,084 | 18 |
+| SOPHIE | SOPHIE | 17,254 | 2,329 | 14,926 | 13 % | 17,469 | 17,577 | 17 | 89 % | 16,786 | 18 |
+| PI-ML | PI | 17,182 | 2,429 | 14,752 | 14 % | 17,285 | 17,557 | 18 | 89 % | 16,694 | 18 |
+| PI-SD | PI | 17,057 | 2,429 | 14,628 | 14 % | 17,201 | 17,383 | 18 | 88 % | 16,570 | 18 |
+| PI-CC | PI | 16,692 | 2,429 | 14,264 | 15 % | 18,090 | 19,951 | 18 | 86 % | 16,206 | 19 |
+| PI-RS | PI | 16,685 | 2,429 | 14,256 | 15 % | 16,810 | 16,973 | 18 | 86 % | 16,198 | 19 |
+| PI-RC | PI | 16,654 | 2,429 | 14,225 | 15 % | 17,040 | 18,922 | 18 | 86 % | 16,167 | 19 |
+| PI-MT | PI | 16,525 | 2,429 | 14,096 | 15 % | 16,658 | 16,836 | 18 | 85 % | 16,038 | 19 |
+| PLAITS-FM | PLAITS | 16,511 | 2,329 | 14,182 | 14 % | 16,580 | 16,748 | 18 | 85 % | 16,042 | 19 |
+| PI-HH | PI | 15,152 | 2,429 | 12,722 | 16 % | 16,463 | 18,297 | 20 | 78 % | 14,664 | 21 |
+| PLAITS-ADD | PLAITS | 14,775 | 2,329 | 12,446 | 16 % | 14,844 | 15,202 | 20 | 76 % | 14,306 | 21 |
+| PI-BD | PI | 14,562 | 2,429 | 12,133 | 17 % | 14,680 | 14,848 | 21 | 75 % | 14,075 | 22 |
+| PLAITS-PART | PLAITS | 14,061 | 2,331 | 11,730 | 17 % | 14,130 | 14,356 | 22 | 73 % | 13,592 | 22 |
+| TRX-S2 | TRX | 13,677 | 2,429 | 11,248 | 18 % | 13,678 | 5,492 | 22 | 71 % | 13,190 | 23 |
+| TRX-CH | TRX | 13,560 | 2,429 | 11,130 | 18 % | 14,213 | 14,622 | 22 | 70 % | 13,072 | 23 |
+| TRX-OH | TRX | 13,560 | 2,429 | 11,130 | 18 % | 14,228 | 14,652 | 22 | 70 % | 13,072 | 23 |
+| EFM-RS | EFM | 13,327 | 2,429 | 10,898 | 18 % | 13,523 | 13,707 | 23 | 69 % | 12,840 | 24 |
+| EFM-CB | EFM | 13,323 | 2,429 | 10,894 | 18 % | 13,512 | 13,689 | 23 | 69 % | 12,836 | 24 |
+| TRX-MA | TRX | 12,619 | 2,429 | 10,190 | 19 % | 13,491 | 13,810 | 24 | 65 % | 12,132 | 25 |
+| PLAITS-SD | PLAITS | 12,215 | 2,329 | 9,886 | 19 % | 12,482 | 12,781 | 25 | 63 % | 11,746 | 26 |
+| PLAITS-SWRM | PLAITS | 12,090 | 2,329 | 9,762 | 19 % | 12,659 | 13,311 | 25 | 62 % | 11,622 | 26 |
+| TRX-CP | TRX | 11,563 | 2,429 | 9,134 | 21 % | 12,277 | 13,010 | 26 | 60 % | 11,076 | 27 |
+| EFM-SD | EFM | 10,871 | 2,429 | 8,442 | 22 % | 11,060 | 11,237 | 28 | 56 % | 10,384 | 29 |
+| PLAITS-BD | PLAITS | 10,828 | 2,329 | 8,499 | 22 % | 10,842 | 10,391 | 28 | 56 % | 10,359 | 29 |
+| PLAITS-WS | PLAITS | 10,442 | 2,329 | 8,113 | 22 % | 10,558 | 10,648 | 29 | 54 % | 9,973 | 31 |
+| EFM-HH | EFM | 10,349 | 2,429 | 7,920 | 23 % | 10,541 | 10,721 | 29 | 53 % | 9,862 | 31 |
+| DRONE | DRONE | 10,103 | 2,488 | 7,615 | 25 % | 9,978 | 11,638 | 30 | 52 % | 9,548 | 32 |
+| EFM-CP | EFM | 10,040 | 2,429 | 7,611 | 24 % | 10,222 | 10,396 | 30 | 52 % | 9,553 | 32 |
+| EFM-XT | EFM | 9,951 | 2,429 | 7,522 | 24 % | 10,132 | 10,298 | 31 | 51 % | 9,464 | 32 |
+| PLAITS-VA | PLAITS | 9,737 | 2,329 | 7,408 | 24 % | 9,718 | 9,896 | 31 | 50 % | 9,268 | 33 |
+| PLAITS-NOIS | PLAITS | 8,795 | 2,329 | 6,466 | 26 % | 8,894 | 9,068 | 35 | 45 % | 8,326 | 37 |
+| PLAITS-HH | PLAITS | 8,749 | 2,329 | 6,420 | 27 % | 8,856 | 9,067 | 35 | 45 % | 8,280 | 37 |
+| EFM-BD | EFM | 8,627 | 2,429 | 6,198 | 28 % | 8,807 | 8,975 | 35 | 44 % | 8,140 | 38 |
+| STRETCH | SAMPLE | 8,192 | (own) | - | - | 16,738 | 8,540 | 37 | 42 % | 8,192 | 37 |
+| TRX-CB | TRX | 8,131 | 2,430 | 5,702 | 30 % | 3,451 | 3,995 | 38 | 42 % | 7,644 | 40 |
+| TRX-SD | TRX | 7,780 | 2,429 | 5,351 | 31 % | 8,005 | 8,217 | 39 | 40 % | 7,293 | 42 |
+| TRX-RS | TRX | 7,609 | 2,429 | 5,180 | 32 % | 7,762 | 7,784 | 40 | 39 % | 7,122 | 43 |
+| PI-MA | PI | 7,526 | 2,429 | 5,097 | 32 % | 7,748 | 7,971 | 41 | 39 % | 7,039 | 44 |
+| TRX-B2 | TRX | 6,611 | 2,429 | 4,182 | 37 % | 6,845 | 6,937 | 46 | 34 % | 6,124 | 50 |
+| ANALOG2 | ANALOG2 | 6,541 | 2,533 | 4,008 | 39 % | 6,656 | 7,066 | 47 | 34 % | 5,962 | 51 |
+| TRX-CL | TRX | 5,956 | 2,429 | 3,526 | 41 % | 6,104 | 6,255 | 52 | 31 % | 5,468 | 56 |
+| TRX-BD | TRX | 4,184 | 2,429 | 1,755 | 58 % | 4,184 | 3,305 | 74 | 22 % | 3,697 | 83 |
+| TRX-XT | TRX | 4,072 | 2,429 | 1,644 | 60 % | 3,187 | 2,964 | 76 | 21 % | 3,586 | 86 |
+| TRX-XC | TRX | 4,072 | 2,429 | 1,644 | 60 % | 2,818 | 2,962 | 76 | 21 % | 3,586 | 86 |
+| GND-SN | GND | 3,623 | 2,429 | 1,194 | 67 % | 3,727 | 3,832 | 85 | 19 % | 3,136 | 98 |
+| GND-NS | GND | 3,139 | 2,429 | 710 | 77 % | 3,193 | 3,255 | 98 | 16 % | 2,652 | 116 |
+| GND-IM | GND | 2,821 | 2,431 | 390 | 86 % | 2,966 | 3,047 | 109 | 15 % | 2,334 | 132 |
+
+(steady after opt-host: the host changes of the next section, engines untouched.)
+
+## The voice host cut (opt-host, 2026-11-12, commit bf2639fd, bit-identical)
+
+Every PERC voice (Machinedrum, Monomachine, SOPHIE, PLAITS, TB303, DRONE, ANALOG 2) is 469..579 cheaper a block:
+host 2,429 -> 1,942 (Machinedrum), 2,329 -> 1,860 (the others), -20 %; `mnm_ages` 4,906 -> ~2,350 a block (model,
+16 slots, one voice). The same operations on the same values, reordered or held in registers:
+
+| part | before | after | how |
+|---|---:|---:|---|
+| resampler (32 samples) | 1,174 | 1,017 | the four stream loads ride on computes, 4.0 held in F7, the sample stored through I2 beside the position's add: 36 -> 31 a sample |
+| frame records (MD 16, others 9) | 368 / 222 | 154 / 84 | `frame_regs` / `frame_byte`: I1, I0 and two shift counts set once a voice (a record's half depends only on its offset and the slot's parity), not half()'s address arithmetic each record |
+| output guard | 226 | 178 | the samples alternately in R0 / R2 through I1: the next load and the store ride on computes |
+| track effects (MD, all off) | 109 | 55 | the AM step's exp2 only when AM is on (only the AM pass reads it) |
+| quiet test (peak32) | 146 | 122 | the next word loaded beside the MAX, through I1 (also in mnm_ages' listen) |
+| knob inputs | 112 | 84 | the four constants in registers |
+| Monomachine budget | 141 | 22 | one word: `mnm_ages` sums the costs in key order (CUM_OFF, free L2 scratch) in a block with a Monomachine slot |
+| mnm_ages' order | ~2,900 | ~1,300 | six keys at a time in registers, a compare and a conditional add each (new DSL op `comp_iop_if`, the stock's `IF cond R = R +- R` form): 48 L2 key reads, not 256 |
+| mnm_ages' slots | ~2,000 | ~1,000 | ours / Monomachine by one bit of two masks, slot index in I0, count in R15 (the L2 words left as before) |
+| slot loop (16 slots) | - | -~20 a slot | the record pointer it set (read by nothing) gone; PERC or Monomachine by one bit (VOICE_MASK) |
+
+Code: perc.asm 39,264 -> 38,946 instructions, 170,102 bytes (about 1.8 KB freed in PERC's L2 span).
+Proof: `scripts/perc_host_identity.py` (every engine through mnm_ages + the voice, three voices at once on both
+slot parities, notes, knobs, effects, a machine change, rests, a NaN wipe, every type word on the other tracks;
+outputs and the voices' state hashed): 58 of 58 identical to main. Unit tests test_perc_live, test_perc_mf,
+test_md, test_mnm: the same 448 pass and the same 4 fail on main. Hardware rules on the regenerated section 7: PASS.
+On the regenerated tree (gpufarm, 2026-11-12): runner decode, map, voice, guard, garbage, wipe 50/50 PASS; mnm,
+frame, stress, chords, smp 51 PASS and 1 FAIL, `v0.18: ONESHOT plays KICK from the pool` (sample machines), which
+fails the same on main f649683c (smp step run there). Measured in the runner after: TRX-CY's host 3,425 -> 2,938
+(runner map), PERC's entry 4,846 -> 2,317 with no voice and 13,128 -> 10,199 with 16, the slot loop 1,305 -> 953
+and 6,617 -> 6,265: with 16 voices ~11,100 a block less for the host and the loop around it.
+
+What is left in the host (after): the resampler 1,017 (31 a sample; multifunction would need a new register plan),
+the stream's move 145 (35 words copied a block; a ring would change the voice's state layout), the output guard
+178, the voice's own set-up ~160. Not ours: the sample machines' loop (8,115 a block, the recorder and link).
+
+## What each machine costs the DSP (v0.39 source, measured 2026-11-03; v0.33 table below it)
 
 One voice of each machine sounding, eight blocks after its note, in the SHARC runner
 (`scripts/sharc_waverider_m5.py --steps cost`, step 3c), less a run with nothing sounding.
