@@ -1942,12 +1942,29 @@ static const char *play_name(int i, int arg)
     return smp_play[i];
 }
 
+/* the arrows (popup.c wpop_arrow): record ID moved D choices, one click each (fmt.c smp_quant's "one choice a
+ * click", as FUNC + turn) */
+typedef void (*wpop_move_fn)(int d, int arg);
+extern void wpop_offer_mv(int slot, const char *label, int n, int cur, wpop_name_fn name, wpop_name_fn tag, int arg,
+                          wpop_move_fn move);
+extern int smp_param_put(u32 id, int value, int click);   /* rec.c */
+static void *play_view __attribute__((section(".data"))) = 0;
+
+static void play_move(int d, int id)
+{
+    u8 flag;
+    int dir = d > 0 ? 1 : -1;
+    for (int k = d > 0 ? d : -d; k > 0 && play_view; k--)
+        smp_param_put((u32)id, GET_VALUE(play_view, (u32)id, &flag) + dir * 0x100, dir);
+}
+
 static void pop_offer(void *view, int kind, const u32 *ids, int places)
 {
+    play_view = view;
     for (int i = 0; i < places; i++)
         if (ids[i] && widget_of(ids[i], kind) == W_PLAY) {
             int k = value(view, ids[i], 0) * 4 / 128;
-            wpop_offer(i, NAME_SHORT(ids[i]), 4, k > 3 ? 3 : k, play_name, 0, 0);
+            wpop_offer_mv(i, NAME_SHORT(ids[i]), 4, k > 3 ? 3 : k, play_name, 0, (int)ids[i], play_move);
         }
 }
 

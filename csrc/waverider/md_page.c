@@ -585,8 +585,25 @@ static const char *mnm_pop_tag(int i, int arg)      /* 2026-11-11: the tag besid
 /* PAGE's knobs (2026-11-11, the User: "on analog2, page 2, E and A are mixed up... popup shows for the
  * wrong knobs": this offered page 1's controls on every page, so on page 2 knob A opened WAVE's list
  * and page 2's own lists never opened) */
+/* the arrows (popup.c wpop_arrow): control J of machine MI moved D choices, one click each as FUNC + turn's "one
+ * choice a click" (fmt.c smp_quant: a retired choice stepped past, MONOMACHINE's engine started as on the knob) */
+typedef void (*wpop_move_fn)(int d, int arg);
+extern void wpop_offer_mv(int slot, const char *label, int n, int cur, wpop_name_fn name, wpop_name_fn tag, int arg,
+                          wpop_move_fn move);
+extern int smp_param_put(u32 id, int value, int click);   /* rec.c */
+static void *mnm_pop_view __attribute__((section(".data"))) = 0;
+
+static void mnm_pop_move(int d, int arg)
+{
+    int j = arg % MNM_J, dir = d > 0 ? 1 : -1;
+    u8 flag;
+    for (int k = d > 0 ? d : -d; k > 0 && mnm_pop_view; k--)
+        smp_param_put(mnm_rid[j], GET_VALUE(mnm_pop_view, mnm_rid[j], &flag) + dir * 0x100, dir);
+}
+
 void mnm_pop_offer(void *view, int mi, int page)
 {
+    mnm_pop_view = view;
     if (mi < 0 || mi >= MNM_N)
         return;
     int base = page > 0 && page < mnm_npages[mi] ? 8 * page : 0;
@@ -603,7 +620,7 @@ void mnm_pop_offer(void *view, int mi, int page)
             if (ch >= r)
                 ch--;
         }
-        wpop_offer(s, mnm_labels[mi][j], cnt, ch, mnm_pop_name, mnm_pop_tag, mi * MNM_J + j);
+        wpop_offer_mv(s, mnm_labels[mi][j], cnt, ch, mnm_pop_name, mnm_pop_tag, mi * MNM_J + j, mnm_pop_move);
     }
 }
 

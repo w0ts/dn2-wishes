@@ -935,6 +935,26 @@ int smp_set_samp(int track, int value)
     return 0;
 }
 
+/* 2026-11-12 (the list popups' arrows, popup.c wpop_arrow): record ID on the active track set to VALUE (the
+ * record's units, coarse << 8) as the knob sets it; CLICK (+1 / -1) has fmt.c smp_quant take it as one click of
+ * our machines' choice controls (FUNC + turn's "one choice a click"), 0 as the value itself */
+int smp_click __attribute__((section(".data"))) = 0;
+
+int smp_param_put(u32 id, int value, int click)
+{
+    int t = (int)UI_TRACK_NOW;
+    u32 owner = UI_OWNER();
+    if (t < 0 || t > 15 || !owner || !KIT)
+        return -1;
+    u32 ps = PARAM_SET(owner, id, (u32)t);
+    if (!ps)
+        return -1;
+    smp_click = click;
+    SET_VALUE(ps, id, (u32)value, (u32)t, 0, 0, 1);
+    smp_click = 0;
+    return 0;
+}
+
 /* v0.30: MACHINE SEL's commit (its call at 0x4005bba0): from one sample machine to another
  * the sample stays (the owner: switching between DT2 machines lost it; the commit resets the
  * sound to the new machine's defaults, SAMP to OFF). Anything else is stock's. */
@@ -1936,8 +1956,20 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
         if (it[0] == IT_KEY && msel_key(it, code, down))
             code = it[7];
     }
-    if (it[0] == IT_KEY && down && !(flags & F_REPEAT) && code != K_FUNC && !(code >= K_ENC_A && code <= K_ENC_H))
-        smp_key_seq = ++smp_ui_seq;                     /* a press (not FUNC, nor an encoder's push: held while turning): the popup goes */
+    if (it[0] == IT_KEY && down && !rec_overlay
+        && (code == K_UP || code == K_DOWN || code == K_LEFT || code == K_RIGHT)) {
+        extern int wpop_arrow(unsigned code);   /* 2026-11-12: the arrows move the list popup's value (popup.c) */
+        if (wpop_arrow(code)) {
+            eaten |= 1u << code;                /* (its release, and its repeats once the popup is gone) */
+            it[0] = IT_DROP;
+            return (u32)it;
+        }
+    }
+    /* a press (not FUNC, nor an encoder's push: held while turning; nor a [TRIG] key, 2026-11-12, the User: "the list
+     * menu should not close when I press one of the 16 track buttons (to preview the sound)"): the popup goes */
+    if (it[0] == IT_KEY && down && !(flags & F_REPEAT) && code != K_FUNC && !(code >= K_ENC_A && code <= K_ENC_H)
+        && !(code >= K_TRIG1 && code < K_TRIG1 + 16u))
+        smp_key_seq = ++smp_ui_seq;
     if (it[0] == IT_KEY && code < 64) {
         u32 *h = code < 32 ? &smp_held_lo : &smp_held_hi;
         u32 bit = 1u << (code & 31);

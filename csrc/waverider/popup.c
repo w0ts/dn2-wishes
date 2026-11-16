@@ -55,6 +55,7 @@ typedef unsigned char u8;
 #define COUNT_X    102                                  /* the place in the list, "13/13" */
 
 typedef const char *(*wpop_name_fn)(int i, int arg);
+typedef void (*wpop_move_fn)(int d, int arg);           /* the value moved D entries, as the knob would set it */
 
 extern int smp_pop_knob;                                /* rec.c: the last knob turned, 1..8 (A..H) */
 extern u32 smp_knob_at;                                 /* ... and when (FRAMES) */
@@ -65,6 +66,7 @@ static struct {
     const char *label;
     int n, cur, arg;
     wpop_name_fn name, tag;
+    wpop_move_fn move;
 } pop __attribute__((section(".data")));
 static int pop_offered __attribute__((section(".data"))) = 0;    /* in this draw */
 static u32 pop_listing __attribute__((section(".data"))) = 0;    /* the places offered as lists in this draw */
@@ -96,8 +98,10 @@ int wpop_first_turn(int knob)
 }
 
 /* a page draws place SLOT (0..7, knob A..H) as a list of N names, CUR the value (0..N-1, as the
- * page shows it); NAME(i, ARG) the i-th's text, TAG(i, ARG) an optional second column */
-static void offer(int slot, const char *label, int n, int cur, wpop_name_fn name, wpop_name_fn tag, int arg)
+ * page shows it); NAME(i, ARG) the i-th's text, TAG(i, ARG) an optional second column; MOVE(d, ARG) the
+ * value moved d entries (the arrows, wpop_arrow; 0: the arrows close it as any key) */
+static void offer(int slot, const char *label, int n, int cur, wpop_name_fn name, wpop_name_fn tag, int arg,
+                  wpop_move_fn move)
 {
     if (n < WPOP_MIN || !name)                          /* (WPOP_MIN: cpage.py POPUP_MIN) */
         return;
@@ -111,23 +115,30 @@ static void offer(int slot, const char *label, int n, int cur, wpop_name_fn name
     pop.name = name;
     pop.tag = tag;
     pop.arg = arg;
+    pop.move = move;
     pop_offered = 1;
 }
 
-/* our machines' and FX's lists (WPOP_OURS) */
-void wpop_offer(int slot, const char *label, int n, int cur, wpop_name_fn name, wpop_name_fn tag, int arg)
+/* our machines' and FX's lists (WPOP_OURS); _mv with the arrows' MOVE */
+void wpop_offer_mv(int slot, const char *label, int n, int cur, wpop_name_fn name, wpop_name_fn tag, int arg,
+                   wpop_move_fn move)
 {
 #if WPOP_OURS
-    offer(slot, label, n, cur, name, tag, arg);
+    offer(slot, label, n, cur, name, tag, arg, move);
 #else
-    (void)slot; (void)label; (void)n; (void)cur; (void)name; (void)tag; (void)arg;
+    (void)slot; (void)label; (void)n; (void)cur; (void)name; (void)tag; (void)arg; (void)move;
 #endif
 }
 
-/* stock parameters' lists (popup_stock.c, WPOP_STOCK) */
-void wpop_offer_stock(int slot, const char *label, int n, int cur, wpop_name_fn name, int arg)
+void wpop_offer(int slot, const char *label, int n, int cur, wpop_name_fn name, wpop_name_fn tag, int arg)
 {
-    offer(slot, label, n, cur, name, 0, arg);
+    wpop_offer_mv(slot, label, n, cur, name, tag, arg, 0);
+}
+
+/* stock parameters' lists (popup_stock.c, WPOP_STOCK) */
+void wpop_offer_stock(int slot, const char *label, int n, int cur, wpop_name_fn name, int arg, wpop_move_fn move)
+{
+    offer(slot, label, n, cur, name, 0, arg, move);
 }
 
 /* the screen's place SLOT from a stock cell's widget at X0, Y0 (page.c wr_cell: the cells are
@@ -240,4 +251,33 @@ void wpop_poll(void *screen)
         pop_shown = 0;
         SET_DIRTY(screen);
     }
+}
+
+/* rec.c smp_ui_pop, an arrow key's press or repeat (2026-11-12, the User: "up and down keys should navigate in the
+ * open list (whichever kind); left/right page one page up/down"): with the knob's popup up and its list able to
+ * move, UP / DOWN move the value one entry, LEFT / RIGHT a page (the five rows), stopping at the ends, as the knob
+ * would set it; the popup stays up as after a turn. -> 1 when the key is the popup's. Not with a [TRIG] held (the
+ * page shows its p-lock, and the move would set the sound's value) */
+#define POP_PAGE   (2 * POP_HALF + 1)
+#define K_UP       11
+#define K_LEFT     13
+#define K_DOWN     14
+#define K_RIGHT    15
+extern u32 smp_held_lo, smp_held_hi;                    /* rec.c: keys held, by code */
+
+int wpop_arrow(unsigned code)
+{
+    int d = code == K_UP ? -1 : code == K_DOWN ? 1 : code == K_LEFT ? -POP_PAGE : code == K_RIGHT ? POP_PAGE : 0;
+    if (!d || modal.label || !pop_shown || !pop_live() || !pop.move)
+        return 0;
+    if ((smp_held_lo >> 25) || (smp_held_hi & 0x1FFu))  /* [TRIG] 1..16: codes 25..40 */
+        return 0;
+    int to = pop.cur + d;
+    to = to < 0 ? 0 : to >= pop.n ? pop.n - 1 : to;
+    if (to != pop.cur)
+        pop.move(to - pop.cur, pop.arg);
+    pop.cur = to;                                       /* (a second arrow before the next draw moves on from it) */
+    smp_knob_at = FRAMES_NOW;                           /* up as after a turn, and redrawn (wpop_poll) */
+    smp_knob_seq = ++smp_ui_seq;
+    return 1;
 }

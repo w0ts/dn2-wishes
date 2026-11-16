@@ -23,7 +23,9 @@ typedef unsigned int u32;
 #define MAX_LIST   64
 
 typedef const char *(*wpop_name_fn)(int i, int arg);
-extern void wpop_offer_stock(int slot, const char *label, int n, int cur, wpop_name_fn name, int arg);
+typedef void (*wpop_move_fn)(int d, int arg);
+extern void wpop_offer_stock(int slot, const char *label, int n, int cur, wpop_name_fn name, int arg, wpop_move_fn move);
+extern int smp_param_put(u32 id, int value, int click);   /* rec.c */
 extern int wpop_slot_of(int x0, int y0);
 
 static u32 seen_id __attribute__((section(".data"))) = 0xFFFFFFFFu;   /* the last record judged */
@@ -79,6 +81,21 @@ static const char *stock_name(int i, int id)
     return b;
 }
 
+/* the arrows (popup.c wpop_arrow): record ID's value D entries on, as the page shows it (the view of the
+ * offer's draw), written as the knob writes it */
+static void *pop_view __attribute__((section(".data"))) = 0;
+
+static void stock_move(int d, int id)
+{
+    unsigned char flag;
+    int n = list_n((u32)id), lo = RECORD(id)[2];
+    if (!n || !pop_view)
+        return;
+    int to = (GET_VALUE(pop_view, (u32)id, &flag) - lo) / 0x100 + d;
+    to = to < 0 ? 0 : to >= n ? n - 1 : to;
+    smp_param_put((u32)id, lo + to * 0x100, 0);
+}
+
 /* page.c wr_cell, after each stock cell (OURS: a record our code draws itself) */
 void wpop_stock_cell(void *view, int x0, int y0, u32 id, int ours)
 {
@@ -90,7 +107,8 @@ void wpop_stock_cell(void *view, int x0, int y0, u32 id, int ours)
         return;
     unsigned char flag;
     int cur = (GET_VALUE(view, id, &flag) - RECORD(id)[2]) / 0x100;
-    wpop_offer_stock(wpop_slot_of(x0, y0), NAME_SHORT(id), n, cur, stock_name, (int)id);
+    pop_view = view;
+    wpop_offer_stock(wpop_slot_of(x0, y0), NAME_SHORT(id), n, cur, stock_name, (int)id, stock_move);
 #else
     (void)view; (void)x0; (void)y0; (void)id; (void)ours;
 #endif

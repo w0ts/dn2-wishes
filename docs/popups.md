@@ -19,7 +19,20 @@ message box), so it is drawn by our code over the page: `csrc/waverider/popup.c`
   touched; TRIG page 2's slides (E, F) keep their own detents.
 - Five rows: the value lit in the middle, its neighbours above and below. The list stops at its
   ends (blank rows past them). The header: the parameter's label and the place, "9/12".
-- Goes 1.5 s after the last turn, or at once on any key press except FUNC and an encoder's push.
+- Goes 1.5 s after the last turn, or at once on any key press except FUNC, an encoder's push, the
+  16 [TRIG] keys and the arrows (2026-11-12). Another knob turned shows that knob's list, or none.
+- The [TRIG] keys (the User: "the list menu should not close when I press one of the 16 track
+  buttons (to preview the sound)"): the popup stays and the key does what it does (the track
+  plays). MACHINE SEL is stock's view and already stays open while a trig plays.
+- The arrows (the User: "up and down keys should navigate in the open list (whichever kind);
+  left/right page one page up/down"): UP / DOWN move the value one entry, LEFT / RIGHT five (the
+  popup's rows), stopping at the ends, and keep it up as a turn does (`wpop_arrow`). Each list
+  says how it moves: stock lists write the entry's value; our machines' choice controls (the
+  Monomachine-family lists, the sample machines' PLAY / MODE) take one click each through
+  `smp_quant`'s "one choice a click" (a retired choice stepped past, MONOMACHINE's engine
+  started as on the knob); PERC's TYPE the middle of the machine's band; INSERT M.SEL through its
+  own knob code. Not with a [TRIG] held (the page then shows that trig's p-lock): the arrows close
+  it as before.
 - A trig held: the page shows the trig's p-lock, and so does the popup.
 - Covers the eight places (x 21..127, y 0..53); stock's title bar and left panel stay.
 
@@ -64,7 +77,10 @@ opens a list of the filter types in the same box (`wpop_modal`, `csrc/msel/msel.
   characters, the header `FLT1` and the place; the track's own type lit when it opens.
 - The first turn opens it; each further turn moves it, stopping at the ends.
 - FUNC let go, YES or G pushed: that type. NO, another key or another knob: the type stays. The
-  key the list took (YES, NO, G pushed) is the list's down to its release.
+  key the list took (YES, NO, G pushed, an arrow) is the list's down to its release.
+- UP / DOWN one row, LEFT / RIGHT five, a held arrow on (LIVE SELECT: committed once it rests, as
+  on the knob). A [TRIG] key leaves it up; with FUNC held that key is stock's FUNC + TRIG (no
+  note).
 - The pick is MACHINE SEL's filter page's YES (`0x4005bbbe`): stock's commit
   `0x40031a56(model, track, type, 1, 1)`, only when the type changes, with the model MACHINE SEL
   holds (the UI owner's +0xF4) and the current track.

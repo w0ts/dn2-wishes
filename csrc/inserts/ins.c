@@ -463,7 +463,19 @@ static void fill(void *c, int x0, int y0, int x1, int y1, int on)
  * knobs, H MIX a knob, each with stock's label; an unused place is left empty. Under M.SEL: FULL when the
  * slot's FDN8 / XDLY found no instance free (it passes the sound through) */
 typedef const char *(*wpop_name_fn)(int i, int arg);
-extern void wpop_offer(int slot, const char *label, int n, int cur, wpop_name_fn name, wpop_name_fn tag, int arg);
+typedef void (*wpop_move_fn)(int d, int arg);
+extern void wpop_offer_mv(int slot, const char *label, int n, int cur, wpop_name_fn name, wpop_name_fn tag, int arg,
+                          wpop_move_fn move);
+
+/* the arrows (popup.c wpop_arrow): M.SEL D types on in the list's order, to the middle of that type's band, as
+ * the knob turned there would */
+static void ins_move(int d, int arg)
+{
+    (void)arg;
+    int t = UI_TRACK & 15, j = (ins_up - 1) & 1;
+    int to = clamp(POS[ins_sel[t][j]] + d, 0, TYPES - 1);
+    turn(1, (to * 128 + 64) / TYPES - ins_selv[t][j]);
+}
 
 static const char *ins_name(int i, int arg)
 {
@@ -482,7 +494,7 @@ void ins_draw(void *c)
     int t = UI_TRACK & 15, j = (ins_up - 1) & 1, y = ins_sel[t][j];
     fill(c, 22, 0, 127, 53, 0);                 /* the places; stock's title bar and left panel stay */
     wg_choice(c, 0, NAME[y]);
-    wpop_offer(0, "M.SEL", TYPES, POS[y], ins_name, 0, 0);   /* the list popup (csrc/waverider/popup.c) */
+    wpop_offer_mv(0, "M.SEL", TYPES, POS[y], ins_name, 0, 0, ins_move);   /* the list popup (csrc/waverider/popup.c) */
     wg_label(c, 0, !BUILT[y] ? "SOON" : instances(y) && ins_inst[t][j] == NO_INST ? "FULL" : "M.SEL");
     for (int k = 0; k < 6; k++) {
         if (!LABEL[y][k][0])

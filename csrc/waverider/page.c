@@ -733,6 +733,20 @@ void wr_cell(void *view, void *canvas, int x0, int y0, u32 id)
     mv_cell(canvas, x0, y0, id);                /* moving controls: the heard value's line (csrc/modulation) */
 }
 
+/* the arrows (popup.c wpop_arrow): TYPE D machines on, the middle of its band of the knob (perc_of's inverse) */
+typedef void (*wpop_move_fn)(int d, int arg);
+extern void wpop_offer_mv(int slot, const char *label, int n, int cur, wpop_name_fn name, wpop_name_fn tag, int arg,
+                          wpop_move_fn move);
+extern int smp_param_put(u32 id, int value, int click);   /* rec.c */
+
+static void perc_move(int d, int arg)
+{
+    (void)arg;
+    int to = perc_type() + d;
+    to = to < 0 ? 0 : to >= PERC_N ? PERC_N - 1 : to;
+    smp_param_put(PERC_TYPE_ID, ((to * 128 + 64) / PERC_N) << 8, 0);
+}
+
 static const char *perc_name(int i, int arg)
 {
     (void)arg;
@@ -768,7 +782,7 @@ void wr_page_draw(void *view, void *canvas)
     if (kind == 1)                              /* TYPE: the list popup (popup.c) */
         for (int s = 0; s < 8; s++)
             if (wr_ids[page][s] == PERC_TYPE_ID)
-                wpop_offer(s, "TYPE", PERC_N, perc_seen, perc_name, perc_tag, 0);
+                wpop_offer_mv(s, "TYPE", PERC_N, perc_seen, perc_name, perc_tag, 0, perc_move);
     if (mnm) {                                  /* MODL ..: the list popup (md_page.c) */
         extern void mnm_pop_offer(void *view, int mi, int page);
         mnm_pop_offer(view, mi, page);

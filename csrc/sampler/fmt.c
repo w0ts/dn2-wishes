@@ -175,9 +175,11 @@ enum { F_OFF, F_KEEP, F_CHOICE, F_NONE, F_TUNE };
 #define OWN_REC_FIRST 238u                      /* our records (dnfw.perc / dnfw.sampler machines) */
 #define OWN_REC_LAST 260u
 
+extern int smp_click;                           /* rec.c smp_param_put: a list popup's arrow, one click (+1 / -1) */
+
 static int func_kind(u8 *s, int slot, u32 id)
 {
-    if (!smp_func_held || !smp_knob_d || *(volatile u32 *)0x4058F8D4u - smp_knob_at > KNOB_FRESH)
+    if (!smp_click && (!smp_func_held || !smp_knob_d || *(volatile u32 *)0x4058F8D4u - smp_knob_at > KNOB_FRESH))
         return F_OFF;
     int ty = (signed char)s[SOUND_TYPE];
     /* v0.33: only our machines' own controls, records 238..260 (PERC's, the Monomachine's
@@ -233,7 +235,7 @@ int smp_quant(u8 *s, int slot, int value, u32 id)
     if (fk == F_TUNE)
         return mnm_tune_step(old0, smp_knob_d > 0 ? 1 : -1);
     if (fk == F_CHOICE) {                       /* one choice a click, the knob's way: a */
-        fq_click = smp_knob_d > 0 ? 1 : -1;     /* detent's worth past the old value, */
+        fq_click = smp_click ? smp_click : smp_knob_d > 0 ? 1 : -1;     /* detent's worth past the old value, */
         int oc0 = old0 >> 8;                    /* each table's own step below */
         if ((oc0 == 0 && fq_click < 0) || (oc0 == 255 && fq_click > 0)) {
             fq_click = 0;

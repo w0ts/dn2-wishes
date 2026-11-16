@@ -43,7 +43,9 @@ typedef unsigned char u8;
 #define V_TYPE    412
 #define V_FILTER  416
 #define K_SRC     2
+#define K_UP      11
 #define K_LEFT    13
+#define K_DOWN    14
 #define K_RIGHT   15
 #define F_FUNC    0x02                          /* an item's flag while FUNC is held (rec.c) */
 /* the FLTR page's view class, measured in the 1.12 emulator (2026-11-11, the screen's view list on [FLTR];
@@ -60,6 +62,7 @@ typedef unsigned char u8;
 #define K_FUNC    17
 #define KNOB_G    7
 #define K_PUSH_G  47                            /* encoder G pushed (K_ENC_A + 6) */
+#define K_TRIG1   25                            /* the sixteen [TRIG] keys: 25..40 (rec.c) */
 
 #define ROWS      6                             /* a column's cells */
 #define CELLS     (2 * ROWS)                    /* a screen */
@@ -410,17 +413,39 @@ static void fp_poll(void)
 
 static u32 fp_bit(u32 code)
 {
-    return code == K_YES ? 1u : code == K_NO ? 2u : code == K_PUSH_G ? 4u : 0u;
+    return code == K_YES ? 1u : code == K_NO ? 2u : code == K_PUSH_G ? 4u
+           : code == K_UP ? 8u : code == K_DOWN ? 16u : code == K_LEFT ? 32u : code == K_RIGHT ? 64u : 0u;
+}
+
+/* the lit row D on, stopping at the ends (the knob, and the arrows: UP / DOWN one, LEFT / RIGHT a page of five,
+ * 2026-11-12, the User: "up and down keys should navigate in the open list (whichever kind); left/right page one
+ * page up/down"); LIVE SELECT: committed once it rests */
+static void fp_move(int d)
+{
+    int was = fp_at;
+    fp_at += d;
+    fp_at = fp_at < 0 ? 0 : fp_at >= MSEL_FROWS ? MSEL_FROWS - 1 : fp_at;
+    if (fp_at != was && live_on()) {
+        fp_due = 1;
+        fp_when = ls_mono + REST;
+    }
+    wpop_modal("FLT1", MSEL_FROWS, fp_at, fp_name, 0);
 }
 
 /* from rec.c smp_ui_pop, every item while no screen of ours is up: -> 1 when the item is the list's (dropped) */
 int flt_pop(const u8 *it, u32 code, int down, int func_held)
 {
+    if (it[0] == IT_KEY && code >= K_TRIG1 && code < K_TRIG1 + 16u)
+        return 0;                               /* a [TRIG] key: the list stays, the key does what it does (2026-11-12,
+                                                 * the User: "should not close when I press one of the 16 track
+                                                 * buttons"; with FUNC held that is stock's FUNC + TRIG) */
     if (it[0] == IT_KEY) {
         u32 b = fp_bit(code);
         if (fp_eat & b) {                       /* a key the list took: its repeats and its release */
             if (!down)
                 fp_eat &= ~b;
+            else if (fp_open && b >= 8u)        /* an arrow held: on it goes */
+                fp_move(code == K_UP ? -1 : code == K_DOWN ? 1 : code == K_LEFT ? -5 : 5);
             return 1;
         }
         if (!fp_open || (!down && code != K_FUNC))
@@ -429,6 +454,11 @@ int flt_pop(const u8 *it, u32 code, int down, int func_held)
             if (!down)
                 fp_close(PICK);
             return 0;
+        }
+        if (b >= 8u) {                          /* an arrow: the list moves */
+            fp_eat |= b;
+            fp_move(code == K_UP ? -1 : code == K_DOWN ? 1 : code == K_LEFT ? -5 : 5);
+            return 1;
         }
         if (b) {
             fp_eat |= b;
@@ -457,13 +487,8 @@ int flt_pop(const u8 *it, u32 code, int down, int func_held)
         fp_due = 0;
         ls_save(fp_track(), fp_model());        /* the sound as it was, for NO (LIVE SELECT) */
     } else {
-        int was = fp_at;
-        fp_at += (signed char)it[8];
-        fp_at = fp_at < 0 ? 0 : fp_at >= MSEL_FROWS ? MSEL_FROWS - 1 : fp_at;
-        if (fp_at != was && live_on()) {
-            fp_due = 1;
-            fp_when = ls_mono + REST;
-        }
+        fp_move((signed char)it[8]);
+        return 1;
     }
     wpop_modal("FLT1", MSEL_FROWS, fp_at, fp_name, 0);
     return 1;
