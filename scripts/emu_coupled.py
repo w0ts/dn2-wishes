@@ -91,6 +91,8 @@ class Coupled:
         self.dsp_packets = 0
         self.halt = None
         self.taps: dict = {}
+        self.post_block = []                    # fn(self, res) after each DSP block (dsp_clock's AFTER)
+        self.clock = None                       # dsp_clock(): the DSP's time, as the runner's insdl step models it
         self.input = None                       # block -> ([32 floats L], [32 floats R]): the inputs
         # negative controls only (a test breaking one link on purpose, to show it is caught):
         # frame_filter(bytes) -> bytes, the frame as the DSP gets it (big-endian, as built);
@@ -213,6 +215,62 @@ class Coupled:
         self.dsp_i7 = M.m2.word_reg(self.dsp_state, "I7")    # v0.51: every block called with it (m4.unpack_call)
         self.dsp_instructions = 0
 
+    def dsp_clock(self, P: int = 666_667, extra: int = 0, scale: float = 0.9) -> dict:
+        """2026-11-13: give the DSP a clock, as the SHARC runner's insdl step does (scripts/sharc_insdl_step.py), so the
+        guard's deadline, its voice skips, the inserts' refusals and the rooms the DSP reports are exercised. Every
+        `R8 = EMUCLK;` in our code reads the block's start plus the cost so far (instructions + SCALE x (4 L2 + 10 DDR)
+        accesses, docs/dsp-cost.md's scale), MARK0 the block's start, MARK our entry, frames P apart; after each block
+        idle_load's AFTER moves by the block's busy stretch from MARK plus EXTRA, the stock work the runner does not
+        model (the unit's heavier stock: calibrate EXTRA so an idle frame reads the unit's D). Without it (the default)
+        the DSP's clock stands still: no deadline is known, every voice and insert runs, the rooms read none.
+        -> the clock's state (blocks, the last block's 'end' and 'd' = (end + EXTRA) / P)."""
+        from dnfw.perc import guard as G       # noqa: PLC0415
+        M = self.M
+        counts, undo = M._count_memory()
+        ck = {"P": P, "extra": extra, "S": scale, "counts": counts, "undo": undo, "after": 0, "mark": 0,
+              "end": 0, "d": 0.0, "blocks": 0}
+        self.clock = ck
+
+        def cycles(r):
+            return int(getattr(r, "steps_n", 0) + ck["S"] * (4 * counts["L2"] + 10 * counts["DDR"]))
+
+        def base():
+            return (ck["blocks"] + 1) * ck["P"]
+
+        def clock(r, _c):
+            r.state.uregs[M.fx.UREG_CODES["R8"]] = M.fx.Const((base() + cycles(r)) & 0xFFFFFFFF)
+
+        def at_dispatch(r, _c):
+            for x in ("L1", "L2", "DDR"):
+                counts[x] = 0
+            counts["on"] = True
+
+        def at_perc(r, _c):
+            ck["mark"] = cycles(r)
+            M.m2.poke(r.state, G.MARK0, base() & 0xFFFFFFFF)
+            M.m2.poke(r.state, G.MARK, (base() + ck["mark"]) & 0xFFFFFFFF)
+
+        def after(c, res):
+            end = int(res[2] + ck["S"] * (4 * counts["L2"] + 10 * counts["DDR"]))
+            ck["end"] = end
+            ck["d"] = (end + ck["extra"]) / ck["P"]
+            ck["after"] += end - ck["mark"] + ck["extra"]
+            c.dsp_poke(G.AFTER, ck["after"] & 0xFFFFFFFF)
+            ck["blocks"] += 1
+        sites = set()
+        for name in ("perc", "smp", "inserts", "inspost", "insbus", "a2f"):
+            try:
+                sites |= set(M._after_emuclk(name))
+            except FileNotFoundError:           # (a part this build does not have)
+                pass
+        for x in sites:
+            self.taps[x] = clock
+        self.taps[M.m3.DISPATCH] = at_dispatch
+        self.taps[M.dsp.PERC_SW] = at_perc
+        self.post_block.append(after)
+        ck["sites"] = len(sites)
+        return ck
+
     def dsp_word(self, a) -> int:
         return (self.M.m2.word(self.dsp_state.state, a) or 0) & 0xFFFFFFFF
 
@@ -318,6 +376,8 @@ class Coupled:
             return False
         self.dsp_instructions += res[2]
         self.dsp_state = r
+        for fn in self.post_block:
+            fn(self, res)
         self.last_bufs = [M.m2.floats(r.state, tap["bufs"][t], 32) for t in range(16)]
         if packet is not None:
             self.delivered += 1
