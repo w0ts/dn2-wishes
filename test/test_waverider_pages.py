@@ -114,6 +114,18 @@ def test_the_renderer_sits_between_the_assembly_and_the_runtime():
     assert pages.LOAD + len(CHUNK) <= pages.C_END
 
 
+def test_every_mnm_table_has_a_row_for_every_place():
+    # 2026-11-12: mnm_order had 10 rows for MNM_N 14, so MONOMACHINE's engines (places 10..13) drew
+    # control 0 in all eight cells; a short initializer compiles silently with zeroed rows
+    import re
+    h = pages.c_header()
+    n = int(re.search(r"#define MNM_N (\d+)", h).group(1))
+    for m in re.finditer(r"static const [\w ]+ (mnm_\w+)\[MNM_N\]\[MNM_J\](?:\[\d+\])? = \{(.*?)\};", h, re.S):
+        rows = re.findall(r"\{[^{}]*\}" if "[6]" not in m.group(0).split("=")[0] else r"\{(?:\s*\"[^\"]*\",?)+\s*\}",
+                          m.group(2))
+        assert len(rows) == n, f"{m.group(1)}: {len(rows)} rows for MNM_N {n}"
+
+
 def test_the_harnesses_scratch_ends_where_the_renderer_starts():
     import ast
     src = (pathlib.Path(__file__).parents[1] / "scripts/emulib/machine.py").read_text()

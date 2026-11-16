@@ -463,7 +463,7 @@ def mnm_c_header() -> str:
         # the words the eight records take (perc.live.knob_word), and the records' ids
         f"static const unsigned short mnm_rid[MNM_J] = {{{', '.join(str(r) for r, _s, _lo, _t in MNM_RECS)}}};",
         # 2026-11-11: the control drawn at each place (page 8 p + knob), as the descriptors' records
-        f"static const unsigned char mnm_order[MNM_N][MNM_J] = {{{arr([list(mnm_order(M)) for M in _mnm.CF_MACHINES])}}};",
+        f"static const unsigned char mnm_order[MNM_N][MNM_J] = {{{arr([list(mnm_order(M)) for M in _mnm.CF_ALL])}}};",   # every place, MONOMACHINE's engines too (2026-11-12)
         # page 2's and page 3's start: a machine with PNAMES2 / PNAMES3 its DEFAULTS2 / DEFAULTS3 (knob
         # 0..127 each), else the records' words untouched (0xffff: not written)
         f"static const unsigned short mnm_default[MNM_N][MNM_J] = {{{arr([mnm_default_words(d, M) for d, M in zip(_mnm.CF_ALL_DEFAULTS, _mnm.CF_ALL)])}}};",
