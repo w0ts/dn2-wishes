@@ -647,34 +647,45 @@ def _coefs_body(p: Prog, L: K.Layout) -> None:
     p.iop(10, 10, "-", 9)                    # c0 = 1/2 - ceil(2 t1 t2) - c1
 
 
-def _pieces(p: Prog, k: int, r: int) -> None:
-    """S[k], S[k + 1] = the coefficient word Rr as _term reads it: Rr 2, Rr (perf, 2026-11-10;
-    were its 12-bit pieces as floats). Clobbers R13."""
-    p.lsh(13, r, 1)
+def _pieces(p: Prog, k: int, r: int, exact: bool = False) -> None:
+    """S[k], S[k + 1] = the coefficient word Rr as its filter reads it. EXACT (the 56300's filters, _term):
+    Rr 2, Rr (perf, 2026-11-10). Else (v0.51's float filters, _coef): its 12-bit pieces, the high one
+    signed, as floats. Clobbers R12-R14."""
+    if EXACT or exact:
+        p.lsh(13, r, 1)
+        ss(p, k, 13)
+        ss(p, k + 1, r)
+        return
+    p.ash(13, r, -12)
+    p.iconst(12, 4095)
+    p.iop(14, r, "AND", 12)
+    p.iconst(12, 0)
+    p.float_(13, 13, 12)
+    p.float_(14, 14, 12)
     ss(p, k, 13)
-    ss(p, k + 1, r)
+    ss(p, k + 1, 14)
 
 
-def set_hp1(p: Prog, L: K.Layout, off: int) -> None:
-    """The hp1 at OFF: its coefficients from R9 (tune), R10 (index)."""
+def set_hp1(p: Prog, L: K.Layout, off: int, exact: bool = False) -> None:
+    """The hp1 at OFF: its coefficients from R9 (tune), R10 (index). EXACT as for hp1()."""
     coefs(p, L)
-    _pieces(p, off, 9)
-    _pieces(p, off + 2, 15)
+    _pieces(p, off, 9, exact)
+    _pieces(p, off + 2, 15, exact)
 
 
-def set_hpc(p: Prog, L: K.Layout, off: int) -> None:
+def set_hpc(p: Prog, L: K.Layout, off: int, exact: bool = False) -> None:
     coefs(p, L)
     for k in (off, off + HP1_N):
-        _pieces(p, k, 9)
-        _pieces(p, k + 2, 15)
+        _pieces(p, k, 9, exact)
+        _pieces(p, k + 2, 15, exact)
 
 
-def set_res4(p: Prog, L: K.Layout, off: int) -> None:
+def set_res4(p: Prog, L: K.Layout, off: int, exact: bool = False) -> None:
     coefs(p, L)
     for k in (off, off + RES2_N):
-        _pieces(p, k, 9)
-        _pieces(p, k + 2, 15)
-        _pieces(p, k + 4, 10)
+        _pieces(p, k, 9, exact)
+        _pieces(p, k + 2, 15, exact)
+        _pieces(p, k + 4, 10, exact)
 
 
 # =========================================================================== TRX-CP
@@ -755,7 +766,7 @@ class TRXCP:
             for k, off in ((5, TRXCP.HP), (7, TRXCP.RC), (9, TRXCP.RR)):
                 w(p, 9, k)
                 w(p, 10, k + 1)
-                (set_hpc if k == 5 else set_res4)(p, L, off)
+                (set_hpc if k == 5 else set_res4)(p, L, off, exact=True)   # (TRX-CP's filters are exact)
         note_only(p, words)
 
     @staticmethod
