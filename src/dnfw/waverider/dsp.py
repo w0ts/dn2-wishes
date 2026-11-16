@@ -218,6 +218,24 @@ ROUTE_RESUME_SW = 0x1C1FF2
 # the hardware rule BRANCH-12 (scripts/gate_hwrules.py) wants 12 valid 48-bit instructions (36 parcels,
 # 72 bytes) after every branch, the code's last one included
 L2_TAIL = 128
+# 2026-11-12 (opt-stock item 1, the User's GO): the stock delay's control words and the stock chorus's state
+# (DDR 0x80459130..0x8045a6cc) in the memory arbiter's L2 allotment, one piece: dnfw.waverider.stockfx.
+from . import stockfx as _stockfx                # noqa: E402
+CHORUS_DDR, CHORUS_BYTES, CHORUS_DM = _stockfx.CHORUS_DDR, _stockfx.CHORUS_BYTES, _stockfx.CHORUS_L2
+FX_DDR, FX_BYTES, FX_DM = _stockfx.FX_DDR, _stockfx.FX_BYTES, _stockfx.FX_L2
+
+
+def fx_patches() -> list[tuple[int, int, bytes, bytes]]:
+    return _stockfx.patches(sw_to_load, l2_sw_to_load)
+
+
+def fx_spans(stock: bytes) -> list[tuple[str, int, bytes]]:
+    """the block loaded in L2 as the stock stream loads it in DDR: zeros but for the initial words stock's .data
+    gives it (the chorus's last word, base + 0x1340, starts at 1.0: found by running engine init on both)"""
+    return [("the stock delay's control words and chorus's state, from DDR 0x80459130, in L2 (stock's initial "
+             "words; opt-stock)", FX_DM, bootstream.read_span(stock, FX_DDR, FX_BYTES))]
+
+
 REVERB_SITE_SW = 0x1C1D11                    # the FX bus: CJUMP 0xb836bc (DB), then its two pushes
 REVERB_SITE_STOCK = bytes.fromhex("0418b800bc36")
 STOCK_REVERB_SW = 0xB836BC
@@ -819,6 +837,8 @@ def placements() -> list[dict]:
     out = [{"what": what, "load_address": f"{at:#010x}", "dm_byte": f"{at - LOAD_ALIAS:#08x}",
             "bytes": len(payload), "sha256": hashlib.sha256(payload).hexdigest()}
            for what, at, payload in spans() + ddr_spans() + l2_spans()]
+    out.append({"what": "the stock delay's control words and chorus's state in L2 (the stock stream's initial words "
+                        f"at {FX_DDR:#x}; opt-stock)", "load_address": f"{FX_DM:#010x}", "bytes": FX_BYTES})
     obj = objects()
     out += [{"what": f"patch: entry JUMP {COUNT_SW:#x} (the block counter, then PERC) + NOP at sw 0x1c9448",
              "load_address": f"{sw_to_load(ENTRY_SW):#010x}",
@@ -855,6 +875,9 @@ def placements() -> list[dict]:
                      f"(wr_inbus, which does the instruction it replaced and JUMPs back to {ROUTE_RESUME_SW:#x})",
              "load_address": f"{sw_to_load(ROUTE_SITE_SW):#010x}", "bytes": len(ROUTE_SITE_STOCK),
              "stock": ROUTE_SITE_STOCK.hex(), "new": obj["insbus_jump"].hex()}]
+    out += [{"what": f"patch: the stock FX state {FX_DDR:#x} -> L2 {FX_DM:#x}, the instruction at sw {sw:#x}",
+             "load_address": f"{at:#010x}", "bytes": len(old), "stock": old.hex(), "new": new.hex()}
+            for sw, at, old, new in fx_patches()]
     return out
 
 
@@ -1112,10 +1135,15 @@ def section7(stock: bytes) -> bytes:
     _check_ddr(stock, ddr)
     l2 = l2_spans()
     _check_l2(stock, l2)
+    ch = fx_spans(stock)
+    _check_l2(stock, ch)
+    for sw, at, old, _ in fx_patches():
+        if bootstream.read_span(stock, at, len(old)) != old:
+            raise DspError(f"sw {sw:#x} is not the stock instruction opt-stock re-points (dnfw.waverider.stockfx)")
     check_regions()
 
     out = bytearray(bootstream.insert_before_final(
-        stock, b"".join(_blocks(at, payload) for _, at, payload in added + ddr + l2)))
+        stock, b"".join(_blocks(at, payload) for _, at, payload in added + ddr + l2 + ch)))
     bootstream.write_span(out, sw_to_load(ENTRY_SW), entry)
     bootstream.write_span(out, sw_to_load(LOOKUP_SITE_SW), obj["lookup_ptr"])
     bootstream.write_span(out, l2_sw_to_load(IDLE_SITE_SW), obj["idle_jump"])
@@ -1126,6 +1154,8 @@ def section7(stock: bytes) -> bytes:
     bootstream.write_span(out, sw_to_load(SENDS_SITE_SW), sends_cjump())
     bootstream.write_span(out, sw_to_load(CHORUS_SITE_SW), chorus_call())
     bootstream.write_span(out, sw_to_load(ROUTE_SITE_SW), obj["insbus_jump"])
+    for _, at, _, new in fx_patches():
+        bootstream.write_span(out, at, new)
     result = drop_twin(bytes(out))            # 2026-11-10: entry_mark.asm copies A over B
     walked = bootstream.walk(result)
     if not walked.complete or walked.stopped_at != len(result):

@@ -13,9 +13,7 @@ section 5, the output stage `0x1c244d`'s channel table), after each call of the 
   as output;
 - **records**: the reply page's Overbridge records (`+0x1c..+0xaa0` of the reply buffer, the output stage's third
   argument, read at its call sw 0x1c307b; in the runner the caller's locals are zeros, so the buffer is at 0);
-- the 16 mono track buffers at the block's end are reported, not required: they are the chain's scratch, already
-  read into the panned blocks (tracks B) when the output stage runs, and on the current build a few of their words
-  differ after that (signed zeros, and one track's low bits on 2026-11-12) while every output above is the same.
+- **track buffers**: the 16 mono buffers at the block's end (as step 4).
 
 Words are compared as bit patterns (NaN included). The frames: every track on a stock machine, random parameter
 words on every carried index (machine pages, filter, amp, FX sends, overdrive, ...), random notes and filter types,
@@ -45,7 +43,7 @@ TX_BASE, TX_PAGE_WORD = 0x2C08E8, 0x268A38      # docs/link-research.md: TX page
 TX_SLOTS = 14
 RECORDS = (0x1C, 0xAA0)
 STATE_L1 = (0x240000, 0x2C0000)
-OUTPUTS = ("main", "tracks A", "tracks B", "FX returns", "TDM", "records")
+OUTPUTS = ("main", "tracks A", "tracks B", "FX returns", "TDM", "records", "track buffers")
 STOCK_TYPES = (0, 1, 2, 3, 4)                   # FM TONE, WAVETONE, FM DRUM, SWARMER, MIDI
 INDICES = [i for first, last, _ in FR.SLOT_BLOCKS for i in range(first, last + 1)]
 FRAME_COPY = 0x25C48C                           # where the engine copies the frame image
@@ -181,8 +179,6 @@ def run(M5, snap, m2mach, m5img, stockimg, sound, machines, blocks: int = 16) ->
                     diff[key] = bad
         sounding = both and any(any(w & 0x7FFFFFFF for w in c["main"]) for c in s["caps"])
         records = both and all(c["records"] is not None for c in s["caps"] + d["caps"])
-        tb_diff = [b for b, (x, y) in enumerate(zip(s["caps"], d["caps"])) if x["track buffers"] != y["track buffers"]] \
-            if both else None
         state_diff = [sum(1 for x, y in zip(a["state"], b2["state"]) if x != y)
                       for a, b2 in zip(s["caps"], d["caps"])] if both else None
         checks[f"{name}: both images return every block"] = both
@@ -192,9 +188,8 @@ def run(M5, snap, m2mach, m5img, stockimg, sound, machines, blocks: int = 16) ->
             continue
         checks[f"{name}: the stock run sounds on the main mix"] = sounding
         checks[f"{name}: the reply buffer was found at the output stage's call"] = records
-        checks[f"{name}: main, tracks A/B, FX returns, TDM 0..13, records bit-identical, every block"] = (
+        checks[f"{name}: main, tracks A/B, FX returns, TDM 0..13, records, track buffers bit-identical, every block"] = (
             both and not diff)
         numbers[name] = {"differing (output: blocks)": diff, "halts": {k: v["halt"] for k, v in runs.items() if v["halt"]},
-                         "mono track buffers at the block's end differing (reported, not required)": tb_diff,
                          "stock L1 state words differing per block (reported, not required)": state_diff}
     return {"ok": all(checks.values()), "checks": checks, "numbers": numbers}

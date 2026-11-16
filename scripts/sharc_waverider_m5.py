@@ -141,6 +141,7 @@ def init_on(snap, m2mach, image: Image, warm: bool = False):
         m2.poke(runner.state, Lm.T[MDK.SHIPPED] + k, struct.unpack_from("<I", shipped, k)[0])
     m2.poke(runner.state, Lm.ready, SM.TABLE_MAGIC)
     _twin_copy(runner.state, image)            # 2026-11-10: as entry_mark.asm leaves B (step_twin checks it)
+    _chorus_copy(runner.state, image)          # 2026-11-12: as the build's FX init leaves the chorus (in L2)
     if warm:
         # v0.17: the Machinedrum's sine and tables as the DSP has them 0.7 s after power-on
         # (it fills them itself, 32 blocks; the "sine" run checks that fill word for word),
@@ -3253,6 +3254,10 @@ def step_pvmix(snap, m2mach, m5: Image, stock: Image) -> dict:
         # the twin table B is loaded as zeros by the build and copied by the hook (step 4t proves it
         # ends as stock's), so its span differs from stock's image by design
         twin = range(dsp.TWIN_B, dsp.TWIN_B + dsp.TWIN_BYTES)
+        # 2026-11-12: likewise the stock delay's control words and chorus's state, which the build keeps in L2 (init_on copies it there, as
+        # the build's init leaves it; the stockout step compares what the chorus makes of it)
+        chorus = range(dsp.FX_DM, dsp.FX_DM + dsp.FX_BYTES)
+        twin = [*twin, *chorus]
         stray = [a for a in diff if a not in twin and a - dsp.LOAD_ALIAS not in twin
                  and not any(o <= a - dsp.LOAD_ALIAS < o + 4 or o <= a < o + 4 for o in own)]
         got = mix(rm)
@@ -3713,6 +3718,19 @@ def step_tdm(init, sound, machines, blocks) -> dict:
 
 
 # -- step 4 -------------------------------------------------------------------------------------------
+
+def _chorus_copy(state, image) -> None:
+    """2026-11-12 (opt-stock): the snapshot's engine init ran stock's code, which put the delay's control words and the
+    chorus's state in DDR at FX_DDR. The build's init (the bases and offsets re-pointed, dnfw.waverider.stockfx) puts
+    the same words in L2 at FX_DM: every access is base-relative, and no word of L1, L2 or the FX's DDR holds an
+    address inside the block after init (scratch/opt-stock ptrscan_fx.py: only a stack spill of the chorus base).
+    So a build's run starts with them copied."""
+    _, at, _, new = dsp.fx_patches()[1]
+    if image.memory.read(at, len(new)) != new:
+        return                                  # stock, or a build without the move
+    for k in range(0, dsp.FX_BYTES, 4):
+        m2.poke(state, dsp.FX_DM + k, m2.word(state, dsp.FX_DDR + k) or 0)
+
 
 def _twin_copy(state, image) -> None:
     """2026-11-10 (shrink): an image that loads the twin table at TWIN_A only has TWIN_B filled by

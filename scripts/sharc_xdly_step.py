@@ -21,7 +21,7 @@ import struct
 
 import numpy as np
 
-from dnfw.waverider import dsp
+from dnfw.waverider import dsp, stockfx
 from dnfw.xdly import design as XD
 from dnfw.xdly import program as XP
 from dnfw.xdly import ref as XR
@@ -103,6 +103,39 @@ def own(a: int) -> bool:
     return False
 
 
+def moved(a: int) -> int:
+    """2026-11-12 (opt-stock): an address in the build's L2 copy of the stock FX block, where stock has it in DDR"""
+    return a - dsp.FX_DM + dsp.FX_DDR if dsp.FX_DM <= a < dsp.FX_DM + dsp.FX_BYTES else a
+
+
+def same_word(M5, rs, rb, a: int) -> bool:
+    """the word at A as stock's, A in either image's coordinates (the stock FX block is at FX_DDR in stock's, at
+    FX_DM in the build's: dnfw.waverider.stockfx); a pointer into the block, saved on the stack, as stock's when it
+    names the same word. (The overlay is kept by byte: the word compared is the one holding A.)"""
+    a &= ~3
+    if dsp.FX_DM <= a < dsp.FX_DM + dsp.FX_BYTES:
+        sa, ba = moved(a), a
+    elif dsp.FX_DDR <= ddr(a) < dsp.FX_DDR + dsp.FX_BYTES:
+        sa, ba = ddr(a), ddr(a) - dsp.FX_DDR + dsp.FX_DM
+    else:
+        sa = ba = a
+    sw, bw = M5.m2.word(rs.state, sa), M5.m2.word(rb.state, ba)
+    if sw == bw:
+        return True
+    if sw is None or bw is None:
+        return False
+    sw, bw = sw & 0xFFFFFFFF, bw & 0xFFFFFFFF
+    # a pointer into the block, or one of the delay's re-pointed offsets (base + 0x4000xx) saved on the stack
+    return moved(bw) == sw or (bw - sw) & 0xFFFFFFFF in (stockfx.DELTA, stockfx.DELTA // 4)
+
+
+def same_reg(fx, s, b) -> bool:
+    """a register as stock's, or a pointer into the moved FX block where stock's points at the same word"""
+    if s == b:
+        return True
+    return isinstance(s, fx.Const) and isinstance(b, fx.Const) and moved(b.value & 0xFFFFFFFF) == s.value & 0xFFFFFFFF
+
+
 def ddr(a: int) -> int:
     return a if a >= 0x80000000 else a - dsp.LOAD_ALIAS
 
@@ -121,8 +154,10 @@ def run(M5, snap, m2mach, m5img, stock_img) -> dict:
         rb, hb, ob, _, wb = call(M5, rb, tw, inl, inr, par)
         ok &= hs[0] == "stop" and hb[0] == "stop"
         same_out &= os_ == ob
-        same_regs &= rs.state.uregs == rb.state.uregs
-        diff = {a for a in ws | wb if rs.state.overlay.get(a) != rb.state.overlay.get(a)}
+        same_regs &= set(rs.state.uregs) == set(rb.state.uregs) and all(
+            same_reg(M5.fx, rs.state.uregs[k], rb.state.uregs[k]) for k in rs.state.uregs)
+        # compared by value, the stock FX block's words where each image keeps them (2026-11-12, opt-stock)
+        diff = {a for a in ws | wb if not same_word(M5, rs, rb, a)}
         s = {a for a in diff if not own(a)}
         stray |= s
         no_stray &= not s

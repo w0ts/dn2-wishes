@@ -58,6 +58,8 @@ def ranges() -> list[tuple[int, int, str]]:
                      ("the routing's JUMP to the bus inserts (wr_inbus)", dsp.ROUTE_SITE_SW),
                      ("the routing's instruction wr_inbus returns to", dsp.ROUTE_RESUME_SW)):
         out.append((sw - 48, sw + 48, f"round {name}"))
+    for sw, *_ in dsp.fx_patches():              # 2026-11-12 (opt-stock): the stock FX's re-pointed immediates
+        out.append((sw - 48, sw + 48, f"round the re-pointed stock FX instruction at {sw:#x}"))
     return out
 
 
