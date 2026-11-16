@@ -223,7 +223,7 @@ TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platfo
          "test/test_inserts_bus.py",                          # the bus inserts (FDN8, XDLY per track): the same
          "test/test_inserts_c.py",                            # the ColdFire's packed values against design.pack
          "test/test_wishes.py", "test/test_wishes_c.py", "test/test_wishes_items_c.py", "test/test_wishes_pst.py", "test/test_matrix_c.py",      # the wishes record: its stubs, its C on the host
-         "test/test_meter_quiet.py"]                         # the CPU label quiet while stock loads or upgrades
+         "test/test_meter_quiet.py", "test/test_meter_stamp.py"]                         # the CPU label quiet while stock loads or upgrades
 HIT = re.compile(r"^\s+([0-9a-f]{8}):", re.M)
 # stock's MachineListView (csrc/msel/msel.c): its class, the cursor's row (dividers counted), the page (0 the
 # machines, 1 the filters), and the reader of the type under its cursor (stock's YES reads it)

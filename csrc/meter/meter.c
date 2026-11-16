@@ -23,6 +23,7 @@ typedef unsigned int u32;
 typedef unsigned char u8;
 
 #include "quiet.h"
+#include "stamp.h"
 
 #define SET_PIXEL ((void (*)(void *, int, int, int))0x40113E70u)   /* (1.11: 0x40113b90) */
 #define SET_DIRTY ((void (*)(void *))0x4011D5DEu)
@@ -222,9 +223,9 @@ static u32 icons_live(u32 f)            /* the icons to show now (bits), the for
     u32 on = 0;
     for (int k = 0; k < 3; k++) {
         if (ev >> k & 1u)
-            MTR[MTR_ICON_AT_D + k] = f | 1u;
+            MTR[MTR_ICON_AT_D + k] = mtr_stamp(f);
         u32 at = MTR[MTR_ICON_AT_D + k];
-        if (at && f - at < ICON_HOLD)
+        if (at && mtr_age(at, f) < ICON_HOLD)     /* stamp.h: never -1 on an even frame */
             on |= 1u << k;
     }
     return on | (MTR[MTR_ICON_FORCE] & 7u);
@@ -307,7 +308,7 @@ void mtr_tlm(u32 *w)
     w[6] = mtr_heap_faults;
     w[7] = (MTR[MTR_ICON_SHOWN] & 7u) | (MTR[MTR_ICON_HYS] & 7u) << 8 | (MTR[MTR_ICON_FORCE] & 7u) << 16;
     for (int k = 0; k < 3; k++)
-        w[8 + k] = MTR[MTR_ICON_AT_D + k] ? f - MTR[MTR_ICON_AT_D + k] : 0xFFFFFFFFu;
+        w[8 + k] = MTR[MTR_ICON_AT_D + k] ? mtr_age(MTR[MTR_ICON_AT_D + k], f) : 0xFFFFFFFFu;
 }
 
 /* 3 x 5 glyphs, rows top to bottom, bit 2 the left column */
