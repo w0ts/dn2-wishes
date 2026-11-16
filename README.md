@@ -9,6 +9,7 @@ Custom firmware for the Elektron Digitone II, OS 1.12. Built on
   recorder, FLEX.
 - PERC: the Machinedrum's TRX, EFM, GND and P-I machines.
 - Monomachine machines: SID 6581, DPRO WAVE, DPRO DDRW, DPRO DENS, VO-6, polyphonic.
+- Seven new LFO waveforms.
 
 ## Added in DN2 WISHES
 
@@ -18,7 +19,6 @@ Custom firmware for the Elektron Digitone II, OS 1.12. Built on
 - Insert effects: FUZZ, TAPE, FOLD, CHOR, WIDE, HARM, FDN8, XDLY, SUB, DIST, GATER,
   RING, JUNO.
 - Modulation matrix.
-- Seven new LFO waveforms.
 - MACHINE SEL in two columns, engine row in the preset browser, LIVE SELECT.
 - List popups, units on parameter values, oscilloscope page.
 - Velocity on the Machinedrum and Monomachine machines.
