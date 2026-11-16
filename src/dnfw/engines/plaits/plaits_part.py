@@ -21,6 +21,7 @@ from ...mnm import core as C
 from . import plk as K
 from . import plaits_noise as N
 from ...md import core as MD
+from ...perc import msched as MS
 from ...perc.dsl import Prog, f32
 
 MODEL = "PART"
@@ -283,48 +284,66 @@ def _acc_row(p: Prog, L: C.Layout) -> None:
     p.seti(4, 0)
 
 
+# 2026-11-14 (plaits16, r52): a fixed stage's 16 samples straight, placed by dnfw.perc.msched into multifunction
+# instructions with their loads and stores on them (the loop did one operation an instruction). The same operations
+# on the same values: x is worked out twice (XM for the multiply, XA for the add; the same add of the same operands,
+# the same bits). Every register is the stage's: R10 (the buffer) and R11 (wp0) are put back after it, R10 from
+# W["inner"] (the particles' pointer, free once they are done: _stages saves R10 there). The registers: a search
+# over assignments (scratch fixexp2.py), two sets that alternate a sample.
+FX_FRAC, FX_K, FX_NK, FX_X1 = "F4", "F7", "F1", "F13"
+FX_SETS = ({"x0": "F10", "d": "F2", "d2": "F12", "xm": "F2", "xa": "F15", "t": "F6", "a": "F13", "a2": "F5",
+            "a3": "F13", "a4": "F9"},
+           {"x0": "F14", "d": "F0", "d2": "F11", "xm": "F3", "xa": "F13", "t": "F15", "a": "F5", "a2": "F6",
+            "a3": "F9", "a4": "F3"})
+
+
+def _fixed_ops() -> list:
+    """the 16 samples' operations: I0 x0 (offset -s; x1 the word one on, the sample before's x0), I2 the half's
+    samples (offset s), I1 the line's head (offset -s)."""
+    ops = [("mov", "ldk", (FX_X1,), (), ("I0", 1))]
+    for s in range(K.HALF):
+        r, q = FX_SETS[s % 2], FX_SETS[(s - 1) % 2]
+        x1 = FX_X1 if s == 0 else q["x0"]
+        ops += [("mov", "ldk", (r["x0"],), (), ("I0", -s)),
+                ("alu", "-", (r["d"],), (x1, r["x0"]), None),          # x1 - x0
+                ("mul", "*", (r["d2"],), (r["d"], FX_FRAC), None),     # x the fraction (0)
+                ("alu", "+", (r["xm"],), (r["x0"], r["d2"]), None),    # x (for the multiply)
+                ("alu", "+", (r["xa"],), (r["x0"], r["d2"]), None),    # x (for the add)
+                ("mul", "*", (r["t"],), (r["xm"], FX_K), None),        # x k
+                ("mov", "ldk", (r["a"],), (), ("I2", s)),
+                ("alu", "+", (r["a2"],), (r["a"], r["t"]), None),      # acc + x k
+                ("mov", "stk", (), (r["a2"],), ("I1", -s)),             # the line's head
+                ("mul", "*", (r["a3"],), (r["a2"], FX_NK), None),      # x (0 - k)
+                ("alu", "+", (r["a4"],), (r["a3"], r["xa"]), None),    # + x
+                ("mov", "stk", (), (r["a4"],), ("I2", s))]
+    return ops
+
+
 def _fixed(p: Prog, L: C.Layout, line, k: float, write: bool) -> None:
-    """a fixed-offset stage over the 16 samples (the TAIL read, its fraction 0)."""
+    """a fixed-offset stage over the 16 samples (the TAIL read, its fraction 0). R10 the buffer, R11 wp0 (put
+    back after: R10 from W["inner"])."""
+    assert write, "every fixed stage writes its line (FIXED)"
     b, l = line
-    _acc_row(p, L)
-    _ptr(p, 0, b + l - 1)                      # x0, then back a word a sample
-    _ptr(p, 1, b + l)                          # x1 (no wrap: _fast_ok): the first sample's; after it
+    _ptr(p, 0, b + l - 1)                      # x0 at offset -s, x1 (no wrap: _fast_ok) the word one on
+    _ptr(p, 1, b)                              # the head
     K.ld(p, 0, K.S_AGE)                        # 2026-11-11 (_jit): every read of the half of a word no write
     p.iconst(12, l - 1)                        # has reached (AGE - 16 <= l - 17): the zero row's words instead
 
     def zeros():
         p.iconst(0, L.YB + 4 * (Z_ROW + 15))
         p.seti(0, 0)
-        p.iconst(0, L.YB + 4 * (Z_ROW + 16))
-        p.seti(1, 0)
     p.if_(0, "LE", 12, zeros, kind="i")
-    p.ldi(14, 0, 1)                            # each sample's x1 is the sample before's x0 (F14)
-    if write:
-        _ptr(p, 5, b)
-    p.fconst(6, 0.0)                           # the fraction
-    p.fconst(3, k)
-    if write:
-        p.fconst(12, 0.0)
-        p.fop(12, 12, "-", 3)                  # -k (0 - k, as _stage_sub)
-
-    def one(x1: int, x0: int):
-        p.ldm(x0, 0)
-        p.fop(9, x1, "-", x0)
-        p.fop(9, 9, "*", 6)
-        p.fop(5, x0, "+", 9)                   # x
-        p.fop(9, 5, "*", 3)
-        p.ldi(4, 0, 4)
-        p.fop(4, 4, "+", 9)
-        if write:
-            p.stm(5, 4)
-            p.fop(4, 4, "*", 12)
-            p.fop(4, 4, "+", 5)
-        p.stpost(4, 4)
-
-    def two():                                 # 2026-11-11: two samples a pass, x0 / x1 swapping
-        one(14, 7)                             # registers (no copy), the loop's count / jump halved
-        one(7, 14)
-    p.loop_r(2, K.HALF // 2, two, one=13)
+    p.ld(0, L.W["wb"])
+    p.seti(2, 0)                               # the half's samples
+    frac, kk, nk = (int(r[1:]) for r in (FX_FRAC, FX_K, FX_NK))
+    p.fconst(frac, 0.0)                        # the fraction
+    p.fconst(kk, k)
+    p.fconst(nk, 0.0)
+    p.fop(nk, nk, "-", kk)                     # -k (0 - k, as _stage_sub)
+    MS.emit(p, _fixed_ops())
+    p.ld(10, L.W["inner"])
+    p.ld(0, L.W["sb"])
+    p.ipass(11, 0)
 
 
 def _moving_masked(p: Prog, L: C.Layout, line, scale_rt: bool, write: bool, mul: float, add: float) -> None:
@@ -555,8 +574,57 @@ def _fixed_masked(p: Prog, L: C.Layout, line, k: float, write: bool) -> None:
     p.loop(L.W["n5"], K.HALF, one)
 
 
+# 2026-11-14 (plaits16, r52): the fast half's mix straight, placed by dnfw.perc.msched (its moves on its computes):
+# I2 the half's samples read, I3 them written (one pointer for both would order every sample's read after the
+# sample before's write), I1 DEL's head, I0 the inputs. I3 is the slot's pointer: kept in W["inner"] meanwhile
+# (_fixed's saved R10 is done with). The same operations on the same values.
+MIX_AMT = "F6"
+MIX_SETS = ({"a": "F8", "in": "F12", "a2": "F9", "a3": "F0", "o": "F10"},
+            {"a": "F11", "in": "F13", "a2": "F14", "a3": "F1", "o": "F15"},
+            {"a": "F4", "in": "F7", "a2": "F2", "a3": "F3", "o": "F5"})
+
+
+def _mix_ops() -> list:
+    ops = []
+    for s in range(K.HALF):
+        r = MIX_SETS[s % len(MIX_SETS)]
+        ops += [("mov", "ldk", (r["a"],), (), ("I2", s)),
+                ("mov", "stk", (), (r["a"],), ("I1", -s)),             # c.Write(del, 2.0): DEL's head
+                ("mov", "ldk", (r["in"],), (), ("I0", s)),
+                ("alu", "+", (r["a2"],), (r["a"], r["a"]), None),      # 2 acc
+                ("alu", "-", (r["a3"],), (r["a2"], r["in"]), None),    # - in
+                ("mul", "*", (r["o"],), (MIX_AMT, r["a3"]), None),     # x amount
+                ("alu", "+", (r["o"],), (r["in"], r["o"]), None),      # in +
+                ("mov", "stk", (), (r["o"],), ("I3", s))]
+    return ops
+
+
+def _mix_fast(p: Prog, L: C.Layout) -> None:
+    """_mix of a fast half (R10 the buffer, R11 wp0); I4 left past the half's samples, as _mix's loop."""
+    _ptr(p, 1, DEL[0])
+    K.ld(p, int(MIX_AMT[1:]), AMT)
+    b3 = p.ibias.get(3)                         # I3 as the voice set it: biased (program.I3_BIAS)
+    p.geti(0, 3)
+    p.st(L.W["inner"], 0)
+    p.iconst(0, L.YB + 4 * IN_ROW)
+    p.seti(0, 0)
+    p.ld(0, L.W["wb"])
+    p.seti(2, 0)
+    p.seti(3, 0)
+    MS.emit(p, _mix_ops())
+    p.ld(0, L.W["inner"])
+    p.seti(3, 0, bias=b3)
+    p.ld(0, L.W["wb"])
+    p.iconst(12, 4 * K.HALF)
+    p.iop(0, 12, "+", 0)
+    p.seti(4, 0)
+
+
 def _mix(p: Prog, L: C.Layout, masked: bool) -> None:
     """c.Write(del, 2.0), the mix: *in_out += amount (2 acc - in)"""
+    if not masked:
+        _mix_fast(p, L)
+        return
     _acc_row(p, L)
     if masked:
         p.ld(0, L.W["sb"])
@@ -596,6 +664,8 @@ def _stages(p: Prog, L: C.Layout, masked: bool) -> None:
     for a half whose windows wrap round the buffer's end, masked (2026-11-11: stage by stage as
     well, not the old sample-by-sample chain)."""
     fixed = _fixed_masked if masked else _fixed
+    if not masked:
+        p.st(L.W["inner"], 10)                 # R10 the buffer, for _fixed to put back (2026-11-14)
     for line, k, w in FIXED[:3]:
         fixed(p, L, line, k, w)
     if masked:
