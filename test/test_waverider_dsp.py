@@ -457,17 +457,47 @@ def test_smp_hands_on_to_the_inserts_and_writes_only_saved_registers():
     assert not any(re.search(r"\bCALL\b|\bDO\b|\bRTS\b", ln) for ln in lines)
 
 
-def test_inserts_hand_on_to_ping_and_write_only_saved_registers():
+def _ping_restores() -> set[str]:
+    """the registers PING's shared tail (wr_ping) reloads, each from the word PERC saved it in (PERC's first lines,
+    test_perc_saves_what_ping_restores_and_hands_on_to_resonator): what our chain may write"""
     import re
-    lines = _code_lines("inserts")
+    perc: dict[str, int] = {}
+    for ln in _code_lines("perc"):                                         # its save block: each register's first store
+        m = re.match(r"DM\((0x[0-9a-f]+)\) = (\w+);", ln)
+        if m and 0x2DDE00 <= int(m.group(1), 16) < 0x2DDE70:
+            perc.setdefault(m.group(2), int(m.group(1), 16))
+    out = set()
+    for ln in _code_lines("ping"):
+        m = re.match(r"(\w+) = DM\((0x[0-9a-f]+)\);", ln)
+        if m and 0x2DDE00 <= int(m.group(2), 16) < 0x2DDE70:
+            assert perc.get(m.group(1)) == int(m.group(2), 16), ln          # reloaded from its own save word
+            out.add(m.group(1))
+    return out
+
+
+def test_inserts_hand_on_to_ping_and_write_only_saved_registers():
+    """the chain after SMP: the inserts (wr_ins), then A2F (wr_a2f) when built, then PING's tail, which reloads what
+    PERC saved and is the chain's only way back to stock. Every index or modify register the inserts and A2F write is
+    one it reloads (2026-11-15: insfx's FZ / TAPE staging reads its tables through I2 and the block through I3, A2F
+    its slots through I2 / I3; both saved at 0x2dde48 / 0x2dde4c). Post-modified I0-I4 rely on L0-L4 = 0: stock's
+    start-up zeroes them (docs/waverider-dsp-silence.md) and no code here writes an L or B register (checked);
+    I5 stays pre-modified only, as in SMP (its L5 is not assumed)."""
+    import re
+    restored = _ping_restores()
+    assert {"I0", "I1", "I2", "I3", "I4", "I12"} <= restored and not any(r[0] in "LB" for r in restored)
+    chain = ["inserts"]
     # 2026-11-10 (the A2 filters): the inserts hand on to A2F (wr_a2f), which hands on to PING's shared tail
-    assert f"JUMP {dsp.A2F_SW:#x};" in lines and f"JUMP {dsp.PING_SW:#x};" in _code_lines("a2f")
-    for ln in lines:
-        m = re.match(r"(I|M|L|B)(\d+) =", ln)
-        if m:
-            assert f"{m.group(1)}{m.group(2)}" in ("I0", "I1", "I4", "I12"), ln
-        assert not re.search(r"\b(R1[6-9]|R[2-9]\d|F1[6-9]|USTAT|MODE1|MODE2|LCNTR)\b", ln), ln
-    assert not any(re.search(r"\bCALL\b|\bDO\b|\bRTS\b", ln) for ln in lines)
+    assert f"JUMP {dsp.A2F_SW:#x};" in _code_lines("inserts") and f"JUMP {dsp.PING_SW:#x};" in _code_lines("a2f")
+    chain.append("a2f")
+    for name in chain:
+        lines = _code_lines(name)
+        for ln in lines:
+            m = re.match(r"(I|M|L|B)(\d+) =", ln)
+            if m:
+                assert f"{m.group(1)}{m.group(2)}" in restored, (name, ln)
+            assert not re.search(r"\b(R1[6-9]|R[2-9]\d|F1[6-9]|USTAT|MODE1|MODE2|LCNTR)\b", ln), (name, ln)
+            assert not re.search(r"DM\(I5, M", ln), (name, ln)
+        assert not any(re.search(r"\bCALL\b|\bDO\b|\bRTS\b", ln) for ln in lines), name
 
 
 def test_inspost_saves_what_it_uses_and_hands_on_to_the_sends():
