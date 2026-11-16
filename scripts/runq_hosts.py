@@ -14,13 +14,17 @@ import shutil
 import signal
 import subprocess
 import tarfile
+import time
 
 FARM = os.environ.get("RUNQ_FARM_HOST", "gpufarm")
 FARM_HOME = os.environ.get("RUNQ_FARM_HOME", "/home/mots")
 FARM_BENCH = FARM_HOME + "/dn2mk2-bench"
 FARM_ROOT = FARM_BENCH + "/runq"                 # the job trees, and seed/ (the runner's engine snapshot)
-FARM_CPU_MAX = float(os.environ.get("RUNQ_FARM_CPUS", "32"))      # the User's rule: ours, all together
-FARM_LOAD_MAX = float(os.environ.get("RUNQ_FARM_LOAD", "96"))     # of its 128: the colleagues' room
+# the User's rule (2026-11-12): ours, all together, of gpufarm's 64 cores: 32 on weekdays 08:00-17:00 (local),
+# 50 otherwise. RUNQ_FARM_CPUS sets one cap at all times
+FARM_CPU_OFFICE, FARM_CPU_OFF_HOURS = 32.0, 50.0
+FARM_CPU_FIXED = os.environ.get("RUNQ_FARM_CPUS")
+FARM_LOAD_MAX = float(os.environ.get("RUNQ_FARM_LOAD", "60"))     # of its 64 cores: the colleagues' room
 MAC_JOBS_MAX = int(os.environ.get("RUNQ_MAC_JOBS", "2"))
 MAC_LOAD_MAX = float(os.environ.get("RUNQ_MAC_LOAD", "12"))
 RAMP_S = 90                                      # a job just started may not show its CPU yet
@@ -163,6 +167,14 @@ def mac_load() -> float:
     return os.getloadavg()[0]
 
 
+def farm_cpu_max(now: float) -> float:
+    """our CPU cap on gpufarm at NOW (epoch seconds, the Mac's local time)"""
+    if FARM_CPU_FIXED is not None:
+        return float(FARM_CPU_FIXED)
+    t = time.localtime(now)
+    return FARM_CPU_OFFICE if t.tm_wday < 5 and 8 <= t.tm_hour < 17 else FARM_CPU_OFF_HOURS
+
+
 def can_start(job: dict, host: str, running: list[dict], usage, now: float) -> bool:
     """the User's limits for starting JOB on HOST, given the queue's RUNNING jobs and the host's
     USAGE (farm: (our CPUs, load1) or None; mac: load1). Pure, for the tests."""
@@ -172,7 +184,7 @@ def can_start(job: dict, host: str, running: list[dict], usage, now: float) -> b
         return False
     ours, load = usage
     ramping = sum(j["cpus"] for j in running if j["host"] == "farm" and now - j.get("started", 0) < RAMP_S)
-    return ours + ramping + job["cpus"] <= FARM_CPU_MAX and load + job["cpus"] <= FARM_LOAD_MAX
+    return ours + ramping + job["cpus"] <= farm_cpu_max(now) and load + job["cpus"] <= FARM_LOAD_MAX
 
 
 def place(job: dict, running: list[dict], mac_usage: float, farm, now: float) -> str | None:

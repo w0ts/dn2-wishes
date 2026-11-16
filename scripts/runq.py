@@ -342,7 +342,7 @@ def status(d: pathlib.Path) -> str:
     lines = [f"Mac load {H.mac_load():.1f} (starts at <= {H.MAC_LOAD_MAX:g}, <= {H.MAC_JOBS_MAX} jobs)"]
     fu = H.farm_usage()
     lines.append("gpufarm: unreachable" if fu is None else
-                 f"gpufarm: our CPUs {fu[0]:.1f} of {H.FARM_CPU_MAX:g}, load {fu[1]:.1f} (starts at <= {H.FARM_LOAD_MAX:g})")
+                 f"gpufarm: our CPUs {fu[0]:.1f} of {H.farm_cpu_max(time.time()):g}, load {fu[1]:.1f} (starts at <= {H.FARM_LOAD_MAX:g})")
     lines.append(f"dispatcher: {'running' if (d / 'dispatcher.pid').exists() else 'idle'}")
     for sel in ("running", "starting", "queued", "joined"):
         js = [j for j in jobs if j["state"] == sel]

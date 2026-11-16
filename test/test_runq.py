@@ -33,15 +33,28 @@ def _job(cpus=1, host="farm", started=0.0):
     return {"cpus": cpus, "host": host, "started": started, "hosts": [host]}
 
 
+WEEKDAY_NOON = time.mktime((2026, 11, 12, 12, 0, 0, 0, 0, -1))      # a Thursday
+SATURDAY = time.mktime((2026, 11, 14, 12, 0, 0, 0, 0, -1))
+WEEKDAY_EVENING = time.mktime((2026, 11, 12, 17, 0, 0, 0, 0, -1))
+
+
+def test_farm_cap_is_32_in_office_hours_50_otherwise(runq):
+    assert runq.H.farm_cpu_max(WEEKDAY_NOON) == 32
+    assert runq.H.farm_cpu_max(SATURDAY) == 50
+    assert runq.H.farm_cpu_max(WEEKDAY_EVENING) == 50
+    assert runq.H.can_start(_job(2), "farm", [], (47.0, 10.0), SATURDAY)
+    assert not runq.H.can_start(_job(2), "farm", [], (49.0, 10.0), SATURDAY)        # 51 > 50
+
+
 def test_farm_counts_cpus_ours_and_ramping(runq):
-    now = 1000.0
+    now = WEEKDAY_NOON
     assert runq.H.can_start(_job(1), "farm", [], (31.0, 10.0), now)
     assert not runq.H.can_start(_job(2), "farm", [], (31.0, 10.0), now)            # 33 > 32
     # a job started 10 s ago may not show yet: it counts with its CPUs
     ramping = [_job(4, started=now - 10)]
     assert not runq.H.can_start(_job(1), "farm", ramping, (28.0, 10.0), now)
     assert runq.H.can_start(_job(1), "farm", [_job(4, started=now - 600)], (28.0, 10.0), now)
-    assert not runq.H.can_start(_job(1), "farm", [], (0.0, 96.0), now)              # the farm's own load
+    assert not runq.H.can_start(_job(1), "farm", [], (0.0, 60.0), now)              # the farm's own load
     assert not runq.H.can_start(_job(1), "farm", [], None, now)                     # unreachable: wait
 
 

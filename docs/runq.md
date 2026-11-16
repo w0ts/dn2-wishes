@@ -58,10 +58,11 @@ setup has not been shown to match the Mac's (main, 2026-11-12: they may go there
   bookkeeping, never across ssh.
 - **Within the User's limits**, checked before every start by one dispatcher (the first submit
   starts it; it leaves after ten idle minutes):
-  - gpufarm: at most **32 CPUs of ours at any time**: every process of user mots there is
+  - gpufarm: at most **32 CPUs of ours on weekdays 08:00-17:00, 50 otherwise** (the Mac's local time; the
+    User, 2026-11-12: 64 real cores): every process of user mots there is
     counted (queued or not: other runs too), measured over a second from /proc, plus the CPUs of
     any queue job started in the last 90 s (not visible yet); and the farm's load1 plus the job
-    stays under 96 of its 128, the colleagues' room.
+    stays under 60 of its 64 cores, the colleagues' room.
   - Mac: at most **two** queue jobs, and none while `uptime`'s load1 is over **12**. A job that may
     run on either host goes to gpufarm when the Mac is loaded, else it waits.
   - (`RUNQ_FARM_CPUS`, `RUNQ_FARM_LOAD`, `RUNQ_MAC_JOBS`, `RUNQ_MAC_LOAD` change them.)
