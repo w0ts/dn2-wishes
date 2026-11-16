@@ -1,7 +1,7 @@
+# DN2 WISHES
+
 Custom firmware for the Elektron Digitone II, OS 1.12. Built on
 [dn2mk2](https://github.com/De-Pattern/dn2mk2-firmware) by De-Pattern.
-
-## Added in DN2 WISHES
 
 - 1.12 support.
 - Machines: JUNO, ANALOG (filters SVF, LADR, OTA, DIODE, MS-20), TB-303, PLAITS, SOPHIE, DRONE.
