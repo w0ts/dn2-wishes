@@ -243,6 +243,12 @@ stayed silent and LEV read `CPU` (the frame guard leaving voices out for time). 
   blocks, 2.7 ms; STRG two, 1.3 ms; then STRG's `init_tail`). Only when the engine starts on a
   voice (a voice changing machine, or MODL); a voice already on it plays its next note at once.
   `S_CLR` is slot word 7 (GRAIN's, free).
+  2026-11-11 (plaits16, declared: not bit-exact in time against the deferred clear): **PART clears just in
+  time** (`plaits_part._jit`): it sounds from its first half, its output word for word that of a clear at the
+  start; each diffuser word is zeroed right before the first half that reads it, or, a half reading only words
+  no write has reached, the stage reads a zero row (fixed lines) or runs its x = +0 loop (AP4, DEL) instead.
+  `S_AGE` (slot word 8, GRAIN's) counts its samples until 3,456. **STRG's chunk is 800 words a half**: its
+  3,984 in 5 halves, rendering from the sixth (main's 512: from the ninth). docs/dsp-perf.md has the numbers.
 - **The guard keeps a start block's cost out of its expectation** (`guard.FRESH`, set by PLAITS'
   change of engine, which a voice changing machine to PLAITS also makes): the next block is
   expected at FLOOR, then at what it measures, so one heavy start cannot get the note's next

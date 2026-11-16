@@ -76,8 +76,9 @@ def init(p: Prog, L: C.Layout) -> None:
     Plaits' Init sets them, but a particle's filter only ever ticks a 0 input with zero state
     until its first frequency is drawn, which sets them), the post filter at 0, the diffuser's
     LFO started, its low-pass at 0, its buffer cleared and its write pointer at 0. 2026-11-09:
-    the buffer's clear deferred (plk.defer_clear: 8,192 DDR words over the next eight halves,
-    silent, the trigger kept), so a voice's start block is not 8,192 DDR stores."""
+    the buffer's clear deferred (plk.defer_clear), so a voice's start block is not 8,192 DDR
+    stores; 2026-11-11 (plaits16): just in time instead (_jit: each word zeroed before the half
+    that first reads it), so the voice sounds from its first half."""
     p.iconst(0, 0)
     for k in range(NU_USED):
         K.sv(p, K.U0 + k, 0)
@@ -98,7 +99,8 @@ def init(p: Prog, L: C.Layout) -> None:
     p.iconst(12, MASK)
     p.iop(0, 0, "AND", 12)
     K.sv(p, WP, 0)
-    K.defer_clear(p, BIG_USED)
+    p.iconst(0, 0)
+    K.sv(p, K.S_AGE, 0)
 
 
 def _params(p: Prog) -> None:
@@ -242,6 +244,8 @@ def _particle(p: Prog, L: C.Layout) -> None:
 # masked reads (_stage_sub) sample by sample. Every value with the same operations: bit-exact.
 FIXED = ((AP1, KAP, True), (AP2, KAP, True), (AP3, KAP, True), (DAPA, -KAP, True), (DAPB, KAP, True))
 IN_ROW, LFO_ROW = 0, 16                        # the render scratch's YB row: the inputs, the LFO
+Z_ROW = 32                                     # 17 zeros (_jit, plaits16): a young line's reads in a fast half
+MV_FLAG = Z_ROW + 17                           # AP4's, DEL's: every read of this (fast) half unwritten (_jit)
 
 
 def _fast_ok(p: Prog, d: int) -> None:
@@ -287,6 +291,15 @@ def _fixed(p: Prog, L: C.Layout, line, k: float, write: bool) -> None:
     _acc_row(p, L)
     _ptr(p, 0, b + l - 1)                      # x0, then back a word a sample
     _ptr(p, 1, b + l)                          # x1 (no wrap: _fast_ok): the first sample's; after it
+    K.ld(p, 0, K.S_AGE)                        # 2026-11-11 (_jit): every read of the half of a word no write
+    p.iconst(12, l - 1)                        # has reached (AGE - 16 <= l - 17): the zero row's words instead
+
+    def zeros():
+        p.iconst(0, L.YB + 4 * (Z_ROW + 15))
+        p.seti(0, 0)
+        p.iconst(0, L.YB + 4 * (Z_ROW + 16))
+        p.seti(1, 0)
+    p.if_(0, "LE", 12, zeros, kind="i")
     p.ldi(14, 0, 1)                            # each sample's x1 is the sample before's x0 (F14)
     if write:
         _ptr(p, 5, b)
@@ -421,6 +434,20 @@ def _moving(p: Prog, L: C.Layout, line, scale_rt: bool, write: bool, mul: float,
             p.fop(12, 12, "-", 3)                  # -k (0 - k, as _stage_sub)
         p.fconst(15, -1.0)                         # no LFO value yet (it is 0..1)
 
+        def stale():                               # 2026-11-11 (plaits16, _jit): every word the half reads is
+            p.fconst(5, 0.0)                       # one no write has reached (Plaits': 0), so x = 0 + (0 - 0) frac
+            p.fconst(9, 0.0)                       # = +0 and x k = +0 (k > 0): the rest of one()'s operations
+
+            def s1():
+                p.ldi(4, 0, 4)
+                p.fop(4, 4, "+", 9)
+                if write:
+                    p.stm(1, 4)
+                    p.fop(4, 4, "*", 12)
+                    p.fop(4, 4, "+", 5)
+                p.stpost(4, 4)
+            p.loop_r(2, K.HALF, s1, one=13)        # (F12 is -k)
+
         def recompute():
             p.fpass(15, 13)
             p.ipass(8, 2)                          # the old integer part (0 before the first)
@@ -456,7 +483,8 @@ def _moving(p: Prog, L: C.Layout, line, scale_rt: bool, write: bool, mul: float,
                 p.fop(4, 4, "+", 5)
             p.stpost(4, 4)
             p.fpass(14, 7)                         # the next sample's x1
-        p.loop(L.W["n5"], K.HALF // 2, lambda: (one(), one()), one=9)
+        p.ld(0, L.YB + 4 * (MV_FLAG + [AP4, DEL].index(line)))
+        p.ifz(0, "NE", stale, lambda: p.loop(L.W["n5"], K.HALF // 2, lambda: (one(), one()), one=9))
 
     p.ld(0, L.W["sb"])
     p.iconst(12, base + lo)
@@ -599,6 +627,114 @@ def _stages(p: Prog, L: C.Layout, masked: bool) -> None:
     _mix(p, L, masked)
 
 
+# 2026-11-11 (plaits16): the buffer is not cleared at the engine's start (it was, since 2026-11-09 over the start's
+# first halves, silent): a read of a word no write has reached since the start must read 0, as Plaits' cleared
+# buffer, and each such word is zeroed just before the half that reads it. A line's head writes the word at its
+# offset `base` from the write pointer, which moves one word back a sample, so the word read at offset base + j
+# in sample s of a half that starts t0 samples after the start (j relative to the half's first write pointer
+# wp0) was written j samples earlier; it has not been when j > t0. A half reads, per line, j in [R - 16, R + 1]:
+# R = l - 1 for a fixed line (its tail, x1 one on); for AP4 / DEL R is the LFO's integer offset at the half's
+# larger LFO value (the LFO moves once in 32 samples, by under 0.3 of a sample, so the half's other offset is
+# R or R - 1). Before the stages, while t0 <= the largest R (AGE < YOUNG), the words wp0 + base + j for j in
+# [max(t0 + 1, R - 17), R + 1] are zeroed: words no write has reached (the line's own head reaches them later;
+# the next line's head writes them only after this line's reads, stage by stage), so a zero there is what
+# Plaits' cleared buffer holds. The output is the same as a clear at the start, sample for sample, and the voice
+# sounds from its first half; the clear's 8,192 DDR stores are spread over the first 3,456 samples, 17-19 words
+# a line a half.
+YOUNG = 3456
+MOVING = ((AP4, 43.0, 400.0), (DEL, 340.0, 3070.0))   # _moving's lines: their offset = add + mul x the LFO
+
+
+def _jitz_body(p: Prog) -> None:
+    """R1 = R, R2 = the line's base, R9 = t0 + 1, R10 the buffer, R11 wp0: zero the words wp0 + base + j, j in
+    [max(t0 + 1, R - 17), R + 1], round the buffer's end; none when R0 is not 0 (a fixed line in a fast half)
+    and every read of the half is of such a word (R - 16 >= t0: _fixed reads the zero row then). Clobbers R1-R6,
+    R8, R12, I1."""
+    p.iconst(12, -17)
+    p.iop(3, 12, "+", 1)
+    p.iop(3, 3, "MAX", 9)                      # the first j
+    p.iop(4, 1, "-", 3)
+    p.iconst(12, 2)
+    p.iop(4, 12, "+", 4)                       # the words: R + 2 - the first j
+
+    def fixed_fast():
+        p.iconst(12, -15)
+        p.iop(5, 12, "+", 1)
+        p.if_(5, "GE", 9, lambda: p.iconst(4, 0), kind="i")
+    p.ifz(0, "NE", fixed_fast)
+
+    def zero():
+        p.iop(8, 11, "+", 2)
+        p.iop(8, 8, "+", 3)
+        p.iconst(12, MASK)
+        p.iop(8, 8, "AND", 12)                 # the first word
+        p.iconst(12, MASK + 1)
+        p.iop(5, 12, "-", 8)
+        p.iop(5, 5, "MIN", 4)                  # the words before the buffer's end
+        p.iop(4, 4, "-", 5)                    # and after it
+        p.lsh(8, 8, 2)
+        p.iop(8, 8, "+", 10)
+        p.seti(1, 8)
+        p.iconst(6, 0)
+        p.loop_r(5, None, lambda: p.stpost(1, 6))
+
+        def rest():
+            p.seti(1, 10)
+            p.loop_r(4, None, lambda: p.stpost(1, 6))
+        p.ifz(4, "GT", rest)
+    p.ifz(4, "GT", zero)
+
+
+def _jit(p: Prog, L: C.Layout) -> None:
+    """while the voice is young: zero the words this half's stages read that no write has reached (above), or,
+    a fixed line in a fast half that reads only such words, write the zero row it reads instead (_fixed). R10
+    the buffer, R11 wp0 (kept); the LFO's row written. Clobbers R0-R9, R12, I1, I12."""
+    K.ld(p, 0, K.S_AGE)                        # t0
+
+    def young():
+        p.iconst(12, K.HALF)
+        p.iop(1, 12, "+", 0)
+        K.sv(p, K.S_AGE, 1)
+        p.iconst(12, 1)
+        p.iop(9, 12, "+", 0)
+        p.iconst(0, L.YB + 4 * Z_ROW)          # the zero row (the render scratch is anyone's between halves)
+        p.seti(1, 0)
+        p.iconst(6, 0)
+        p.loop_r(5, 17, lambda: p.stpost(1, 6))
+        p.ld(0, L.W["tmp2"])                   # _fast_ok's verdict: R0 for the fixed lines
+
+        def lines(group):
+            for (b, l), _k, _w in group:
+                p.iconst(1, l - 1)
+                p.iconst(2, b)
+                p.call("plpart_jitz", lambda: _jitz_body(p))
+        for group in (FIXED[:3], FIXED[3:]):     # nothing to zero in a group once t0 > R = l - 1 for all its lines
+            p.iconst(12, max(l for (_b, l), _k, _w in group))
+            p.if_(9, "LE", 12, lambda group=group: lines(group), kind="i")   # (R9 = t0 + 1 <= l)
+        p.ld(7, L.YB + 4 * LFO_ROW)
+        p.ld(8, L.YB + 4 * (LFO_ROW + K.HALF - 1))
+        p.fop(7, 7, "MAX", 8)                  # the half's larger LFO value
+        for k, ((b, _l), mul, add) in enumerate(MOVING):
+            K.mulk(p, 1, 7, mul)               # _moving's operations: its integer offset there
+            K.addk(p, 1, 1, add)
+            p.trunc(1, 1)
+            p.ld(4, L.W["tmp2"])               # a fast half whose every read (j >= R - 16) is unwritten: no
+            p.iconst(12, -16)                  # zeros stored, _moving's stale loop instead (its x is +0)
+            p.iop(5, 12, "+", 1)
+            p.if_(5, "LT", 9, lambda: p.iconst(4, 0), kind="i")
+            p.st(L.YB + 4 * (MV_FLAG + k), 4)
+            p.iconst(0, 0)                     # (no zero row for AP4 / DEL)
+            p.iconst(2, b)
+            p.ifz(4, "EQ", lambda: p.call("plpart_jitz", lambda: _jitz_body(p)))
+
+    def old():
+        p.iconst(4, 0)
+        for k in range(len(MOVING)):
+            p.st(L.YB + 4 * (MV_FLAG + k), 4)
+    p.iconst(12, YOUNG)
+    p.if_(0, "LT", 12, young, old, kind="i")
+
+
 def _diffuse_fast(p: Prog, L: C.Layout) -> None:
     """the post filter and the diffuser, stage by stage (see FIXED); L.W["tmp2"] holds _fast_ok's verdict."""
     p.geti(0, 4)
@@ -614,14 +750,18 @@ def _diffuse_fast(p: Prog, L: C.Layout) -> None:
     p.iconst(0, L.YB + 4 * LFO_ROW)
     p.seti(5, 0)
     K.ld(p, 11, WP)
-
+    K.ld(p, 13, Y1)                             # 2026-11-11 (plaits16): the LFO's row value in F13 through the
+    K.addk(p, 13, 13, 0.5)                      # loop, worked out again only when the LFO moves (the same add on
+                                                # the same Y1); the count in R15, the pointer's step a DEC
     def first():
         p.ldi(0, 0, 4)
-        N.svf_tick(p)
+        for d, a, op, b in ((9, 2, "*", 4), (6, 0, "-", 9), (9, 1, "*", 4), (6, 6, "-", 9), (6, 6, "-", 5),
+                            (6, 6, "*", 3), (9, 1, "*", 6), (7, 9, "+", 4), (4, 9, "+", 7), (9, 1, "*", 7),
+                            (8, 9, "+", 5), (5, 9, "+", 8)):
+            p.fop(d, a, op, b)                  # N.svf_tick's body, here (no call a sample)
         p.stpost(4, 8)                          # the accumulator starts at the input
         p.stpost(0, 8)
-        p.iconst(12, 1)
-        p.iop(11, 11, "-", 12)
+        p.dec(11, 11)
         p.iconst(12, MASK)
         p.iop(11, 11, "AND", 12)
         p.iconst(12, 31)
@@ -634,11 +774,10 @@ def _diffuse_fast(p: Prog, L: C.Layout) -> None:
             p.fop(8, 8, "-", 7)
             K.sv(p, Y0, 8)
             K.sv(p, Y1, 6)
+            K.addk(p, 13, 6, 0.5)
         p.ifz(0, "EQ", lfo_next)
-        K.ld(p, 13, Y1)
-        K.addk(p, 13, 13, 0.5)
         p.stpost(5, 13)
-    p.loop(L.W["n5"], K.HALF, first)
+    p.loop_r(15, K.HALF, first)
     K.sv(p, PS1, 4)
     K.sv(p, PS2, 5)
     p.iconst(12, K.HALF - 1)                    # wp0 = the first sample's (15 on from the last's, R11)
@@ -648,6 +787,7 @@ def _diffuse_fast(p: Prog, L: C.Layout) -> None:
     p.st(L.W["sb"], 0)
     K.sv(p, WP, 11)
     p.ipass(11, 0)
+    _jit(p, L)
     p.ld(0, L.W["tmp2"])
     p.ifz(0, "NE", lambda: _stages(p, L, False), lambda: _stages(p, L, True))
 

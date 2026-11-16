@@ -446,3 +446,47 @@ first); the I-registers I6/I7 are not saved by PERC (`SAVE_REGS`), do not use th
 memory move into a compute; `L.W["tmp"]` is the half-pair loop's counter in `machines._render`, `tmp2` is
 free; the python models run natively on the Mac with `MD_OS_BIN/MNM_OS/DT2_*` from `bench/run112.sh`
 (perf scripts: `~/GitHub/dn2mk2-scratch/perf/`, profvoice.py per call site).
+
+## PLAITS PART / STRG at 16 voices (2026-11-11, plaits16, branch claude/plaits16-a61ad4 on main 65edf070)
+
+Runner poly16 step (`DNFW_POLY16_ONLY=PART,STRG`, gpufarm): **PASS for both** (PART 16/16 sounding from block 2,
+STRG from block 4, no guard skip from block 4). Main's: PART sounds from block 10, STRG from block 6 (the
+deferred clear with CLEAR_SPREAD), so both FAILed there whatever the speed. Two parts:
+
+1. **STRG, bit-exact** (`plaits_string._string_loop`): the string's 16 samples in a loop for the worst case
+   (upsampler at unity, dispersion) and one for the rest (below unity, or the curved bridge: its samples cost
+   less even with the upsampler's work); the temporaries in registers instead of slot words (U_D, U_AP, U_MAIN,
+   U_OK no longer written a sample), the random generator in R13 and its scale in R14, the count in R15; line
+   addresses without re-masking WP / WP2 (kept in range), the mirror word as one store at +1024, the unity
+   crossfade's x 1.0 left out (every float, NaN's all-ones too, is its own product by 1.0); `_hermite` and
+   `_stretched` are subroutines, one copy for both loops (PERC's code room, +4 instructions a sample).
+   Runner: steady max a voice 22.9k -> 19.25k (mean 18.0k). Model (scratch strtest.py: 30 cases of HARM / TIMB /
+   MORP x notes 12..96 with retriggers, a knob change and note changes while ringing; 60 with the L1 render
+   scratch poisoned every block): output word for word identical to main with the same clear chunk.
+2. **The note start (declared: not bit-exact in time against main; after the start the same output)**:
+   - PART clears just in time (`plaits_part._jit`). A diffuser word read at offset base + j in a half that starts
+     t0 samples after the engine's start was written j samples earlier, so it holds Plaits' cleared 0 when
+     j > t0. While AGE (slot word 8, `plk.S_AGE`) < 3,456 each half zeroes, per line, the words j in
+     [max(t0 + 1, R - 17), R + 1] (R its tail, l - 1, or AP4 / DEL's integer offset at the half's larger LFO
+     value: the LFO moves once in 32 samples, by under 0.3 of a sample). In a fast half whose every read of a
+     line is of such words, nothing is stored: a fixed line reads a 17-word zero row in L1 instead (`_fixed`), AP4
+     and DEL run their stale loop (x = 0 + (0 - 0) frac = +0, x k = +0: the rest of one()'s operations).
+     Output: word for word that of a clear at the start (a reference tree with an immediate clear), 60 cases with
+     the voice's DDR area filled with random words first and a re-init (away to WS and back) at block 100, the
+     L1 scratch poisoned. Young blocks cost less than main's steady (model 15.9-17.9k vs ~19.3k); the young
+     period ends 108 blocks after the start.
+   - STRG's deferred clear: 800 words a half (`plk.CLR_CHUNK`), its 3,984 in 5 halves, rendering from the sixth
+     (main's 512: the ninth). A clear half (~8.1k + the voice's ~1.9k) stays under a sounding half, so sixteen
+     starts at once fit the guard (runner: clear blocks 19.9k a voice, steady 19.25k). An exact just-in-time
+     STRG is not cheap: its read offsets follow the note and the curved bridge (a factor 0..2.5 on the delay),
+     so it needs a test on every read (about 1 KB of code; there is none).
+3. Also PART, bit-exact: the post filter / LFO loop with the SVF tick inline, the count in R15, the row's LFO
+   value worked out only when the LFO moves.
+
+Golden (golden_all.py, 56 PERC machines, plain and with poisoned scratch): 54/56 identical, PART and STRG
+differ by the declared start only. Code: PERC 170,710 -> 171,922 B of its 172,032 B L2 span (46 B above the
+64 B of NOPs the span needs): any later PERC growth needs room found first.
+
+Traps: in run mode `loop_r` poisons its `one` register (R12 by default) every pass, so a loop keeping a constant
+in F12 passes another `one`; MODL is knob H (`plaits.MODL_K`) since 2026-11-11: a script setting knob 6
+renders WS.
