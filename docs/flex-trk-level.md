@@ -63,8 +63,30 @@ SUS 127, the sample at LEV 127):
 | ONESHOT | take peak 1.0, 1.8 % of frames at the recorder's clamp | 85.6 % at the clamp |
 | WaveTone | take peak 1.0, 7.7 % at the clamp | 60.0 % at the clamp |
 
-Playback peaks stay under 1.8 at the voice and 0.16 at the amp out. GAIN (-24..+38 dB) and H's CLIP meter are the
-way down for such a source. GAIN +38 clips any normal source by construction.
+Playback peaks stay under 1.8 at the voice and 0.16 at the amp out. GAIN +38 clips any normal source by construction.
+
+### v0.54.3: the take keeps 18 dB of room
+
+The owner chose to fix this. A FLEX take of a track (GAIN set, SRC TRK) is now stored at 1/8 of its level and
+played 8 times louder (`TAKE_HEAD`), so GAIN 0 still plays at the source's level:
+
+- **The mark.** Bit 17 of the buffer half's steps word, or of a slot entry's format word, marks the take. A voice
+  keeps it in its `sla` word as bit 30 and multiplies its LEV by 8 once a block (`render()`).
+- **The meter and THRES** still read the peak at the full level.
+- **Saved takes.** A take saved to a pool slot is normalised and written as plain int16, so it plays as stored,
+  with no mark.
+
+Measured on the fixed runner, step 3f:
+
+| check | v0.54.2 (no headroom) | v0.54.3 |
+|---|---|---|
+| hot source, GAIN 0: frames at the clamp | peak 1.0, FAIL | peak 0.17, none, PASS |
+| hot take: 18.0 dB over the same take at GAIN -18 | +17.99 | +18.01, PASS |
+| saved (plain int16) entry: 18.06 dB under the marked take | 0 dB, FAIL | -18.06, PASS |
+
+A hot track's take plays louder than its source, because its VOL, SUS, LEVEL and LEV count once more. GAIN 0 is the
+source's level at the init sound. STRETCH's renderer (`render_stretch`) does not apply the mark. Only FLEX tracks
+reach the buffers, and FLEX plays through `render()`.
 
 ## For upstream
 

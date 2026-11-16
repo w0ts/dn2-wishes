@@ -3100,8 +3100,12 @@ def step_flexlevel(init, sound, machines) -> dict:
     def rms(x):
         return _m.sqrt(sum(v * v for v in x) / max(1, len(x)))
 
-    def run(gidx):
+    hot = {90: 0x7F00, 84: 0x7F00}                  # v0.54.3's hot source: VOL 127, AMP SUS 127 (and LEV, LEVEL 127)
+
+    def run(gidx, loud=False, saved=False):
         state = {"b": 0}
+        snd = {**amp, **(hot if loud else {})}
+        lp = {**loop, **({SM.LEV_REC: 127} if loud else {})}
 
         def at_dispatch(r):
             b = state["b"]
@@ -3109,14 +3113,18 @@ def step_flexlevel(init, sound, machines) -> dict:
                 command(r, 1, SM.CMD_NOW, src=2, chan=gidx << 24, dest=0)
             if b == n:
                 command(r, 2, SM.CMD_STOP)
+            if saved and b == n + gap - 1:          # the entry as a save writes it: int16, no mark
+                m2.poke(r.state, dsp.SMP_POOL_DDR + 8 + 16 * SM.REC_FIRST + 12, SM.FMT_I16)
             state["b"] += 1
 
         def fb(b):
             if b < n + gap:
-                f = base_frame(sound, machines, t0=ONE, trigger=b == 1, overrides={**amp, **smp_words(loop)})
+                f = base_frame(sound, machines, t0=ONE, trigger=b == 1, overrides={**snd, **smp_words(lp)})
             else:
-                take = {**loop, SM.SAMP_REC: SM.REC_FIRST + 1}
-                f = base_frame(sound, machines, t0=ONE, trigger=b == n + gap, overrides={**amp, **smp_words(take)})
+                take = {**lp, SM.SAMP_REC: SM.REC_FIRST + 1}
+                f = base_frame(sound, machines, t0=ONE, trigger=b == n + gap, overrides={**snd, **smp_words(take)})
+            if loud:
+                f.header(FR.LEVEL, 0, 0x7F00)
             for t in range(16):                         # each track to its own slot of 0x1c244d's buffer
                 f.put(0xA5A + 2 * t, t)                 # (docs/link-research.md; all zero sums every
             return f.to_bytes()                         # track, unset buffers too, into TRK1: NaN)
@@ -3141,8 +3149,12 @@ def step_flexlevel(init, sound, machines) -> dict:
                 "source_render_rms": rms(ren[src]), "take_render_rms": rms(ren[back]),
                 "source_out_rms": rms(flat[src]), "take_out_rms": rms(flat[back]),
                 "take_rms": rms(take[per * (n - w): per * n]), "take_frames": ent[1],
-                "take_peak": max((abs(v) for v in take), default=0.0)}
+                "take_peak": max((abs(v) for v in take), default=0.0),
+                "take_clipped": sum(1 for v in take if abs(v) >= 0.9999)}
     unity, recorder, minus6 = run(SM.GAIN_ZERO), run(0), run(SM.GAIN_ZERO - 6)
+    loud, saved = run(SM.GAIN_ZERO, loud=True), run(SM.GAIN_ZERO, saved=True)
+    quiet = run(SM.GAIN_ZERO - 18, loud=True)
+    head_db = 20 * _m.log10(8.0)                    # v0.54.3's requirement: stored x 1/8, played x 8 (SM.TAKE_HEAD)
     checks = {
         f"2026-11-15: a FLEX take of a track (GAIN 0) at its source's level as the unit measures it: the take's "
         f"render against the source's at {RUNNER_TO_UNIT_DB:+.2f} dB (the runner's offset to the unit), within 1 dB":
@@ -3155,9 +3167,19 @@ def step_flexlevel(init, sound, machines) -> dict:
         "v0.50: GAIN -6 records the take 6 dB under GAIN 0's (its frames' RMS, within 0.1 dB), unclipped":
             unity is not None and minus6 is not None and unity["take_peak"] < 1.0
             and abs(20 * _m.log10((minus6["take_rms"] or 1e-30) / (unity["take_rms"] or 1e-30)) + 6.0) <= 0.1,
+        "v0.54.3: a hot source (VOL, LEVEL, SUS, LEV 127) records unclipped at GAIN 0 (no frame at the clamp)":
+            loud is not None and loud["take_clipped"] == 0,
+        # (not at its source's level: a track's own VOL, SUS, LEVEL and LEV count once more on the take, so GAIN 0
+        # is the source's level at the init sound, the owner's calibration point; a hot track's take is louder)
+        ".. and plays linearly: 18.0 dB over the same take at GAIN -18 (within 0.1 dB, out of the amp)":
+            loud is not None and quiet is not None and abs(loud["out_db"] - quiet["out_db"] - 18.0) <= 0.1,
+        f"v0.54.3: the take with its entry as a save writes it (int16, no mark) plays {head_db:.2f} dB under the "
+        f"marked take (within 0.1 dB): a saved take is played as stored":
+            unity is not None and saved is not None and abs(saved["out_db"] - unity["out_db"] + head_db) <= 0.1,
     }
     return {"ok": all(checks.values()), "checks": checks,
-            "numbers": {"unity": unity, "recorder": recorder, "minus6": minus6}}
+            "numbers": {"unity": unity, "recorder": recorder, "minus6": minus6, "loud": loud, "quiet": quiet,
+                        "saved": saved}}
 
 
 def show_flexlevel(step) -> None:

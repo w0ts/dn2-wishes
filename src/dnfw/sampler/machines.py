@@ -199,6 +199,17 @@ REC_GAIN = 0x2DF7F4                        # v0.50: a FLEX take's GAIN index (0 
 # out 17.86 dB under its source; the User: GAIN 0 is the source's level on the unit. So x 10^(17.86 / 20)
 TRK_UNITY_UNIT_DB = 17.86                  # the unit's shortfall at 2.339 (unit-now, 2026-11-15)
 TRK_UNITY = 0.1696 / 0.0725 * 10.0 ** (TRK_UNITY_UNIT_DB / 20.0)   # 18.28 (+25.2 dB): x the 1 / TRK_GAIN
+# 2026-11-15 (v0.54.3, the owner: "Fix in v0.54.3"): with TRK_UNITY at the unit's level a hot track filled the int16
+# take (7.7 % of a WaveTone's frames at the clamp, GAIN 0). A FLEX take of a track (GAIN set, SRC TRK) is stored
+# TAKE_HEAD times lower and played TAKE_HEAD times louder: GAIN 0 still plays at the source's level, with 18 dB of
+# room in the take. The mark: bit TAKE_HEAD_BIT of the buffer half's steps word (BUF_DIR, steps & 0x7FFF) or of a
+# slot entry's format word (bits 0..7 the format, 8..15 slices, 16 the slice area); a voice keeps it in its 'sla'
+# as SLA_HEAD (bit 30: a take has no slice table; tempo() reads a take's steps as sla & 0x7FFF). The meter and THRES
+# read the peak at the full level, as before. A take saved to a pool slot is normalised (smp_save_recording) and its
+# entry written as plain int16: no mark, played as it is.
+TAKE_HEAD = 8.0
+TAKE_HEAD_BIT = 1 << 17
+SLA_HEAD = 1 << 30
 GAIN_ZERO = 25                             # the index of 0 dB: 1..63 is -24..+38 dB
 CMD_OFFSET = 0xF00                         # the command block in the pool's directory page:
 CMD_WORDS = 6                              #   seq, cmd, src, chan, thres (0..32767), dest << 24 | frames

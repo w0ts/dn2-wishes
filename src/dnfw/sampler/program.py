@@ -432,12 +432,15 @@ def start(p: Prog, L: Layout) -> None:
                 p.ldi(5, 0, 1)
                 p.ldi(6, 1, 1)
                 p.ldi(13, 2, 1)
+                p.iconst(8, SM.TAKE_HEAD_BIT)        # 2026-11-15 (v0.54.3): a TRK take's mark, kept in the
+                p.iop(8, 13, "AND", 8)               # format word below as a slot's would be
                 p.iconst(12, 0x7FFF)
                 p.iop(13, 13, "AND", 12)
                 p.iconst(12, 1)
                 p.iop(13, 13, "MAX", 12)     # 1..32767 steps (0 would divide by it)
                 p.fconst(7, 1.0)
-                p.iconst(8, SM.FMT_I16)
+                p.iconst(12, SM.FMT_I16)
+                p.iop(8, 8, "OR", 12)
             p.if_(4, "GE", 12, buf_entry, pool_entry, kind="i")
             vs(p, "base", 5)
             vs(p, "frames", 6)
@@ -470,6 +473,8 @@ def start(p: Prog, L: Layout) -> None:
             # them. (slice_bounds reads 'sla' only with slices, which a take never has)
             p.ld(13, C["x"])
             p.ifz(13, "NE", lambda: (p.iconst(12, -0x80000000), p.iop(9, 13, "OR", 12), p.iconst(12, 0), vs(p, "nsl", 12)))
+            p.lsh(12, 8, 31 - 17)            # 2026-11-15 (v0.54.3): the entry's TAKE_HEAD_BIT, to the sign
+            p.ifz(12, "LT", lambda: (p.iconst(12, SM.SLA_HEAD), p.iop(9, 9, "OR", 12)))
             vs(p, "sla", 9)
             p.iconst(12, 0xFF)
             p.iop(8, 8, "AND", 12)
@@ -481,6 +486,18 @@ def start(p: Prog, L: Layout) -> None:
         p._branch(lambda: s32(p.r[4]) < s32(p.r[0]), "LT", inrange, None)
     p.e("COMP(R0, R12);")
     p._branch(lambda: p.r[0] == p.r[12], "EQ", found, None)
+
+
+def head_mark(p: Prog, C: dict, d: int) -> None:
+    """2026-11-15 (v0.54.3): Rd = SM.TAKE_HEAD_BIT for a take stored 1 / TAKE_HEAD of its level (a GAIN index set,
+    a track's source: the record loop's R13), else 0. After settings(). Clobbers R12."""
+    p.ld(d, SM.REC_GAIN)
+
+    def gained():
+        p.ld(d, C["rsrc"])
+        p.iconst(12, 2)
+        p.if_(d, "GE", 12, lambda: p.iconst(d, SM.TAKE_HEAD_BIT), lambda: p.iconst(d, 0), kind="i")
+    p.ifz(d, "NE", gained)
 
 
 def entry_check(p: Prog, L: Layout) -> None:
@@ -1203,6 +1220,9 @@ def render(p: Prog, L: Layout) -> None:
     p.ldi(1, 0, 0)
     p.ld(0, C["lev"])
     p.fop(0, 0, "*", 1)
+    v(p, 9, "sla")                            # 2026-11-15 (v0.54.3): a TRK take (SLA_HEAD) plays TAKE_HEAD louder
+    p.lsh(9, 9, 1)
+    p.ifz(9, "LT", lambda: (p.fconst(12, SM.TAKE_HEAD), p.fop(0, 0, "*", 12)))
     p.st(C["tmp"], 0)                         # LEV with the make-up (C['lev'] stays: a retrigger renders twice)
     if L.line:
         p.iconst(0, LINE_NONE)
@@ -1970,7 +1990,9 @@ def recorder(p: Prog, L: Layout) -> None:
                     p.sti(1, 1, 7)            # frames: none yet
                     p.fconst(7, 1.0)
                     p.sti(2, 1, 7)            # rate 1
+                    head_mark(p, C, 13)       # 2026-11-15 (v0.54.3): a TRK take's mark
                     p.iconst(7, SM.FMT_I16)
+                    p.iop(7, 7, "OR", 13)
                     p.sti(3, 1, 7)
 
                 def buf_dest():
@@ -1993,6 +2015,8 @@ def recorder(p: Prog, L: Layout) -> None:
                     p.lsh(7, 7, -16)
                     p.iconst(12, 0x7FFF)
                     p.iop(7, 7, "AND", 12)
+                    head_mark(p, C, 13)       # 2026-11-15 (v0.54.3): and a TRK take's mark
+                    p.iop(7, 7, "OR", 13)
                     p.sti(2, 1, 7)
                 p.if_(5, "GE", 12, buf_dest, pool_dest, kind="i")
                 p.iconst(7, 0)
@@ -2230,6 +2254,10 @@ def recorder(p: Prog, L: Layout) -> None:
     p.ld(5, C["rpk"])                         # the block's peak (0 above)
     # v0.52 merge: the GAIN index (v0.50) once, in R7 (only settings() writes it): R8 holds rchan for every frame
     p.ld(7, SM.REC_GAIN)
+    # 2026-11-15 (v0.54.3): a TRK take with GAIN is stored 1 / TAKE_HEAD of its level (R13), the peak (meter, THRES)
+    # taken at the full level as before
+    p.fconst(13, 1.0)
+    p.ifz(7, "NE", lambda: (p.iconst(12, 2), p.if_(10, "GE", 12, lambda: p.fconst(13, 1.0 / SM.TAKE_HEAD), kind="i")))
 
     def frame():
         p.ldi(4, 32, 1)                       # R
@@ -2251,15 +2279,18 @@ def recorder(p: Prog, L: Layout) -> None:
             p.iconst(12, 2)                   # (the source in R10, loaded above: R8 stays rchan)
             p.if_(10, "GE", 12, lambda: (p.fconst(12, SM.TRK_UNITY), p.fop(3, 3, "*", 12)), kind="i")
         p.ifz(7, "NE", gained)
+        p.fop(9, 3, "*", 13)                  # v0.54.3: the stored frame (R13: 1 or 1 / TAKE_HEAD)
         p.fconst(12, 0.999969)
         p.fop(3, 3, "MIN", 12)
+        p.fop(9, 9, "MIN", 12)
         p.fconst(12, -1.0)
         p.fop(3, 3, "MAX", 12)
+        p.fop(9, 9, "MAX", 12)
         p.fconst(12, 0.0)
         p.fop(6, 12, "-", 3)
         p.fop(6, 6, "MAX", 3)
         p.fop(5, 5, "MAX", 6)
-        p.stpost(4, 3)                        # staged as floats
+        p.stpost(4, 9)                        # staged as floats
     p.loop_r(11, 32, frame)
     p.st(C["rpk"], 5)
     p.iconst(6, 32)
