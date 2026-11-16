@@ -560,7 +560,7 @@ def scenario_line(a, report, sym):
 
 # 2026-11-12: our own pages (md_page.c, smp_page.c) draw their knobs themselves and call mv_knob for each
 OURS = (("MACHINEDRUM", 5), ("SOPHIE", 20), ("PLAITS", 18), ("TB303", 19), ("DRONE", 21), ("ANALOG2", 22),
-        ("MONOMACHINE", 6), ("ONESHOT", 8), ("SLICE", 13))
+        ("MONOMACHINE", 6), ("ONESHOT", 8), ("SLICE", 13), ("JUNO", 23))   # 2026-11-13: + JUNO
 
 
 LFO_ON = ("MACHINEDRUM", "MONOMACHINE")       # a real LFO, run by the evaluator, on these two
@@ -686,43 +686,62 @@ def scenario_ours(a, report, sym):
         drawn = max(pages, key=len) if pages else {}
         check(f"{name}: its pages call mv_knob for their knobs", sum(map(len, pages)) >= 4,
               f"{[len(p) for p in pages]} knobs")
-        for _ in range(3):                      # back to the page with the most knobs
-            if dict((r, (x, y, w, lo, hi)) for x, y, w, r, lo, hi in knobs) == drawn:
-                break
-            knobs.clear()
-            panel.tap((0, 1))
-            panel.settle(40_000_000)
-        cand = [r for r in drawn if 0 < record(m, r)[1] <= 100 and drawn[r][4] > drawn[r][3]]
+
+        def to_page(want_drawn):
+            for _ in range(3):
+                if dict((r, (x, y, w, lo, hi)) for x, y, w, r, lo, hi in knobs) == want_drawn:
+                    return True
+                knobs.clear()
+                panel.tap((0, 1))
+                panel.settle(40_000_000)
+            return dict((r, (x, y, w, lo, hi)) for x, y, w, r, lo, hi in knobs) == want_drawn
+
+        def movable(page):
+            return [r for r in page if 0 < record(m, r)[1] <= 100 and page[r][4] > page[r][3]]
+
+        def prove(rid, entry, tag):
+            """the knob's heard value moved: exactly moving.c's line in its row; none once heard = set past the linger"""
+            x, y, w, lo, hi = entry
+            s = record(m, rid)[1]
+            setv = (struct.unpack(">I", m.read(STATE + 4 * idx(0, s), 4))[0] + 0x8000) >> 16
+            heard = lo + (hi - lo) * 3 // 4
+            if heard == setv:
+                heard += 0x100
+            w16(m, OUT + 2 * idx(0, s), heard)
+            m.write(FRAMES, struct.pack(">I", m.long(FRAMES) + 100))
+            panel.settle(30_000_000)
+            at = (min(max(heard, lo), hi) - lo) * (w - 1) // (hi - lo)
+            frm = (w - 1) // 2 if 2 * record(m, rid)[4] == lo + hi else 0
+            want = list(range(min(frm, at), max(frm, at) + 1))
+            px = row_lit(x, y, w)
+            shots[f"{name}-{tag}"] = panel.screen(f"{name}-{tag}")
+            check(f"{name}{' ' + tag if tag != 'line' else ''}: record {rid} (slot {s}) heard {heard:#06x} of "
+                  f"{lo:#x}..{hi:#x}: the line in row {y}", px == want, f"lit {px}, want {want[0]}..{want[-1]}")
+            w16(m, OUT + 2 * idx(0, s), setv)
+            m.write(FRAMES, struct.pack(">I", m.long(FRAMES) + 700))
+            panel.settle(30_000_000)
+            m.write(FRAMES, struct.pack(">I", m.long(FRAMES) + 700))
+            panel.settle(30_000_000)
+            px = row_lit(x, y, w)
+            check(f"{name}{' ' + tag if tag != 'line' else ''}: heard = set, 400 ms later: no line", px == [], f"{px}")
+            return {"record": rid, "line": [x, y, w], "range": [lo, hi]}
+
+        to_page(drawn)                          # back to the page with the most knobs
+        cand = movable(drawn)
         if not cand:
             check(f"{name}: a knob to modulate", False)
             continue
-        rid = cand[0]
-        x, y, w, lo, hi = drawn[rid]
-        s = record(m, rid)[1]
-        setv = (struct.unpack(">I", m.read(STATE + 4 * idx(0, s), 4))[0] + 0x8000) >> 16
-        heard = lo + (hi - lo) * 3 // 4
-        if heard == setv:
-            heard += 0x100
-        w16(m, OUT + 2 * idx(0, s), heard)
-        m.write(FRAMES, struct.pack(">I", m.long(FRAMES) + 100))
-        panel.settle(30_000_000)
-        at = (min(max(heard, lo), hi) - lo) * (w - 1) // (hi - lo)
-        frm = (w - 1) // 2 if 2 * record(m, rid)[4] == lo + hi else 0
-        want = list(range(min(frm, at), max(frm, at) + 1))
-        px = row_lit(x, y, w)
-        shots[f"{name}-line"] = panel.screen(f"{name}-line")
-        check(f"{name}: record {rid} (slot {s}) heard {heard:#06x} of {lo:#x}..{hi:#x}: the line in row {y}",
-              px == want, f"lit {px}, want {want[0]}..{want[-1]}")
-        w16(m, OUT + 2 * idx(0, s), setv)
-        m.write(FRAMES, struct.pack(">I", m.long(FRAMES) + 700))
-        panel.settle(30_000_000)
-        m.write(FRAMES, struct.pack(">I", m.long(FRAMES) + 700))
-        panel.settle(30_000_000)
-        px = row_lit(x, y, w)
-        check(f"{name}: heard = set, 400 ms later: no line", px == [], f"{px}")
-        rep[name] = {"knobs": [len(p) for p in pages], "record": rid, "line": [x, y, w], "range": [lo, hi]}
-        if name in LFO_ON:
-            rep[name]["lfo"] = lfo_moves(m, panel, sym, name, s, x, y, w, row_lit, shots)
+        rep[name] = {"knobs": [len(p) for p in pages], **prove(cand[0], drawn[cand[0]], "line")}
+        # 2026-11-13: a sample machine's page 2 bottom row (E, F, G, H's pill): its lines on row 7 (MV_LINE: y 9 - 2)
+        bottom = [(p, r) for p in pages for r in movable(p) if p[r][1] == 7]
+        if bottom:
+            page, rid = bottom[0]
+            check(f"{name}: back on the page with the bottom row", to_page(page))
+            rep[name]["bottom"] = prove(rid, page[rid], "bottom")
+        if name in LFO_ON:                      # the first knob's: LFO1 at full depth on its slot
+            to_page(drawn)
+            x, y, w, _lo, _hi = drawn[cand[0]]
+            rep[name]["lfo"] = lfo_moves(m, panel, sym, name, record(m, cand[0])[1], x, y, w, row_lit, shots)
     report["ours"] = {"pages": rep, "screens": shots}
 
 

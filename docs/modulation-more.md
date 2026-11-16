@@ -126,11 +126,17 @@ centre for a parameter whose default is mid-range. Shown while heard != set, kep
   every knob's row free before anything is modulated; one knob's heard value moved gives exactly
   the line; LFO1 aimed at Machinedrum's AMD and at MONOMACHINE's WAV1 at full depth, run by the
   frame's evaluator, moves the line by itself (0.1 s apart: ends 8, 17, 16, 7, 0; 20, 19, 11, 2, 0
-  of 20) and it leaves once LFO1's depth is zero.
+  of 20) and it leaves once LFO1's depth is zero. JUNO (type 23) draws through the same
+  Monomachine page code, so its knobs have the line too.
+- **A sample machine's PAGE 2 bottom row (2026-11-13)** [E]: E, F, G (labels or WERP's icons) and H
+  (LEV's pill) have no widgets, but their controls move like any other: their lines go on row 7,
+  above the labels and the pill (rows 0..6) and below the waveform and its markers (from row 8),
+  21 px from each place's x + 2 (`MV_LINE`'s y 9, `mv_knob`'s 7). The `ours` scenario moves a bottom-row control's
+  heard value on its own (the "bottom" check), besides the page's first knob.
 - **Not shown:** what the DSP modulates itself (envelopes, key tracking inside the DSP, our DSP
-  machines' internal modulation); PAGE 2 of a sample machine shows the line on its top row only
-  (its bottom row is labels and LEV's pill, no widgets); PERC's fallback grid (page.c, drawn only
-  when the Machinedrum's fonts are missing from the build) has none.
+  machines' internal modulation); the INSERT pages (their values are the inserts' own, sent over the
+  link, not frame parameters: no LFO or route reaches them, so no heard value can differ); PERC's
+  fallback grid (page.c, drawn only when the Machinedrum's fonts are missing from the build) has none.
 
 ### Cost, in the UI task [E, FLTR page]
 

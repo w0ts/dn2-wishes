@@ -2105,6 +2105,11 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
         int top, v = value(view, ids[7], &top);
         w_pill(c, CELL_X(3), 0, v, top);
     }
+    /* 2026-11-13: the bottom row's heard-value lines (E, F, G and H's pill), on row 7: above the labels and the
+     * pill (rows 0..6), below the waveform and its markers (cy 21 - SMP_WAVE_AMP - 2 = 8) */
+    for (int i = 4; i < 8; i++)
+        if (ids[i])
+            MV_LINE(c, CELL_X(i - 4), 9, ids[i]);
     /* v0.50 (impbox: "p-locks are not visible on sample page 2"): a locked control's place on
      * the bottom row inverted, as page 1's cells are (cell()); v0.20..v0.49 drew this row's
      * labels and LEV's pill without looking */
