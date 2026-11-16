@@ -1267,8 +1267,9 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
         layout[name] = csyms[name]
     for name in ("scope_up", "scope_taps", "scope_ring", "scope_pos", "smp_rx_sh"):   # AMP page 2's scope (csrc/scope)
         layout[name] = csyms[name]
-    for name in ("ls_commits", "ls_reverts", "live_rows", "set_bits"):   # LIVE SELECT (csrc/msel)
+    for name in ("ls_commits", "ls_reverts", "live_rows", "set_bits", "set_flag_put"):   # LIVE SELECT (csrc/msel; gate: livesel)
         layout[name] = csyms[name]
+    layout["msel_draw"] = csyms["msel_draw"]    # MACHINE SEL in two columns (csrc/msel/msel.c; gate: msel, colsw)
     for name in ("eng_mask", "eng_tests", "eng_lists", "eng_n"):   # the preset browser's ENGINE filter (csrc/presets)
         layout[name] = csyms[name]
     layout["mtr_ram"] = pages.METER_RAM      # the system meter's state block (csrc/meter/meter.c MTR_*)

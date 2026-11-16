@@ -73,6 +73,12 @@ failure:
 6y. **the envelope clone** (2026-11-12, `sharc_matrix_env.py --quick`): the model ENV1/ENV2 run against stock's own AMP
    envelope in Elektron's DSP code (the SHARC runner), block by block: ADSR and AHD, a note-off in the attack, RSET
    off, the fastest knobs.
+6m. **MACHINE SEL in two columns** (`emu_waverider_menu.py`, csrc/msel/msel.c): after every key the cell drawn
+   selected is the row stock's own reader puts under the cursor, over every machine row and every filter row;
+   FUNC + SYN switches the page and leaves it up; YES commits the type drawn selected; NO closes it.
+6m2. **LIVE SELECT** (`emu_waverider_menu.py`, csrc/msel/msel.c, docs/live-select.md): a moved cursor commits
+   nothing until it has rested, then the machine under it; NO puts the machine and the whole sound back byte for
+   byte and closes; YES keeps the previewed machine; with the setting off, MACHINE SEL is stock's.
 6s. **DIRECT JUMP** (`emu_jump.py`, docs/jump.md): the sequencer ticked through stock's own ISR;
    off is stock's state every tick; on, every track goes on from its own step (Elektron's rule); a cue
    that is not the PTN view's stays stock's; the setting persists in its sector.
@@ -217,6 +223,10 @@ TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platfo
          "test/test_inserts_c.py",                            # the ColdFire's packed values against design.pack
          "test/test_wishes.py", "test/test_wishes_c.py", "test/test_wishes_items_c.py", "test/test_wishes_pst.py", "test/test_matrix_c.py"]      # the wishes record: its stubs, its C on the host
 HIT = re.compile(r"^\s+([0-9a-f]{8}):", re.M)
+# stock's MachineListView (csrc/msel/msel.c): its class, the cursor's row (dividers counted), the page (0 the
+# machines, 1 the filters), and the reader of the type under its cursor (stock's YES reads it)
+MSEL_VT, MSEL_CURSOR, MSEL_PAGE, MSEL_ROW_TYPE = 0x401DFDE8, 420, 424, 0x4005B162
+MSEL_ROWS = 6                                       # msel.c ROWS: a column's cells; two columns a screen
 
 # v0.38 (owner, 2026-11-01): the steps by name, for --only and --list, in the order a full run
 # takes them. The quick ones, and those new code most often fails, first, so a failure shows
@@ -254,6 +264,8 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("slice", "SLICE menus and SLICES keys (ColdFire)"),
        ("samplist", "sample list, browser, playhead (ColdFire)"),
        ("colsw", "MACHINE SEL columns, SYN held (ColdFire)"),
+       ("msel", "MACHINE SEL in two columns (ColdFire)"),
+       ("livesel", "LIVE SELECT (ColdFire)"),
        ("machines", "every machine through MACHINE SEL's own list; a power-on with ours on the tracks (ColdFire)"),
        ("drive", "+DRIVE browser (ColdFire)"),
        ("drivenav", "+DRIVE keys and long names (ColdFire)"),
@@ -607,6 +619,8 @@ def main() -> int:
                               ("smp_machine_commit", "SAMP kept across sample machines (ColdFire)"),
                               ("smp_knob_at", "FUNC + turn (ColdFire)"),
                               ("smp_pl_on", "per-project pools (ColdFire)"),
+                              ("msel_draw", "MACHINE SEL in two columns (ColdFire)"),
+                              ("ls_commits", "LIVE SELECT (ColdFire)"),
                               ("jmp_on", "DIRECT JUMP (ColdFire)")):
                 if re.search(rf"\b{sym}\b", csrc_text) and sym not in lay:
                     gate(what, False, f"{sym} is in the C but not in the layout: the check cannot run")
@@ -2408,6 +2422,195 @@ def main() -> int:
                 return good, ("MACHINE SEL: RIGHT from GRID shows the FLTR column from its top, LEFT returns "
                               "to GRID; SYN held shows the page's values" if good else why)
             later("colsw", "MACHINE SEL columns, SYN held (ColdFire)", "MACHINE SEL columns, SYN held (ColdFire)", [r_cmd, sorted(EMU_ENV.items())], r_body)
+
+        # 6m. MACHINE SEL in two columns (csrc/msel/msel.c; upstream's step, its state read from stock's own view: this
+        # series' msel.c keeps none). Track 1 on WaveTone, MACHINE SEL opened. After every key the row stock's own
+        # reader (0x4005b162(view)) puts under the cursor is the row drawn selected (the view's cursor +420 into
+        # dnfw.waverider.msel's rows, what msel_draw draws): DOWN through every row of the machine page and UP back
+        # through all of them (every listed type seen), FUNC + SYN to the filter page (stock's RIGHT: still up, page 1)
+        # and DOWN through its rows, FUNC + SYN back (page 0); the selected cell inverted, both columns drawn, each
+        # page's dot; YES commits the type drawn selected (stock's commit, unchanged); NO closes it.
+        if "msel_draw" in lay:
+            from dnfw.waverider import msel as _ms      # noqa: PLC0415
+            kit = 0x4210D08C
+            ty = kit + 52 + 0xDE
+            m_rows, f_rows = _ms.machine_rows(), _ms.filter_rows()
+            mreads: list[str] = []
+            mcalls: list[str] = []
+
+            def mrd(label, off):                        # OFF in MACHINE SEL's view ("" while it is not up)
+                mreads.append(label)
+                return f"view:{MSEL_VT:#x}:{off}:4"
+
+            def both(label):                            # the view's cursor, and stock's row under it
+                mcalls.append(label)
+                return f"{mrd(label, MSEL_CURSOR)},call:{MSEL_ROW_TYPE:#x}:view@{MSEL_VT:#x}"
+            ms = [f"wait:3,poke:{ty:#x}:01,wait:4,tap:2,wait:6,func-src,wait:20,png:m0",
+                  mrd("shown open", 0), mrd("page open", MSEL_PAGE), both("open")]
+            ms += [f"down,wait:8,{both(f'down {i}')},png:d{i}" for i in range(len(m_rows))]
+            ms += ["png:m1"]
+            ms += [f"up,wait:8,{both(f'up {i}')}" for i in range(len(m_rows))]
+            ms += ["func-src,wait:20,png:f0", mrd("shown filters", 0), mrd("page filters", MSEL_PAGE),
+                   both("filters")]
+            ms += [f"down,wait:8,{both(f'filter down {i}')}" for i in range(len(f_rows))]
+            ms += ["func-src,wait:20,png:b0", mrd("shown back", 0), mrd("page back", MSEL_PAGE), both("back")]
+            ms += ["down,wait:8", both("pick"), "yes,wait:20,types", "no,wait:20", mrd("shown no", 0)]
+            mjs = work / "msel.json"
+            ms_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
+                      "--snapshot", snap, "--steps", ",".join(ms), "--png-dir", work / "msel", "--json", mjs]
+
+            def ms_body(tdir):
+                rc, out = run("machine sel two columns", ms_cmd, logs, env=EMU_ENV, trace=tdir)
+                why, good = out[-800:], False
+                if rc == 0 and mjs.exists():
+                    import numpy as np                     # noqa: PLC0415
+                    from PIL import Image                  # noqa: PLC0415
+                    r = json.loads(mjs.read_text())
+
+                    def signed(h):
+                        if not h:
+                            return None
+                        v = int(h, 16)
+                        return v - (1 << 32) if v & 0x80000000 else v
+                    got = dict(zip(mreads, (signed(v) for k_, v in r["memory"].items() if k_.startswith("0x"))))
+                    stock_rows = dict(zip(mcalls, (c["d0"] for c in r["direct_calls"])))
+                    filt = {k_ for k_ in mcalls if k_ == "filters" or k_.startswith("filter down ")}
+
+                    def drawn_of(k_):                       # the row msel_draw draws selected: rows[cursor]
+                        rows, at = (f_rows if k_ in filt else m_rows), got.get(k_)
+                        return rows[at] if at is not None and 0 <= at < len(rows) else None
+                    drawn = {k_: drawn_of(k_) for k_ in mcalls}
+                    differ = {k_: (drawn[k_], stock_rows.get(k_)) for k_ in mcalls if drawn[k_] != stock_rows.get(k_)}
+                    walked = {drawn[k_] for k_ in mcalls if k_ == "open" or k_.startswith(("down ", "up "))}
+                    fwalked = {drawn[k_] for k_ in filt}
+                    types = r["memory"].get(next((k_ for k_ in r["memory"] if k_.startswith("types@")), ""), [None])
+
+                    def lit(name, x0, y0, x1, y1):          # screen pixels, y from the top, both ends in
+                        im = np.array(Image.open(r["screens"][name]).convert("L")) > 128
+                        k = im.shape[1] // 128
+                        return float(im[y0 * k:(y1 + 1) * k, x0 * k:(x1 + 1) * k].mean())
+
+                    def selected(name, at):                 # the cell of row AT on its screen of twelve
+                        c = (at or 0) % (2 * MSEL_ROWS)
+                        x, y = 2 + (c // MSEL_ROWS) * 61, 12 + 8 * (c % MSEL_ROWS)
+                        return lit(name, x, y - 1, x + 56, y + 4)
+                    unlit = {f"down {i}": round(selected(f"d{i}", got.get(f"down {i}")), 2) for i in range(len(m_rows))
+                             if selected(f"d{i}", got.get(f"down {i}")) <= 0.5}
+                    facts = {"MACHINE SEL up, the machine page": got.get("shown open") is not None
+                             and got.get("page open") == 0,
+                             "every row drawn selected is stock's cursor row": not differ,
+                             "the machine page's walk saw every listed type": walked == set(m_rows) - {_ms.DIVIDER},
+                             "the selected cell inverted": selected("m0", got.get("open")) > 0.5,
+                             # the cell stock's cursor is on drawn inverted after every DOWN (FLEX and MIDI included:
+                             # their dividers are stock's)
+                             "every DOWN: the cursor's cell drawn inverted": not unlit,
+                             "both columns drawn": lit("m1", 1, 10, 60, 60) > 0.03 and lit("m1", 63, 10, 122, 60) > 0.03,
+                             "the machine page's dot": lit("m0", 124, 52, 127, 55) > 0.9,
+                             "FUNC + SYN: the filter page, still up": got.get("shown filters") is not None
+                             and got.get("page filters") == 1,
+                             "the filter page's dot": lit("f0", 124, 58, 127, 61) > 0.9,
+                             "the filter page's walk saw every listed filter": fwalked == set(f_rows),
+                             "FUNC + SYN again: the machine page": got.get("shown back") is not None
+                             and got.get("page back") == 0,
+                             "YES commits the type drawn selected": types[0] == drawn["pick"],
+                             "NO closes it": got.get("shown no") is None}
+                    good = all(facts.values())
+                    why = (f"{ {k_: v for k_, v in facts.items() if not v} } differ={differ} unlit={unlit} got={got} "
+                           f"types={types}")
+                return good, (f"MACHINE SEL in two columns: {len(m_rows)} machine rows and {len(f_rows)} filter rows, "
+                              "the row drawn selected stock's cursor row after every key; FUNC + SYN switches the "
+                              "page; YES commits the row drawn selected; NO closes it" if good else why)
+            later("msel", "MACHINE SEL in two columns (ColdFire)", "MACHINE SEL in two columns (ColdFire)",
+                  [ms_cmd, sorted(EMU_ENV.items())], ms_body)
+
+        # 6m2. LIVE SELECT (csrc/msel/msel.c, live.c; docs/live-select.md; upstream's step, MACHINE SEL's view found by
+        # its class): track 1 on WaveTone, MACHINE SEL opened, the setting on (the default). DOWN moves the cursor:
+        # before it has rested nothing is committed (the tick read around it); the tick moved on past the rest: the
+        # cursor's machine is on the track; NO puts WaveTone back and the whole sound byte for byte as it was at the
+        # opening, and closes. Reopened, DOWN, rested, YES: the cursor's machine kept, closed, nothing reverted. The
+        # setting turned off through set_flag_put (what the PERSONALIZE row calls): a resting cursor commits nothing
+        # and NO reverts nothing (stock's MACHINE SEL).
+        if "ls_commits" in lay:
+            kit = 0x4210D08C
+            snd0 = kit + 52
+            ty = snd0 + 0xDE
+            tick = 0x466768B0                            # the panel task's tick (msel.c TICK, read modulo 4096)
+            rest, sound_len, live_off = (250 * 120 + 500) // 1000, 1163, 4   # msel.c REST (30: REST_MS, TICK_HZ 120), SOUND_LEN; live.c SET_LIVE_OFF
+            lreads: list[str] = []
+            lcalls: list[str] = []
+
+            def lrd(label, va, n=4):
+                lreads.append(label)
+                return f"mem:{va:#x}:{n}"
+
+            def lshown(label):                           # MACHINE SEL's view's class word ("" while it is not up)
+                lreads.append(label)
+                return f"view:{MSEL_VT:#x}:0:4"
+
+            def lcall(label, text):
+                lcalls.append(label)
+                return text
+
+            def cursor(label):                           # stock's own type under the cursor
+                return lcall(label, f"call:{MSEL_ROW_TYPE:#x}:view@{MSEL_VT:#x}")
+            later_rest = f"addl:{tick:#x}:{rest + 50},wait:10"
+            ls_ = [f"wait:3,poke:{ty:#x}:01,wait:4,tap:2,wait:6,func-src,wait:20",
+                   lrd("open sound", snd0, sound_len), lrd("commits open", lay["ls_commits"]),
+                   lrd("tick before", tick)]
+            ls_ += ["down,wait:8", lrd("tick after", tick), lrd("commits unrested", lay["ls_commits"])]
+            ls_ += [later_rest, lrd("commits rested", lay["ls_commits"]), cursor("cursor rested"), "types",
+                    lrd("previewed sound", snd0, sound_len)]
+            ls_ += ["no,wait:20", "types", lrd("sound after no", snd0, sound_len), lrd("reverts no", lay["ls_reverts"]),
+                    lshown("shown no")]
+            ls_ += ["func-src,wait:20,down,wait:8", later_rest, cursor("cursor yes"), "yes,wait:20", "types",
+                    lshown("shown yes"), lrd("reverts yes", lay["ls_reverts"]), lrd("commits yes", lay["ls_commits"])]
+            ls_ += [lcall("off", f"call:{lay['set_flag_put']:#x}:{live_off}:1"), lrd("bits off", lay["set_bits"]),
+                    "func-src,wait:20,down,wait:8", later_rest, "types", lrd("commits off", lay["ls_commits"]),
+                    "no,wait:20", "types", lrd("reverts off", lay["ls_reverts"])]
+            ljs = work / "livesel.json"
+            ls_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
+                      "--snapshot", snap, "--steps", ",".join(ls_), "--png-dir", work / "livesel", "--json", ljs]
+
+            def ls_body(tdir):
+                rc, out = run("live select", ls_cmd, logs, env=EMU_ENV, trace=tdir)
+                why, good = out[-800:], False
+                if rc == 0 and ljs.exists():
+                    r = json.loads(ljs.read_text())
+                    got = dict(zip(lreads, (v for k_, v in r["memory"].items() if k_.startswith("0x"))))
+                    num = {k_: int(v, 16) for k_, v in got.items() if 0 < len(v) <= 8}
+                    calls = dict(zip(lcalls, (c["d0"] for c in r["direct_calls"])))
+                    types = [v for k_, v in r["memory"].items() if k_.startswith("types@")]
+                    t1 = [t[0] for t in types] + [None] * 5   # track 1: rested, NO, YES, off rested, off NO
+                    waited = (num.get("tick after", 0) - num.get("tick before", 0)) & 0xFFF
+                    c0 = num.get("commits open")
+                    facts = {f"the cursor moved, not rested ({waited} ticks < {rest}): nothing committed":
+                             waited < rest and num.get("commits unrested") == c0,
+                             "rested: the cursor's machine on the track, one commit":
+                             t1[0] == calls.get("cursor rested") and t1[0] != 1
+                             and num.get("commits rested") == (c0 or 0) + 1,
+                             "the preview changed the sound": got.get("previewed sound") != got.get("open sound"),
+                             "NO: WaveTone back": t1[1] == 1,
+                             "NO: the whole sound as it was at the opening, byte for byte":
+                             got.get("sound after no") == got.get("open sound"),
+                             "NO: one revert, MACHINE SEL closed": num.get("reverts no") == 1
+                             and got.get("shown no") == "",
+                             "YES: the cursor's machine kept, closed, nothing reverted":
+                             t1[2] == calls.get("cursor yes") and t1[2] != 1 and got.get("shown yes") == ""
+                             and num.get("reverts yes") == 1,
+                             "off: the sector's flag set": bool(num.get("bits off", 0) & live_off),
+                             "off: a resting cursor commits nothing": t1[3] == t1[2]
+                             and num.get("commits off") == num.get("commits yes"),
+                             "off: NO reverts nothing": t1[4] == t1[2] and num.get("reverts off") == 1}
+                    good = all(facts.values())
+                    differ = (sum(x != y for x, y in zip(bytes.fromhex(got.get("sound after no", "")),
+                                                         bytes.fromhex(got.get("open sound", ""))))
+                              if "sound after no" in got and "open sound" in got else None)
+                    why = (f"{ {k_: v for k_, v in facts.items() if not v} } types={t1[:5]} calls={calls} "
+                           f"num={num} sound bytes differing after NO={differ}")
+                return good, ("LIVE SELECT: a moved cursor commits only once rested; NO puts the machine and the "
+                              "whole sound back byte for byte; YES keeps the previewed machine; off, MACHINE SEL "
+                              "is stock's" if good else why)
+            later("livesel", "LIVE SELECT (ColdFire)", "LIVE SELECT (ColdFire)", [ls_cmd, sorted(EMU_ENV.items())], ls_body)
 
         # 6s. v0.45 (v0.44's BOUNCE froze the unit on MACHINE SEL's YES, and at every power-on of
         # a project holding a BOUNCE track: pages.py wr_label indexed past the Monomachine's label

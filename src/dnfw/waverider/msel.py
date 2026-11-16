@@ -91,7 +91,10 @@ DIVIDER = -1
 
 
 def _group(t: int) -> int:
-    """coldfire's group(type) as rewritten (GROUP_SOURCE): the synths, MIDI, the sample machines, ours"""
+    """coldfire's group(type) as rewritten (GROUP_SOURCE): the synths, MIDI, the sample machines
+    SAMPLER_FIRST..SAMPLER_LAST, ours. FLEX (17) is not a sample machine there, so stock's list has a divider
+    on each side of it (GRID | FLEX | MIDI): the rows drawn must be stock's, row for row, or the page
+    highlights the wrong cell from FLEX on (2026-11-14, the gate's msel step on r6)"""
     from . import coldfire as C
     if t < 0:
         return 0
@@ -99,7 +102,7 @@ def _group(t: int) -> int:
         return 1
     if t == 4:
         return 2
-    if C.SAMPLER_FIRST <= t <= C.SAMPLER_LAST or t == getattr(C, "BOUNCE_TYPE", 17):
+    if C.SAMPLER_FIRST <= t <= C.SAMPLER_LAST:
         return C.SAMPLER_GROUP
     return C.SAMPLE_GROUP
 

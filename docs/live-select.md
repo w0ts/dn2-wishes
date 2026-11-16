@@ -18,7 +18,8 @@ sector, has it on.
 While it is on:
 
 - **MACHINE SEL**, both pages (machines and filters): the machine (or filter) under the cursor is put on
-  the track once the cursor has rested 150 ticks (ms on the unit). Arrows and the knob both count.
+  the track once the cursor has rested 250 ms (30 ticks of the panel tick, 120.0 a second on the unit; it was 150 ticks, 1.25 s, until 2026-11-14:
+  measured on the unit on r5, key to commit 1.32 s +-3 ms over 5 tries). Arrows and the knob both count.
   - YES commits anything still pending, then closes (stock's YES on the track's own row).
   - NO puts back the machine and the filter the track had when MACHINE SEL opened, then the whole sound
     (1,163 bytes) as it was, and closes.

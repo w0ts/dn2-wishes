@@ -193,7 +193,7 @@ int msel_key(u8 *it, u32 code, int down)
 
 /* LIVE SELECT (2026-11-12, the User: "preview/load the engine on the arrows, confirm and exit on YES, discard and
  * revert on NO"; a PERSONALIZE row, csrc/msel/live.c, default on). While it is on, in MACHINE SEL (both pages) and in
- * the FUNC + G filter list: the machine (filter) under the cursor is committed once the cursor has rested REST ticks
+ * the FUNC + G filter list: the machine (filter) under the cursor is committed once the cursor has rested REST_MS
  * (as stock's YES commits it: 0x4005bb7e, 0x4005bbbe); YES commits what is still pending, then stock's YES closes
  * (the cursor's type is the track's by then); NO puts the type it had at the opening back through the same commit and
  * then the track's whole sound as it was, byte for byte (a commit resets the machine's or filter's parameters to their
@@ -201,9 +201,12 @@ int msel_key(u8 *it, u32 code, int down)
 #define KIT_POINTER (*(u8 *volatile *)0x800052A0u)
 #define SOUND_AT    52                          /* a track's sound: kit + 52 + 1163 t */
 #define SOUND_LEN   1163
-#define TICK        (*(volatile u32 *)0x466768B0u)   /* the panel module's tick (ms on the unit), 0..4095 */
+#define TICK        (*(volatile u32 *)0x466768B0u)   /* the panel module's tick, 0..4095: 120.0 a second on the unit
+                                                      (measured 2026-11-14 on r5, docs/live-select.md) */
 #define TICK_MASK   0xFFFu
-#define REST        150                         /* ticks the cursor rests before its machine is committed */
+#define TICK_HZ     120                         /* the tick's rate on the unit (docs/live-select.md) */
+#define REST_MS     250                         /* the cursor rests this long before its machine is committed */
+#define REST        ((REST_MS * TICK_HZ + 500) / 1000)   /* in ticks: 30, 250 ms (150 until now: 1.25 s) */
 #define MACHINE_COMMIT ((u32 (*)(u32, int, int, int, int))0x40031880u)
 extern u32 smp_machine_commit(u32 model, u32 track, u32 type, u32 a, u32 b);   /* csrc/sampler/rec.c */
 #define TYPE_AT     ((int (*)(u32))0x4005B162u) /* the type under MACHINE SEL's cursor (stock's YES reads it) */

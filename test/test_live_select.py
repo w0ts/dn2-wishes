@@ -59,10 +59,17 @@ def test_no_restores_the_whole_sound_after_the_types():
     body = m.group(0)
     assert body.index("MACHINE_COMMIT(model, ls_track, ls_type, 1, 1)") < body.index("ls_copy(ls_at, ls_sound)")
     assert body.index("FILTER_COMMIT(model, ls_track, ls_filter, 1, 1)") < body.index("ls_copy(ls_at, ls_sound)")
-    assert "#define SOUND_LEN   1163" in MSEL_C and "#define REST        150" in MSEL_C
+    assert "#define SOUND_LEN   1163" in MSEL_C and "#define REST_MS     250" in MSEL_C and "#define TICK_HZ     120" in MSEL_C
 
 
 def test_the_checks_find_the_state():
     lay = CODE["layout"]
-    for name in ("ls_commits", "ls_reverts", "live_rows", "set_bits"):
+    for name in ("ls_commits", "ls_reverts", "live_rows", "set_bits", "set_flag_put", "msel_draw"):
         assert name in lay
+
+
+def test_the_gate_runs_both_steps():
+    gate = (ROOT / "scripts/ship_gate.py").read_text()
+    assert '("msel", "MACHINE SEL in two columns (ColdFire)")' in gate
+    assert '("livesel", "LIVE SELECT (ColdFire)")' in gate
+    assert '("ls_commits", "LIVE SELECT (ColdFire)")' in gate and '("msel_draw", "MACHINE SEL in two columns (ColdFire)")' in gate

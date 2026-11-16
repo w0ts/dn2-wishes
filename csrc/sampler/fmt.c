@@ -636,6 +636,14 @@ void smp_formats(int kind)
  * (the records are never touched) and ctl_pos in dnfw.sampler.program (back to ctl). */
 #define POS_RANGE 0x7800
 #define FINE_REF 36u                            /* FREQ: stock's fine unipolar control */
+#if DN2_STOCK_UNITS
+/* with the stock records' units (md_page.c stu_poll) FREQ's own formatter is our Hz text: STRT, LEN and LOOP take
+ * stock's own, the units table's for record 36 (stock's two-decimal one), never what record 36 holds now */
+extern void *stu_stock_of(int id);
+#define FINE_FMT (stu_stock_of(FINE_REF) ? stu_stock_of(FINE_REF) : RECORD_FMT(FINE_REF))
+#else
+#define FINE_FMT RECORD_FMT(FINE_REF)
+#endif
 #define REC_W(id) ((int *)(0x401F83A4u + 60u * (id)))
 #define ENTRY_TYPE(id) ((u32 *)(0x4243425Cu + 68u * (id) + 4u))   /* the value type, 4 words */
 static const u16 pos_ids[3] = {SMP_STRT_ID, SMP_LEN_ID, SMP_LOOP_ID};
@@ -678,14 +686,14 @@ void smp_fine(int kind)
             r[5] = REC_W(FINE_REF)[5];
             for (int j = 0; j < 4; j++)
                 ENTRY_TYPE(id)[j] = ENTRY_TYPE(FINE_REF)[j];
-            RECORD_FMT(id) = RECORD_FMT(FINE_REF);
+            RECORD_FMT(id) = FINE_FMT;
         } else if (smp_fine_on & (1 << k)) {
             r[3] = pos_rec[k][0];
             r[4] = pos_rec[k][1];
             r[5] = pos_rec[k][2];
             for (int j = 0; j < 4; j++)
                 ENTRY_TYPE(id)[j] = pos_type[k][j];
-            if (RECORD_FMT(id) == RECORD_FMT(FINE_REF))
+            if (RECORD_FMT(id) == FINE_FMT)
                 RECORD_FMT(id) = pos_fmt[k];    /* (smp_formats has set GRID's/SLICE's own) */
         }
     }

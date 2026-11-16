@@ -513,6 +513,16 @@ void stu_poll(void)
         if ((u32)STU_FMT(stu_ids[w]) == stu_stock[w])
             STU_FMT(stu_ids[w]) = (void *)stu_fns[w];
 }
+
+/* stock's own formatter at record ID when stu_poll may have put ours there, else 0 (fmt.c smp_fine: STRT, LEN and
+ * LOOP take FREQ's, record 36, which is our Hz text here) */
+void *stu_stock_of(int id)
+{
+    for (int w = 0; w < STU_N; w++)
+        if (stu_ids[w] == id)
+            return (void *)stu_stock[w];
+    return 0;
+}
 #endif
 
 static int mnm_choice_count(int n)

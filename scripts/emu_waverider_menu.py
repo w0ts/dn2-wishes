@@ -40,9 +40,11 @@ the frame it built, with the mirror and the sixteen sounds beside it),
 `poke:VA:HEX` (write bytes: a value the audio tick would have left, say), `onpc:PC:VA:HEX`
 (write them when PC next runs),
 `types` (every track's `sound+0xDE`), `call:VA[:ARG...]` (enter a routine that
-does not run here; ARG is a number, `kit`, `soundT`, `long@VA`, or `argN@VA[-OFF]`
+does not run here; ARG is a number, `kit`, `soundT`, `long@VA`, `view@VT` (the
+screen's view of class VT, 0 when none is up), or `argN@VA[-OFF]`
 -- the Nth argument of the last entry to an `--args-at VA`, less OFF -- and d0 is
-reported).
+reported), `view:VT:OFF:N` (N bytes at OFF in the screen's view of class VT, ""
+while none is up; kept with the `mem:` reads, in order).
 
 `--watch-types` logs every write to any track's `sound+0xDE` with the step, PC
 and the code addresses on the stack: the persistence check. The selection test
@@ -2091,6 +2093,25 @@ def main() -> int:
         counted["n"] += 1
 
     returned = {"d0": 0}
+    screen_obj = json.loads((root / "src/dnfw/mods/waverider_code.json").read_text())["layout"].get("wr_screen_obj")
+
+    def view_of(vt: int) -> int:
+        """the view of class VT in the screen's list, or 0 (as smp_question_up walks it: node +0 the next, +8 the
+        view; the sentinel at screen + 20, the first node at screen + 28)"""
+        def ok(a_):
+            return 0x40000000 <= a_ < 0x48000000 and not a_ & 3
+        scr = machine.long(screen_obj) if screen_obj else 0
+        if not ok(scr):
+            return 0
+        node = machine.long(scr + 28)
+        for _ in range(32):
+            if not ok(node) or node == scr + 20:
+                return 0
+            v = machine.long(node + 8)
+            if ok(v) and machine.long(v) == vt:
+                return v
+            node = machine.long(node)
+        return 0
 
     def guest_call(fn, *args, limit=5_000_000, want_count=False):
         """Call FN in the paused machine and put every register back, as digikit's
@@ -2298,6 +2319,8 @@ def main() -> int:
                     args.append(machine.long(KIT_POINTER) + 52 + SOUND_STRIDE * int(x[5:]))
                 elif x.startswith("long@"):
                     args.append(machine.long(int(x[5:], 0)))
+                elif x.startswith("view@"):             # the screen's view of class VT (0: none up)
+                    args.append(view_of(int(x[5:], 0)))
                 elif x.startswith("arg") and "@" in x:
                     # argN@VA, or argN@VA-OFF: an object that argument points into
                     n, va = x[3:].split("@")
@@ -2570,6 +2593,13 @@ def main() -> int:
             # a second read of the same address keeps the first: key it by its order
             key = va if va not in mems else f"{va}@{len(mems)}"
             mems[key] = machine.read(int(va, 0), int(n, 0)).hex()
+        elif step.startswith("view:"):
+            # view:VT:OFF:N, N bytes at OFF in the screen's view of class VT ("" while none is up), keyed as mem: is
+            _, vt, off, n = step.split(":")
+            v = view_of(int(vt, 0))
+            key = f"0x{int(vt, 0):x}+{int(off, 0)}"
+            key = key if key not in mems else f"{key}@{len(mems)}"
+            mems[key] = machine.read(v + int(off, 0), int(n, 0)).hex() if v else ""
         elif step.startswith("sync:"):
             # One track, through the routine the ISR's note path calls when a
             # triggered track's sound has changed (0x40026bbc / 0x40026bfe).

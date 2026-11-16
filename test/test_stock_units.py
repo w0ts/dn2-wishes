@@ -88,3 +88,56 @@ def test_measured_tables_are_whole():
         assert len(q["values"]) == 128, name
         assert q["unit"] and q["how"] and q["records"], name
         assert all(r in MU._STOCK_FMT_OF for r in q["records"]), name
+
+
+def _fine_prog(hdr: str, smp: str) -> str:
+    """fmt.c's smp_fine and md_page.c's stu_stock_of compiled natively, the records and value types in arrays: record
+    36 (FREQ) holds our Hz formatter, as stu_poll leaves it with the option on"""
+    fmt = (ROOT / "csrc/sampler/fmt.c").read_text()
+    a = fmt.index("#define POS_RANGE")
+    b = fmt.index("\n}\n", fmt.index("void smp_fine(int kind)\n{")) + 3
+    body = (fmt[a:b].replace("__attribute__((section(\".data\")))", "")
+            .replace("((int *)(0x401F83A4u + 60u * (id)))", "(rec_w[id])")
+            .replace("((u32 *)(0x4243425Cu + 68u * (id) + 4u))", "(entry_type[id])"))
+    md = (ROOT / "csrc/waverider/md_page.c").read_text()
+    stu = md[md.index("void *stu_stock_of(int id)"):]
+    stu = stu[:stu.index("\n}\n") + 3]
+    keep = [ln for ln in hdr.splitlines() if ln.startswith(("#define STU_N ", "static const unsigned short stu_ids",
+                                                            "static const unsigned int stu_stock"))]
+    defs = [ln for ln in smp.splitlines() if ln.startswith(("#define SMP_KIND0", "#define SMP_STRT_ID", "#define SMP_LEN_ID",
+                                                            "#define SMP_LOOP_ID", "#define SMP_STRETCH_KIND",
+                                                            "#define SMP_REPITCH_KIND", "#define SMP_BOUNCE_KIND"))]
+    return ("#include <stdio.h>\n#include <stdint.h>\ntypedef unsigned int u32;\ntypedef unsigned short u16;\n"
+            "#define DN2_STOCK_UNITS 1\n" + "\n".join(keep + defs) + "\n"
+            "static int rec_w[512][15];\nstatic u32 entry_type[512][4];\nstatic void *rec_fmt[512];\n"
+            "#define RECORD_FMT(id) (rec_fmt[id])\n" + stu + body +
+            "\nstatic void ours_hz(int v, char *b) { (void)v; b[0] = 0; }\n"
+            "static void strt_own(int v, char *b) { (void)v; b[0] = 0; }\n"
+            "int main(void) {\n"
+            "    void *stock36 = stu_stock_of(36);\n"
+            "    rec_fmt[36] = (void *)ours_hz;             /* stu_poll: ours on FREQ */\n"
+            "    rec_fmt[SMP_STRT_ID] = rec_fmt[SMP_LEN_ID] = rec_fmt[SMP_LOOP_ID] = (void *)strt_own;\n"
+            "    smp_fine(SMP_KIND0);                       /* ONESHOT: all three fine */\n"
+            "    printf(\"%d %d %d\\n\", rec_fmt[SMP_STRT_ID] == stock36, rec_fmt[SMP_LEN_ID] == stock36,"
+            " rec_fmt[SMP_LOOP_ID] == stock36);\n"
+            "    smp_fine(-1);                              /* a machine without them: their own back */\n"
+            "    printf(\"%d %d %d\\n\", rec_fmt[SMP_STRT_ID] == (void *)strt_own, rec_fmt[SMP_LEN_ID] == (void *)strt_own,"
+            " rec_fmt[SMP_LOOP_ID] == (void *)strt_own);\n"
+            "    return 0;\n}\n")
+
+
+@pytest.mark.skipif(shutil.which("cc") is None, reason="no C compiler")
+def test_fine_positions_take_stocks_two_decimal_text_not_our_hz(monkeypatch, tmp_path):
+    """main's bug (2026-11-14): with the option on, smp_fine gave STRT/LEN/LOOP record 36's formatter, which stu_poll
+    has made our Hz text, and handed their own back only while 36 still held what it gave. They take stock's own
+    two-decimal formatter (stock 1.12's at record 36, the units table's), and get their own back when the machine
+    has no fine positions"""
+    assert MU.STOCK_UNITS[36][3] == 0x400E305A                               # stock 1.12's two-decimal one
+    prog = _fine_prog(_header(monkeypatch, True), WP.smp_c_header())
+    c = tmp_path / "f.c"
+    c.write_text(prog)
+    exe = tmp_path / "f"
+    subprocess.run(["cc", "-O1", "-w", "-o", str(exe), str(c)], check=True)
+    out = subprocess.run([str(exe)], check=True, capture_output=True, text=True).stdout.split("\n")
+    assert out[0] == "1 1 1", "ONESHOT's STRT/LEN/LOOP: stock's two-decimal formatter, not our Hz"
+    assert out[1] == "1 1 1", "their own formatters back on a machine without fine positions"
