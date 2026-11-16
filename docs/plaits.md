@@ -282,3 +282,77 @@ The run-mode model renders every engine but PART and STRG bit for bit as before 
 four / two blocks later). **Not measured: the unit.** On the memory-cost clock even the old build
 admits every rotated PLAITS note (WS at 0.17 of the frame); what the unit measures differently is
 not known, so whether this is enough is the User's test on the instrument.
+
+## Sixteen voices (2026-11-10, branch sophie-v043-os112-poly16)
+
+The User: "each instrument must be able to play 16 voices". Measured on the unit (b5diag2, 2026-11-09):
+the guard's limit about 355,000 cycles a frame, the rest of the DN2 about 43,000, so at most ~19,500
+cycles a voice; b6's PLAITS voices cost 20,000 .. 48,000. Every change below keeps the engines' output
+**bit for bit** as b6's (so every reference figure above still holds): `golden.py` (outside the repo,
+`dn2mk2-scratch/poly16/`) hashes the full voice (frame, engine, resampler, output guard) for every MODL
+slot x 5 knob sets x a note / trig script with an engine switch: 65 / 65 identical to b6. The
+reorderings were also run 600 blocks (PART), and the shared routines held to the old ones on random
+inputs (`sin_eq.py` 25,530 sines, `ages_eq.py`, `guard_eq.py` 400 blocks with inf / NaN).
+
+What was done (the commits on this branch):
+- **The voices' slots in L1** (`dsp.MD_STATE_DM` 0x2e7000, 16 x 1 KB; L2 until now): every voice of ours
+  reads and writes its slot all through its block. The startup's DM cache is 16 KB (0x2ec000..,
+  docs/waverider-dsp-silence.md), so REGION may reach 0x2eb000. Zeros at power-on: a fill block.
+- **mnm_ages a loop over the slots** (it was unrolled 16 times): 8.1 KB of the DSP upload back, the room
+  the faster kernels take.
+- **DDR out of the engines' loops**: MDAL's mode states / amplitudes, ADD's interpolators / amplitudes,
+  STRG's string states, SWRM's voices 0..4 now live in the slot's free host words (W[9..63]: the
+  Monomachine host writes W[1..8] only) and the union's free tail; per-half coefficients and rows in
+  the render scratch's rows SID left free (XB, YB, L1); FM's FIR copied to L1 once a half. MDAL runs
+  mode by mode (a mode's state in registers through the half), PART's diffuser stage by stage (every
+  read is 125+ samples behind its write, so a stage may run its 16 samples in a row; its fixed stages
+  walk the buffer by post-decrement).
+- **Instructions**: the sine without branches (TRUNC + `IF LT`, the fold by MIN / MAX), inline where
+  hot (FM, ADD); the OUT stage, the output guard (a sum of x x 0 for the non-finite test), STRG's
+  excitation, PART's particles with their state in registers; a voice's reset clears 8 words a pass.
+- DSL (`dnfw.perc.dsl`): `par` (one compute with one memory move), `fop_lt` / `fop_if` (a conditional
+  compute on the last ALU result's flags), `fabs_`, `float0`, `geti`, `ldm` / `stm` (M7's -1), and a
+  load / store folded into the adjacent independent compute automatically. Two traps found by the gate's
+  decode step (selmap against digikit), both now refused by the DSL: a compute's move through I4 / I5
+  (`compute, R = DM(I4, M6)`, `compute, R = DM(k, I5)`: selmap reads 4 bytes, the compute gone), so
+  only I0..I3 (`dsl.PAR_I`); and multifunction computes (selmap reads selas's `Fm = Fx * Fy, Fa = ...`
+  as `Fm = MRF + Fx * Fy`, digikit as a float multiply). selas also encodes illegal multifunction
+  register sets without a word.
+
+Cost, a steady block (the model's instructions with every jump and call counted, + 0.9 x (4 L2 + 10
+DDR), the runner's memory-cost clock; the worst of 5 knob sets over blocks 8..19, trigs included):
+
+| engine | b6 | poly16 | | engine | b6 | poly16 |
+|---|---|---|---|---|---|---|
+| WS | 16,951 | 10,807 | | PART | 41,367 | 25,659 |
+| VA | 25,364 | 12,321 | | STRG | 70,808 | 23,481 |
+| FM | 30,700 | 17,148 | | MDAL | 102,575 | 21,075 |
+| ADD | 50,937 | 14,921 | | BD | 18,548 | 11,511 |
+| SWRM | 22,927 | 13,899 | | SD | 23,738 | 12,814 |
+| NOIS | 15,559 | 9,907 | | HH | 17,447 | 9,303 |
+
+The runner's poly16 step's own case (the PLAITS defaults, a held note, `perblock.py`): a steady block
+WS 10,541, VA 9,775, FM 16,997, ADD 14,871, SWRM 12,190, NOIS 9,139, PART 21,394 (25,259 in a half
+whose diffuser window wraps the buffer: the old per-sample path), STRG 21,705, MDAL 19,265, BD 11,383,
+SD 12,567, HH 8,810; a fresh voice's first block (its reset) 23,656 on every engine.
+(b6's WS voice measured about 20,000 cycles on the unit against 16,951 here.) The worst block (an
+engine's start with its reset, PART's / STRG's deferred clear) 30,500 .. 45,000.
+
+The guard (PLAITS slots only; every other machine decides as before):
+- `program.MNM_START["PLAITS"]` 30,000 (was 60,000): sixteen notes started together are each
+  expected at it for their first two blocks.
+- `guard.PLAITS_FLOOR` 20,000 (was 30,000), and a measured slot expected at 1.25 x its last cost
+  (`PLAITS_SLACK_SHIFT`; was 1.5 x).
+- A slot without a measured cost (its engine's start, FRESH, or a voice never rendered yet) expected
+  at its start bound, not FLOOR's 60,000: a voice refused during PART's / STRG's start never got a
+  cost, stayed at 60,000 and was refused until stolen.
+Provisional until the unit's costs are measured.
+
+The runner's poly16 step (16 PLAITS voices triggered together and held, the memory clock; build
+38b8cbe5, the branch's last): WS VA FM ADD SWRM NOIS MDAL BD SD HH every voice sounding, no guard
+skip after the start (the heaviest: MDAL 21,816, FM 18,204 a voice); PART and STRG 13..14 of 16 (their
+frame is full there: 20,000 .. 26,800 a voice with their DDR charged at 9 cycles an access, the
+runner's estimate; the unit's DM cache serves DDR, so the unit decides). The same build: the decode
+step (selmap and digikit, every instruction), DSP identity, the hardware rules, guard / rotate /
+stress / TDM / the Monomachine machines bit-exact (44 PASS), boot from reset (800 M instructions). Runner step `poly16` (`scripts/sharc_waverider_m5.py --steps poly16`): sixteen PLAITS
+voices at once on each engine, the memory clock.

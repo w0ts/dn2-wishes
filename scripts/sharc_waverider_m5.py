@@ -616,6 +616,11 @@ def main(argv=None):
             results["3n_notestart"] = step_notestart(warm(), sound, machines)
             show(results["3n_notestart"])
             gc.collect()
+        if "poly16" in steps:
+            print("\nstep 3p: sixteen PLAITS voices at once on each engine, the memory clock (2026-11-10)")
+            results["3p_poly16"] = step_poly16(warm(), sound, machines)
+            show(results["3p_poly16"])
+            gc.collect()
         if "rests" in steps:
             print("\nstep 3q: a Monomachine voice after its note-off and the amp's release rests (2026-11-09)")
             results["3q_rests"] = step_rests(warm(), sound, machines)
@@ -1436,6 +1441,104 @@ def step_stress(init, sound, machines) -> dict:
     return {"ok": all(checks.values()), "checks": checks, "numbers": n}
 
 
+def step_poly16(init, sound, machines, blocks=20) -> dict:
+    """2026-11-10 (poly16; the User: "each instrument must be able to play 16 voices"). For each
+    PLAITS engine: sixteen tracks on PLAITS at that MODL, a note each (C2 .. D#3), all triggered at
+    block 1 and held, on the memory-cost clock (step 3k's: cycles = instructions + S x (4 L2 + 10
+    DDR), EMUCLK moved by it, so the frame guard decides as on the unit). From block 4 on every
+    voice must sound in every block, the guard must skip none, our voices done by 0.8 of the
+    frame, everything finite. DNFW_POLY16_ONLY=VA,FM narrows the engines; DNFW_POLY16_N the voices."""
+    from dnfw.perc import guard as G
+    from dnfw.mnm import machines as MMx, plaits as PLT
+    P = 666_667
+    N = int(os.environ.get("DNFW_POLY16_N", "16"))
+    sites = set(_after_emuclk("perc")) | set(_after_emuclk("smp"))
+    counts, undo_counts = _count_memory()
+    S = float(os.environ.get("DNFW_MEM_SCALE", "0.9"))
+    k = MMx.NAMES.index("PLAITS")
+    typ = MMx.TYPES[k]
+    only = [x for x in os.environ.get("DNFW_POLY16_ONLY", "").split(",") if x]
+    res, nums = {}, {}
+    try:
+        for m in range(PLT.N_MODELS):
+            name = PLT.MODELS[m]
+            if not name or (only and name not in only):
+                continue
+            knobs = list(MMx.DEFAULTS["PLAITS"])
+            knobs[6] = PLT.knob_of(m)
+            words = mnm_words(k, knobs)
+            b_now = {"b": 0}
+            skips = {}
+
+            def cycles(r):
+                return int(getattr(r, "steps_n", 0) + S * (4 * counts["L2"] + 10 * counts["DDR"]))
+
+            def clock(r):
+                r.state.uregs[fx.UREG_CODES["R8"]] = fx.Const(((b_now["b"] + 1) * P + cycles(r)) & 0xFFFFFFFF)
+
+            def at_dispatch(r):
+                for x in ("L1", "L2", "DDR"):
+                    counts[x] = 0
+                counts["on"] = True
+
+            costs = {}
+
+            def at_perc(r):
+                base = (b_now["b"] + 1) * P
+                skips[b_now["b"]] = m2.word(r.state, G.SKIPS)
+                costs[b_now["b"]] = [m2.word(r.state, G.COST_PERC + 4 * t) for t in range(N)]
+                m2.poke(r.state, G.MARK0, base & 0xFFFFFFFF)
+                m2.poke(r.state, G.MARK, (base + cycles(r)) & 0xFFFFFFFF)
+            hooks = {dsp.PERC_SW: at_perc, m3.DISPATCH: at_dispatch}
+            hooks.update({x: clock for x in sites})
+
+            def fb(b):
+                b_now["b"] = b
+                f = base_frame(sound, machines, t0=typ, overrides=words, trigger=False,
+                               others={t: typ for t in range(1, N)})
+                for t in range(N):
+                    for slot, w in words.items():
+                        f.param(t, slot, w)
+                    f.header(FR.NOTE, t, (36 + t) << 8)
+                    if b == 1:
+                        f.trigger(t)
+                return f.to_bytes()
+            rr = run_blocks(init, fb, blocks, extra_hooks=hooks)
+            st = rr.get("state")
+            end = mark0 = None
+            if rr["ok"]:
+                end, mark0 = m2.word(st.state, G.OURS_END), m2.word(st.state, G.MARK0)
+            rr.pop("state", None)
+            sounding = []
+            for b in range(4, len(rr.get("perc", []))):
+                blk = rr["perc"][b]
+                sounding.append(sum(1 for t in range(N) if t in blk and V.peak(blk[t]["out"]) > 1e-6))
+            fin = rr["ok"] and all(math.isfinite(x) for blk in rr["buffers"] for t in range(16) for x in blk[t])
+            over = ((end - mark0) & 0xFFFFFFFF) / P if end is not None else None
+            ks = sorted(skips)
+            skipped = (skips[ks[-1]] - skips[4]) if len(ks) > 4 else None
+            steady = [c for b in ks[6:] for c in costs[b] if c]
+            per = []
+            for b in range(len(rr.get("perc", []))):
+                blk = rr["perc"][b]
+                per.append(sum(1 for t in range(N) if t in blk and V.peak(blk[t]["out"]) > 1e-6))
+            print(f"      {name} per block: sounding {per}", flush=True)
+            print(f"      {name} per block: skips {[skips[b] for b in ks]}", flush=True)
+            print(f"      {name} per block: cost max {[max(costs[b]) for b in ks]}", flush=True)
+            nums[name] = {"sounding_min": min(sounding) if sounding else 0,
+                          "skips_from_block_4": skipped, "skips_total": skips[ks[-1]] if ks else None,
+                          "cost_steady_max": max(steady) if steady else None,
+                          "cost_steady_mean": round(sum(steady) / len(steady)) if steady else None,
+                          "our_end_over_P": over and round(over, 3)}
+            print(f"    {name}: {nums[name]}", flush=True)
+            res[f"PLAITS {name}: all {N} voices sound in every block from block 4, no guard skip, done by 0.8 "
+                f"of the frame, finite"] = (rr["ok"] and fin and over is not None and over <= 0.8
+                                            and nums[name]["sounding_min"] >= N and skipped == 0)
+    finally:
+        undo_counts()
+    return {"ok": all(res.values()), "checks": res, "numbers": nums}
+
+
 def step_chords(init, sound, machines, need=4, cold=None) -> dict:
     """v0.36 (the owner and misterairplane: two voices at most on a Monomachine track, the
     oldest silenced). A chord: four notes of one Monomachine machine at once (four tracks,
@@ -2013,7 +2116,7 @@ def step_garbage(init, sound, machines) -> dict:
     import random as _r
     from dnfw.mnm import machines as MMx
     fills = {"nan": lambda k: 0xFFFFFFFF, "random": (lambda g: lambda k: g.getrandbits(32))(_r.Random(33))}
-    spans = [(dsp.MD_STATE_L2, 16 * 1024), (dsp.MNM_SCRATCH_L2, dsp.MNM_SCRATCH_BYTES),
+    spans = [(dsp.MD_STATE_DM, 16 * 1024), (dsp.MNM_SCRATCH_L2, dsp.MNM_SCRATCH_BYTES),
              (dsp.MNM_RENDER_DM, dsp.MNM_RENDER_BYTES)]          # v0.43: the render scratch in L1
     res, bad = {}, []
 

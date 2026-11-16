@@ -68,14 +68,20 @@ def init(p: Prog, L: C.Layout) -> None:
     K.sv(p, PMF, 0)
 
 
-def _u32(p: Prog) -> None:
-    """R15 = static_cast<uint32_t>(2^32 F15), F15 in 0 .. 1 (exact). Clobbers R12-R14, I12."""
-    def body():
-        K.mulk(p, 15, 15, U32, t=13)
-        p.fconst(14, U32 / 2)
-        p.if_(15, "GE", 14, lambda: p.fop(15, 15, "-", 13))
-        p.trunc(15, 15)
-    p.call("plfm_u32", body)
+def _u32_body(p: Prog) -> None:
+    K.mulk(p, 15, 15, U32, t=13)
+    p.fconst(14, U32 / 2)
+    p.if_(15, "GE", 14, lambda: p.fop(15, 15, "-", 13))
+    p.trunc(15, 15)
+
+
+def _u32(p: Prog, inline: bool = False) -> None:
+    """R15 = static_cast<uint32_t>(2^32 F15), F15 in 0 .. 1 (exact). Clobbers R12-R14, I12.
+    INLINE (2026-11-10): the body here, not a call (the sub-sample's)."""
+    if inline:
+        _u32_body(p)
+    else:
+        p.call("plfm_u32", lambda: _u32_body(p))
 
 
 def _params(p: Prog, L: C.Layout) -> None:
@@ -124,7 +130,7 @@ def _sub(p: Prog) -> None:
     p.fop(10, 9, "*", 6)
     K.addk(p, 10, 10, 1.0)
     p.fop(15, 10, "*", 5)
-    _u32(p)
+    _u32(p, inline=True)
     K.ld(p, 9, MPH)
     p.iop(9, 15, "+", 9)
     K.sv(p, MPH, 9)
@@ -133,7 +139,7 @@ def _sub(p: Prog) -> None:
     p.iconst(12, -32)
     p.float_(15, 9, 12)
     p.fop(15, 15, "+", 10)
-    K.sinp(p, 15, 15)                             # modulator
+    K.sinp_body(p)                                # modulator (2026-11-10: inline, not a call)
     p.fop(10, 2, "*", 15)
     K.ld(p, 9, CPH)
     p.iop(9, 9, "+", 4)
@@ -141,7 +147,7 @@ def _sub(p: Prog) -> None:
     p.iconst(12, -32)
     p.float_(15, 9, 12)
     p.fop(15, 15, "+", 10)
-    K.sinp(p, 15, 15)                             # carrier
+    K.sinp_body(p)                                # carrier (inline)
     K.ld(p, 9, PREV)
     p.fop(10, 15, "-", 9)
     K.mulk(p, 10, 10, 0.05)
@@ -171,7 +177,7 @@ def _sample(p: Prog, L: C.Layout) -> None:
     K.interp_next(p, 5, PMF, IMF)
     K.ld(p, 3, CFIR)                              # the downsampler's head
     p.fconst(11, 0.0)                             # its tail
-    p.iconst(9, _tab(L) + 4 * FMQ_N)
+    p.iconst(9, L.YB)                             # the FIR (2026-11-10: its L1 copy, half's start)
     p.seti(1, 9)
     p.loop_r(8, 4, lambda: _sub(p))
     p.stpost(4, 3)
@@ -181,4 +187,11 @@ def _sample(p: Prog, L: C.Layout) -> None:
 def half(p: Prog, L: C.Layout) -> None:
     """FMEngine::Render(16 samples) at I4."""
     _params(p, L)
+    p.iconst(9, _tab(L) + 4 * FMQ_N)              # 2026-11-10 (poly16): the FIR's 7 words to L1 (the
+    p.seti(1, 9)                                  # render scratch's YB row) once a half: read 8 times
+    p.iconst(9, L.YB)                             # a sample, they were 256 DDR reads a block
+    p.seti(5, 9)
+    for k in range(7):
+        p.ldpost(9, 1)
+        p.stpost(5, 9)
     p.loop(L.W["n4"], K.HALF, lambda: _sample(p, L))

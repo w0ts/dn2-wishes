@@ -196,9 +196,12 @@ def test_ddr_spans_are_clear_of_the_stock_image_and_the_engine():
     from dnfw.perc import live as PL
     L = PL.layout()
     l2 = {a: p for _, a, p in dsp.l2_spans()}
-    assert L.md.state == dsp.MD_STATE_L2 and L.md.mnm.scratch == dsp.MNM_SCRATCH_L2
+    assert L.md.state == dsp.MD_STATE_DM and L.md.mnm.scratch == dsp.MNM_SCRATCH_L2
     assert L.md.delay == dsp.MD_DELAY_DDR                 # not state + 1 MB: L2 has no room for it
-    assert not any(l2[dsp.MD_STATE_L2]) and len(l2[dsp.MD_STATE_L2]) == 16 * MDK.MD_STRIDE
+    l1 = {a: p for _, a, p in dsp.spans()}                # 2026-11-10: the slots in L1 block 1 (zeros)
+    at = dsp.dm_to_load(dsp.MD_STATE_DM)
+    assert not any(l1[at]) and len(l1[at]) >= 16 * MDK.MD_STRIDE
+    assert dsp.MD_STATE_DM + 16 * MDK.MD_STRIDE <= dsp.REGION[1] <= dsp.DM_CACHE_16K - 0x1000
     assert not any(l2[dsp.MNM_SCRATCH_L2]) and dsp.MD_STATE_L2 + 16 * MDK.MD_STRIDE <= dsp.MNM_SCRATCH_L2
     assert 0x20088400 <= dsp.MD_STATE_L2 and dsp.MNM_SCRATCH_L2 + dsp.MNM_SCRATCH_BYTES <= 0x200B0000
     # v0.43: the Monomachine render scratch in L1, after GRAN's state, inside the region (zeros

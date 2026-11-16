@@ -1256,7 +1256,7 @@ if (typeof module !== "undefined") module.exports = DN2;
   const DIAG_KEYS = ["wipes", "info", "where", "mask", "since", "load", "loadPeak", "skipped", "periods", "frames",
                      "scanCount", "scanFirst", "scanDone", "scanSeq"];
   const SCANS = [["voice 1's P-I delay lines", 0x82200000, 2048], ["voice 4's P-I delay lines", 0x82206000, 2048],
-                 ["the 16 voices' Machinedrum state", 0x200A0000, 4096], ["the 16 voices' PERC state", 0x2DE180, 512]];
+                 ["the 16 voices' Machinedrum state", 0x2E7000, 4096], ["the 16 voices' PERC state", 0x2DE180, 512]];
   async function diag() {
     const p = (await call(C.CMD.DIAG, [], 3000, 2)).payload, d = {};
     DIAG_KEYS.forEach((k, i) => d[k] = DN2.rd32(p, 4 * i));

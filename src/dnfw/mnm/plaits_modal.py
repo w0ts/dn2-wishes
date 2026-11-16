@@ -8,8 +8,10 @@ damping. On a trigger an impulse (its size from the excitation's cutoff) through
 low-pass SVF (Q 1.5) into 24 band-pass SVF modes (FREQUENCY_FAST), their amplitudes from Plaits'
 approximate cosine oscillator at 0.015, summed in Plaits' batches of 4.
 
-Memory: the voice's DDR area (plk.big_at): 24 modes x MW words (g, r + g, h, gain, the two states,
-the amplitude).
+Memory (2026-11-10, poly16; the voice's DDR until then): each mode's two states and amplitude in the
+slot (L1): S1 at W[9 + m], S2 at W[33 + m], the amplitude at slot word 131 + m (the union's free
+tail); its coefficients for the half (g, r + g, h, gain) in the render scratch's YB row (L1, MW
+words a mode). The same arithmetic: the output is bit for bit as before.
 """
 
 from __future__ import annotations
@@ -23,7 +25,11 @@ from ..perc.dsl import Prog, f32
 MODEL = "MDAL"
 N_MODES, BATCH, MW = 24, 4, 8
 (MG, MRG, MH, MA, MS1, MS2, MAMP) = range(7)
-BIG_USED = N_MODES * MW
+BIG_USED = 0
+from ..md import core as _MDK
+S1_W = 9                                         # slot words: S1 at S1_W + m, S2 24 on, the amplitude 122 on
+S2_OFF, AMP_OFF = 24, 122
+assert S1_W + S2_OFF + N_MODES <= _MDK.NW
 (U_BIG, U_HLP, U_EG, U_ERG, U_EH, U_ES1, U_ES2, U_IMP, U_F0, U_BR, U_DA, U_ST, U_SF, U_HM, U_Q,
  U_QL, U_SA, U_SB, U_I) = (K.U0 + k for k in range(19))
 NU_USED = 19
@@ -82,23 +88,25 @@ def init(p: Prog, L) -> None:
     p.iconst(0, 0)
     for u in (U_HLP, U_ES1, U_ES2):
         K.sv(p, u, 0)
-    K.big_at(p, L, 4)
+    p.geti(4, 3)
+    p.iconst(12, 4 * S1_W)
+    p.iop(4, 12, "+", 4)                         # the first mode's S1 in the slot
     p.iconst(5, 0)
     p.fconst(6, AMP_Y1)                          # y1
     p.fconst(7, 0.5)                             # y0
 
     def mode():
         p.seti(1, 4)
-        for k in range(MW):
-            p.sti(k, 1, 5)
+        p.sti(0, 1, 5)
+        p.sti(S2_OFF, 1, 5)
         K.mulk(p, 8, 7, AMP_C)
         p.fop(8, 8, "-", 6)                      # c y0 - y1
         p.fpass(6, 7)
         K.addk(p, 9, 7, 0.5)
         K.mulk(p, 9, 9, 0.25)
-        p.sti(MAMP, 1, 9)
+        p.sti(AMP_OFF, 1, 9)
         p.fpass(7, 8)
-        p.iconst(12, 4 * MW)
+        p.iconst(12, 4)
         p.iop(4, 12, "+", 4)
     p.loop_r(10, N_MODES, mode)
 
@@ -145,7 +153,7 @@ def _stiff_point(p: Prog) -> None:
 
 def half(p: Prog, L) -> None:
     """ModalEngine::Render, 16 samples at I4."""
-    K.big_at(p, L, 4)
+    p.iconst(4, L.YB)                            # the coefficients' row (L1)
     K.sv(p, U_BIG, 4)
     # harmonics_lp_ += 0.01 (harmonics - harmonics_lp_); brightness, damping with the accent
     K.par(p, 4, 0)
@@ -269,17 +277,28 @@ def half(p: Prog, L) -> None:
     # the modes' coefficients
     K.ld(p, 4, U_BIG)
     p.seti(1, 4)
+    p.geti(4, 3)
+    p.iconst(12, 4 * (S1_W + AMP_OFF))
+    p.iop(4, 12, "+", 4)
+    p.seti(5, 4)                                 # the amplitudes (slot), walked by I5
+
+    # 2026-11-10 (poly16): the running words in registers through the 24 modes (F1 harmonic, F2
+    # stretch, F3 stiffness, F8 q, F9 q's loss, F10 f0; recip, _h, _tan_fast and _soften clobber
+    # none of them), written back after: the same operations in the same order
+    K.ld(p, 1, U_HM)
+    K.ld(p, 2, U_SF)
+    K.ld(p, 3, U_ST)
+    K.ld(p, 8, U_Q)
+    K.ld(p, 9, U_QL)
+    K.ld(p, 10, U_F0)
 
     def coefs():
-        K.ld(p, 4, U_HM)
-        K.ld(p, 5, U_SF)
-        p.fop(4, 4, "*", 5)
+        p.fop(4, 1, "*", 2)
         p.fconst(12, 0.499)
         p.fop(4, 4, "MIN", 12)                   # mode_frequency
         _tan_fast(p, 5, 4)
         p.sti(MG, 1, 5)
-        K.ld(p, 6, U_Q)
-        p.fop(6, 4, "*", 6)
+        p.fop(6, 4, "*", 8)
         K.addk(p, 6, 6, 1.0)
         recip(p, 6, 6)                           # r = 1 / (1 + f q)
         _h(p, 7, 6, 5)
@@ -289,79 +308,132 @@ def half(p: Prog, L) -> None:
         p.fop(4, 4, "+", 4)
         p.fconst(12, 1.0)
         p.fop(4, 12, "-", 4)                     # 1 - 2 f
-        p.ldi(5, MAMP, 1)
+        p.ldpost(5, 5)
         p.fop(5, 5, "*", 4)
         p.sti(MA, 1, 5)
-        K.ld(p, 4, U_SF)                         # stretch += stiffness; stiffness *= k
-        K.ld(p, 5, U_ST)
-        p.fop(4, 4, "+", 5)
-        K.sv(p, U_SF, 4)
-        _soften(p, 5)
-        K.sv(p, U_ST, 5)
-        K.ld(p, 4, U_HM)
-        K.ld(p, 5, U_F0)
-        p.fop(4, 4, "+", 5)
-        K.sv(p, U_HM, 4)
-        K.ld(p, 4, U_Q)
-        K.ld(p, 5, U_QL)
-        p.fop(4, 4, "*", 5)
-        K.sv(p, U_Q, 4)
-        K.ld(p, 4, U_BIG)                        # the next mode
-        p.ipass(8, 4)
+        p.fop(2, 2, "+", 3)                      # stretch += stiffness; stiffness *= k
+        _soften(p, 3)
+        p.fop(1, 1, "+", 10)                     # harmonic += f0
+        p.fop(8, 8, "*", 9)                      # q *= q_loss
+        p.geti(0, 1)                             # the next mode's coefficients
         p.iconst(12, 4 * MW)
-        p.iop(4, 12, "+", 8)
-        K.sv(p, U_BIG, 4)
-        p.seti(1, 4)
+        p.iop(0, 12, "+", 0)
+        p.seti(1, 0)
     p.loop(L.W["n5"], N_MODES, coefs)
-    K.big_at(p, L, 4)
-    K.sv(p, U_BIG, 4)
+    K.sv(p, U_HM, 1)
+    K.sv(p, U_SF, 2)
+    K.sv(p, U_ST, 3)
+    K.sv(p, U_Q, 8)
+    p.geti(0, 1)
+    K.sv(p, U_BIG, 0)
+    _render(p, L)
 
-    def sample():
-        # the excitation's low-pass (ResonatorSvf<1>): F13 = its output
-        K.ld(p, 1, U_IMP)
-        p.fconst(0, 0.0)
-        K.sv(p, U_IMP, 0)
-        K.ld(p, 2, U_ES1)
-        K.ld(p, 3, U_ES2)
-        K.ld(p, 4, U_EG)
-        K.ld(p, 5, U_ERG)
-        K.ld(p, 6, U_EH)
+
+# 2026-11-10 (poly16, the User: 16 voices on every engine): the half mode by mode, not sample by
+# sample. The excitation's 16 samples first (a row in L1, L.XB: SID's phases' room, free since SID
+# went); then each batch of 4 modes, each mode's states and coefficients in registers through the
+# 16 samples (3 DDR words read and 2 written a mode a half, not 7 a sample), its gain x bp added into
+# the batch's row (L1), each batch then added into the half's samples at I4: every sample's sums in
+# Plaits' order, so the output is the same, bit for bit.
+X_ROW = 0                                        # L.XB + 4 x: the excitation's 16 samples
+B_ROW = 16                                       # the batch's 16 sums
+
+
+def _render(p: Prog, L) -> None:
+    xr, br = L.XB + 4 * X_ROW, L.XB + 4 * B_ROW
+    # the excitation's low-pass (ResonatorSvf<1>), 16 samples into the X row; the impulse once
+    K.ld(p, 2, U_ES1)
+    K.ld(p, 3, U_ES2)
+    K.ld(p, 4, U_EG)
+    K.ld(p, 5, U_ERG)
+    K.ld(p, 6, U_EH)
+    K.ld(p, 1, U_IMP)
+    p.fconst(0, 0.0)
+    K.sv(p, U_IMP, 0)
+    p.iconst(9, xr)
+    p.seti(1, 9)
+
+    def exc():
         _res_svf(p, 1, 2, 3, 4, 5, 6)
-        K.sv(p, U_ES1, 2)
-        K.sv(p, U_ES2, 3)
-        p.fpass(13, 8)                           # lp
-        p.fconst(14, 0.0)                        # the batch's sum
-        p.fconst(15, 0.0)                        # out
-        K.ld(p, 9, U_BIG)
-        p.iconst(10, 0)
+        p.par(("op", 1, 0, "+", 0), ("st", 1, 11))    # the input after the impulse: 0 (F0's 0 + 0)
+    p.loop_r(15, K.HALF, exc)
+    K.sv(p, U_ES1, 2)
+    K.sv(p, U_ES2, 3)
+    # the half's samples at I4: 0
+    p.fconst(0, 0.0)
+    for k in range(K.HALF):
+        p.sti(k, 4, 0)
+    p.iconst(9, L.YB)
+    K.sv(p, U_BIG, 9)                            # (as the sample loop left it)
+    p.st(L.W["bs"], 9)                          # the modes' coefficients' pointer (2026-11-10)
+    p.geti(0, 3)
+    p.iconst(12, 4 * S1_W)
+    p.iop(0, 12, "+", 0)
+    p.seti(0, 0)                                 # I0: the modes' S1 in the slot (S2 S2_OFF on)
+
+    def batch():
+        p.iconst(0, br)
+        p.seti(5, 0)
+        p.fconst(0, 0.0)
+        for k in range(K.HALF):
+            p.stpost(5, 0)
 
         def mode():
+            # 2026-11-10 (poly16): the loads and the store on computes, the 16 samples unrolled
+            # (every F register taken): 12 instructions a sample, not 12+3. (Multifunction pairs
+            # were tried: selmap reads selas's float multiply as MRF + x y: dsl.par refuses them.)
+            # F0 g, F1 rg, F2 h, F3 gain, F5 s1, F12 s2; F4 bp, F6 t, F8 gb, F9 the batch's sum,
+            # F10 lp, F11 u / hp, F13 o, F14 x, F15 g hp. The same operations in the same order.
+            p.ld(9, L.W["bs"])                  # this mode's coefficients
             p.seti(1, 9)
-            p.ldi(2, MS1, 1)
-            p.ldi(3, MS2, 1)
-            p.ldi(4, MG, 1)
-            p.ldi(5, MRG, 1)
-            p.ldi(6, MH, 1)
-            _res_svf(p, 13, 2, 3, 4, 5, 6)
-            p.sti(MS1, 1, 2)
-            p.sti(MS2, 1, 3)
-            p.ldi(1, MA, 1)
-            p.fop(7, 1, "*", 7)                  # gain bp
-            p.fop(14, 14, "+", 7)
-            p.iconst(12, 3)
-            p.iop(1, 10, "AND", 12)
-
-            def flush():
-                p.fop(15, 15, "+", 14)
-                p.fconst(14, 0.0)
-            p.if_(1, "EQ", 12, flush, kind="i")
-            p.iconst(12, 1)
-            p.iop(10, 12, "+", 10)
+            p.ldi(0, MG, 1)
+            p.ldi(1, MRG, 1)
+            p.ldi(2, MH, 1)
+            p.ldi(3, MA, 1)
             p.iconst(12, 4 * MW)
             p.iop(9, 12, "+", 9)
-        p.loop(L.W["inner"], N_MODES, mode)
-        p.stpost(4, 15)
-    p.loop(L.W["n4"], K.HALF, sample)
+            p.st(L.W["bs"], 9)
+            p.ldi(5, 0, 0)                       # s1
+            p.ldi(12, S2_OFF, 0)                 # s2
+            p.iconst(13, xr)
+            p.seti(1, 13)
+            p.iconst(13, br)
+            p.seti(2, 13)                        # (I2: a compute's move goes through I0..I3)
+            p.ldpost(14, 1)                      # x
+            p.fop(6, 1, "*", 5)                  # t = rg s1
+            for k in range(K.HALF):
+                p.fop(11, 14, "-", 6)            # u = x - t
+                p.fop(11, 11, "-", 12)           # - s2
+                p.par(("op", 11, 11, "*", 2), ("ldk", 9, 0, 2))   # hp; the batch's sum
+                p.fop(15, 0, "*", 11)            # g hp
+                p.fop(4, 15, "+", 5)             # bp
+                p.fop(13, 3, "*", 4)             # o = gain bp
+                p.fop(5, 15, "+", 4)             # s1
+                p.fop(8, 0, "*", 4)              # gb = g bp
+                p.fop(9, 9, "+", 13)             # B += o
+                p.fop(6, 1, "*", 5)              # the next t = rg s1
+                p.par(("op", 10, 8, "+", 12), ("ld", 14, 1))     # lp = gb + s2; the next x
+                p.par(("op", 12, 8, "+", 10), ("st", 2, 9))       # s2; B out
+            p.sti(S2_OFF, 0, 12)
+            p.stpost(0, 5)                       # the next mode's
+        p.loop(L.W["inner"], BATCH, mode)
+        p.iconst(0, br)
+        p.seti(5, 0)
+        p.geti(0, 4)
+        p.seti(1, 0)
+
+        def add4():                              # out += the batch's sum
+            for k in range(4):
+                p.ldpost(1, 5)
+                p.ldi(0, 0, 1)
+                p.fop(0, 0, "+", 1)
+                p.stpost(1, 0)
+        p.loop_r(15, K.HALF // 4, add4)
+    p.loop(L.W["n4"], N_MODES // BATCH, batch)
+    p.geti(0, 4)                                 # I4 past the half, as before
+    p.iconst(12, 4 * K.HALF)
+    p.iop(0, 12, "+", 0)
+    p.seti(4, 0)
 
 
 def _res_svf(p: Prog, x: int, s1: int, s2: int, g: int, rg: int, h: int) -> None:

@@ -63,9 +63,14 @@ CODE = pathlib.Path(__file__).with_name("sharc_code.json")
 # which is carved from the top of block 1 (16 KB at size code 0, the size the
 # startup writes; see docs/waverider-dsp-silence.md). REGION ends 36 KB below the
 # block's top, so it stays clear of a 16 KB or a 32 KB DM cache.
-REGION = (0x2DD600, 0x2E7000)                # W5: tables to DDR; W2: + the scanner; PING: + its code, state, tables; SHFT: + state, tables; RESONATOR: + code, scratch, tables
+REGION = (0x2DD600, 0x2EB000)                # 2026-11-10 (poly16): + the voices' slots (MD_STATE_DM); W5: tables to DDR; W2: + the scanner; PING: + its code, state, tables; SHFT: + state, tables; RESONATOR: + code, scratch, tables
 STOCK_BLOCK1_END = 0x2DD52C
 DM_CACHE_32K = 0x2E8000                      # the lowest byte a 32 KB DM cache would own
+# 2026-11-10 (poly16): the startup's DM cache is 16 KB (size code 0, decoded in
+# docs/waverider-dsp-silence.md, "The startup cache configuration": 0x2ec000..0x2effff, the same
+# code that leaves block 3's top 16 KB to the I-cache), so REGION may reach 4 KB below it
+DM_CACHE_16K = 0x2EC000                      # the lowest byte the startup's 16 KB DM cache owns
+REGION_CACHE_GAP = 0x1000
 CODE_SPAN = 0x400                            # each code object is padded to this
 STATE_DM, STATE_BYTES = 0x2DDE00, 0x380      # save area, PERC's scratch, idle_load's state
 # PERC (v0.11, docs/perc.md): machine type 5, in Waverider's former place. Its code is
@@ -95,7 +100,12 @@ MD_TABLES_DDR = 0x82000000
 # keep theirs in the same slots), then the Monomachine's shared scratch (and the voice order
 # in its tail). The P-I delay lines (128 KB, too big for the room) stay in DDR, at the
 # address they always had, now loaded with zeros at power-on too.
-MD_STATE_L2 = 0x200A0000
+MD_STATE_L2 = 0x200A0000                     # until 2026-11-10: now MD_STATE_DM (the room is left unused)
+# 2026-11-10 (poly16, the User: 16 PLAITS voices on every engine): the 16 slots x 1 KB out of L2
+# into L1 block 1, above XDLY's state: every voice reads and writes its slot words all through its
+# block (a PLAITS voice 1,100 .. 3,000 accesses a block), and an L1 access costs no more than its
+# instruction (dnfw/docs dsp-cost.md). Zeros at power-on: a fill block, nothing in the upload.
+MD_STATE_DM = 0x2E7000
 MNM_SCRATCH_L2 = 0x200A4000
 MNM_SCRATCH_BYTES = 0x4000
 # v0.36..v0.43: the DPRO tables' room (gone with DPRO-DDRW and -DENS, 2026-11-08; the address stays
@@ -375,6 +385,8 @@ def spans() -> list[tuple[str, int, bytes]]:
         ("ping.asm (wr_ping: the shared tail)", PING_CODE_DM, obj["ping"]),
         ("FDN8 state: its words, the LFOs' phases, the stock buffers' chunk table", FDN8_STATE_DM, _fdn8_state()),
         ("XDLY state: its words (zeros)", XDLY_STATE_DM, _xdly_state()),
+        ("Machinedrum / Monomachine voices: 16 slots x 1 KB (zeros; L2 until 2026-11-10)", MD_STATE_DM,
+         bytes(16 * _md_core().MD_STRIDE)),
     ]
     out = []
     for k, (what, at, payload) in enumerate(raw):
@@ -523,8 +535,6 @@ def l2_spans() -> list[tuple[str, int, bytes]]:
             raise DspError(f"{name}.asm ({len(code)} bytes) leaves fewer than 64 bytes of its L2 span")
         out.append((what, at, code + bytes(span - len(code))))
     # v0.32: the voices' working state (zeros)
-    out.append(("Machinedrum voices: 16 slots x 1 KB, in L2 (zeros; v0.32)", MD_STATE_L2,
-                bytes(16 * _md_core().MD_STRIDE)))
     out.append(("Monomachine scratch and the voice order, in L2 (zeros; v0.32)", MNM_SCRATCH_L2,
                 bytes(MNM_SCRATCH_BYTES)))
     out.append(("the main mix's tap for the recorder's MAIN, in L2 (zeros; v0.37)", MAIN_TAP_L2,
@@ -652,8 +662,8 @@ def _check_free(stock: bytes, span_list) -> None:
             if b.target < hi and lo < b.target + b.count:
                 raise DspError(f"{what} at {lo:#x}+{len(payload):#x} overlaps the stock "
                                f"block at {b.target:#x}+{b.count:#x}")
-    if not (STOCK_BLOCK1_END <= REGION[0] and REGION[1] <= DM_CACHE_32K):
-        raise DspError(f"the region {REGION} is not between block 1's last stock byte and a 32 KB DM cache")
+    if not (STOCK_BLOCK1_END <= REGION[0] and REGION[1] <= DM_CACHE_16K - REGION_CACHE_GAP):
+        raise DspError(f"the region {REGION} is not between block 1's last stock byte and 4 KB under the DM cache")
     ordered = sorted((at, at + len(p), w) for w, at, p in span_list)
     for (a0, a1, w0), (b0, b1, w1) in zip(ordered, ordered[1:]):
         if b0 < a1:

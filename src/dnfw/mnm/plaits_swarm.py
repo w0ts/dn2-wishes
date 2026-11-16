@@ -33,6 +33,18 @@ V_FROM, V_INT, V_PH, V_FM, V_AMP, V_PREV, V_FC, V_SPH, V_SNX, V_SF, V_SG = range
 V_N = 11
 V_INIT = (0.0, 1.0, 1.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.0, 0.01, 0.0)
 BIG_USED = NV * V_N
+# 2026-11-10 (poly16): voices 0..4's words in the slot's free host words W[9..63] (L1), 5..7's still
+# in DDR (no room for them): their DDR accesses 5/8 fewer, the same arithmetic
+from ..md import core as _MDK
+L1_W, L1_NV = 9, 5
+assert L1_W + L1_NV * V_N <= _MDK.NW
+
+
+def _first(p: Prog) -> None:
+    """R0 = voice 0's words (the slot's W[9]). Clobbers R12."""
+    p.geti(0, 3)
+    p.iconst(12, 4 * L1_W)
+    p.iop(0, 12, "+", 0)
 
 
 def _acc_at(p: Prog, L: C.Layout) -> None:
@@ -51,14 +63,16 @@ def _vb(p: Prog) -> None:
 
 def init(p: Prog, L: C.Layout) -> None:
     """SwarmEngine::Init + Reset: every voice's GrainEnvelope and saw at Init; the sum at 0."""
-    K.big_at(p, L, 0)
-    p.seti(1, 0)
-
     def voice():
         for v in V_INIT:
             p.fconst(0, v)
             p.stpost(1, 0)
-    p.loop_r(10, NV, voice)
+    _first(p)
+    p.seti(1, 0)
+    p.loop_r(10, L1_NV, voice)
+    K.big_at(p, L, 0)
+    p.seti(1, 0)
+    p.loop_r(10, NV - L1_NV, voice)
     _acc_at(p, L)
     p.fconst(0, 0.0)
     p.loop_r(10, HALF, lambda: p.stpost(1, 0))
@@ -251,6 +265,9 @@ def _voice(p: Prog, L: C.Layout) -> None:
     K.ld(p, 0, W_VB)
     p.iconst(12, 4 * V_N)
     p.iop(0, 12, "+", 0)
+    p.ld(1, L.W["n5"])
+    p.iconst(12, NV - L1_NV + 1)                 # voice L1_NV - 1 just done: the next in DDR
+    p.if_(1, "EQ", 12, lambda: K.big_at(p, L, 0), kind="i")
     K.sv(p, W_VB, 0)
 
 
@@ -276,7 +293,7 @@ def half(p: Prog, L: C.Layout) -> None:
     K.semis(p, 4, 3)
     K.mulk(p, 4, 4, 0.25)                      # size_ratio
     K.sv(p, W_SR, 4)
-    K.big_at(p, L, 0)
+    _first(p)
     K.sv(p, W_VB, 0)
     p.loop(L.W["n5"], NV, lambda: _voice(p, L))
     _acc_at(p, L)

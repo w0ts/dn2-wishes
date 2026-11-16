@@ -75,7 +75,7 @@ def clear_half(p: Prog, L: C.Layout, out: int) -> None:
     p.iop(0, 8, "+", 0)
     p.seti(1, 0)
     p.iconst(2, 0)
-    p.loop_r(3, CLR_CHUNK, lambda: p.stpost(1, 2))
+    p.loop_r(3, CLR_CHUNK // 8, lambda: [p.stpost(1, 2) for _ in range(8)])   # 2026-11-10: 8 a pass
     p.iconst(out, 0)
     for _ in range(HALF):
         p.stpost(4, out)
@@ -238,24 +238,26 @@ SIN_POLY = (6.283185005187988, -41.34165573120117, 81.60099792480469, -76.549659
 
 
 def sinp_body(p: Prog) -> None:
-    """F15 = sin(2 pi F15), any F15. Clobbers R0, R1, R12-R14."""
-    # r = x - round(x): -1/2 .. 1/2
-    addk(p, 13, 15, 0.5)
-    floor_frac(p, 0, 1, 13)
-    addk(p, 15, 1, -0.5)                       # r
-    # fold to |r| <= 1/4: r > 1/4 -> 1/2 - r, r < -1/4 -> -1/2 - r
-    p.fconst(13, 0.25)
+    """F15 = sin(2 pi F15), any F15. Clobbers R0, R1, R12-R14.
 
-    def hi():
-        p.fconst(12, 0.5)
-        p.fop(15, 12, "-", 15)
-    p.if_(15, "GT", 13, hi)
-    p.fconst(13, -0.25)
-
-    def lo():
-        p.fconst(12, -0.5)
-        p.fop(15, 12, "-", 15)
-    p.if_(15, "LT", 13, lo)
+    2026-11-10 (poly16): without branches, the same values bit for bit: x + 0.5's floor by TRUNC
+    and a conditional + 1 (x + 0.5 - its TRUNC is exact, so + 1 and - (TRUNC - 1) round alike);
+    the quarter-turn fold as MAX(MIN(r, 0.5 - r), -0.5 - r) (each picked value computed as
+    before; the others cannot cross 0.25 by rounding). 28 instructions, not 33..37 and two
+    branches."""
+    p.fconst(12, 0.5)
+    p.fconst(14, 1.0)
+    p.fop(13, 15, "+", 12)
+    p.trunc(0, 13)
+    p.float0(1, 0)
+    p.fop(1, 13, "-", 1)
+    p.fop_lt(1, 1, "+", 14)                    # x + 0.5 - floor(x + 0.5)
+    p.fop(15, 1, "-", 12)                      # r = x - round(x): -1/2 .. 1/2
+    p.fconst(1, -0.5)
+    p.fop(13, 12, "-", 15)
+    p.fop(14, 15, "MIN", 13)
+    p.fop(13, 1, "-", 15)
+    p.fop(15, 14, "MAX", 13)                   # |r| <= 1/4
     p.fop(13, 15, "*", 15)                     # r^2
     p.fconst(14, SIN_POLY[-1])
     for c in reversed(SIN_POLY[:-1]):
@@ -268,6 +270,15 @@ def sinp(p: Prog, d: int, x: int) -> None:
     """Fd = sin(2 pi Fx), any Fx (a subroutine). Clobbers R0, R1, R12-R15, I12."""
     p.fpass(15, x)
     p.call("pl_sinp", lambda: sinp_body(p))
+    if d != 15:
+        p.fpass(d, 15)
+
+
+def sinp_inline(p: Prog, d: int, x: int) -> None:
+    """sinp's body here, not a call (2026-11-10: a hot loop's; no I12). Clobbers R0, R1, R12-R15."""
+    if x != 15:
+        p.fpass(15, x)
+    sinp_body(p)
     if d != 15:
         p.fpass(d, 15)
 
@@ -301,6 +312,20 @@ def rng(p: Prog, d: int) -> None:
 def rnd01(p: Prog, d: int) -> None:
     """Fd = Random::GetFloat(), 0..1: (word >> 1) x 2^-31. Clobbers R12-R14."""
     rng(p, 13)
+    p.lsh(13, 13, -1)
+    p.iconst(12, -31)
+    p.float_(d, 13, 12)
+
+
+def rnd01_inline(p: Prog, d: int) -> None:
+    """rnd01 with rng's body here, not a call (2026-11-10: a hot loop's; the same operations).
+    Clobbers R12-R14."""
+    ld(p, 13, S_RNG)
+    p.iconst(14, 1664525)
+    p.mul_ssi(13, 13, 14)
+    p.iconst(14, 1013904223)
+    p.iop(13, 13, "+", 14)
+    sv(p, S_RNG, 13)
     p.lsh(13, 13, -1)
     p.iconst(12, -31)
     p.float_(d, 13, 12)

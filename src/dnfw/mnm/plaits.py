@@ -540,33 +540,44 @@ def _post(p: Prog, L: C.Layout) -> None:
     p.fconst(12, 0.0)
 
     def limit():                                 # stmlib Limiter::Process(-gain)
+        # 2026-11-10 (poly16): the peak, -gain and the constants in registers through the half,
+        # the attack's choice a conditional move on the error's own sign (as COMP(error, 0)):
+        # the same operations in the same order
         p.fconst(12, 0.0)
         p.fop(5, 12, "-", 5)
+        C.vw(p, 7, "i1")                         # peak
+        p.fconst(9, 0.05)
+        p.fconst(10, 1.0)
+        p.fconst(11, -1.0)
+        p.fconst(3, 0.8)
 
         def one():
-            p.ldi(4, 0, 1)
+            p.ldpost(4, 1)
             p.fop(4, 4, "*", 5)                  # s
-            _abs(p, 6, 4)
-            C.vw(p, 7, "i1")                     # peak
-            p.fop(6, 6, "-", 7)                  # error
+            p.fabs_(6, 4)                        # (|s|, as _abs: 0 - s, MAX: the same value)
             p.fconst(8, 0.00002)
-            p.fconst(12, 0.0)
-            p.if_(6, "GT", 12, lambda: p.fconst(8, 0.05))
+            p.fop(6, 6, "-", 7)                  # error
+            p.fop_if("GT", 8, 9, "PASS")
             p.fop(6, 8, "*", 6)
             p.fop(7, 7, "+", 6)
-            C.vws(p, "i1", 7)
-            p.fconst(12, 1.0)
-            p.if_(7, "GT", 12, lambda: (recip(p, 7, 7), p.fop(4, 4, "*", 7)))
-            _mulk(p, 4, 4, 0.8)
-            _clamp(p, 4, -1.0, 1.0)              # Clip16, as every OUT (the limiter's attack lets a jump through)
-            p.stpost(1, 4)
-        p.loop(L.W["n4"], HALF, one)
+            p.if_(7, "GT", 10, lambda: (C.vws(p, "i1", 7), recip(p, 14, 7), p.fop(4, 4, "*", 14), C.vw(p, 7, "i1")))
+            p.fop(4, 4, "*", 3)
+            p.fop(4, 4, "MAX", 11)
+            p.fop(4, 4, "MIN", 10)               # Clip16, as every OUT (the limiter's attack lets a jump through)
+            p.sti(-1, 1, 4)
+        p.loop_r(2, HALF, one)                   # (recip clobbers R12-R15)
+        C.vws(p, "i1", 7)
 
     def fixed():                                 # the gain, Clip16's +-1
-        def one():
-            p.ldi(4, 0, 1)
-            p.fop(4, 4, "*", 5)
-            _clamp(p, 4, -1.0, 1.0)
-            p.stpost(1, 4)
-        p.loop(L.W["n4"], HALF, one)
+        p.fconst(11, -1.0)
+        p.fconst(10, 1.0)
+
+        def four():
+            for k in range(4):
+                p.ldpost(4, 1)
+                p.fop(4, 4, "*", 5)
+                p.fop(4, 4, "MAX", 11)
+                p.fop(4, 4, "MIN", 10)
+                p.sti(-1, 1, 4)
+        p.loop_r(15, HALF // 4, four)
     p.if_(5, "LT", 12, limit, fixed)

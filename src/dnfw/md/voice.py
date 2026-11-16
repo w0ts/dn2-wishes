@@ -99,18 +99,44 @@ def _each(p: Prog, L: K.Layout, step: str) -> None:
     p.place(end)
 
 
+def _zeros(p: Prog, n: int, i: int = 5, z: int = 6, counter: int = 7) -> None:
+    """2026-11-10 (poly16): N zeros from Ii on (Rz already 0), eight stores a pass of a register loop
+    (until then a memory-counter loop of one store: about 6 instructions a word, 1.4 now). The same
+    words written. Clobbers Rcounter, R12."""
+    if n >= 8:
+        p.loop_r(counter, n // 8, lambda: [p.stpost(i, z) for _ in range(8)])
+    for _ in range(n % 8):
+        p.stpost(i, z)
+
+
+def peak32(p: Prog, i: int, counter: int = 2) -> None:
+    """F7 = MAX(F7, |x|) over the 32 words from Ii on, as MAX(F7, x) then MAX(F7, 0 - x) a word
+    (2026-11-10, poly16: four words a pass of a register loop, 0.0 held in F13; it was a
+    memory-counter loop reloading the 0 every word: 10 instructions a word, ~4.75 now; the same
+    operations). Clobbers F6, F13, Rcounter, R12."""
+    p.fconst(13, 0.0)
+
+    def four():
+        for _ in range(4):
+            p.ldpost(6, i)
+            p.fop(7, 7, "MAX", 6)
+            p.fop(6, 13, "-", 6)
+            p.fop(7, 7, "MAX", 6)
+    p.loop_r(counter, 8, four)
+
+
 def reset(p: Prog, L: K.Layout) -> None:
-    """The slot's words cleared, no machine, the stream asking for a block. Clobbers R0,
+    """The slot's words cleared, no machine, the stream asking for a block. Clobbers R0, R6, R7 (2026-11-10),
     R12, I5."""
     p.ld(0, L.C["mdb"])
     p.seti(5, 0)
     p.iconst(6, 0)
-    p.loop(L.C["n1"], K.MD_WORDS, lambda: p.stpost(5, 6))
+    _zeros(p, K.MD_WORDS)
     # v0.24: and its P-I delay lines (the Machinedrum's start as its emulator's: zeros)
     K.delay_base(p, L, 0)
     p.seti(5, 0)
     p.iconst(6, 0)
-    p.loop(L.C["n1"], K.PI_DELAY_WORDS, lambda: p.stpost(5, 6))
+    _zeros(p, K.PI_DELAY_WORDS)
     p.iconst(0, -1)
     K.vws(p, "mach", 0)
     p.fconst(0, START)
@@ -128,10 +154,14 @@ def advance(p: Prog, L: K.Layout) -> None:
     p.iop(1, 12, "+", 1)
     p.seti(1, 1)                               # I1: B[32]
 
-    def move():
+    def move8():                               # 2026-11-10 (poly16): 8 words a pass of a register loop
+        for _ in range(8):
+            p.ldpost(6, 1)
+            p.stpost(5, 6)
+    p.loop_r(7, 35 // 8, move8)
+    for _ in range(35 % 8):
         p.ldpost(6, 1)
         p.stpost(5, 6)
-    p.loop(L.C["n1"], 35, move)
     # v0.24: the host's scale function is emitted once (it was twice: after a note and
     # for dirty words), run when a note waits or, with a machine, when words are dirty
     K.vw(p, 0, "trg")
@@ -156,13 +186,13 @@ def advance(p: Prog, L: K.Layout) -> None:
                 p.ld(0, L.C["mdb"])
                 p.seti(5, 0)
                 p.iconst(6, 0)
-                p.loop(L.C["n1"], K.B0 + K.NB, lambda: p.stpost(5, 6))   # W, S, the stream
+                _zeros(p, K.B0 + K.NB)                          # W, S, the stream
 
                 def lines():
                     K.delay_base(p, L, 0)
                     p.seti(5, 0)
                     p.iconst(6, 0)
-                    p.loop(L.C["n1"], K.PI_DELAY_WORDS, lambda: p.stpost(5, 6))
+                    _zeros(p, K.PI_DELAY_WORDS)
                 K.vw(p, 1, "mach")
                 p.iconst(12, DELAY_LO)
                 p.iconst(2, 0)
@@ -252,14 +282,7 @@ def advance(p: Prog, L: K.Layout) -> None:
         p.iop(1, 12, "+", 1)
         p.seti(5, 1)
         p.fconst(7, 0.0)
-
-        def peak():
-            p.ldpost(6, 5)
-            p.fop(7, 7, "MAX", 6)
-            p.fconst(13, 0.0)
-            p.fop(6, 13, "-", 6)
-            p.fop(7, 7, "MAX", 6)
-        p.loop(L.C["n1"], 32, peak)
+        peak32(p, 5)
         K.vw(p, 0, "quiet")
         p.fconst(12, QUIET_LEVEL)
         p.if_(7, "LT", 12, lambda: (p.iconst(12, 1), p.iop(0, 12, "+", 0)),
@@ -328,10 +351,11 @@ def block(p: Prog, L: K.Layout, knobs: list[int], note: int, want: int, level: f
         p.fconst(14, 0.5)                      # the same product, bit for bit)
         p.ld(15, level_word)
 
+    p.fconst(4, K.STEP)                        # 2026-11-10 (poly16): the step held in F4
+
     def one():
         p.trunc(7, 6)
-        p.iconst(12, 0)
-        p.float_(8, 7, 12)
+        p.float0(8, 7)                         # (FLOAT R7, as FLOAT R7 BY 0)
         p.fop(8, 6, "-", 8)                    # f
         p.lsh(7, 7, 2)
         p.iop(7, 13, "+", 7)
@@ -365,9 +389,8 @@ def block(p: Prog, L: K.Layout, knobs: list[int], note: int, want: int, level: f
             p.fop(9, 9, "*", 15)
         p.fop(10, 1, "*", 15)
         p.fop(9, 9, "+", 10)
-        p.stpost(4, 9)
-        p.fconst(12, K.STEP)
-        p.fop(6, 6, "+", 12)
+        p.fop(6, 6, "+", 4)                    # the position on
+        p.stpost(4, 9)                         # the sample out (2026-11-10: not one instruction: I4)
     p.loop_r(5, 32, one)
     K.vws(p, "pos", 6)
     p.st(L.C["n1"], 5)

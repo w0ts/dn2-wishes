@@ -9,7 +9,7 @@
 The scans (each the DSP walking the range, 1,024 words a block, about 2 ms):
 
     voice 1's P-I delay lines   0x82200000  2048 words     voice 4's   0x82206000
-    the 16 voices' L2 state     0x200a0000  4096 words     the PERC state  0x2de180  512
+    the 16 voices' L2 state     0x2e7000  4096 words     the PERC state  0x2de180  512
 
 Run it right after a power-on, before any note is played, then after the note that kills
 voice 1, then `watch` with nothing playing. A non-finite word before any note says the
@@ -34,7 +34,7 @@ from dn2samples import HELLO, Link  # noqa: E402
 DIAG, SCAN, ENTRY = 24, 25, 27
 SCANS = (("voice 1's P-I delay lines (DDR)", 0x82200000, 2048),
          ("voice 4's P-I delay lines (DDR)", 0x82206000, 2048),
-         ("the 16 voices' Machinedrum state (L2)", 0x200A0000, 4096),
+         ("the 16 voices' Machinedrum state (L1)", 0x2E7000, 4096),
          ("the 16 voices' PERC state (L1)", 0x2DE180, 512))
 
 

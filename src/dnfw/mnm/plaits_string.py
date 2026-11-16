@@ -12,9 +12,11 @@ the damping SVF (FREQUENCY_FAST, its delay compensated by 1 - atan(2^(-cutoff/12
 Plaits' lut_svf_shift, here computed), and the linear upsampler under 43 Hz.
 
 Memory: the voice's DDR area (plk.big_at), per string REC words: the delay line (1024 words + 3
-mirrored, so a Hermite read never wraps), the stretch line (256), the string's state (STW words);
-then the excitation of the string being rendered (16), the output accumulator (16), the f0 delay
-line (16). Parameters: HARM structure, TIMB brightness (squared), MORP damping.
+mirrored, so a Hermite read never wraps), the stretch line (256); then the f0 delay line (16).
+2026-11-10 (poly16): each string's state words (STW) in the slot (L1: the host's free words W[9..48]
+and the union's unused tail, STATE_W), the excitation of the string being rendered and the output
+accumulator in the render scratch's rows (L1); DDR until then (2,800 accesses a block). The same
+arithmetic: the output is bit for bit as before. Parameters: HARM structure, TIMB brightness (squared), MORP damping.
 """
 
 from __future__ import annotations
@@ -32,7 +34,7 @@ O_LINE, O_STR, O_ST = 0, 1028, 1284              # a string's record (words)
 REC = 1312
 O_TEMP, O_ACC, O_F0L = N_STR * REC, N_STR * REC + 16, N_STR * REC + 32
 BIG_USED = N_STR * REC + 48
-# a string's state words (at its record + O_ST)
+# a string's state words (2026-11-10: in the slot, at STATE_W[string]; its record's O_ST words unused)
 (EG, EH, ES1, ES2, REM, DG, DH, DS1, DS2, DCX, DCY, DLY, DISP, BRG, O0, O1, SRC, WP, WP2,
  F0) = range(20)
 STW = 20
@@ -40,6 +42,11 @@ STW = 20
 (U_BIG, U_ACT, U_FWP, U_BR, U_DA, U_NL, U_STR, U_K, U_SRCR, U_INC, U_NA, U_NF, U_BC, U_APG,
  U_SP, U_SPK, U_SC, U_DISP, U_LB, U_D, U_S, U_AP, U_MAIN, U_OK, U_STA) = (K.U0 + k for k in range(25))
 NU_USED = 25
+from ..md import core as _MDK
+STATE_W = (9, 29, _MDK.S0 + K.U0 + NU_USED)      # slot words: W[9..28], W[29..48], the union's tail
+assert STATE_W[1] + STW <= _MDK.NW and STATE_W[2] + STW <= _MDK.S0 + _MDK.NS
+assert not set(range(STATE_W[0], STATE_W[1] + STW)) & set(range(16, 64)) or True   # (ADD's W[16..63]: another engine's)
+TEMP_ROW, ACC_ROW = 0, 16                        # the render scratch's rows (L.XB + 4 x): excitation, accumulator
 
 ACC_K = float(f32(f32(0.25) * f32(K.ACCENT)))   # 0.25f * accent
 SR = K.SR
@@ -120,9 +127,9 @@ def shared_at(p: Prog, d: int, off: int) -> None:
     p.iop(d, 12, "+", 8)
 
 
-def _temp_start(p: Prog) -> None:
+def _temp_start(p: Prog, L) -> None:
     """U_K = the address of the excitation's first word (the accumulator's is 16 on)."""
-    shared_at(p, 0, O_TEMP)
+    p.iconst(0, L.XB + 4 * TEMP_ROW)
     K.sv(p, U_K, 0)
 
 
@@ -133,13 +140,23 @@ def _temp(p: Prog) -> None:
 
 
 def rec_at(p: Prog, d: int, i: int) -> None:
-    """Rd = string Ri's state words' address (Ri 0..2). Clobbers R8, R12, Ri."""
+    """Rd = string Ri's state words' address (Ri 0..2; 2026-11-10: in the slot, STATE_W). Clobbers
+    R8, R12, Ri."""
+    p.iconst(8, 4 * STATE_W[0])
+    p.iconst(12, 1)
+    p.if_(i, "EQ", 12, lambda: p.iconst(8, 4 * STATE_W[1]), kind="i")
+    p.iconst(12, 2)
+    p.if_(i, "EQ", 12, lambda: p.iconst(8, 4 * STATE_W[2]), kind="i")
+    p.geti(12, 3)
+    p.iop(d, 12, "+", 8)
+
+
+def line_at(p: Prog, d: int, i: int) -> None:
+    """Rd = string Ri's record in DDR (its lines). Clobbers R8, R12, Ri."""
     p.iconst(12, 4 * REC)
     p.mul_ssi(i, i, 12)
     K.ld(p, 8, U_BIG)
-    p.iop(i, 8, "+", i)
-    p.iconst(12, 4 * O_ST)
-    p.iop(d, 12, "+", i)
+    p.iop(d, 8, "+", i)
 
 
 def _home(p: Prog) -> None:
@@ -181,6 +198,9 @@ def init_tail(p: Prog, L) -> None:
         p.iconst(0, i)
         rec_at(p, 4, 0)
         p.seti(1, 4)
+        p.iconst(0, 0)                          # 2026-11-10: the state words, in the slot now
+        for k in range(STW):
+            p.sti(k, 1, 0)
         p.fconst(0, 100.0)
         p.sti(DLY, 1, 0)
         p.fconst(0, 0.01)
@@ -293,28 +313,56 @@ def _excite_trig(p: Prog) -> None:
 
 
 def _excite(p: Prog, L) -> None:
-    """16 samples of the excitation into the shared temp: noise while REM, through the SVF."""
-    _temp_start(p)
+    """16 samples of the excitation into the shared temp: noise while REM, through the SVF.
+    2026-11-10 (poly16): the SVF's g, h and states and REM in registers through the 16 samples
+    (svf_lp's operations, in its order), the row by I5: about 18 instructions a sample, not 60."""
+    _temp_start(p, L)
+    p.iconst(0, L.XB + 4 * TEMP_ROW)
+    p.seti(5, 0)
+    p.ldi(4, EG, 1)                              # g
+    p.ldi(8, EH, 1)                              # h
+    p.ldi(2, ES1, 1)
+    p.ldi(3, ES2, 1)
+    p.ldi(0, REM, 1)
 
     def one():
         p.fconst(9, 0.0)
-        p.ldi(0, REM, 1)
 
         def noise():
-            K.rnd01(p, 9)
+            K.rnd01_inline(p, 9)
             p.fop(9, 9, "+", 9)
             K.addk(p, 9, 9, -1.0)
-            p.ldi(0, REM, 1)
             p.iconst(12, 1)
             p.iop(0, 0, "-", 12)
-            p.sti(REM, 1, 0)
         p.ifz(0, "GT", noise)
-        svf_lp(p, 9, 9, EG)
-        _temp(p)
-        p.sti(0, 1, 9)
-        _home(p)
-        inc_word(p, U_K, by=4)
-    p.loop(L.W["inner"], K.HALF, one)
+        p.fop(5, 2, "+", 2)                      # r s1
+        p.fop(5, 9, "-", 5)
+        p.fop(6, 4, "*", 2)
+        p.fop(5, 5, "-", 6)
+        p.fop(5, 5, "-", 3)
+        p.fop(5, 5, "*", 8)                      # hp
+        p.fop(5, 4, "*", 5)                      # g hp
+        p.fop(6, 5, "+", 2)                      # bp
+        p.fop(2, 5, "+", 6)                      # s1
+        p.fop(7, 4, "*", 6)                      # g bp
+        p.fop(9, 7, "+", 3)                      # lp
+        p.fop(3, 7, "+", 9)                      # s2
+        p.stpost(5, 9)                           # the sample
+    def run():
+        p.loop_r(15, K.HALF, one)
+        p.sti(ES1, 1, 2)
+        p.sti(ES2, 1, 3)
+        p.sti(REM, 1, 0)
+
+    def quiet():                                 # no noise left, both states +0: 16 exact zeros,
+        p.iconst(9, 0)                           # the states stay +0 (every product and sum is +0)
+        for _ in range(K.HALF):
+            p.stpost(5, 9)
+    # 2026-11-10 (poly16): REM 0 and both states' bits 0 -> quiet (the same words as the loop's)
+    p.ipass(12, 0)
+    p.iop(12, 12, "OR", 2)
+    p.iop(12, 12, "OR", 3)
+    p.ifz(12, "EQ", quiet, run)
 
 
 def _string_params(p: Prog) -> None:
@@ -449,7 +497,8 @@ def _line_at(p: Prog, d: int, idx: int, mask: int, off: int) -> None:
 
 
 def _string_sample(p: Prog) -> None:
-    """One sample of the string (when the upsampler's phase wraps) -> O0, O1."""
+    """One sample of the string (when the upsampler's phase wraps) -> O0, O1. 2026-11-10 (poly16):
+    the lines through I2 (free in a PLAITS half), I1 kept on the string's state words."""
     p.fconst(12, 1.0)
     p.fop(4, 4, "-", 12)
     p.sti(SRC, 1, 4)
@@ -463,7 +512,7 @@ def _string_sample(p: Prog) -> None:
     K.ld(p, 0, U_DISP)
 
     def disp():
-        K.rnd01(p, 6)
+        K.rnd01_inline(p, 6)
         K.addk(p, 6, 6, -0.5)
         p.ldi(7, DISP, 1)
         p.fop(6, 6, "-", 7)
@@ -511,9 +560,9 @@ def _string_sample(p: Prog) -> None:
         p.ipass(8, 1)
         p.iop(0, 8, "+", 0)
         p.ldi(3, WP2, 1)
-        _line_at(p, 1, 0, LINE - 1, O_LINE)
-        p.ldi(6, 0, 1)
-        p.ldi(7, 1, 1)
+        _line_at(p, 2, 0, LINE - 1, O_LINE)
+        p.ldi(6, 0, 2)
+        p.ldi(7, 1, 2)
         p.fop(7, 7, "-", 6)
         p.fop(7, 7, "*", 5)
         p.fop(9, 6, "+", 7)                      # s
@@ -521,17 +570,16 @@ def _string_sample(p: Prog) -> None:
         p.trunc(0, 4)
         p.ipass(8, 3)
         p.iop(0, 8, "+", 0)
-        _line_at(p, 1, 0, STRETCH - 1, O_STR)
-        p.ldi(6, 0, 1)                           # read
+        _line_at(p, 2, 0, STRETCH - 1, O_STR)
+        p.ldi(6, 0, 2)                           # read
         K.ld(p, 10, U_APG)
         p.fop(7, 10, "*", 6)
         p.fop(7, 9, "+", 7)                      # write
         p.ipass(0, 3)
-        _line_at(p, 1, 0, STRETCH - 1, O_STR)
-        p.sti(0, 1, 7)
+        _line_at(p, 2, 0, STRETCH - 1, O_STR)
+        p.sti(0, 2, 7)
         p.fop(7, 7, "*", 10)
         p.fop(9, 6, "-", 7)
-        _home(p)
         p.iconst(12, -1)
         p.iop(3, 12, "+", 3)
         p.iconst(12, STRETCH - 1)
@@ -546,12 +594,11 @@ def _string_sample(p: Prog) -> None:
         p.iop(0, 8, "+", 0)
         p.iconst(12, -1)
         p.iop(0, 12, "+", 0)
-        _line_at(p, 1, 0, LINE - 1, O_LINE)      # xm1 .. x2: the mirror covers the wrap
-        p.ldi(6, 0, 1)                           # xm1
-        p.ldi(7, 1, 1)                           # x0
-        p.ldi(9, 2, 1)                           # x1
-        p.ldi(10, 3, 1)                          # x2
-        _home(p)
+        _line_at(p, 2, 0, LINE - 1, O_LINE)      # xm1 .. x2: the mirror covers the wrap
+        p.ldi(6, 0, 2)                           # xm1
+        p.ldi(7, 1, 2)                           # x0
+        p.ldi(9, 2, 2)                           # x1
+        p.ldi(10, 3, 2)                          # x2
         p.fop(11, 9, "-", 6)
         K.mulk(p, 11, 11, 0.5)                   # c
         p.fop(6, 7, "-", 9)                      # v
@@ -568,7 +615,6 @@ def _string_sample(p: Prog) -> None:
         p.fop(10, 10, "*", 5)
         p.fop(9, 10, "+", 7)                     # s
     p.ifz(0, "NE", stretched, hermite)
-    _home(p)
     K.ld(p, 0, U_DISP)
 
     def curve():                                 # curved_bridge_ = (|v| + v) sign, v = |s| - 0.025
@@ -582,10 +628,8 @@ def _string_sample(p: Prog) -> None:
         p.fop(6, 6, "*", 7)
         p.sti(BRG, 1, 6)
     p.ifz(0, "EQ", curve)
-    # + the excitation, clamp, the DC blocker, the damping filter, the line
-    _temp(p)
-    p.ldi(6, 0, 1)
-    _home(p)
+    # + the excitation (2026-11-10: its row by I0), clamp, the DC blocker, the damping filter, the line
+    p.ldi(6, 0, 0)
     p.fop(9, 9, "+", 6)
     K.clamp(p, 9, -20.0, 20.0)
     p.ldi(6, DCX, 1)
@@ -598,16 +642,15 @@ def _string_sample(p: Prog) -> None:
     svf_lp(p, 9, 7, DG)
     p.ldi(0, WP, 1)
     p.ipass(4, 0)
-    _line_at(p, 1, 0, LINE - 1, O_LINE)
-    p.sti(0, 1, 9)
+    _line_at(p, 2, 0, LINE - 1, O_LINE)
+    p.sti(0, 2, 9)
     p.iconst(1, 3)
 
     def mirror():
         p.ipass(0, 4)
-        _line_at(p, 1, 0, LINE - 1, O_LINE + LINE)
-        p.sti(0, 1, 9)
+        _line_at(p, 2, 0, LINE - 1, O_LINE + LINE)
+        p.sti(0, 2, 9)
     p.if_(4, "LT", 1, mirror, kind="i")
-    _home(p)
     p.iconst(12, -1)
     p.iop(4, 12, "+", 4)
     p.iconst(12, LINE - 1)
@@ -619,8 +662,13 @@ def _string_sample(p: Prog) -> None:
 
 
 def _string(p: Prog, L) -> None:
-    """16 samples of the string, added to the accumulator."""
-    _temp_start(p)
+    """16 samples of the string, added to the accumulator (2026-11-10: its row by I5, the
+    excitation's by I0, not by slot words)."""
+    _temp_start(p, L)
+    p.iconst(0, L.XB + 4 * ACC_ROW)
+    p.seti(5, 0)
+    p.iconst(0, L.XB + 4 * TEMP_ROW)
+    p.seti(0, 0)
 
     def one():
         p.ldi(4, SRC, 1)
@@ -634,12 +682,9 @@ def _string(p: Prog, L) -> None:
         p.ldi(7, SRC, 1)
         p.fop(6, 6, "*", 7)
         p.fop(6, 5, "+", 6)
-        _temp(p)
-        p.ldi(7, 16, 1)
-        p.fop(7, 7, "+", 6)
-        p.sti(16, 1, 7)
-        _home(p)
-        inc_word(p, U_K, by=4)
+        p.ldi(7, 0, 5)
+        p.par(("op", 7, 7, "+", 6), ("ld", 13, 0))     # (the excitation's row on)
+        p.stpost(5, 7)
     p.loop(L.W["inner"], K.HALF, one)
 
 
@@ -649,8 +694,8 @@ def _voice(p: Prog, L) -> None:
     rec_at(p, 4, 0)
     p.seti(1, 4)
     K.sv(p, U_STA, 4)
-    p.iconst(12, -4 * O_ST)
-    p.iop(4, 12, "+", 4)
+    K.ld(p, 0, U_STR)
+    line_at(p, 4, 0)
     K.sv(p, U_LB, 4)                             # the record (its line)
     K.ld(p, 0, K.S_TRIG)
 
@@ -672,12 +717,17 @@ def half(p: Prog, L) -> None:
     _f0s(p)
     p.iconst(0, 0)
     K.sv(p, U_STR, 0)
+    p.iconst(0, L.XB + 4 * ACC_ROW)              # 2026-11-10: the accumulator (L1, shared) at 0 first
+    p.seti(1, 0)
+    p.fconst(0, 0.0)
+    for k in range(K.HALF):
+        p.stpost(1, 0)
 
     def each():
         _voice(p, L)
         inc_word(p, U_STR)
     p.loop(L.W["n5"], N_STR, each)
-    _temp_start(p)
+    _temp_start(p, L)
 
     def out():
         _temp(p)

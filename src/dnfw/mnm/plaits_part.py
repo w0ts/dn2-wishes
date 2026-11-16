@@ -147,21 +147,45 @@ def _fire(p: Prog) -> None:
 
 def _particle_sample(p: Prog) -> None:
     """One sample of Particle::Render: u in F6, the Svf in F1-F5, the pre-gain F10, R15 the
-    frequency still to draw; the sum at I1 (moved on)."""
-    p.fconst(9, 0.0)                           # s
-    K.ld(p, 11, DENS)
+    frequency still to draw; the sum at I1 (moved on). 2026-11-10 (poly16): the voice's random
+    generator in R13 through the loop (written back round _fire, which draws from the slot), the
+    Svf's tick inline: the same operations in the same order."""
+    p.fconst(9, 0.0)                           # s (F11: DENS, loaded before the loop)
 
     def fires():
         K.ld(p, 12, GAIN)
         p.fop(9, 6, "*", 12)
-        p.ifz(15, "NE", lambda: _fire(p))
+
+        def fire():
+            K.sv(p, K.S_RNG, 13)
+            _fire(p)
+            K.ld(p, 13, K.S_RNG)
+            K.ld(p, 11, DENS)                  # (_fire clobbers R11)
+        p.ifz(15, "NE", fire)
     p.if_(6, "LE", 11, fires)
     p.fop(0, 10, "*", 9)
-    N.svf_tick(p)
+    p.fop(9, 2, "*", 4)                        # N.svf_tick's body
+    p.fop(6, 0, "-", 9)
+    p.fop(9, 1, "*", 4)
+    p.fop(6, 6, "-", 9)
+    p.fop(6, 6, "-", 5)
+    p.fop(6, 6, "*", 3)                        # hp
+    p.fop(9, 1, "*", 6)
+    p.fop(7, 9, "+", 4)                        # bp
+    p.fop(4, 9, "+", 7)
+    p.fop(9, 1, "*", 7)
+    p.fop(8, 9, "+", 5)                        # lp
+    p.fop(5, 9, "+", 8)
     p.ldi(8, 0, 1)
     p.fop(8, 8, "+", 7)
     p.stpost(1, 8)
-    K.rnd01(p, 6)                              # the next u
+    p.iconst(14, 1664525)                      # the next u: plk.rnd01 (rng's body) on R13
+    p.mul_ssi(13, 13, 14)
+    p.iconst(14, 1013904223)
+    p.iop(13, 13, "+", 14)
+    p.lsh(12, 13, -1)
+    p.iconst(14, -31)
+    p.float_(6, 12, 14)
 
 
 def _particle(p: Prog, L: C.Layout) -> None:
@@ -177,7 +201,10 @@ def _particle(p: Prog, L: C.Layout) -> None:
         p.ldi(k, k, 1)
     _r_of_i4(p, 0)
     p.seti(1, 0)
+    K.ld(p, 13, K.S_RNG)
+    K.ld(p, 11, DENS)
     p.loop(L.W["n4"], K.HALF, lambda: _particle_sample(p))
+    K.sv(p, K.S_RNG, 13)
     p.ld(0, L.W["inner"])
     p.seti(1, 0)
     p.sti(0, 1, 10)
@@ -305,6 +332,246 @@ def _post_diffuse(p: Prog, L: C.Layout) -> None:
     p.stpost(4, 4)
 
 
+# 2026-11-10 (poly16): the diffuser stage by stage over the half. Every read is 125 samples or more
+# behind the write pointer (the shortest line's tail; AP4's modulated tap 357, DEL's 2,730), so no
+# read of a half sees a write of the same half and each stage may run its 16 samples in a row; the
+# five fixed-offset stages then walk their three words a sample by post-decrement (I0, I1, I5)
+# instead of masking three addresses, as long as no window wraps round the buffer's end (_fast_ok;
+# else the half runs as before, sample by sample). AP4 and DEL (their offsets on the LFO) keep the
+# masked reads (_stage_sub) sample by sample. Every value with the same operations: bit-exact.
+FIXED = ((AP1, KAP, True), (AP2, KAP, True), (AP3, KAP, True), (DAPA, -KAP, True), (DAPB, KAP, True))
+IN_ROW, LFO_ROW = 0, 16                        # the render scratch's YB row: the inputs, the LFO
+
+
+def _fast_ok(p: Prog, d: int) -> None:
+    """Rd = 1 if the half's every fixed window stays inside the buffer, else 0. Clobbers R0, R8, R12."""
+    K.ld(p, 8, WP)
+    p.iconst(12, -1)
+    p.iop(8, 12, "+", 8)                       # this half's first write pointer (before its mask)
+    p.iconst(d, 1)
+    cs = [(b + l - 1, True) for (b, l), _k, _w in FIXED] + [(b, False) for (b, l), _k, _w in FIXED]
+    cs += [(AP4[0], False), (DEL[0], False)]
+    for c, read in cs:
+        p.iconst(12, c)
+        p.iop(0, 12, "+", 8)
+        p.iconst(12, MASK)
+        p.iop(0, 0, "AND", 12)
+        p.iconst(12, 15)
+        p.if_(0, "LT", 12, lambda: p.iconst(d, 0), kind="i")
+        if read:
+            p.iconst(12, MASK - 1)
+            p.if_(0, "GT", 12, lambda: p.iconst(d, 0), kind="i")
+
+
+def _ptr(p: Prog, i: int, c: int) -> None:
+    """Ii = the buffer's word (wp0 + c) & MASK; R11 wp0, R10 the buffer. Clobbers R0, R12."""
+    p.iconst(12, c)
+    p.iop(0, 12, "+", 11)
+    p.iconst(12, MASK)
+    p.iop(0, 0, "AND", 12)
+    p.lsh(0, 0, 2)
+    p.iop(0, 10, "+", 0)
+    p.seti(i, 0)
+
+
+def _acc_row(p: Prog, L: C.Layout) -> None:
+    """I4 = the half's samples (the accumulator), from L.W['wb']."""
+    p.ld(0, L.W["wb"])
+    p.seti(4, 0)
+
+
+def _fixed(p: Prog, L: C.Layout, line, k: float, write: bool) -> None:
+    """a fixed-offset stage over the 16 samples (the TAIL read, its fraction 0)."""
+    b, l = line
+    _acc_row(p, L)
+    _ptr(p, 0, b + l - 1)                      # x0, then back a word a sample
+    _ptr(p, 1, b + l)                          # x1 (no wrap: _fast_ok): the first sample's; after it
+    p.ldi(14, 0, 1)                            # each sample's x1 is the sample before's x0 (F14)
+    if write:
+        _ptr(p, 5, b)
+    p.fconst(6, 0.0)                           # the fraction
+    p.fconst(3, k)
+    if write:
+        p.fconst(12, 0.0)
+        p.fop(12, 12, "-", 3)                  # -k (0 - k, as _stage_sub)
+
+    def one():
+        p.ldm(7, 0)
+        p.fop(9, 14, "-", 7)
+        p.fpass(14, 7)
+        p.fop(9, 9, "*", 6)
+        p.fop(5, 7, "+", 9)                    # x
+        p.fop(9, 5, "*", 3)
+        p.ldi(4, 0, 4)
+        p.fop(4, 4, "+", 9)
+        if write:
+            p.stm(5, 4)
+            p.fop(4, 4, "*", 12)
+            p.fop(4, 4, "+", 5)
+        p.stpost(4, 4)
+    p.loop_r(2, K.HALF, one, one=13)
+
+
+def _moving(p: Prog, L: C.Layout, line, scale_rt: bool, write: bool, mul: float, add: float) -> None:
+    """AP4 / DEL over the 16 samples: the offset add + mul x LFO (its row); _stage_sub's operations
+    inline (2026-11-10: no call a sample). The offset (F1, its integer part R2, its fraction F6) is
+    worked out again only when the LFO's value changes (once a half at most; F15 the last value),
+    and x1 (F14) is the sample before's x0: the same word, as the write pointer moves one back a
+    sample and the offset stays. The same operations on the same values."""
+    base = line[0]
+    _acc_row(p, L)
+    p.iconst(0, L.YB + 4 * LFO_ROW)
+    p.seti(5, 0)
+    p.ld(0, L.W["sb"])
+    p.ipass(11, 0)                             # wp0
+    if scale_rt:
+        K.ld(p, 3, RT)
+    else:
+        p.fconst(3, KAP)
+    p.fconst(15, -1.0)                         # no LFO value yet (it is 0..1)
+
+    def at(r):
+        p.iconst(12, MASK)
+        p.iop(9, r, "AND", 12)
+        p.lsh(9, 9, 2)
+        p.iop(9, 10, "+", 9)
+        p.seti(1, 9)
+
+    def recompute():
+        p.fpass(15, 13)
+        K.mulk(p, 1, 13, mul)
+        K.addk(p, 1, 1, add)                   # the offset
+        p.trunc(2, 1)
+        p.float0(6, 2)
+        p.fop(6, 1, "-", 6)                    # its fraction
+        p.iop(8, 11, "+", 2)
+        p.iconst(12, base + 1)
+        p.iop(8, 12, "+", 8)
+        at(8)
+        p.ldi(14, 0, 1)                        # x1
+
+    def one():
+        p.ldpost(13, 5)                        # the LFO's value
+        p.if_(13, "NE", 15, recompute)
+        p.iop(8, 11, "+", 2)
+        p.iconst(12, base)
+        p.iop(8, 12, "+", 8)
+        at(8)
+        p.ldi(7, 0, 1)                         # x0
+        p.fop(9, 14, "-", 7)                   # x1 - x0
+        p.fop(9, 9, "*", 6)
+        p.fop(5, 7, "+", 9)                    # x
+        p.fop(9, 5, "*", 3)
+        p.ldi(4, 0, 4)
+        p.fop(4, 4, "+", 9)
+        if write:
+            p.iconst(12, base)
+            p.iop(8, 12, "+", 11)
+            at(8)
+            p.sti(0, 1, 4)
+            p.fconst(12, 0.0)
+            p.fop(12, 12, "-", 3)
+            p.fop(4, 4, "*", 12)
+            p.fop(4, 4, "+", 5)
+        p.stpost(4, 4)
+        p.fpass(14, 7)                         # the next sample's x1
+        p.iconst(12, -1)                       # the next sample's write pointer
+        p.iop(11, 12, "+", 11)
+        p.iconst(12, MASK)
+        p.iop(11, 11, "AND", 12)
+    p.loop(L.W["n5"], K.HALF, one)
+
+
+def _diffuse_fast(p: Prog, L: C.Layout) -> None:
+    """the post filter and the diffuser, stage by stage (see FIXED)."""
+    p.geti(0, 4)
+    p.st(L.W["wb"], 0)                          # the half's samples (the accumulator)
+    # the post filter and the LFO, sample by sample: the inputs and the LFO's values to rows
+    K.ld(p, 1, PG_)
+    K.ld(p, 2, PR_)
+    K.ld(p, 3, PH_)
+    K.ld(p, 4, PS1)
+    K.ld(p, 5, PS2)
+    p.iconst(0, L.YB + 4 * IN_ROW)
+    p.seti(0, 0)
+    p.iconst(0, L.YB + 4 * LFO_ROW)
+    p.seti(5, 0)
+    K.ld(p, 11, WP)
+
+    def first():
+        p.ldi(0, 0, 4)
+        N.svf_tick(p)
+        p.stpost(4, 8)                          # the accumulator starts at the input
+        p.stpost(0, 8)
+        p.iconst(12, 1)
+        p.iop(11, 11, "-", 12)
+        p.iconst(12, MASK)
+        p.iop(11, 11, "AND", 12)
+        p.iconst(12, 31)
+        p.iop(0, 11, "AND", 12)
+
+        def lfo_next():
+            K.ld(p, 6, Y0)
+            K.ld(p, 7, Y1)
+            K.mulk(p, 8, 6, LFO_IIR)
+            p.fop(8, 8, "-", 7)
+            K.sv(p, Y0, 8)
+            K.sv(p, Y1, 6)
+        p.ifz(0, "EQ", lfo_next)
+        K.ld(p, 13, Y1)
+        K.addk(p, 13, 13, 0.5)
+        p.stpost(5, 13)
+    p.loop(L.W["n5"], K.HALF, first)
+    K.sv(p, PS1, 4)
+    K.sv(p, PS2, 5)
+    p.iconst(12, K.HALF - 1)                    # wp0 = the first sample's (15 on from the last's, R11)
+    p.iop(0, 12, "+", 11)
+    p.iconst(12, MASK)
+    p.iop(0, 0, "AND", 12)
+    p.st(L.W["sb"], 0)
+    K.sv(p, WP, 11)
+    p.ipass(11, 0)
+    for line, k, w in FIXED[:3]:
+        _fixed(p, L, line, k, w)
+    _moving(p, L, AP4, False, True, 43.0, 400.0)
+    _moving(p, L, DEL, True, False, 340.0, 3070.0)
+    # c.Lp(lp_decay_, 0.75), sample by sample
+    _acc_row(p, L)
+    K.ld(p, 6, LP)
+    p.fconst(3, 0.75)
+
+    def lp():
+        p.ldi(4, 0, 4)
+        p.fop(7, 4, "-", 6)
+        p.fop(7, 7, "*", 3)
+        p.fop(6, 6, "+", 7)
+        p.stpost(4, 6)
+    p.loop_r(2, K.HALF, lp)
+    K.sv(p, LP, 6)
+    K.ld(p, 11, WP)
+    p.ld(0, L.W["sb"])
+    p.ipass(11, 0)
+    for line, k, w in FIXED[3:]:
+        _fixed(p, L, line, k, w)
+    # c.Write(del, 2.0), the mix: *in_out += amount (2 acc - in)
+    _acc_row(p, L)
+    _ptr(p, 5, DEL[0])
+    p.iconst(0, L.YB + 4 * IN_ROW)
+    p.seti(0, 0)
+    K.ld(p, 6, AMT)
+
+    def mix():
+        p.ldi(4, 0, 4)
+        p.stm(5, 4)
+        p.ldpost(15, 0)
+        p.fop(4, 4, "+", 4)
+        p.fop(4, 4, "-", 15)
+        p.fop(4, 6, "*", 4)
+        p.fop(4, 15, "+", 4)
+        p.stpost(4, 4)
+    p.loop_r(2, K.HALF, mix)
+
+
 def _post_params(p: Prog) -> None:
     """the post filter's coefficients (f0 clamped to 0.49, q 0.5) and the diffuser's amount and
     rt, into the per-half words the particles are done with"""
@@ -346,4 +613,6 @@ def half(p: Prog, L: C.Layout) -> None:
     p.loop(L.W["n5"], NP, lambda: _particle(p, L))
     _post_params(p)
     K.big_at(p, L, 10)
-    p.loop(L.W["n4"], K.HALF, lambda: _post_diffuse(p, L))
+    _fast_ok(p, 9)
+    p.ifz(9, "NE", lambda: _diffuse_fast(p, L),
+          lambda: p.loop(L.W["n4"], K.HALF, lambda: _post_diffuse(p, L)))

@@ -96,7 +96,14 @@ BOUNDS_AFTER_KEYS = 0x180 // 4                 # program.BOUNDS_OFF - MNM_KEYS_O
 # B. the pages' CPU flag (SKIPMASK) is set only when the refused PERC voice's note is new (its key's
 #    age under NEW_NOTE_BLOCKS, ~100 ms): a ringing voice cut short (refused, then stolen) is counted
 #    in SKIPS but no longer lights CPU, which is meant to say a note was not heard.
-PLAITS_FLOOR = 30_000
+# 2026-11-10 (poly16): a PLAITS slot's next block is expected at its last cost + last >> 2 (1.25 x),
+# not 1.5 x: its engines' blocks vary little (PART's worst, a diffuser half taking the old path,
+# +18 %), and with 15 voices before it the 16th voice's 0.5 x margin was what the frame lacked (the
+# runner's poly16: three voices refused a block, then stolen). LIMIT keeps P / 8 in reserve anyway.
+PLAITS_SLACK_SHIFT = 2
+PLAITS_FLOOR = 20_000                          # 2026-11-10 (poly16): 30,000 until then; every engine's
+                                               # steady block now costs 10,000 .. 25,000, and the last of 16
+                                               # voices needs 15 x cost + max(1.5 x cost, floor) to fit
 NEW_NOTE_BLOCKS = 150                          # blocks of 32 samples: 100 ms at 48 kHz
 
 
@@ -368,6 +375,8 @@ def around(p, t_word: int, cost: int, buffers: int, voice, rests: int | None = N
     p.iop(9, 10, "+", 9)
     p.seti(5, 9)
     p.ldi(9, 0, 5, "this slot's last cost")
+    if keys is not None:
+        p.ipass(13, 9)                         # (the last cost, for PLAITS' 1.25 below)
     p.lsh(10, 9, -1)
     p.iop(9, 9, "+", 10)                       # x 1.5
     if keys is None:
@@ -377,10 +386,21 @@ def around(p, t_word: int, cost: int, buffers: int, voice, rests: int | None = N
         p.comment("b6: a PLAITS slot with a measured cost: at least PLAITS_FLOOR, else FLOOR")
         nob = p.label("gnob")
         flo = p.label("gflo")
+        q15 = p.label("gq15")
         _key_and_bound(p, t_word, keys)
+        p.comment("2026-11-10 (poly16): a PLAITS slot: 1.25 x its last cost, not 1.5 x (PLAITS_SLACK_SHIFT)")
+        p.e("R11 = PASS R11;")
+        p.jump("EQ", q15)
+        p.lsh(12, 13, -PLAITS_SLACK_SHIFT)
+        p.iop(9, 13, "+", 12)
+        p.place(q15)
         p.iconst(12, FLOOR)
         p.e("R11 = PASS R11;")
         p.jump("EQ", flo)
+        p.comment("2026-11-10 (poly16): a PLAITS slot without a measured cost (a start, FRESH, or never")
+        p.comment("rendered): its start bound, not FLOOR (at 60,000 a voice refused in its start never")
+        p.comment("got a cost, stayed at FLOOR and was refused until stolen: the runner's poly16)")
+        p.e("R12 = PASS R11;")
         p.e("R9 = PASS R9;")
         p.jump("EQ", flo)
         p.iconst(12, PLAITS_FLOOR)

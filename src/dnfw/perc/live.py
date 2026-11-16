@@ -30,7 +30,7 @@ def layout(state=None, scratch=None, tables=None, sin=None) -> M.Layout:
         _, at = SL.tables_bytes()
         sin = dsp.SHFT_TABLES_DDR + at["sin"]
     return M.Layout(state=state, scratch=scratch, tables=tables, sin=sin,
-                    md_state=dsp.MD_STATE_L2, md_tables=dsp.MD_TABLES_DDR,
+                    md_state=dsp.MD_STATE_DM, md_tables=dsp.MD_TABLES_DDR,
                     md_delay=dsp.MD_DELAY_DDR, mnm_scratch=dsp.MNM_SCRATCH_L2,
                     mnm_tables=dsp.MD_TABLES_DDR + MDC.TABLE_LAYOUT["mnm"][0],
                     mnm_render=dsp.MNM_RENDER_DM,
