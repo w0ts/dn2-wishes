@@ -29,12 +29,12 @@ An engine already in its band keeps its level (bit for bit); one outside moves t
 | DPRO-DDRW | held | RMS -29.3 | +2.9 | -26.4 |
 | DPRO-DENS | held | RMS -33.0 | +4.7 | -28.3 ¹ |
 | PLAITS SWRM | held | RMS -28.9 | +2.5 | -26.4 |
-| SOPHIE | hit | peak -21.1 | +3.8 | -17.3 |
+| SOPHIE | hit | peak -21.1 | 0 ² | -21.1 |
 | TB-303 | hit | peak -22.7 | +4.0 | -18.7 ¹ |
 | PLAITS MDAL | hit | peak -19.5 | +2.2 | -17.3 |
-| PLAITS SD | hit | peak -19.9 | +2.6 | -17.3 |
-| PLAITS HH | hit | peak -21.3 | +4.0 | -17.3 |
-| PLAITS BD | hit | peak -27.0 | +9.7 | -17.3 |
+| PLAITS SD | hit | peak -19.9 | 0 ² | -19.9 |
+| PLAITS HH | hit | peak -21.3 | 0 ² | -21.3 |
+| PLAITS BD | hit | peak -27.0 | 0 ² | -27.0 |
 | PLAITS STRG | hit | peak -27.0 | +8.4 | -18.6 ¹ |
 | SID 6581, PLAITS FM, ADD, VA, NOIS, DRONE, VO-6 | held | RMS -24.7 .. -28.4 | 0 | in band |
 | PLAITS PART | hit | peak -17.9 | 0 | in band |
@@ -42,6 +42,11 @@ An engine already in its band keeps its level (bit for bit); one outside moves t
 ¹ In its band, short of the middle: at the middle the engine's loudest setting (every knob 127, the runner's `tops`
 run) went past the runner's 4.0 bound on a track buffer (TB-303 4.29, DPRO-DENS 4.42 at +5.4 / +6.6 dB; PLAITS STRG 4.52 at +9.7 dB, its start when the runner's MODL walk turns to it); at these it
 stays near 3.6.
+
+² **The User, 2026-11-12, on r11f** (SOPHIE "very loud"): "bring it back how it was, apply the correction only to the
+melodic synths". The drums and percussion (SOPHIE, PLAITS BD, SD, HH) are at their levels from before this work, bit
+for bit; the melodic synths (ANALOG 2, TB-303, PLAITS WS, SWRM, MDAL, STRG, DPRO-WAVE, DDRW, DENS) keep their
+corrections; the Machinedrum is as it was.
 
 ## The Machinedrum machines (all 34, peak at the amp stage, 53 ms; 2026-11-12)
 

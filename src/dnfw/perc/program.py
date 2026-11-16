@@ -66,10 +66,12 @@ MNM_LEVELS: dict[str, float] = {"DRONE": 0.7,   # 2026-11-09: DRONE peaks 1.5..1
 # method: test/test_engine_levels.py, docs/levels.md), then moved into its band only when outside it: a held synth's
 # RMS within +-2 dB of stock WaveTone's (-26.4 dB), a hit's peak within +-2 dB of the stock synths' mean peak
 # (-17.3 dB). dB on top of the level the engine had (MNM_LEVELS, else MD_LEVEL); PLAITS by model (plaits_level)
-LEVEL_DB: dict[str, float] = {"ANALOG2": -3.2, "SOPHIE": +3.8, "TB303": +4.0,   # TB303, DENS: held under the runner's 4.0 at all knobs 127
+# 2026-11-12 (the User, on r11f: SOPHIE "very loud"; "bring it back how it was, apply the correction only to the melodic
+# synths"): the drums and percussion (SOPHIE, PLAITS BD SD HH) at their levels before; the Machinedrum as is
+LEVEL_DB: dict[str, float] = {"ANALOG2": -3.2, "TB303": +4.0,   # TB303, DENS: held under the runner's 4.0 at all knobs 127
                               "DPRO-WAVE": +4.1, "DPRO-DDRW": +2.9, "DPRO-DENS": +4.7}
 PLAITS_LEVEL_DB: dict[str, float] = {"WS": -2.8, "": -2.8,      # "" the retired choice, which plays WS
-                                     "SWRM": +2.5, "MDAL": +2.2, "SD": +2.6, "HH": +4.0, "BD": +9.7, "STRG": +8.4}   # STRG: its start in the runner's MODL walk under 4.0
+                                     "SWRM": +2.5, "MDAL": +2.2, "STRG": +8.4}   # STRG: its start in the runner's MODL walk under 4.0
 
 
 def _db(x: float) -> float:
