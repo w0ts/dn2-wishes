@@ -22,7 +22,7 @@
 #define P5 374761393u
 /* the seeds are ASCII tags, spelled as characters: a hex literal of the second reads as an address in the
    uncached block to autobuild's address check (rebase/lib/addrcheck.py, check A) */
-#define TAG4(a, b, c, d) (((uint32_t)(a) << 24) | ((uint32_t)(b) << 16) | ((uint32_t)(c) << 8) | (uint32_t)(d))
+#define TAG4(a, b, c, d) (((u32)(a) << 24) | ((u32)(b) << 16) | ((u32)(c) << 8) | (u32)(d))
 #define SEED0 TAG4('W', 'I', 'S', 'H')
 #define SEED1 TAG4('N', '2', 'M', 'X')
 
