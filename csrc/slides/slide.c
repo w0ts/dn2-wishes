@@ -60,21 +60,33 @@ struct ext {                                    /* in a lock list at SL_EXT */
     u16 sld, slen;                              /* the step's values, 0xffff: no lock */
     u32 frame;                                  /* FRAMES + 1 of its last apply; 0 never */
     u16 rec, pad;                               /* v0.41: its REC trig's buffer (1, 2), 0xffff none */
+    u16 e2[SL_E2N];                             /* 2026-11-12: ENV2's ATK DEC SUS REL MODE RSET, 0xffff none */
 };
 _Static_assert(SL_EXT + sizeof(struct ext) <= 20 + 202 * 8, "our values fit in the lock list's spare tail");
 
-/* v0.41: a record's head byte for each of our locks: k 0 SLD, 1 SLEN, 2 REC (rectrig.c) */
+/* v0.41: a record's head byte for each of our locks: k 0 SLD, 1 SLEN, 2 REC (rectrig.c); 2026-11-12: 3.. ENV2's
+ * knobs (csrc/matrix), heads SL_RAM_E2.., stored ids SL_ID_E2.. */
+#define SL_KINDS (3u + SL_E2N)
 static u8 head_of(u32 k)
 {
-    return k == 0 ? SL_RAM_SLD : k == 1 ? SL_RAM_SLEN : SL_RAM_REC;
+    return k == 0 ? SL_RAM_SLD : k == 1 ? SL_RAM_SLEN : k == 2 ? SL_RAM_REC : (u8)(SL_RAM_E2 + k - 3u);
 }
 static int our_head(u8 h)
 {
-    return h == SL_RAM_SLD || h == SL_RAM_SLEN || h == SL_RAM_REC;
+    return h == SL_RAM_SLD || h == SL_RAM_SLEN || h == SL_RAM_REC || (h >= SL_RAM_E2 && h < SL_RAM_E2 + SL_E2N);
 }
 static u32 k_of(u8 h)
 {
-    return h == SL_RAM_SLD ? 0 : h == SL_RAM_SLEN ? 1 : 2;
+    return h == SL_RAM_SLD ? 0 : h == SL_RAM_SLEN ? 1 : h == SL_RAM_REC ? 2 : 3u + (u32)(h - SL_RAM_E2);
+}
+static u8 id_of_k(u32 k)                        /* the stored id */
+{
+    return k == 0 ? SL_ID_SLD : k == 1 ? SL_ID_SLEN : k == 2 ? SL_ID_REC : (u8)(SL_ID_E2 + k - 3u);
+}
+static int k_of_id(u8 id)                       /* -> k, or -1 not ours */
+{
+    return id == SL_ID_SLD ? 0 : id == SL_ID_SLEN ? 1 : id == SL_ID_REC ? 2
+           : id >= SL_ID_E2 && id < SL_ID_E2 + SL_E2N ? 3 + (int)(id - SL_ID_E2) : -1;
 }
 
 struct slide {
@@ -242,6 +254,11 @@ void sl_apply(u32 v, u8 *list, void *mirror)
     sl_v[v].n = 0;
     sl_apply_stock(v, list, mirror);
     trigger(v, t, list);
+    {   /* 2026-11-12: the step's ENV2 locks to the voice's ENV2 (csrc/matrix), none when the list is not this track's */
+        extern void mx_env2_locks(u32 v, const u16 *e2);
+        const struct ext *e = (const struct ext *)(list + SL_EXT);
+        mx_env2_locks(v, (e->magic >> 16) == 0x534Cu && ((e->magic >> 8) & 0xFF) == t ? e->e2 : 0);
+    }
     /* (v0.41..v0.43 fired a REC trig from here, so a step with no note never recorded; v0.44:
      * rectrig.c's rt_frame fires from the sequencer's own step, whatever the step holds) */
 }
@@ -299,10 +316,10 @@ static int ours(const u8 *r, u32 t)
     return our_head(r[0]) && r[1] == (SL_TAG | t);
 }
 
-/* the step's SLD (k 0), SLEN (k 1) or REC (k 2, v0.41) lock in TABLE, 0xffff: none */
+/* the step's SLD (k 0), SLEN (k 1), REC (k 2, v0.41) or ENV2 (k 3.., 2026-11-12) lock in TABLE, 0xffff: none */
 u32 sl_lock_get(const u8 *table, u32 t, u32 step, u32 k)
 {
-    if (!table || t >= NV || step > 127 || k > 2)
+    if (!table || t >= NV || step > 127 || k >= SL_KINDS)
         return 0xFFFF;
     u8 head = head_of(k);
     for (u32 i = 0; i < RECS; i++) {
@@ -318,7 +335,7 @@ u32 sl_lock_get(const u8 *table, u32 t, u32 step, u32 k)
  * come the records they need; stock's own allocation skips a lock when none is free). */
 static int lock_set(u8 *table, u32 t, u32 step, u32 k, u32 value, u32 reserve)
 {
-    if (!table || t >= NV || step > 127 || k > 2)
+    if (!table || t >= NV || step > 127 || k >= SL_KINDS)
         return 0;
     u8 head = head_of(k);
     u8 *rec = 0, *free = 0;
@@ -374,6 +391,8 @@ void sl_build(int track, u8 *list, u8 *table, void *sound, int step, int a6, int
     e->slen = (u16)sl_lock_get(table, (u32)track, (u32)step, 1);
     e->rec = (u16)sl_lock_get(table, (u32)track, (u32)step, 2);
     e->pad = 0;
+    for (u32 j = 0; j < SL_E2N; j++)
+        e->e2[j] = (u16)sl_lock_get(table, (u32)track, (u32)step, 3u + j);
     e->frame = 0;
     e->magic = 0x534C0000u | ((u32)track << 8) | (u32)step;
 }
@@ -391,9 +410,8 @@ int sl_clear(void *model, int track, int step)
     /* the model's lock table (vtable +40). Declared as returning an integer: stock returns it
      * in d0, and GCC would take a returned pointer from a0 */
     u8 *table = (u8 *)((u32 (*)(void *))((*(void ***)model)[10]))(model);
-    sl_lock_set(table, (u32)track, (u32)step, 0, 0xFFFF);
-    sl_lock_set(table, (u32)track, (u32)step, 1, 0xFFFF);
-    sl_lock_set(table, (u32)track, (u32)step, 2, 0xFFFF);
+    for (u32 k = 0; k < SL_KINDS; k++)
+        sl_lock_set(table, (u32)track, (u32)step, k, 0xFFFF);
     return r;
 }
 
@@ -408,7 +426,7 @@ int sl_save(u8 *stored, u8 *ram)
         const u8 *m = ram + REC * i;
         u8 *s = stored + REC * i;
         if (our_head(m[0]) && (m[1] & 0xF0) == SL_TAG) {
-            s[0] = m[0] == SL_RAM_SLD ? SL_ID_SLD : m[0] == SL_RAM_SLEN ? SL_ID_SLEN : SL_ID_REC;
+            s[0] = id_of_k(k_of(m[0]));
             s[1] = m[1] & 0x0F;
         }
     }
@@ -425,12 +443,13 @@ int sl_load(u8 *ram, u8 *stored)
     for (u32 i = 0; i < RECS; i++) {
         const u8 *s = stored + REC * i;
         u8 *m = ram + REC * i;
-        if ((s[0] != SL_ID_SLD && s[0] != SL_ID_SLEN && s[0] != SL_ID_REC) || s[1] > 15 || m[0] != 0xFF)
+        int k = k_of_id(s[0]);
+        if (k < 0 || s[1] > 15 || m[0] != 0xFF)
             continue;
         for (u32 b = 2; b < REC; b++)
             m[b] = s[b];
         m[1] = SL_TAG | s[1];
-        m[0] = s[0] == SL_ID_SLD ? SL_RAM_SLD : s[0] == SL_ID_SLEN ? SL_RAM_SLEN : SL_RAM_REC;
+        m[0] = head_of((u32)k);
     }
     return r;
 }
@@ -826,6 +845,7 @@ int sl_paste(const u8 *rec, const u8 *vals, u8 *table, int first, int count, int
 #define TCLIP 128
 u32 sl_tclip[TCLIP] D = {[0 ... TCLIP - 1] = 0xFFFFFFFFu};                          /* a copied trig's SLEN << 16 | SLD (0xffff none) */
 u8 sl_tclip_rec[TCLIP] D = {[0 ... TCLIP - 1] = 0xFFu};                            /* v0.41: its REC (0xff none) */
+u8 sl_tclip_e2[TCLIP][SL_E2N] D = {[0 ... TCLIP - 1] = {[0 ... SL_E2N - 1] = 0xFFu}};   /* 2026-11-12: its ENV2 locks */
 
 void sl_tcopy(u32 off, void *ctx, u32 step)
 {
@@ -834,6 +854,8 @@ void sl_tcopy(u32 off, void *ctx, u32 step)
         return;
     sl_tclip[e] = 0xFFFFFFFFu;
     sl_tclip_rec[e] = 0xFFu;
+    for (u32 j = 0; j < SL_E2N; j++)
+        sl_tclip_e2[e][j] = 0xFFu;
     u8 *table = ctx ? ctx_table(ctx) : 0;
     u32 t = ctx ? *(u32 *)((u8 *)ctx + 60) : NV;
     if (!table || t >= NV || step > 127)
@@ -841,6 +863,10 @@ void sl_tcopy(u32 off, void *ctx, u32 step)
     sl_tclip[e] = sl_lock_get(table, t, step, 0) | sl_lock_get(table, t, step, 1) << 16;
     u32 r = sl_lock_get(table, t, step, 2);
     sl_tclip_rec[e] = r == 0xFFFF ? 0xFFu : (u8)r;
+    for (u32 j = 0; j < SL_E2N; j++) {
+        u32 x = sl_lock_get(table, t, step, 3u + j);
+        sl_tclip_e2[e][j] = x == 0xFFFF ? 0xFFu : (u8)x;
+    }
 }
 
 /* the records stock's trig paste still needs (v0.40 review): entries E.. of the clipboard's
@@ -884,11 +910,15 @@ void sl_tpaste(u32 off, void *ctx, u32 step, const u8 *vec)
         return;
     u32 c = sl_tclip[e];
     u32 cr = sl_tclip_rec[e];
-    if (c == 0xFFFFFFFFu && cr == 0xFFu)
+    int any = c != 0xFFFFFFFFu || cr != 0xFFu;
+    for (u32 j = 0; j < SL_E2N; j++)
+        any |= sl_tclip_e2[e][j] != 0xFFu;
+    if (!any)
         return;
     u32 reserve = tstock_needs(vec, e, table, t);
-    for (u32 k = 0; k < 3; k++) {
-        u32 v = k < 2 ? (c >> (16 * k)) & 0xFFFF : cr == 0xFFu ? 0xFFFFu : cr;
+    for (u32 k = 0; k < SL_KINDS; k++) {
+        u32 v = k < 2 ? (c >> (16 * k)) & 0xFFFF : k == 2 ? (cr == 0xFFu ? 0xFFFFu : cr)
+                : sl_tclip_e2[e][k - 3u] == 0xFFu ? 0xFFFFu : sl_tclip_e2[e][k - 3u];
         if (v == 0xFFFF)
             continue;
         if (lock_set(table, t, step, k, v, reserve))
@@ -906,4 +936,34 @@ u8 *sl_ui_table_now(void)
     if (!ctx)
         return 0;
     return ctx_table((void *)ctx);
+}
+
+/* ---- 2026-11-12: ENV2's locks, from AMP's ENV2 page (csrc/matrix/env2_page.c) -------------------
+ *
+ * The same kind of record as SLD / SLEN (kinds 3.., ids SL_ID_E2..): a trig held, an ENV2 knob turned sets its lock on
+ * every held step; the step's values reach the voice through the lock list (sl_build, sl_apply). */
+
+/* a trig held -> its lock of ENV2 knob J (0 ATK .. 5 RSET), 0xffff none; 0x10000 when no trig is held */
+u32 sl_e2_held(u32 j)
+{
+    struct held h;
+    if (j >= SL_E2N || !held(&h))
+        return 0x10000u;
+    return sl_lock_get(h.table, h.track, h.first, 3u + j);
+}
+
+/* a trig held: ENV2 knob J's lock set to VALUE (0xffff: cleared) on every held step -> 1; no trig held -> 0. A full
+ * lock pool refuses it, as stock's own locks are refused. */
+int sl_e2_set(u32 j, u32 value)
+{
+    struct held h;
+    if (j >= SL_E2N || !held(&h))
+        return 0;
+    u8 *obj = HELD_OBJ;
+    for (u32 s = 0; s < h.len; s++)
+        if (BIT_TEST(obj + 600, s) & 0xFF)
+            sl_lock_set(h.table, h.track, s, 3u + j, value);
+    sl_ui_table = h.table;
+    ((void (*)(void *, void *))((*(void ***)h.model)[4]))(h.model, 0);   /* the pattern changed (vtable +16) */
+    return 1;
 }

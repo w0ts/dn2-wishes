@@ -348,6 +348,7 @@ void wr_screen(void *screen, void *canvas)
     sl_screen(0, 0);
     extern void mv_begin(void);
     mv_begin();                                 /* moving controls: this draw's cells (csrc/modulation) */
+    { extern void mxp_draw_begin(void); mxp_draw_begin(); }   /* the routes popup: the page's places anew (csrc/matrix) */
     SCREEN_DRAW(screen, canvas);
     extern int sn_up(void);
     if (sn_up()) {                              /* v0.54: the stock NAME screen: nothing of ours over it */
@@ -392,6 +393,7 @@ void wr_screen(void *screen, void *canvas)
             { extern void fxp_draw(void *canvas); fxp_draw(canvas); }   /* XDLY's and FDN8's page 1/2, 2/2 */
         }
         wpop_draw(canvas);                      /* the list popup, over the page */
+        { extern void mxp_draw(void *canvas); mxp_draw(canvas); }   /* the routes popup, over everything of ours (csrc/matrix) */
     }
     extern void mtr_draw(void *canvas);
     mtr_draw(canvas);                           /* the system meter's corner, over everything */
@@ -413,6 +415,7 @@ int wr_poll(void *screen)
     { extern void scope_poll(void *screen); scope_poll(screen); }   /* AMP page 2's scope, 25 a second */
     extern void wpop_poll(void *screen);
     wpop_poll(screen);                          /* the list popup's redraws (popup.c) */
+    { extern void mxp_poll(void *screen); mxp_poll(screen); }   /* the routes popup: FUNC + long push, its redraws (csrc/matrix) */
     smp_er_poll();                              /* v0.39: ERASE MOD DATA, a step a pass (erase.c) */
     { extern void wish_poll(void); wish_poll(); }   /* the wishes record's cells, read and written (csrc/wishes) */
     { extern void mx_poll(void); mx_poll(); }       /* the matrix's routes laid out for the frame (csrc/matrix) */
@@ -729,6 +732,8 @@ void wr_cell(void *view, void *canvas, int x0, int y0, u32 id)
 #endif
     extern void wpop_stock_cell(void *view, int x0, int y0, u32 id, int ours);
     wpop_stock_cell(view, x0, y0, id, id == 122u || id == 131u);   /* a stock list: the popup (popup_stock.c) */
+    extern void mxp_cell(int x0, int y0, u32 id);
+    mxp_cell(x0, y0, id);                       /* the routes popup: which parameter each knob turns (csrc/matrix) */
     extern void mv_cell(void *canvas, int x0, int y0, u32 id);
     mv_cell(canvas, x0, y0, id);                /* moving controls: the heard value's line (csrc/modulation) */
 }

@@ -33,6 +33,7 @@ struct mx_e { s32 cell, d1, src; };
 struct mx_env { s32 level; u32 hold; u8 stage, on, off, pad; };
 struct mx_tab { struct mx_e e[23]; u8 env2[8]; };
 struct mx_state { u32 magic, edits, kit, compiles, frames, ons, offs, sound[16], live[16]; struct mx_env env[16][2];
+                  u8 e2_lock[16][7]; u16 e2_locked;
                   struct mx_tab tab[16][2]; struct mx_tab none; s32 env_out[16 * 30]; u16 scratch[16 * 101]; };
 struct mx_state mx_host_state;
 u16 mx_host_rows[34 / 2 + 16 * 101 + 8] __attribute__((aligned(4)));
@@ -126,7 +127,7 @@ def test_lay_one_route_as_stock_route_1(m):
 def test_lay_skips_what_is_out_of_range(m):
     n, e = lay(m, routes((5, 67, 0x6000), (0, 24, 0x6000), (0, 101, 0x6000), (0, 25, 0x7FFF), (2, 100, 0)))
     assert n == 2                                                   # sources 0..4, slots 25..100 only
-    assert e[0] == (50, (TOP - NONE) * 2, 0)                        # the depth clamped to stock's top
+    assert e[0] == (50, (0x7FFE - NONE) * 2, 0)                     # the depth clamped to DEP's top
     assert e[1] == (200, -2 * NONE, 80)
 
 
@@ -395,3 +396,27 @@ def test_envelope_note_on_and_off_reach_only_their_voice(m):
     m.mx_env_off(1 << 2)                                            # a voice at rest stays at rest
     m.mx_eval(ctypes.addressof(rows))
     assert m.host_stage(2, 0) == 0 and m.host_env(2, 0) == 0
+
+
+def test_env2_takes_a_trigs_locks_until_the_next_trig(m):
+    knobs = (30, 127, 40, 64, 50, 1, 1)
+    put(m, 0, routes((4, 67, TOP)))
+    m.wish_put(ctypes.c_uint32(sound(0)), ctypes.c_uint32(ENV_TAG), bytes(list(knobs) + [0]), 8)
+    m.mx_poll()
+    rows, _ = frame_setup(m, {(v, l): 0 for v in range(16) for l in range(3)}, {})
+    locks = (ctypes.c_uint16 * 6)(10, 0xFFFF, 100, 0xFFFF, 0xFFFF, 0xFFFF)     # ATK 10, SUS 100: the rest the record's
+    m.mx_env2_locks(0, locks)
+    m.mx_env_on(0)
+    out = []
+    for _ in range(60):
+        m.mx_eval(ctypes.addressof(rows))
+        out.append(m.host_env(0, 1))
+    locked = (10, 127, 40, 100, 50, 1, 1)
+    assert out == model(locked, {0: "on"}, 60)
+    m.mx_env2_locks(0, None)                                        # the next trig, no lock: the record's knobs again
+    m.mx_env_on(0)
+    out = []
+    for _ in range(60):
+        m.mx_eval(ctypes.addressof(rows))
+        out.append(m.host_env(0, 1))
+    assert out == model(knobs, {0: "on"}, 60)

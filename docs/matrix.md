@@ -22,7 +22,7 @@ the machine), four bytes a route:
 |---|---|
 | 0 | the source: 0 LFO1, 1 LFO2, 2 LFO3, 3 ENV1, 4 ENV2 |
 | 1 | the destination: a slot of the voice row, 25..100 (a sound parameter) |
-| 2-3 | the depth, big-endian, in stock DEP's units: 0..0x7f00, 0x4000 adds nothing |
+| 2-3 | the depth, big-endian, in stock DEP's units: 0..0x7ffe (DEP's own range), 0x4000 adds nothing |
 
 At most 15 LFO routes are laid out (16 a track, at least one of them stock's route 1) and four for each envelope.
 Anything out of range is skipped. A route into an LFO's own controls (slots 1..24) is not offered: it would land after that LFO has read
@@ -66,8 +66,15 @@ samples) before the routes. The amp's own envelope is untouched; nothing is sent
   ENV1 as they reach the amp.
 - **ENV2** takes the same seven from the sound's wishes record (`WT_MX_ENV` 0x0011: ATK HOLD DEC SUS REL MODE
   RSET, a byte kept 0). With no field it uses stock's own defaults (records 62..66, 73, 74: ATK 8, HOLD 127, DEC 32,
-  SUS 96, REL 24, ADSR, RSET on). ENV2 is not p-lockable yet: the User's order is the record first, the lock study
-  next, then lockable ENV2 as its own step.
+  SUS 96, REL 24, ADSR, RSET on).
+- **ENV2's locks** (the User: "Yes, p-lockable", all six): with grid recording on and a trig held, a knob on ENV2's
+  page sets that step's lock on every held step, as stock's own knobs do; the page shows the held trig's values, a
+  lock drawn as stock draws one. The locks are records of the pattern's lock pool of ours, kinds 3..8 of slides'
+  (`csrc/slides`, table-driven since): stored ids 203..208 (ATK DEC SUS REL MODE RSET; `docs/lock-id-table.md`),
+  RAM heads 0x53..0x58. They are kept, cleared, copied and pasted (page and trig) with slides' own; the lock list's
+  tail carries the step's six values (`sl_build`), and at the trig (`sl_apply`) they become that voice's ENV2 knobs
+  until its next trig, over the record's. A full pool refuses a lock, as stock does. Stock firmware drops them on
+  LOAD and keeps everything else (as slides).
 - **Note-on and note-off** come from DRONE HOLD's hooks, which every note passes through: `hold_len` (a note that
   plays, not one HOLD drops) and `hold_final` (the frame's composed amp note-off word, `+36`).
 
@@ -98,6 +105,32 @@ against stock's own envelope in the SHARC runner, block by block (`scripts/sharc
 one constant in `csrc/waverider/amp_pages.h` (the User: the scope "might move elsewhere"). ENV2's page
 (`csrc/matrix/env2_page.c`) lays out the envelope as stock's AMP page does: A ATK, B DEC, C SUS, D REL, E RSET,
 F MODE (ADSR / AHD). HOLD is not on stock's 1.12 page either. The destinations are set from the knob popup (phase 4).
+
+## The routes popup (phase 4)
+
+`csrc/matrix/routes_pop.c`, the owner's layout A (`scratch/modulation/dest-knob.md` §1, §7 and its mock-ups):
+
+- **FUNC + push** on a sound page: the press is ours. Let go within 0.4 s (600 frames): the popup opens on that
+  knob's parameter. Still held at 0.6 s: the parameter is reset to its record's default (stock's own `setValue`,
+  as a knob writes it). The knob's parameter is the one stock's cell routine drew in that place (`page.c`
+  `wr_cell` -> `mxp_cell`; the left panel's LEV is not a place).
+- **The screen:** a slim header with the parameter's name, then a row a source: LFO1-3 (their icon is their WAVE),
+  ENV1, ENV2. A row at depth 0 is an empty line; a route shows its depth (DEP's units, -64..+63) and the moving bar
+  (the outline the reach, a tick the depth, the solid bar the offset the source applies now on the voice the track
+  last played). The lit row shows its count: the LFOs' shared pool "n/16", an envelope's "n/4", FULL.
+- **Editing:** turning the knob sets the lit row's depth live; push-and-turn (or UP/DOWN) moves the lit row. Turned
+  from 0, an LFO's row takes its stock route 1 when that is free (DEST and DEP, so a stock unit plays it), else a
+  route of the record; a route left at 0 goes when the popup closes.
+- **Closing:** the same knob pushed, YES, FUNC + push, another knob turned, any key that leaves, a track change, a
+  stock question, 6 s untouched: kept. NO: every change undone.
+- **Refused** (the push stays stock's): a trig held, a stock question, a page of ours up, a MIDI track, a parameter
+  that is not a sound parameter of the voice row (slots 25..100).
+
+- **LOCKS** (the bottom line): this parameter's p-locks on the track's pattern (the pool's record of its slot and
+  track): the 16 steps of the page playing, a filled cell a locked step and the playing step underlined, then a tick
+  a page, tall when that page holds a lock, the page playing underlined.
+
+Next in this phase: MOD SETUP's rows (VEL MW PB AT BC KEY, stock's four routes a source).
 
 ## Read in the UI pass, never in the frame
 

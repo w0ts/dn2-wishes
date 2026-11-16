@@ -261,11 +261,244 @@ def scenario_env(a, report, sym):
     report["env"] = rep
 
 
+def scenario_popup(a, report, sym):
+    """the routes popup through the panel (csrc/matrix/routes_pop.c): WaveTone's FLTR page, FUNC + a short push on
+    FREQ's knob opens it; turning makes LFO1's route (stock's route 1: its DEST and DEP), push-and-turn moves to LFO2
+    (its own route 1) and to ENV1 (a route of the record); YES keeps them; a route turned back to 0 goes at the close;
+    NO undoes; FUNC + a long push resets FREQ to its record's default"""
+    from emulib.panel import ENCODER_PUSH, NO, YES, Panel
+    from unicorn import UC_HOOK_CODE
+    m = setup(a.build, a.snapshot)
+    panel = Panel(m, png_dir=str(pathlib.Path(a.json or "out/matrix").with_suffix("")) + "_png")
+    m.write(MO.UI_TRACK, b"\x00")
+    panel.settle(3_000_000)
+    check("popup: track 1 is WaveTone", MO.set_machine(m, panel, 0, 1) == 1)
+    cells = []
+
+    def on_cell(uc, ad, sz, us):
+        sp = m.uc.reg_read(__import__("unicorn").m68k_const.UC_M68K_REG_A7)
+        cv, x0, y0, rid = struct.unpack(">4I", m.read(sp + 4, 16))
+        cells.append((x0, y0, rid))
+    h = m.uc.hook_add(UC_HOOK_CODE, on_cell, begin=sym["mv_cell"], end=sym["mv_cell"])
+    panel.tap((0, 2))                                   # FLTR
+    panel.settle(20_000_000)
+    m.uc.hook_del(h)
+    freq = [(x, y, rid) for x, y, rid in cells if MO.record(m, rid)[1] == 67]
+    check("popup: FREQ (slot 67) is on the FLTR page", bool(freq), str(sorted(set(cells))[:8]))
+    if not freq:
+        return
+    x, y, rid = freq[-1]
+    k = (x - 24 + 13) // 26 + (4 if y < 13 else 0)
+    snd = m.long(MO.KIT) + 52
+    param = lambda slot: struct.unpack(">H", m.read(snd + 20 + 2 * slot, 2))[0]        # noqa: E731
+    visible = lambda: MO.guest(m, sym["mxp_visible"]) & 0xFFFFFFFF   # noqa: E731 -- guest: the running UI's registers kept
+    FUNC = (2, 0)
+    crash = {}
+
+    def on_halt(uc, ad, sz, us):                        # stock's fault dump ends at this halt: the stack, for the cause
+        if not crash:
+            sp = uc.reg_read(__import__("unicorn").m68k_const.UC_M68K_REG_A7)
+            words = struct.unpack(">96I", bytes(uc.mem_read(sp, 384)))
+            crash["sp"] = sp
+            crash["ours"] = [(i, hex(w)) for i, w in enumerate(words) if 0x46A40000 <= w < 0x46AF0000][:12]
+            crash["words"] = [hex(w) for w in words[:40]]
+    m.uc.hook_add(UC_HOOK_CODE, on_halt, begin=0x4011EDEC, end=0x4011EDEC)
+
+    def func_push(frames):
+        """FUNC held, K's push held FRAMES frames (the emulator runs no audio interrupt: its frame count is moved
+        by hand, as the time the push is held), let go"""
+        panel.hold(FUNC, 2_000_000)
+        panel.hold(ENCODER_PUSH[k], 2_000_000)
+        m.write(MO.FRAMES, struct.pack(">I", (m.long(MO.FRAMES) + frames) & 0xFFFFFFFF))
+        m.flush()
+        panel.settle(3_000_000 if frames < 600 else 15_000_000)   # the UI pass (wr_poll) sees the push held that long
+        panel.let_go(ENCODER_PUSH[k], 2_000_000)
+        panel.let_go(FUNC, 5_000_000)
+        return frames
+
+    def counters():
+        return {n: m.long(sym[n]) for n in ("mxp_pushes", "mxp_opens", "mxp_refusals", "mxp_why", "mxp_rid", "mxp_turns", "mxp_keys")}
+
+    def detents():
+        return struct.unpack(">i", m.read(sym["mxp_detents"], 4))[0]
+
+    def turn(delta, times):
+        """TIMES detents of DELTA on K, as the popup receives them: -> the detents it took (the panel task sums the
+        encoder's counts over its timer ticks: each call here sends 4 counts, one detent's worth, settled apart)"""
+        d0 = detents()
+        for _ in range(8 * times):                      # until the popup has taken TIMES detents (the panel task
+            if abs(detents() - d0) >= times:            # takes a turn's first counts from rest, as stock's knob step
+                break                                   # does; docs/display-path.md)
+            m.pc = panel.panelin.encoder(m.m, panel.profile, k, 4 * delta)
+            panel.settle(4_000_000)
+        panel.settle(10_000_000)
+        return detents() - d0
+
+    tbl = MO.guest(m, sym["sl_ui_table_now"]) & 0xFFFFFFFF  # two stock locks of FREQ on step 1 and 4, for LOCKS
+    lockrec = None
+    if tbl:
+        heads = [m.read(tbl + 258 * i, 1)[0] for i in range(80)]
+        lockrec = heads.index(0xFF) if 0xFF in heads else None
+    if lockrec is not None:
+        vals = [0xFFFF] * 128
+        vals[0], vals[3] = 0x5000, 0x3000
+        m.write(tbl + 258 * lockrec, bytes([67, 0]) + b"".join(struct.pack(">H", v)
+                                                               for v in vals))
+        m.flush()
+    f0 = panel.frames()
+    held = func_push(300)
+    panel.settle(20_000_000)
+    print(f"    screens composed: {f0} before the push, {panel.frames()} after it", flush=True)
+    check("popup: FUNC + a short push opens it", visible() == 1, f"push held {held} frames (0.4 s = 600); {counters()}")
+    if visible() != 1:
+        return
+    panel.screen("popup_open")
+    from emu import panel as EP
+    frame = bytes(panel.capture.frames[-1]) if panel.capture.frames else b""
+    lit = EP.lit(frame) if frame else set()
+    cell = lambda s: (30 + 4 * s, 63 - 5) in lit                                     # noqa: E731 (canvas y 5)
+    check("popup: LOCKS shows FREQ's locks on steps 1 and 4, not on step 2", lockrec is not None and cell(0)
+          and cell(3) and not cell(1), f"record {lockrec}, steps 1-4 filled: {[cell(s) for s in range(4)]}")
+    buf = m.alloc(128)
+
+    def record():
+        n = MO.guest(m, sym["wish_get"], snd, TAG, buf, 128) & 0xFFFFFFFF
+        return bytes(m.read(buf, n)) if n < 128 else b""
+    def routes():
+        rec = record()
+        return [rec[i:i + 4] for i in range(0, len(rec), 4)]
+
+    def depth_of(lfo, dest_slot, dep_slot):
+        """-> (where, depth): the LFO's route into FREQ, stock's route 1 ('stock') or the record's ('record')"""
+        if param(dest_slot) >> 8 == 67:
+            return "stock", param(dep_slot)
+        for r in routes():
+            if r[0] == lfo and r[1] == 67:
+                return "record", r[2] << 8 | r[3]
+        return None, 0x4000
+
+    got1 = turn(+1, 2)                                  # the lit row: LFO1
+    where1, d1 = depth_of(0, 4, 8)
+    check(f"popup: LFO1 turned {got1} detents: a route into FREQ at that depth (route 1 first if free)",
+          got1 > 0 and d1 == 0x4000 + 0x100 * got1 and (where1 == "stock" or param(4) >> 8 not in (0, 67)),
+          f"{where1} {d1:#06x}, LFO1 DEST {param(4):#06x}")
+    panel.push_and_turn(k, +1, times=1)                 # LFO2
+    got2 = turn(+1, 2)
+    where2, d2 = depth_of(1, 12, 16)
+    check(f"popup: push-and-turn to LFO2, {got2} detents: its route", got2 > 0 and d2 == 0x4000 + 0x100 * got2,
+          f"{where2} {d2:#06x}")
+    panel.push_and_turn(k, +1, times=2)                 # ENV1
+    got3 = turn(-1, 2)
+    want3 = 0x4000 + 0x100 * got3
+    panel.screen("popup_routes")
+    check(f"popup: ENV1, {got3} detents: a route of the record", got3 < 0
+          and bytes([3, 67, want3 >> 8, want3 & 0xFF]) in routes(), record().hex())
+    panel.tap(YES)
+    check("popup: YES closes it, the routes kept", visible() == 0 and depth_of(0, 4, 8)[1] == d1
+          and depth_of(1, 12, 16)[1] == d2, f"visible {visible()}, {depth_of(0, 4, 8)}, {depth_of(1, 12, 16)}")
+    func_push(300)                                      # LFO1 lit again: back to 0, gone at the close
+    back = 0
+    for _ in range(80):                                 # a count at a time, so it stops on 0 (a record can carry
+        cur = depth_of(0, 4, 8)[1]                      # several detents)
+        if cur == 0x4000:
+            break
+        d0 = detents()
+        m.pc = panel.panelin.encoder(m.m, panel.profile, k, -1 if cur > 0x4000 else 1)
+        panel.settle(4_000_000)
+        back += detents() - d0
+    panel.tap(YES)
+    check("popup: a route turned back to 0 goes at the close", depth_of(0, 4, 8)[0] is None
+          and depth_of(1, 12, 16)[1] == d2, f"{back} detents back; LFO1 {depth_of(0, 4, 8)}, LFO2 {depth_of(1, 12, 16)}")
+    before = (record(), param(4), param(8), param(12), param(16))
+    func_push(300)
+    panel.push_and_turn(k, +1, times=1)
+    turn(+1, 3)
+    panel.tap(NO)
+    after = (record(), param(4), param(8), param(12), param(16))
+    check("popup: NO undoes every change", after == before and visible() == 0, f"{after} vs {before}")
+    m.write(snd + 20 + 2 * 67, struct.pack(">H", 0x1234))
+    m.flush()
+    held = func_push(1000)
+    want = MO.record(m, rid)[4]
+    check("popup: FUNC + a long push resets FREQ to its default", param(67) == want and visible() == 0,
+          f"FREQ {param(67):#06x}, default {want:#06x}, held {held} frames (0.6 s = 900)")
+    rec = record()
+    report["popup"] = {"knob": k, "rid": rid, "record": rec.hex()}
+
+
+def scenario_env2lock(a, report, sym):
+    """ENV2's locks through the panel (csrc/matrix/env2_page.c, csrc/slides): AMP 2/3, a trig held on step 1, knob A
+    (ATK) turned: the step's ENV2 ATK lock (a record of ours, kind 3); the lock list's tail carries it (sl_build); SAVE
+    writes it as stored id 203, LOAD brings it back as it was"""
+    from emulib.panel import Panel
+    m = setup(a.build, a.snapshot)
+    panel = Panel(m, png_dir=str(pathlib.Path(a.json or "out/matrix").with_suffix("")) + "_png")
+    key = lambda code: divmod(code - 1, 8)                                            # noqa: E731
+    g = lambda fn, *args: MO.guest(m, sym[fn], *args) & 0xFFFFFFFF                    # noqa: E731
+    m.write(MO.UI_TRACK, b"\x00")
+    panel.settle(3_000_000)
+    check("env2lock: track 1 is WaveTone", MO.set_machine(m, panel, 0, 1) == 1)
+    panel.tap(key(19))                                  # RECORD: grid recording (a held trig locks, as stock's)
+    panel.settle(10_000_000)
+    panel.tap(key(25))                                  # a trig on step 1
+    panel.settle(10_000_000)
+    panel.tap((0, 3))                                   # [AMP]: stock's page
+    panel.settle(10_000_000)
+    panel.tap((0, 3))                                   # [AMP] again: ENV2's
+    panel.settle(10_000_000)
+    check("env2lock: [AMP] twice is ENV2's page (AMP 2/3)", g("env2_visible") == 1)
+    panel.hold(key(25), 5_000_000)                      # step 1 held
+    panel.settle(10_000_000)
+    lock = 0xFFFF
+    for _ in range(12):                                 # knob A until the lock is there (the panel task sums counts)
+        m.pc = panel.panelin.encoder(m.m, panel.profile, 0, 4)
+        panel.settle(4_000_000)
+        tbl = m.long(sym["sl_ui_table"])
+        lock = g("sl_lock_get", tbl, 0, 0, 3) if tbl else 0xFFFF
+        if lock != 0xFFFF:
+            break
+    panel.screen("env2_locked")
+    snd0 = m.long(MO.KIT) + 52
+    eb = m.alloc(16)
+    n = g("wish_get", snd0, ENV_TAG, eb, 8)
+    print(f"    held: ENV2 page up {g('env2_visible')}, slides' held lock {g('sl_e2_held', 0):#x}, ENV2 record "
+          f"{bytes(m.read(eb, 8)).hex() if n == 8 else None}, popup turns {m.long(sym['mxp_turns'])}", flush=True)
+    panel.let_go(key(25))
+    panel.settle(10_000_000)
+    tbl = m.long(sym["sl_ui_table"])
+    check("env2lock: a trig held, A turned: step 1's ENV2 ATK lock (above the sound's 8)", tbl != 0 and 8 < lock <= 127,
+          f"table {tbl:#x}, lock {lock:#06x}")
+    if not tbl or lock == 0xFFFF:
+        return
+    snd = m.long(MO.KIT) + 52
+    lst = m.alloc(1700)
+    m.write(lst, bytes(1700))
+    m.flush()
+    g("sl_build", 0, lst, tbl, snd, 0, 0, 0)
+    e2 = struct.unpack(">6H", m.read(lst + 1600 + 16, 12))
+    check("env2lock: the lock list carries it (sl_build: the tail's ENV2 values)", e2[0] == lock
+          and all(x == 0xFFFF for x in e2[1:]), str([hex(x) for x in e2]))
+    stored = m.alloc(258 * 80)
+    m.write(stored, bytes(258 * 80))
+    m.flush()
+    g("sl_save", stored, tbl)
+    recs = [bytes(m.read(stored + 258 * i, 4)) for i in range(80)]
+    ours = [r for r in recs if r[0] == 203 and r[1] == 0]
+    check("env2lock: SAVE writes it as stored id 203, track 1", len(ours) == 1, str([r.hex() for r in recs if r[0] >= 200]))
+    ram2 = m.alloc(258 * 80)
+    m.write(ram2, b"\xff" * (258 * 80))
+    m.flush()
+    g("sl_load", ram2, stored)
+    back = g("sl_lock_get", ram2, 0, 0, 3)
+    check("env2lock: LOAD brings it back as it was", back == lock, f"{back:#06x}")
+    report["env2lock"] = {"lock": lock, "tail": list(e2)}
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--build", required=True)
     p.add_argument("--snapshot", default=MO.SNAP)
-    p.add_argument("--scenario", default="exact,env,cost")
+    p.add_argument("--scenario", default="exact,env,popup,env2lock,cost")
     p.add_argument("--frames", type=int, default=240)
     p.add_argument("--json", default=None)
     a = p.parse_args()
@@ -274,6 +507,8 @@ def main() -> int:
     for sc in a.scenario.split(","):
         print(f"  --- {sc} ---", flush=True)
         {"exact": lambda: scenario_exact(a, report, sym), "env": lambda: scenario_env(a, report, sym),
+         "popup": lambda: scenario_popup(a, report, sym),
+         "env2lock": lambda: scenario_env2lock(a, report, sym),
          "cost": lambda: scenario_cost(a, report, sym)}[sc]()
     report["ok"] = not FAILS
     if a.json:

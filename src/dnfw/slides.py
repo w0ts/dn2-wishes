@@ -22,8 +22,11 @@ RAM_SLD, RAM_SLEN = 0x50, 0x51          # RAM header byte 0 (kept inside 0..100,
 # v0.41: a REC trig's lock (docs/rectrig.md): the buffer a step records into, 1 or 2; the
 # same kind of record as SLD/SLEN, kept, copied and cleared with them
 ID_REC, RAM_REC = 202, 0x52
+# 2026-11-12: ENV2's six knobs, lockable (csrc/matrix, docs/matrix.md): ATK DEC SUS REL MODE RSET, ids 203..208, heads
+# 0x53..0x58; their values 0..127 (MODE, RSET 0 / 1)
+ID_E2, RAM_E2, E2_KINDS = 203, 0x53, 6
 RAM_TAG = 0x20                          # RAM header byte 1: track | RAM_TAG (stock's track loops skip it)
-EXT_OFFSET = 1600                       # in a lock list (20 + 202 x 8 = 1636 bytes): our 16 bytes (v0.41: 12 before)
+EXT_OFFSET = 1600                       # in a lock list (20 + 202 x 8 = 1636 bytes): our 28 bytes (v0.41: 16, ENV2 2026-11-12)
 
 # SLEN: the slide's length, in 1/24 of a track step (the track's own scale followed).
 SLEN_UNITS = (3, 6, 12, 18, 24, 36, 48, 72, 96, 144, 192, 288, 384, 768, 1536)
@@ -173,6 +176,7 @@ def c_header(stock: bytes) -> str:
             f"#define SL_ID_SLD {ID_SLD}\n#define SL_ID_SLEN {ID_SLEN}\n"
             f"#define SL_RAM_SLD {RAM_SLD}\n#define SL_RAM_SLEN {RAM_SLEN}\n#define SL_TAG {RAM_TAG}\n"
             f"#define SL_ID_REC {ID_REC}\n#define SL_RAM_REC {RAM_REC}\n"
+            f"#define SL_ID_E2 {ID_E2}\n#define SL_RAM_E2 {RAM_E2}\n#define SL_E2N {E2_KINDS}\n"
             f"#define SL_EXT {EXT_OFFSET}\n#define SL_NLEN {len(SLEN_UNITS)}\n"
             f"#define SL_LEN_DEFAULT {SLEN_DEFAULT}\n"
             f"static const unsigned int sl_shared[4] = {words(shared)};\n"

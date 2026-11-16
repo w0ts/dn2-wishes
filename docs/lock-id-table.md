@@ -80,6 +80,8 @@ keeps its records out of stock's per-track loops with a track tag in RAM.
 | 107..127 | `(slot - 37, track \| 0x20)` | Overtone 1.2 (another firmware; SLD = 116, SLEN = 115) | `docs/overtone-map.md` |
 | **200** | `(0x50, track \| 0x20)` | **parameter slides: SLD** (0 off, 1 on) | `docs/slides.md` |
 | **201** | `(0x51, track \| 0x20)` | **parameter slides: SLEN** (0..14, the length table) | `docs/slides.md` |
+| **202** | `(0x52, track \| 0x20)` | **a REC trig's buffer** (1, 2; v0.41) | `docs/rectrig.md` |
+| **203..208** | `(0x53..0x58, track \| 0x20)` | **ENV2's ATK DEC SUS REL MODE RSET** (0..127; MODE, RSET 0 / 1; 2026-11-12) | `docs/matrix.md` |
 
 Sound-level stored ids 4..28 hold the **wishes record's link** (2026-11-11, `docs/wishes-record.md`): `'W'` and
 its version, the record's hash, its length, a check. Id 32 stays 0 (a stock unit's sink). LFO4's old reservation of

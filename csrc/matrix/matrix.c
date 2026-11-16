@@ -4,7 +4,7 @@
  *
  * A sound's routes are a field of its wishes record (csrc/wishes, tag WT_MX_ROUTES): four bytes each, the source
  * (0 LFO1, 1 LFO2, 2 LFO3, 3 ENV1, 4 ENV2), the destination slot (25..100, a sound parameter's cell of the voice row),
- * and the depth in stock DEP's units (0..0x7f00, 0x4000 none). ENV2's settings are another field (WT_MX_ENV:
+ * and the depth in stock DEP's units (0..0x7ffe, 0x4000 none). ENV2's settings are another field (WT_MX_ENV:
  * ATK HOLD DEC SUS REL MODE RSET and a byte kept 0, stock's AMP envelope's own records' values; env2_page.c).
  *
  * Heard (mx_eval, from the frame's evaluator call, csrc/modulation/hooks.S mod_eval): after stock's evaluator
@@ -19,7 +19,7 @@
  * clone of env1"): a ColdFire clone of stock's AMP envelope, which runs on the SHARC (section 7) and is not read from
  * there. One pair a voice, stepped once a frame (the DSP's block, 32 samples): ENV1 from the voice row's own AMP
  * cells (ATK 81, HOLD 82, DEC 83, SUS 84, REL 85, MODE 91, RSET 92: what the DSP is sent, LFOs and locks included),
- * ENV2 from the track's record. Measured in Elektron's own DSP code (the SHARC runner, scripts/gen_matrix_env.py's
+ * ENV2 from the track's record, a trig's ENV2 locks over it (csrc/slides, kinds 3..8). Measured in Elektron's own DSP code (the SHARC runner, scripts/gen_matrix_env.py's
  * table): the attack is linear (ATK a length in samples), the decay and release geometric (a ratio a block), knob
  * by knob. MODE 1 (ADSR): attack, decay to SUS, at the note-off a release to 0. MODE 0 (AHD): attack, HOLD (127 until
  * the note-off), then a decay to 0; a note-off during the attack starts that decay, one during a timed hold is not
@@ -47,8 +47,9 @@ typedef unsigned long mx_addr;          /* an address: 32 bits here, the host's 
 #define MX_SLOTS (MX_LFO + 2 * MX_ENVR) /* LFO routes 0..14, ENV1's 15..18, ENV2's 19..22 */
 #define MX_SRCS 5                       /* LFO1, LFO2, LFO3, ENV1, ENV2 */
 #define MX_TOP 0x7F00                   /* the evaluator's clamp (0x40137da2) */
+#define MX_DEP_TOP 0x7FFE              /* DEP's top (records 83, 93, 103): a route's depth, as stock's */
 #define MX_NONE 0x4000u                 /* a depth that adds nothing */
-#define MX_MAGIC 0x4D583033u            /* 'MX03' */
+#define MX_MAGIC 0x4D583034u            /* 'MX04' */
 #define ENV_FULL 0x7FFFFFFF
 #define ENV_REST 0x100                  /* a fall this close to 0 is over */
 #define HOLD_GATE 0xFFFFFFFFu           /* HOLD 127: until the note-off */
@@ -86,6 +87,9 @@ struct mx_state {
     u32 sound[16];                      /* the sound track t's table was laid out from */
     u32 live[16];                       /* track t's live table: 0 or 1 */
     struct mx_env env[16][2];           /* each voice's ENV1, ENV2 */
+    u8 e2_lock[16][7];                  /* each voice's ENV2 locks from its last trig (K_ order), 0xff none (a row of
+                                         * 7: 8 would be indexed at scale 8, which the ColdFire has not) */
+    u16 e2_locked;                      /* bit v: voice v's last trig held an ENV2 lock (only those are merged) */
     struct mx_tab tab[16][2];
     struct mx_tab none;                 /* every route unused, the envelopes still */
     s32 env_out[16 * 30];               /* each voice's ENV1, ENV2 levels at [30 v], [30 v + 1]: a row's stride is
@@ -153,8 +157,8 @@ u32 mx_lay(const u8 *val, int n, const u8 *env, int en, struct mx_tab *tab)
                 continue;
             k = MX_LFO + MX_ENVR * (src - 3u) + envs[src - 3u]++;
         }
-        if (dep > MX_TOP)
-            dep = MX_TOP;
+        if (dep > MX_DEP_TOP)
+            dep = MX_DEP_TOP;
         tab->e[k].cell = (s32)(2u * slot);
         tab->e[k].d1 = ((s32)dep - (s32)MX_NONE) * 2;
         tab->e[k].src = src_of(src);
@@ -171,6 +175,9 @@ static void mx_zero(void)
     u32 *w = (u32 *)MX;
     for (u32 k = 0; k < sizeof(struct mx_state) / 4; k++)
         w[k] = 0;
+    for (u32 v = 0; v < 16u; v++)
+        for (u32 j = 0; j < 7u; j++)
+            MX->e2_lock[v][j] = 0xFF;
     lay_none(&MX->none);
     for (u32 t = 0; t < 16; t++) {
         lay_none(&MX->tab[t][0]);
@@ -208,6 +215,22 @@ void mx_poll(void)
     }
     MX->compiles++;
     mx_compiles++;
+}
+
+/* the lock applier's trig on voice V (csrc/slides sl_apply): its ENV2 locks (ATK DEC SUS REL MODE RSET, 0xffff none;
+ * E2 0: none), which ENV2 takes in place of the record's knobs until the voice's next trig */
+void mx_env2_locks(u32 v, const u16 *e2)
+{
+    static const u8 KNOB[6] = {K_ATK, K_DEC, K_SUS, K_REL, K_MODE, K_RSET};
+    if (MX->magic != MX_MAGIC || v > 15u)
+        return;
+    u32 any = 0;
+    for (u32 j = 0; j < 6u; j++) {
+        u8 x = (u8)(!e2 || e2[j] > 127u ? 0xFFu : e2[j]);
+        MX->e2_lock[v][KNOB[j]] = x;
+        any |= x != 0xFFu;
+    }
+    MX->e2_locked = (u16)(any ? MX->e2_locked | 1u << v : MX->e2_locked & ~(1u << v));
 }
 
 /* a note-on on voice V (the frame, csrc/hold hold_len): its envelopes start at the frame's step */
@@ -327,6 +350,14 @@ static s32 env_step(struct mx_env *e, const u8 *k)
     return x;
 }
 
+/* a source's value on voice V now (the routes popup's moving bar): LFO1-3's output, ENV1's and ENV2's level, 1.31 */
+int mx_route_level(u32 v, u32 src)
+{
+    if (MX->magic != MX_MAGIC || v > 15u || src > 4u)
+        return 0;
+    return src < 3u ? *(volatile s32 *)(LFO_OUT(v) + 40u * src) : MX->env_out[30u * v + src - 3u];
+}
+
 /* the frame, after stock's evaluator: B its first argument (the mirror OUT_B). Every row, both envelopes, every
  * route. */
 void mx_eval(mx_addr b)
@@ -347,7 +378,16 @@ void mx_eval(mx_addr b)
             k1[j] = (u8)(j == K_MODE || j == K_RSET ? c != 0 : c > 127u ? 127u : c);
         }
         MX->env_out[30u * v] = env_step(&MX->env[v][0], k1);
-        MX->env_out[30u * v + 1u] = env_step(&MX->env[v][1], tab->env2);
+        const u8 *k2 = tab->env2;
+        u8 merged[K_N];
+        if (MX->e2_locked >> v & 1u) {                  /* ENV2: the trig's locks over the record's knobs */
+            const u8 *lk = MX->e2_lock[v];
+            for (u32 j = 0; j < 7u; j++)
+                merged[j] = lk[j] != 0xFFu ? lk[j] : tab->env2[j];
+            merged[7] = 0;
+            k2 = merged;
+        }
+        MX->env_out[30u * v + 1u] = env_step(&MX->env[v][1], k2);
         volatile u8 *lfo = LFO_OUT(v);
         const struct mx_e *e = tab->e;
 #ifdef __m68k__

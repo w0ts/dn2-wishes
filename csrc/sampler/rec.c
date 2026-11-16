@@ -2055,6 +2055,13 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
             return (u32)it;
         }
     }
+    if (!rec_overlay) {                         /* FUNC + push: the routes into a knob (csrc/matrix/routes_pop.c) */
+        extern int mxp_pop(u8 *it);
+        if (mxp_pop(it)) {
+            it[0] = IT_DROP;
+            return (u32)it;
+        }
+    }
     if (!rec_overlay) {                         /* FUNC + turn G on the FLTR page: the filter type's list (csrc/msel) */
         extern int flt_pop(const u8 *it, u32 code, int down, int func_held);
         if (flt_pop(it, code, down, smp_func_held)) {
