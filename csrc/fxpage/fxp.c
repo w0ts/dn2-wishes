@@ -429,5 +429,5 @@ void fxp_draw(void *c)
         const char *vt = (smp_values_held() || s == touched) ? text(fxp_up, s, fxp_v[g][s]) : 0;
         wg_label(c, s, vt ? vt : p[s].label);
     }
-    tag(c, 2);
+                                                /* (2026-11-12, the User: no tag on page 2 "2/2": the page's own title says it) */
 }

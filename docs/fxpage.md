@@ -2,7 +2,7 @@
 
 The User: "fct pressed and release switch sub page". On the send DELAY page while its TYPE is XDLY, and on the
 send REVERB page while its TYPE is FDN8 or LONG, a **FUNC tap** switches between **page 1** (stock's eight places,
-as they are) and **page 2** (eight more, ours). A small tag at the title bar's right end says **1/2** or **2/2**.
+as they are) and **page 2** (eight more, ours). Page 1 carries a small tag at the title bar's right end, **1/2**; page 2 none (2026-11-12, the User: the 2/2 was stuck in the corner).
 With TYPE on STOCK there is no page 2, no tag, and stock's page is untouched.
 
 ## Gestures
