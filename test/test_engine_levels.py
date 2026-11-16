@@ -33,11 +33,16 @@ MEASURED = {
     "PLAITS BD": ("hit", -27.0, -38.0), "PLAITS STRG": ("hit", -27.0, -38.9),
     "JUNO": ("held", -18.0, -25.3),      # 2026-11-12, on r11f (e0868f63) at MD_LEVEL: in band, no LEVEL_DB entry
 }
+# 2026-11-14 (the User: "Juno level: good"): measured on the unit, which overrides the runner's figure above for the
+# band: dB over stock WaveTone on the same track, both machines at their defaults (r5): single notes, 4-note chords.
+# The runner had JUNO +1.1 dB over WaveTone (RMS -25.3 against -26.4); the unit +4.1 (not explained yet)
+UNIT_OVER_WAVETONE = {"JUNO": (+4.1, +3.9)}
 # 2026-11-12, the User on r11f ("bring it back how it was, apply the correction only to the melodic synths"): the drums
 # and percussion keep the level they had, whatever their band says
 PERCUSSION = ("SOPHIE", "PLAITS BD", "PLAITS SD", "PLAITS HH")
 MD_THEN = 1.4
 LEVELS_THEN = {"DRONE": 0.7, "SID 6581": 5.4, "DPRO-WAVE": 11.5, "DPRO-DDRW": 0.95, "DPRO-DENS": 2.0, "VO-6": 16.5}
+UNIT_THEN = {"JUNO": MD_THEN}                    # the level JUNO had when the unit measured it (r5: MD_LEVEL)
 
 
 def _now(name: str) -> float:
@@ -51,7 +56,14 @@ def _then(name: str) -> float:
     return MD_THEN if name.startswith("PLAITS ") else LEVELS_THEN.get(name, MD_THEN)
 
 
-@pytest.mark.parametrize("name", sorted(n for n in MEASURED if n not in PERCUSSION))
+@pytest.mark.parametrize("name", sorted(UNIT_OVER_WAVETONE))
+def test_an_engine_measured_on_the_unit_sits_in_its_band_there(name):
+    moved = 20.0 * math.log10(_now(name) / UNIT_THEN[name])
+    for over in UNIT_OVER_WAVETONE[name]:
+        assert abs(over + moved) <= BAND, f"{name}: {over + moved:+.1f} dB over WaveTone on the unit, band +-{BAND}"
+
+
+@pytest.mark.parametrize("name", sorted(n for n in MEASURED if n not in PERCUSSION and n not in UNIT_OVER_WAVETONE))
 def test_each_engine_sits_in_its_band(name):
     kind, peak, rms = MEASURED[name]
     moved = 20.0 * math.log10(_now(name) / _then(name))
@@ -70,6 +82,8 @@ def test_an_engine_already_in_its_band_keeps_its_level():
     """no boost out of the blue: only the engines measured outside their band moved"""
     for name, (kind, peak, rms) in MEASURED.items():
         inside = abs((rms - WAVETONE_RMS) if kind == "held" else (peak - STOCK_PEAK)) <= BAND
+        if name in UNIT_OVER_WAVETONE:          # the unit's measurement decides
+            inside = all(abs(over) <= BAND for over in UNIT_OVER_WAVETONE[name])
         if inside:
             assert _now(name) == pytest.approx(_then(name), rel=1e-12), name
 
@@ -98,3 +112,38 @@ def test_the_plaits_level_is_a_pure_scale_by_model(model, monkeypatch):
     for x, y in zip(then, now):
         assert y == pytest.approx(x * g, rel=1e-4, abs=1e-7)
 
+
+
+def _juno(blocks: int = 40) -> list[float]:
+    """JUNO at its defaults (both pages), note 60 at block 0, set up as test_juno sets it up (the MD's fill, the
+    filters' mix tables the coordinator loads)"""
+    from dnfw.engines.analog2 import analog2 as A2
+    from dnfw.engines.juno import juno as J
+    from dnfw.md import core as MDK
+    from dnfw.mnm import machines as MM
+    from dnfw.perc import live as PL
+    from dnfw.perc import machines as PM
+    from dnfw.perc.dsl import bits
+    h = PL.Harness()
+    h.words[h.L.md.C["fill"]] = MDK.Z_N
+    for k, v in enumerate(A2.table_words()):
+        h.words[h.L.md.mnm.scratch + A2.TABLES_OFF + 4 * k] = bits(v)
+    h.set_mnm(next(t for t, k in P.MNM_TYPES.items() if MM.NAMES[k] == "JUNO"), list(J.DEFAULTS))
+    for (_r, slot, lo, top), x in zip(PM.FX_PARAMS, J.DEFAULTS2):
+        h._half(PM.frame_offset(slot), PL.knob_word(x, top, lo))
+    out = []
+    for b in range(blocks):
+        out += h.block(60.0, trig=b == 0)
+    return out
+
+
+def test_the_juno_level_is_a_pure_scale(monkeypatch):
+    """2026-11-14: JUNO's -4.0 dB (LEVEL_DB) scales its output and changes nothing else"""
+    now = _juno()
+    monkeypatch.setitem(P.MNM_LEVELS, "JUNO", P.MD_LEVEL)
+    then = _juno()
+    g = P._db(P.LEVEL_DB["JUNO"])
+    assert P.LEVEL_DB["JUNO"] == -4.0
+    assert max(abs(x) for x in then) > 1e-4, "JUNO: silent"
+    for x, y in zip(then, now):
+        assert y == pytest.approx(x * g, rel=1e-5, abs=1e-7)

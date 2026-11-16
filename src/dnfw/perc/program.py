@@ -69,7 +69,12 @@ MNM_LEVELS: dict[str, float] = {"DRONE": 0.7,   # 2026-11-09: DRONE peaks 1.5..1
 # 2026-11-12 (the User, on r11f: SOPHIE "very loud"; "bring it back how it was, apply the correction only to the melodic
 # synths"): the drums and percussion (SOPHIE, PLAITS BD SD HH) at their levels before; the Machinedrum as is
 LEVEL_DB: dict[str, float] = {"ANALOG2": -3.2, "TB303": +4.0,   # TB303, DENS: held under the runner's 4.0 at all knobs 127
-                              "DPRO-WAVE": +4.1, "DPRO-DDRW": +2.9, "DPRO-DENS": +4.7}
+                              "DPRO-WAVE": +4.1, "DPRO-DDRW": +2.9, "DPRO-DENS": +4.7,
+                              # 2026-11-14 (the User: "Juno level: good"): measured on the unit (r5, the same track,
+                              # both machines at their defaults) JUNO is +4.1 dB over stock WaveTone on single notes,
+                              # +3.9 dB on 4-note chords, and its chords clip alone (peak 1.000); the runner had it at
+                              # +1.1 (docs/levels.md). -4.0 dB brings it level with WaveTone on the unit
+                              "JUNO": -4.0}
 PLAITS_LEVEL_DB: dict[str, float] = {"WS": -2.8, "": -2.8,      # "" the retired choice, which plays WS
                                      "SWRM": +2.5, "MDAL": +2.2, "STRG": +8.4}   # STRG: its start in the runner's MODL walk under 4.0
 

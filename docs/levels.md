@@ -38,7 +38,7 @@ An engine already in its band keeps its level (bit for bit); one outside moves t
 | PLAITS STRG | hit | peak -27.0 | +8.4 | -18.6 ¹ |
 | SID 6581, PLAITS FM, ADD, VA, NOIS, DRONE, VO-6 | held | RMS -24.7 .. -28.4 | 0 | in band |
 | PLAITS PART | hit | peak -17.9 | 0 | in band |
-| JUNO ³ | held | RMS -25.3 (peak -18.0) | 0 | in band (+1.1) |
+| JUNO ³ | held | RMS -25.3 (peak -18.0); on the unit +4.1 over WaveTone | -4.0 | RMS -29.3; on the unit level with WaveTone |
 
 ¹ In its band, short of the middle: at the middle the engine's loudest setting (every knob 127, the runner's `tops`
 run) went past the runner's 4.0 bound on a track buffer (TB-303 4.29, DPRO-DENS 4.42 at +5.4 / +6.6 dB; PLAITS STRG 4.52 at +9.7 dB, its start when the runner's MODL walk turns to it); at these it
@@ -52,6 +52,15 @@ corrections; the Machinedrum is as it was.
 ³ JUNO (type 23, 2026-11-12), measured after this table on r11f (v0.48 round 11) as the others: RMS -25.3 dB, 1.1 dB
 over WaveTone's -26.4, so inside the band and left bit for bit (no LEVEL_DB entry); its machine tap peaks at 1.12
 (WaveTone 1.00, ANALOG 2 0.92).
+**2026-11-14, on the unit (r5; the User: "Juno level: good"):** the same track (T13) at both machines' defaults, JUNO
+against stock WaveTone: 6 single notes -16.4 dB RMS against -20.5 (+4.1), 4 four-note chords -10.5 against -14.4
+(+3.9), and JUNO's chords clipped alone (peak 1.000, WaveTone's 0.526). The unit decides over the runner (whose +1.1 the
+unit's +4.1 does not match, not explained yet): JUNO gets -4.0 dB (`LEVEL_DB`), level with WaveTone there, its chords'
+peak ~0.63. In the SHARC runner (16 blocks, note 60, defaults; and a 4-note chord) it is a pure scale of JUNO's output:
+its PERC output words are the old ones times 10^(-4/20) to float rounding (RMS -4.00000 dB, error <= 5.5e-8 of the
+peak), every other Monomachine engine and WaveTone bit for bit at PERC's output and at the amp stage's input. PERC's code
+gains one branch (JUNO's level 0.8833 for MD_LEVEL's 1.4), +24 B. After stock's filter (the amp stage's input) JUNO
+moves -3.89 dB: that filter is stock's, bit for bit, fed a quieter signal.
 
 ## The Machinedrum machines (all 34, peak at the amp stage, 53 ms; 2026-11-12)
 
