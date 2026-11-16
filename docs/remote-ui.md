@@ -37,6 +37,46 @@ as set for the next mod build).
 Until the menu entry exists, the build below is a test build with the gated commands always available (armed
 by the handshake only).
 
+### Built (2026-11-12): REMOTE CONTROL in SETTINGS > SYSTEM > USB CONFIG
+
+`csrc/devtest/usbcfg.c`, `usbcfg.S`; the setting in `csrc/jump/jump.c`; check `test/test_devtest_usbcfg.py`,
+`tools/dn2tools/tests/test_channel.py`.
+
+- **The entry.** USB CONFIG lists a fourth item under its three choices: **REMOTE CONTROL**, with stock's box
+  (filled = ON), the one its choices and stock's on/off entries draw. YES toggles it; the encoder turns it ON (right)
+  or OFF (left). Default **ON** (for now).
+- **How.** UsbConfigMenuView::rebuild (`0x40104f42`) builds each choice as a MenuItem (`0x401173b8`, 0x54 bytes:
+  four std::function for the label, YES, the draw and a turn) and adds it through the view's vtable slot 8; then
+  puts the cursor back (slot 0x1c) at `0x40105220`. One 6-byte edit there jmps to `dt_usb_rebuild`, which adds our
+  item the same way (stock's own function managers, so the item copies and frees ours as it does stock's) and
+  replays the three instructions. While Outbox 8 handles USB, stock shows "THE USB CONFIG IS CURRENTLY BEING HANDLED
+  BY OUTBOX 8" and rebuild adds no item; neither does ours (the setting stays as it was).
+- **OFF.** Only BUILDINFO, COUNTERS, TRACE, STATE, the switches' INFO and GET, and ARM's DISARM and STATUS answer;
+  SWITCH SET, PEEK, SCREEN, the arm handshake, KEY and PROFILE answer status 7 (`docs/remote-ui-protocol.md`).
+  Turned OFF while armed: disarmed at the next UI pass, every key up, the glass upright. BUILDINFO's byte 36 says
+  which (capability 12, USBCFG). TLM (the sample link's command 32) is not part of the test channel and always answers.
+- **Remembered** in the mod's settings sector `0x6FF000` (`DN2S`, flags **bit 1 set = OFF**; `docs/jump.md` §4),
+  written from the UI loop when it changes. Stored inverted so that no sector (a fresh install, after ERASE MOD
+  DATA) and a sector written by an older build read ON. A stock reflash never reads the sector.
+- **FACTORY RESET turns it OFF.** The startup menu's FACTORY RESET is not a MAIN OS routine that could be hooked
+  alone: the bootstrap (section 2) ORs **bit 1** into the flags word it hands MAIN OS (`0x80002fbc`; EMPTY RESET
+  is bit 0, `0x80002fae`), MAIN OS's entry keeps it at **`0x40287a60`** for the whole boot (`0x400004ec`), and the
+  boot path resets from it (`0x400f21d4`: bit 1 also when the factory armed a reset, `0x405ce870`). So
+  `jmp_poll`, on its first pass of a boot with that bit, sets REMOTE CONTROL OFF and writes the sector (DIRECT JUMP
+  kept as stored). EMPTY RESET leaves it as it was.
+- **Verified in the 1.12 emulator (2026-11-12, gpufarm, the build's own 800M snapshot; SETTINGS opens under the
+  emulator now, ~100M instructions after the key).** SETTINGS > SYSTEM (7 DOWN) > USB CONFIG draws the fourth
+  entry, ticked; DOWN x3 and YES: the box empties, the sector reads `DN2S` v1 flags 2, the armed channel disarms and
+  the glass turns upright; SCREEN, ARM ASK, KEY, PEEK, SWITCH SET and PROFILE answer 7, ARM STATUS, COUNTERS and
+  BUILDINFO (byte 36 = 0) answer. A panel YES: ticked again, flags 0, the handshake arms. DIRECT JUMP set on (flags
+  1), then the boot flags' bit 1 set and the sector re-read as at power-on: flags 3 (DIRECT JUMP kept, REMOTE CONTROL
+  OFF), SCREEN refused. No fault. The item is built at boot (the system menu's views are made then); a first build
+  that declared stock's `operator new` as returning a pointer took %a0's leftover (stock answers in %d0), freed it,
+  and hung the UI at boot: the emulator caught it before anything went out. Not run on the unit.
+- Driving it in the emulator: keys through the test channel armed destructive (`dt:arm:destructive`, raw KEY
+  `dt:raw:42:...`), held 5 ms: with no audio the firmware's clock runs 1,000 ticks a second of emulation, so a "30
+  ms" hold outlasts 15M instructions and two presses merge into one held key.
+
 ### Cost, measured (build `60ffcf64` against the telemetry build `c87ec50e` and night9)
 
 | | section 3 (ColdFire, unpacked) | section 7 (DSP) | packed upgrade image (2 MiB buffer) |

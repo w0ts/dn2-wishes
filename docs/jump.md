@@ -136,7 +136,8 @@ has the same one-step pipeline (the old pattern's last step plays at the switch)
 One 512-byte sector, **`0x6FF000`** (the +Drive's map: `docs/memory-map.md`) on the +Drive (eMMC), through the stock block driver
 (`0x4012c59a` / `0x4012c780`) as the sample link and the library already use it:
 
-- `'DN2S'`, version 1, flags (bit 0: DIRECT JUMP), a check (`~magic ^ version ^ flags`);
+- `'DN2S'`, version 1, flags (bit 0: DIRECT JUMP; bit 1, 2026-11-12: REMOTE CONTROL **off**, USB CONFIG's
+  entry, `csrc/devtest/usbcfg.c`, `docs/remote-ui.md`), a check (`~magic ^ version ^ flags`);
   anything else reads as "off". The mod's own settings sector: a later setting takes a bit.
 - **It is ours.** The stock store ends below `0x458000` (`docs/drive-storage-research.md`);
   the mod's region starts at `0x600000`: the pool's image `0x600000 .. 0x6C8001`, the

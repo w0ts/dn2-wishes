@@ -465,6 +465,10 @@ ENG_STAR_SITE = 0x400A90DE              # FILTER's label: tst.b 1413(%a1) ; beq.
 ENG_STAR_STOCK = bytes.fromhex("4a2905856704")
 ENG_CTOR_SITE = 0x400AC62C              # the view's constructor: move.b %d1,1412(%a2) ; move.b %d1,1413(%a2)
 ENG_CTOR_STOCK = bytes.fromhex("1541058415410585")
+# 2026-11-12: REMOTE CONTROL in USB CONFIG (csrc/devtest/usbcfg.c, usbcfg.S): UsbConfigMenuView::rebuild
+# (0x40104f42), its three choices added, jmps to dt_usb_rebuild (a fourth item) before it puts the cursor back
+USB_REBUILD_SITE = 0x40105220           # movea.l (%a2),%a0 ; clr.l -(%sp) ; move.l %d6,-(%sp)
+USB_REBUILD_STOCK = bytes.fromhex("205242a72f06")
 LINK_RX_SITE = 0x4012197A               # lea 0x40207f9e,%a3: F0 00 20 3C, before the compare
 LINK_RX_STOCK = bytes.fromhex("47f940207f9e")
 LINK_FEED_SITE = 0x400276A2             # lea 0x40006c4a,%a2: the frame is built
@@ -964,6 +968,20 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     edit(ENG_CTOR_SITE, bytes.fromhex("4eb9") + _long(csyms["eng_ctor_hook"]) + bytes.fromhex("4e71"),
          "the preset view's constructor: the engines cleared with stock's filters", ENG_CTOR_STOCK)
 
+    # 2026-11-12: REMOTE CONTROL in USB CONFIG (csrc/devtest/usbcfg.c)
+    _need(content, USB_REBUILD_SITE + 6, bytes.fromhex("2f0a2068001c4e90"),
+          "rebuild goes on: move.l %a2,-(%sp) ; movea.l 28(%a0),%a0 ; jsr (%a0) (the cursor put back)")
+    _need(content, 0x40105064, bytes.fromhex("4e95"), "rebuild's first item: jsr (%a5), %a5 = 0x401173b8")
+    _need(content, 0x40104F94, bytes.fromhex("4bf9401173b8"), "lea 0x401173b8,%a5: MenuItem's constructor")
+    _need(content, 0x40104FAC, bytes.fromhex("41faf8a8"), "lea 0x40104856(%pc),%a0: the label's manager")
+    _need(content, 0x40104FD6, bytes.fromhex("41faf8d0"), "lea 0x401048a8(%pc),%a0: a choice's manager")
+    _need(content, 0x40104CCE, bytes.fromhex("d0b944645d84"), "a choice's box: add.l 0x44645d84,%d0")
+    _need(content, 0x40104F42, bytes.fromhex("4fefff9448d77cfc"), "rebuild's entry (dt_usb_yes calls it after a change)")
+    _need(content, 0x40105256, bytes.fromhex("2f0a206f00082450"), "a choice's YES: its view, then rebuild (as ours)")
+    edit(USB_REBUILD_SITE, bytes.fromhex("4ef9") + _long(csyms["dt_usb_rebuild"]),
+         "USB CONFIG's rebuild: a fourth item, REMOTE CONTROL (dt_usb_rebuild), before the cursor is put back",
+         USB_REBUILD_STOCK)
+
     # the sample link: SysEx in (v0.14); out over the TDM link alone (v0.20)
     edit(LINK_RX_SITE, bytes.fromhex("4eb9") + _long(csyms["smp_rx_hook"]),
          "the SysEx router: the sample link's requests (F0 00 20 3C 7D 01) to smp_rx", LINK_RX_STOCK)
@@ -1129,6 +1147,8 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
                  "slc_nfr", "slc_sl", "slc_ns", "slc_cur", "slc_grid_n", "smp_pos", "smp_pos_at", "smp_periods", "smp_dir_ok", "smp_meta_ok", "smp_lst_open", "smp_fb_open", "smp_fb_folder", "smp_fb_cur", "smp_fb_count", "smp_fb_mark_count", "smp_fb_mark_unused", "smp_fb_marked", "smp_fb_menu", "smp_mod_apply", "smp_quant", "smp_samp_turned", "smp_overlay_dirty", "rec_pv_on", "smp_func_held", "smp_question_up", "sn_opens", "sn_results", "sn_up", "smp_machine_commit", "smp_rx", "smp_fb_store", "smp_lib_refresh", "smp_lib_pending", "smp_lp_queued", "smp_lib_state", "smp_lib_writes", "smp_lib_load", "smp_lib_slot_of", "smp_lib_preview", "smp_lib_preview_stop", "smp_fb_rowtext", "smp_mq_off", "smp_fb_mcur", "smp_lp_done", "smp_lp_full", "smp_fb_auto", "smp_fb_auto_starts", "smp_lp_skipped", "smp_rec_store_named", "smp_name_set", "smp_formats", "smp_rs_done", "smp_rs_last", "smp_trim", "smp_l_order", "smp_walk_total", "smp_held_lo", "smp_held_hi", "smp_knob_d", "smp_knob_at", "smp_dsp_load", "smp_load_peak", "smp_load_seen", "smp_load_at", "wr_screen_obj", "rec_state", "rec_heard", "slc_kb_c", "slc_alloc_n", "smp_tables", "smp_pv_state", "trim_zoom", "trim_head_x", "sl_ui_table_now", "smp_push_slot", "sl_rec_knob", "sl_rec_held", "sl_rec_table", "rec_view", "rec_rlen", "rec_link", "rec_room", "as_done", "rec_saved_slot", "rec_rstrt", "rec_thres", "rec_src", "rec_chan", "sl_rec_page", "smp_rec_place", "smp_slot_empty", "smp_pl_dirp", "rec_combo", "rec_overlay", "rt_on", "rt_play", "rt_rplace", "rt_rbytes", "rt_pend", "rt_cur", "rt_cur_end", "rt_manual", "rt_qrec", "rt_qplay", "rt_pos", "rt_steps", "rt_nx_place", "rt_nx_room", "rt_nx_need", "rt_w", "rt_gen", "q_gen", "q_fire", "q_cancel", "rt_fired", "rt_refused", "rt_swaps", "rt_qfired", "rt_why", "rt_why_at", "rt_trig", "rt_bounce_samp", "rt_is_bounce", "rt_buf_of", "rt_trig_get", "rt_trig_toggle", "rt_rearm", "rt_count", "rt_take_handover", "rt_regions", "rt_rsteps", "rt_last_step", "rt_used", "rt_fired_at", "rt_fired_trk", "rt_why_trk", "rt_last_key", "bn_page", "bn_yes_at", "bn_active", "bn_led_walk", "bn_led_poll", "bn_led_claims", "bn_open", "bn_save", "bn_pages", "bn_said_at", "bn_said_n", "bn_nothing_at", "rt_frame", "rt_poll", "rt_cut", "smp_rt_sent", "rec_rt_take", "rt_q_set", "rt_q_waiting", "rt_knob", "rt_state", "rt_arm", "rt_req", "bn_sub", "rt_flex_req", "rt_req_waiting", "rt_buf_value", "rt_buf_code", "rt_samp_buf", "smp_samp_direct", "rec_gain", "sl_knob_push", "rt_clear", "bn_clear_ask", "bn_cleared", "bn_cleared_at", "fx_get", "fx_set", "fx_valid", "ms_frame", "ms_mask", "ms_frames", "rt_mute_knob", "bn_mute", "rec_peak",
                  "jmp_on", "jmp_armed", "jmp_pending", "jmp_count", "jmp_last", "jmp_loaded", "jmp_dirty",
                  "jmp_reads", "jmp_writes", "jmp_to", "jmp_from", "jmp_key", "jmp_poll", "jmp_forced",
+                 # 2026-11-12: REMOTE CONTROL in USB CONFIG (csrc/devtest/usbcfg.c; the settings sector, jump.c)
+                 "set_remote", "set_reset_seen", "dt_usb_items", "dt_usb_changes", "dt_usb_rebuild",
                  # v0.38: per-project pools
                  "smp_pj_begins", "smp_pj_ends", "smp_pj_loads", "smp_pj_news", "smp_pj_slot", "smp_pj_newslot", "smp_pj_last", "smp_blank_req", "smp_blank_sent", "smp_pl_on", "smp_pl_owner", "smp_pl_state", "smp_pl_writes", "smp_pl_switches", "smp_pl_lists_written", "smp_pl_events", "smp_pl_src", "smp_pl_boot_case", "smp_pl_gen", "smp_pl_skipped", "smp_pl_mismatch", "smp_discard", "smp_rename",
                  # v0.38: the count to the DSP after a live add (link.c K_HEAD)

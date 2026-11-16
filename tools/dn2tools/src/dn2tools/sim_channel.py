@@ -44,6 +44,7 @@ class ChannelSim:
     sw: list[int] = field(default_factory=lambda: [s[3] for s in SWITCHES])
     armed: bool = False
     glass_inverted: bool = False                                # the glass turns at the UI pass after ARM / DISARM
+    remote: bool = True                                         # REMOTE CONTROL in USB CONFIG (usbcfg.c), default ON
     destructive: bool = False
     nonce: int = 0
     nonce_at: float = 0.0
@@ -78,6 +79,8 @@ class ChannelSim:
         now = self.clock()
         if self.armed and now - self.last_cmd >= self.sw[2]:
             self._disarm(1)
+        if not self.remote:
+            self._disarm(2)
         self.glass_inverted = self.armed
         if not self.armed:
             for c in sorted(self.held):
@@ -137,7 +140,7 @@ class ChannelSim:
         if self.armed:
             self.armed = False
             self.destructive = False
-            self.counters[7 if why else 6] += 1
+            self.counters[7 if why == 1 else 6] += 1
             self._trace(2, why)
 
     # --- the toy UI ----------------------------------------------------------------------------
@@ -191,9 +194,12 @@ class ChannelSim:
             return P.ARGS, b""
         self.counters[0] += 1
         sub = a[0] if a else 0xFF
+        if not self.remote and not P.off_ok(cmd, sub):
+            self.counters[1] += 1
+            return P.OFF, b""
         if cmd == P.BUILDINFO:
-            return P.OK, (b"DTB1" + struct.pack(">HBBIBBBB", 1, 0x01, 0x12, 0xFFF, len(SWITCHES), 128, 64, 8)
-                          + b"sim".ljust(16, b"\0") + struct.pack(">I", 1000))
+            return P.OK, (b"DTB1" + struct.pack(">HBBIBBBB", 1, 0x01, 0x12, 0x1FFF, len(SWITCHES), 128, 64, 8)
+                          + b"sim".ljust(16, b"\0") + struct.pack(">IB", 1000, self.remote))
         if cmd == P.SWITCH:
             k = a[1] if len(a) > 1 else 0xFF
             if sub == 0 and k < len(SWITCHES):

@@ -160,6 +160,10 @@ with arrow keys rediscovers what §13 and Appendix C already document.
 
 ## 7. Why the SETTINGS tree cannot be walked here: the +Drive is not modelled
 
+> **Superseded (2026-11-12, OS 1.12, the emulator with its eSDHC model):** SETTINGS opens about 100M instructions
+> after the key and the tree walks with UP/DOWN/YES: SETTINGS > SYSTEM is 7 DOWN, SYSTEM's list starts on USB
+> CONFIG (`docs/remote-ui.md`, REMOTE CONTROL). What follows is the 2026-09-17 state.
+
 Dated 2026-09-17. Five frames after a single tap of key 8 (`SETTINGS`) —
 `--input 130M:press:8 --input 133M:release:8`, captured at +3M, +9M, +17M, +29M
 and +47M instruction counts — are **byte-identical**, and all five show the same

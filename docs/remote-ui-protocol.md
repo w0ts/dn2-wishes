@@ -30,6 +30,13 @@ ranges it reads), dispatched from `csrc/sampler/link.c` `smp_rx`.
 | 4 | refused: the destructive blacklist, or a wrong / stale / spent nonce (ARM) |
 | 5 | busy: the key queue (16 events) has no room for the whole message |
 | 6 | outside the whitelist (PEEK range, SWITCH bounds) |
+| 7 | REMOTE CONTROL is OFF on the unit (SETTINGS > SYSTEM > USB CONFIG; the USBCFG capability, 2026-11-12) |
+
+**While REMOTE CONTROL is OFF** only these answer: BUILDINFO, COUNTERS, TRACE, STATE, SWITCH INFO and GET, ARM
+DISARM and STATUS (`csrc/devtest/devtest.c` `off_ok`, `dn2tools.protocol.off_ok`). SWITCH SET, PEEK, SCREEN, ARM ASK
+and CONFIRM, KEY and PROFILE answer status 7. Turned OFF while armed, the channel disarms at the next UI pass
+(TRACE DISARM with a = 2), every injected key goes up and the glass turns upright. TLM (32) is the sample link's,
+not the test channel's, and always answers.
 
 ## Commands
 
@@ -44,19 +51,20 @@ HELLO → `u16 link protocol (7)`, then the link's numbers. TLM → the 32-word 
 
 ### 33 BUILDINFO
 
-args: none → data (36 bytes):
+args: none → data (36 bytes; 37 with the USBCFG capability):
 
 | offset | type | |
 |---|---|---|
 | 0 | 4 bytes | `DTB1` |
 | 4 | u16 | test channel protocol (1) |
 | 6 | 2 bytes | OS version, BCD (`01 12`) |
-| 8 | u32 | capability bits: 0 TLM, 1 BUILDINFO, 2 SWITCH, 3 PEEK, 4 COUNTERS, 5 TRACE, 6 STATE, 7 SCREEN, 8 ARM, 9 KEY, 10 PROFILE (remoteui-5), 11 INVERT (the glass inverted while armed; STATE byte 88) |
+| 8 | u32 | capability bits: 0 TLM, 1 BUILDINFO, 2 SWITCH, 3 PEEK, 4 COUNTERS, 5 TRACE, 6 STATE, 7 SCREEN, 8 ARM, 9 KEY, 10 PROFILE (remoteui-5), 11 INVERT (the glass inverted while armed; STATE byte 88), 12 USBCFG (REMOTE CONTROL in USB CONFIG; byte 36 here) |
 | 12 | u8 | number of switches |
 | 13 | u8, u8 | screen width, height (128, 64) |
 | 15 | u8 | screen chunks (8) |
 | 16 | 16 bytes | build label, NUL padded (`remoteui-1`) |
 | 32 | u32 | the panel tick's rate the firmware measured (ticks a second; 1000 until the audio runs) |
+| 36 | u8 | REMOTE CONTROL in USB CONFIG: 1 ON, 0 OFF (USBCFG only) |
 
 ### 34 SWITCH
 
@@ -94,7 +102,7 @@ last 64 events; `since` older than that starts at the oldest kept. `event = kind
 | kind | | a | b |
 |---|---|---|---|
 | 1 | ARM | destructive flag | |
-| 2 | DISARM | 0 asked, 1 timed out | |
+| 2 | DISARM | 0 asked, 1 timed out, 2 REMOTE CONTROL turned OFF | |
 | 3 | DOWN | key code | hold ms |
 | 4 | UP | key code | |
 | 5 | ENC | encoder | signed delta (16 bits) |

@@ -6,6 +6,8 @@
  *            words (whitelist.c), the arm handshake, and the key events queued for dt_poll.
  *   dt_poll  once a UI pass (page.c wr_poll, the UI task): plays the queued key and encoder events when
  *            they fall due, lets every key go at its time, disarms after ARMTIME seconds of silence.
+ *   usbcfg.c REMOTE CONTROL in SETTINGS > SYSTEM > USB CONFIG (2026-11-12): while OFF only the reads that show
+ *            nothing of the screen or memory answer (off_ok), and an armed channel disarms at once.
  *
  * The keys go in where the panel's own bytes go (measured in the OS 1.12 image, 2026-11-11): the panel
  * controller's UART8 bytes reach the callback 0x4011ffbc, which hands a button byte (tag 2, a channel's
@@ -79,8 +81,9 @@
 #define CAP_KEY      (1u << 9)
 #define CAP_PROFILE  (1u << 10)                  /* remoteui-5: the CPU profiler (prof.c) */
 #define CAP_INVERT   (1u << 11)                  /* the glass inverted while armed; STATE's byte 88 */
+#define CAP_USBCFG   (1u << 12)                  /* REMOTE CONTROL in USB CONFIG (usbcfg.c); BUILDINFO's last byte */
 #define CAPS (CAP_TLM | CAP_INFO | CAP_SWITCH | CAP_PEEK | CAP_COUNTERS | CAP_TRACE | CAP_STATE | CAP_SCREEN | CAP_ARM | CAP_KEY \
-              | CAP_PROFILE | CAP_INVERT)
+              | CAP_PROFILE | CAP_INVERT | CAP_USBCFG)
 
 /* statuses (the reply's fourth byte) */
 #define ST_OK 0
@@ -89,10 +92,11 @@
 #define ST_REFUSED 4
 #define ST_BUSY 5
 #define ST_RANGE 6                               /* outside the whitelist */
+#define ST_OFF 7                                 /* REMOTE CONTROL is OFF in SETTINGS > SYSTEM > USB CONFIG */
 
 /* trace kinds */
 #define TR_ARM 1
-#define TR_DISARM 2                              /* a: 0 asked, 1 timed out */
+#define TR_DISARM 2                              /* a: 0 asked, 1 timed out, 2 REMOTE CONTROL turned OFF */
 #define TR_DOWN 3
 #define TR_UP 4
 #define TR_ENC 5
@@ -113,6 +117,7 @@ static int func_ok(u32 code)
         || code == 20 || code == 21 || code == 22 || (code >= 41 && code <= 48);
 }
 
+extern u8 set_remote;                            /* jump.c: REMOTE CONTROL ON (1) or OFF (0), USB CONFIG */
 static u32 armed D = 0, arm_flags D = 0, nonce D = 0, nonce_at D = 0, last_cmd D = 0;
 u32 dt_inv D = 0;                                /* the glass's groups go out flipped (set by dt_present only) */
 static u32 tps D = 1000;                         /* ticks a second, measured (dt_poll) */
@@ -284,7 +289,7 @@ static void disarm(u32 why)
         return;
     armed = 0;
     arm_flags = 0;
-    cnt[why ? C_TIMEOUTS : C_DISARMS]++;
+    cnt[why == 1 ? C_TIMEOUTS : C_DISARMS]++;
     trace(TR_DISARM, why, 0);
 }
 
@@ -365,6 +370,8 @@ NOJT int dt_poll(void)
         cnt[C_DSPMAX] = (u32)d;
     if ((int)(now - last_cmd) >= (int)(dt_sw[DT_SW_ARMTIME] * tps))
         disarm(1);
+    if (!set_remote)                             /* turned OFF in USB CONFIG: the keys go, the glass turns back */
+        disarm(2);
     if (!armed) {
         if (held_lo | held_hi)
             release_all();
@@ -501,12 +508,27 @@ static u32 keys_in(const u8 *rq, u32 n, u8 *rp, u32 r, u8 *st)   /* KEY: u8 coun
     return r;
 }
 
+/* REMOTE CONTROL OFF (USB CONFIG, usbcfg.c; the User's ruling, docs/remote-ui.md): what still answers. The
+ * reads that change nothing and show nothing of the screen or memory: BUILDINFO, COUNTERS, TRACE, STATE, the
+ * switches' INFO and GET, and ARM's disarm and status. Everything else (SWITCH SET, PEEK, SCREEN, ARM's
+ * handshake, KEY, PROFILE) is refused with ST_OFF */
+static int off_ok(u32 cmd, u32 sub)
+{
+    return cmd == 33 || cmd == 36 || cmd == 37 || cmd == 38 || (cmd == 34 && sub <= 1)
+        || (cmd == 41 && (sub == 2 || sub == 3));
+}
+
 /* the commands 33..43 (link.c smp_rx: RQ its N bytes, the reply's data from RP + R, room to 160; ST the
  * status byte) -> the reply's length */
 NOJT u32 dt_rx(u32 cmd, const u8 *rq, u32 n, u8 *rp, u32 r, u8 *st)
 {
     u32 sub = n >= 4 ? rq[3] : 0xFFu;
     cnt[C_CMDS]++;
+    if (!set_remote && !off_ok(cmd, sub)) {
+        *st = ST_OFF;
+        cnt[C_REFUSED]++;
+        return r;
+    }
     if (cmd == 33) {                             /* BUILDINFO */
         put32(rp + r, 0x44544231u); r += 4;      /* 'DTB1' */
         rp[r++] = 0; rp[r++] = DT_PROTO;
@@ -518,6 +540,7 @@ NOJT u32 dt_rx(u32 cmd, const u8 *rq, u32 n, u8 *rp, u32 r, u8 *st)
         for (u32 k = 0; k < 16; k++)
             rp[r++] = (u8)build_label[k];
         put32(rp + r, tps); r += 4;
+        rp[r++] = set_remote;                    /* REMOTE CONTROL in USB CONFIG: 1 ON, 0 OFF */
     } else if (cmd == 34) {                      /* SWITCH: 0 INFO k, 1 GET all, 2 SET k u32 */
         u32 k = n >= 5 ? rq[4] : 0xFFu;
         if (sub == 0 && k < DT_SW_N) {

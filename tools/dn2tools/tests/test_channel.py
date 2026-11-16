@@ -253,7 +253,54 @@ def test_the_capability_bits_match_the_firmware():
     bits = {m.group(1): int(m.group(2)) for m in re.finditer(r"#define CAP_(\w+)\s+\(1u << (\d+)\)", text)}
     names = {"INFO": "BUILDINFO"}
     assert {names.get(k, k): v for k, v in bits.items()} == P.CAPS
-    assert "| CAP_PROFILE | CAP_INVERT)" in text                # every bit advertised
+    assert "| CAP_PROFILE | CAP_INVERT | CAP_USBCFG)" in text   # every bit advertised
+
+
+# --- REMOTE CONTROL in SETTINGS > SYSTEM > USB CONFIG (csrc/devtest/usbcfg.c, 2026-11-12) ---------------
+
+def test_what_answers_while_off_matches_the_firmware():
+    body = re.search(r"static int off_ok\(u32 cmd, u32 sub\)\s*\{\s*return (.*?);\s*\}", DEVTEST.read_text(),
+                     re.S).group(1)
+    # the firmware's rule, word for word, and the host's table that mirrors it
+    assert " ".join(body.split()) == ("cmd == 33 || cmd == 36 || cmd == 37 || cmd == 38 || (cmd == 34 && sub <= 1) "
+                                      "|| (cmd == 41 && (sub == 2 || sub == 3))")
+    answers = {(c, s) for c in range(30, 46) for s in range(6) if P.off_ok(c, s)}
+    assert answers == ({(c, s) for c in (33, 36, 37, 38) for s in range(6)} | {(34, 0), (34, 1), (41, 2), (41, 3)})
+    assert not P.off_ok(P.SCREEN, 0) and not P.off_ok(P.KEY, 1) and not P.off_ok(P.PEEK, 0)
+    assert not P.off_ok(P.ARM, 0) and not P.off_ok(P.ARM, 1) and not P.off_ok(P.SWITCH, 2)
+    assert "#define ST_OFF 7" in DEVTEST.read_text() and P.OFF == 7
+
+
+def test_remote_control_off_refuses_and_disarms():
+    """OFF in USB CONFIG: an armed channel disarms at the next UI pass (the glass turns back), the screen, keys,
+    switch writes and the handshake are refused with OFF; the reads still answer, and BUILDINFO says it"""
+    ch = chan()
+    k = K.Keys(ch, log=None)
+    assert ch.info().remote is True and ch.info().has("USBCFG")
+    k.arm()
+    ch.unit.wait(0.02)
+    assert ch.state().glass_inverted
+    ch.unit.sim.channel.remote = False
+    ch.unit.wait(0.02)
+    s = ch.state()                                             # STATE still answers
+    assert not s.armed and not s.glass_inverted
+    assert P.parse_buildinfo(ch.unit.call(P.BUILDINFO)).remote is False    # info() keeps the first answer
+    for call in (ch.screen, lambda: ch.set_switch("ARMTIME", 30), k.arm, lambda: k.press("SRC")):
+        with pytest.raises((StatusError, K.Blocked)) as e:
+            call()
+        if isinstance(e.value, StatusError):
+            assert e.value.status == P.OFF
+    assert ch.counters()["disarms"] == 1 and ch.counters()["auto_disarms"] == 0
+    ch.unit.sim.channel.remote = True                              # back ON: the handshake works again
+    k.arm()
+    assert ch.state().armed
+
+
+def test_buildinfo_parses_with_and_without_the_remote_byte():
+    d = b"DTB1" + struct.pack(">HBBIBBBB", 1, 1, 0x12, 0xFFF, 3, 128, 64, 8) + bytes(16) + struct.pack(">I", 1000)
+    assert P.parse_buildinfo(d).remote is None                 # a build before the USBCFG capability
+    assert P.parse_buildinfo(d + b"\x00").remote is False
+    assert P.parse_buildinfo(d + b"\x01").remote is True
 
 
 def test_destructive_keys_are_refused_on_both_sides():

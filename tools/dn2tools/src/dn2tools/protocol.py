@@ -41,13 +41,20 @@ CONTROL = frozenset({SWITCH, ARM, KEY, PROFILE})  # RAM words the firmware white
 ALLOWED = READ_ONLY | CONTROL
 
 # statuses
-OK, ARGS, UNARMED, REFUSED, BUSY, RANGE = 0, 2, 3, 4, 5, 6
+OK, ARGS, UNARMED, REFUSED, BUSY, RANGE, OFF = 0, 2, 3, 4, 5, 6, 7
 STATUS_TEXT = {OK: "ok", 1: "failed", ARGS: "bad arguments or unknown command", UNARMED: "not armed",
-               REFUSED: "refused (blacklist or handshake)", BUSY: "busy (queue full)", RANGE: "outside the whitelist"}
+               REFUSED: "refused (blacklist or handshake)", BUSY: "busy (queue full)", RANGE: "outside the whitelist",
+               OFF: "REMOTE CONTROL is OFF on the unit (SETTINGS > SYSTEM > USB CONFIG)"}
+
+
+def off_ok(cmd: int, sub: int) -> bool:
+    """what still answers while REMOTE CONTROL is OFF (csrc/devtest/devtest.c off_ok): the reads that show nothing
+    of the screen or memory, and ARM's disarm and status"""
+    return cmd in (BUILDINFO, COUNTERS, TRACE, STATE) or (cmd == SWITCH and sub <= 1) or (cmd == ARM and sub in (2, 3))
 
 # capability bits (BUILDINFO)
 CAPS = {"TLM": 0, "BUILDINFO": 1, "SWITCH": 2, "PEEK": 3, "COUNTERS": 4, "TRACE": 5, "STATE": 6, "SCREEN": 7,
-        "ARM": 8, "KEY": 9, "PROFILE": 10, "INVERT": 11}
+        "ARM": 8, "KEY": 9, "PROFILE": 10, "INVERT": 11, "USBCFG": 12}
 
 # KEY event kinds
 PRESS, ENCODER, RELEASE = 1, 2, 3
@@ -201,6 +208,7 @@ class BuildInfo:
     chunks: int
     label: str
     ticks_per_s: int
+    remote: bool | None = None       # REMOTE CONTROL in USB CONFIG (the USBCFG capability); None: a build before it
 
     def has(self, name: str) -> bool:
         return bool(self.caps >> CAPS[name] & 1)
@@ -214,7 +222,8 @@ def parse_buildinfo(d: bytes) -> BuildInfo:
     caps, = struct.unpack(">I", d[8:12])
     label = d[16:32].split(b"\0")[0].decode("ascii", "replace")
     tps, = struct.unpack(">I", d[32:36])
-    return BuildInfo(proto, os, caps, d[12], d[13], d[14], d[15], label, tps)
+    remote = bool(d[36]) if len(d) > 36 else None
+    return BuildInfo(proto, os, caps, d[12], d[13], d[14], d[15], label, tps, remote)
 
 
 @dataclass(frozen=True)

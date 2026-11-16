@@ -27,7 +27,7 @@ YES or NO closes it. After a failure it can be asked again.
 writes to the +Drive (the pool image, the per-project lists, the library, the settings
 sector all refuse), so what the mod still holds in RAM is never written back. After the
 restart the mod comes up as on a fresh install: no samples, no library, no lists,
-DIRECT JUMP off.
+DIRECT JUMP off, REMOTE CONTROL on (its default).
 
 From the computer (the import page, section 7 "Erase mod data"): two confirmations in
 the browser, then link command 28 with the word `ERASE`; the page polls command 29 and
@@ -141,7 +141,7 @@ Each part's boot already treats a missing or invalid header as empty:
 - the per-project lists: no superblock means a first power-on with the feature (pools.c,
   case 1). It writes an empty legacy list and a new superblock, as a fresh install does. A
   list's header that does not check out is ignored;
-- the settings: no `DN2S` means DIRECT JUMP off;
+- the settings: no `DN2S` means DIRECT JUMP off and REMOTE CONTROL on;
 - the library: no `DN2L` superblock means no library (`smp_lib_state` 1); it is formatted on
   first use.
 

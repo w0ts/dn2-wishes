@@ -2369,11 +2369,14 @@ def main() -> int:
                 dt_log.append({"cmd": cmd, "args": args.hex(), "status": None if r is None else r.status,
                                "data": None if r is None else r.data.hex()})
                 return r
-            if parts[1] == "arm":
+            if parts[1] == "arm":                    # dt:arm, or dt:arm:destructive (SETTINGS allowed: the User's own)
                 ask = dt_call(DP.ARM, DP.args_arm_ask())
                 ok = ask is not None and ask.status == 0
-                conf = dt_call(DP.ARM, DP.args_arm_confirm(struct.unpack(">I", ask.data[:4])[0])) if ok else None
-                dt_results["arm"] = {"asked": ok, "armed": bool(conf and conf.status == 0 and conf.data[0])}
+                conf = dt_call(DP.ARM, DP.args_arm_confirm(struct.unpack(">I", ask.data[:4])[0],
+                                                           destructive=parts[2:] == ["destructive"])) if ok else None
+                dt_results["arm"] = {"asked": ok, "armed": bool(conf and conf.status == 0 and conf.data[0]),
+                                     "status": None if ask is None else ask.status}
+                print(f"  dt arm: {dt_results['arm']}")
             elif parts[1] in ("press", "turn"):
                 if parts[1] == "press":
                     evs, total = DK.chord_events(parts[2])
@@ -2552,6 +2555,15 @@ def main() -> int:
                                 + (machine.read(obj + 0x40, 0x20).hex() if 0x40000000 <= obj < 0x48000000 else "-"))
                 node = machine.long(node)
             mems[f"views@{len(mems)}"] = ",".join(rows)
+        elif step.startswith("stack:"):
+            # stack:N: where the CPU is now: PC, A7, A6 and N longs from A7 (a stuck task's callers)
+            n = int(step[6:])
+            sp = uc.reg_read(K.UC_M68K_REG_A7)
+            words = struct.unpack(f">{n}I", machine.read(sp, 4 * n))
+            mems[f"stack@{len(mems)}"] = {"pc": f"{uc.reg_read(K.UC_M68K_REG_PC):#010x}", "a7": f"{sp:#010x}",
+                                          "a6": f"{uc.reg_read(K.UC_M68K_REG_A6):#010x}",
+                                          "longs": " ".join(f"{w:08x}" for w in words)}
+            print(f"  stack: {mems[f'stack@{len(mems) - 1}']}")
         elif step.startswith("mem:"):
             _, va, n = step.split(":")
             # a second read of the same address keeps the first: key it by its order
