@@ -20,7 +20,6 @@ Custom firmware for the Elektron Digitone II, OS 1.12. Built on
   RING, JUNO.
 - Modulation matrix.
 - Voice budget: new notes take the voice of an old one before the DSP runs out of time.
-- Faster DSP code for the sample, Machinedrum and Monomachine machines, sound unchanged.
 
 ## Builds
 
