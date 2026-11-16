@@ -89,7 +89,7 @@ def init(p: Prog, L) -> None:
     for u in (U_HLP, U_ES1, U_ES2):
         K.sv(p, u, 0)
     p.geti(4, 3)
-    p.iconst(12, 4 * S1_W)
+    p.iconst(12, p.ioff(3, 4 * S1_W))
     p.iop(4, 12, "+", 4)                         # the first mode's S1 in the slot
     p.iconst(5, 0)
     p.fconst(6, AMP_Y1)                          # y1
@@ -278,7 +278,7 @@ def half(p: Prog, L) -> None:
     K.ld(p, 4, U_BIG)
     p.seti(1, 4)
     p.geti(4, 3)
-    p.iconst(12, 4 * (S1_W + AMP_OFF))
+    p.iconst(12, p.ioff(3, 4 * (S1_W + AMP_OFF)))
     p.iop(4, 12, "+", 4)
     p.seti(5, 4)                                 # the amplitudes (slot), walked by I5
 
@@ -367,7 +367,7 @@ def _render(p: Prog, L) -> None:
     K.sv(p, U_BIG, 9)                            # (as the sample loop left it)
     p.st(L.W["bs"], 9)                          # the modes' coefficients' pointer (2026-11-10)
     p.geti(0, 3)
-    p.iconst(12, 4 * S1_W)
+    p.iconst(12, p.ioff(3, 4 * S1_W))
     p.iop(0, 12, "+", 0)
     p.seti(0, 0)                                 # I0: the modes' S1 in the slot (S2 S2_OFF on)
 

@@ -447,7 +447,8 @@ def tables_bytes() -> bytes:
     import struct
     p = struct.pack(f"<{TABLE_LAYOUT['hostP'][1]}I", *rom.host_table("P"))
     z = struct.pack(f"<{TABLE_LAYOUT['zpack'][1]}I", *_zpack_words())
-    return p + z
+    from ..perc import machines as perc_machines     # 2026-11-10 (shrink): then PERC's own, at T['_end']
+    return p + z + perc_machines.shipped_tail()
 
 
 def _shift_r(p: Prog, d: int, a: int, s: int, arith: bool = False) -> None:

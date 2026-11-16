@@ -43,7 +43,7 @@ assert L1_W + L1_NV * V_N <= _MDK.NW
 def _first(p: Prog) -> None:
     """R0 = voice 0's words (the slot's W[9]). Clobbers R12."""
     p.geti(0, 3)
-    p.iconst(12, 4 * L1_W)
+    p.iconst(12, p.ioff(3, 4 * L1_W))
     p.iop(0, 12, "+", 0)
 
 

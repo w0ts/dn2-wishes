@@ -93,6 +93,38 @@ def tables_bytes() -> tuple[bytes, dict[str, int]]:
     return out, at
 
 
+# 2026-11-10 (shrink): the tables only PERC's voices read (tan; SHFT's sine for AMD) travel with
+# the Machinedrum's over the fast link at power-on, right after them (dnfw.md.core.tables_bytes:
+# the shipped words' end, md.T['_end']), instead of in the DSP's boot stream. The voices never
+# run before those tables are whole (dnfw.perc.program: C['fill'] < Z_N leaves every slot
+# silent), so they read the same words. exp2 stays in the stream: the sample machines read it.
+SHIPPED_TABLES = ("tan",)
+
+
+def _shft_sine() -> bytes:
+    from ..shft import live as SL
+    data, at = SL.tables_bytes()
+    return data[at["sin"]:at["pow2"]]
+
+
+def shipped_tail() -> bytes:
+    """PERC's tables that ship over the link (SHIPPED_TABLES, then SHFT's sine)."""
+    data, at = tables_bytes()
+    names = [n for n, _ in TABLES]
+    out = b""
+    for n in SHIPPED_TABLES:
+        k = names.index(n)
+        end = at[names[k + 1]] if k + 1 < len(names) else len(data)
+        out += data[at[n]:end]
+    return out + _shft_sine()
+
+
+def stream_tables() -> bytes:
+    """PERC's tables that stay in the boot stream (those before the shipped ones)."""
+    data, at = tables_bytes()
+    return data[:min(at[n] for n in SHIPPED_TABLES)]
+
+
 # -- voice state (I2: 32 words a slot, L1) and the block's scratch (absolute) ------------
 V = dict(on=0, rng=1, t=2, aenv=3, penv=4, nenv=5, menv=6, xenv=7, cnt=8, next=9, fbv=10,
          last=11, hps=12, hps2=13, ph0=14, ph1=15, ph2=16, ph3=17, ph4=18, ph5=19,
@@ -121,6 +153,7 @@ class Layout:
         self.C = {w: scratch + 4 * k for k, w in enumerate(SC_WORDS)}
         _, at = tables_bytes()
         self.T = {name: tables + off for name, off in at.items()}
+        self.shipped = md_shipped is not None             # 2026-11-10 (shrink): SHIPPED_TABLES at md.T['_end']
         # the Machinedrum voices (v0.17, docs/md.md): their words, their tables, and their
         # scratch in the words the Ravel machines' controls had (c0..c23)
         from ..md import core as MDK
@@ -128,6 +161,13 @@ class Layout:
         self.md = MDK.Layout(md_state if md_state is not None else 0, self.C["c0"],
                              md_tables if md_tables is not None else 0,
                              shipped=md_shipped, ready=md_ready, delay=md_delay)
+        if self.shipped:
+            at_ = self.md.T["_end"]
+            for n in SHIPPED_TABLES:
+                self.T[n] = at_
+                k = [x for x, _ in TABLES].index(n)
+                at_ += 4 * len(TABLES[k][1]())
+            self.sin = at_
         # v0.26: the Monomachine machines' buffers and tables (dnfw.mnm, docs/mnm.md)
         from ..mnm import core as MNC
         self.md.mnm = MNC.Layout(self, mnm_scratch, mnm_tables,

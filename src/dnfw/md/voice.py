@@ -71,31 +71,40 @@ _PROBE_L = K.Layout(0x100000, 0x80000, 0x200000)
 
 
 def _each(p: Prog, L: K.Layout, step: str) -> None:
-    """STEP of the machine whose index is in VW['mach'] (>= 0): a compare chain in emit
-    mode, each distinct code once; run mode calls the one machine."""
+    """STEP of the machine whose index is in VW['mach'] (>= 0; an index past the last, or below 0,
+    the last machine's, as the compare chain this replaces gave it): emit mode jumps through a
+    table of 48-bit JUMPs, one a machine (2026-11-10, shrink: the chain was 12..18 bytes and up
+    to N_ALL compares a machine, the table 6 bytes and one indexed jump), each distinct code
+    once; run mode calls the one machine. Clobbers R0, R12, I12 before STEP's code."""
     if p.run:
         K.vw(p, 0, "mach")
-        getattr(ALL[min(p.r[0], N_ALL - 1)], step)(p, L)
+        k = p.r[0] if 0 <= p.r[0] < N_ALL else N_ALL - 1
+        getattr(ALL[k], step)(p, L)
         return
     same = _same_code(step)
     end = p.label(f"md_{step}_end")
+    table = p.label(f"md_{step}_table")
     body = {k: p.label(f"md_{step}_{k}") for k in set(same.values())}
-    K.vw(p, 0, "mach")                         # once: each body leaves by JUMP, so R0 stays
+    K.vw(p, 0, "mach")
+    p.iconst(12, N_ALL - 1)
+    p.iop(0, 0, "MIN", 12)
+    p.ifz(0, "LT", lambda: p.iconst(0, N_ALL - 1))
+    p.lsh(12, 0, 1)
+    p.iop(0, 12, "+", 0)                       # 3 x the index: a JUMP is 3 short words
+    p.ret_addr(12, table)                      # the table's address - 1 (JUMP (M14, I12) adds 1)
+    p.iop(0, 12, "+", 0)
+    p.seti(12, 0)
+    p.e("JUMP (M14, I12);")
+    p.e("NOP;")                                # never runs: keeps the table's first JUMP out of this
+    p.place(table)                             # JUMP's 48-bit window (hwrules BRANCH-WIN)
     for k, M in enumerate(ALL):
-        nxt = p.label("md_next")
-        if k < N_ALL - 1:
-            p.iconst(12, k)
-            p.e("COMP(R0, R12);")
-            p.jump("NE", nxt)
+        p.jump("", body[same[k]])
+    for k, M in enumerate(ALL):
         if same[k] == k:
             p.comment(f"---- {M.NAME} {step} ----")
             p.place(body[k])
             getattr(M, step)(p, L)
             p.jump("", end)
-        else:
-            p.comment(f"---- {M.NAME} {step}: {ALL[same[k]].NAME}'s ----")
-            p.jump("", body[same[k]])
-        p.place(nxt)
     p.place(end)
 
 

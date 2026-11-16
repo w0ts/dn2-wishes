@@ -142,11 +142,11 @@ def _temp(p: Prog) -> None:
 def rec_at(p: Prog, d: int, i: int) -> None:
     """Rd = string Ri's state words' address (Ri 0..2; 2026-11-10: in the slot, STATE_W). Clobbers
     R8, R12, Ri."""
-    p.iconst(8, 4 * STATE_W[0])
+    p.iconst(8, p.ioff(3, 4 * STATE_W[0]))
     p.iconst(12, 1)
-    p.if_(i, "EQ", 12, lambda: p.iconst(8, 4 * STATE_W[1]), kind="i")
+    p.if_(i, "EQ", 12, lambda: p.iconst(8, p.ioff(3, 4 * STATE_W[1])), kind="i")
     p.iconst(12, 2)
-    p.if_(i, "EQ", 12, lambda: p.iconst(8, 4 * STATE_W[2]), kind="i")
+    p.if_(i, "EQ", 12, lambda: p.iconst(8, p.ioff(3, 4 * STATE_W[2])), kind="i")
     p.geti(12, 3)
     p.iop(d, 12, "+", 8)
 

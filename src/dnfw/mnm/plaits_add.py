@@ -47,7 +47,7 @@ def init(p: Prog, L: C.Layout) -> None:
 def _ptr(p: Prog, i: int, w: int) -> None:
     """Ii = this slot's host word W[w] (I3 + 4 w). Clobbers R0, R12."""
     p.geti(0, 3)
-    p.iconst(12, 4 * w)
+    p.iconst(12, p.ioff(3, 4 * w))
     p.iop(0, 12, "+", 0)
     p.seti(i, 0)
 

@@ -80,6 +80,13 @@ class Mem:
         self.w[a & 0xFFFFFFFF] = v & 0xFFFFFFFF
 
 
+# 2026-11-10 (shrink): loop / loop_r's tails count down by DEC (Rc = Rc - 1) and no longer load 1 into
+# ONE. Run mode puts this NaN in ONE at every tail instead, so a program that read ONE after a
+# loop expecting the 1 gives the model a different output from the DSP (which keeps whatever ONE
+# held), and the runner's model checks fail.
+POISON = 0x7FBADBAD
+
+
 class Prog:
     def __init__(self, mode: str = "emit", mem: Mem | None = None, prefix: str = "pk"):
         assert mode in ("emit", "run")
@@ -94,6 +101,7 @@ class Prog:
         self.in_sub = False
         self.spill: int | None = None           # a DM word `ash` may use (see ash)
         self.known: dict[int, int] = {}         # emit mode: register -> the constant it holds
+        self.ibias: dict[int, int] = {}         # 2026-11-10 (shrink): Ii -> its bias in words (seti)
         self._alu: int | None = None            # 2026-11-10: the last instruction's ALU result (fop_lt)
         # 2026-11-10 (poly16): the last instruction, if a plain compute a following memory move may
         # ride on (MERGE): (its line's index, text, note, destination register)
@@ -338,6 +346,13 @@ class Prog:
         if self.run:
             self.setR(d, s32(self.r[a]) * s32(self.r[b]))
 
+    def dec(self, d: int, a: int, note: str = "") -> None:
+        """2026-11-10 (shrink): Rd = Ra - 1, the stock's 16-bit form (the same result and AZ / AN
+        flags as Ra - R(1))."""
+        self.e(f"R{d} = R{a} - 1;", note)
+        if self.run:
+            self.setR(d, self.r[a] - 1)
+
     def ipass(self, d: int, a: int, note: str = "") -> None:
         self.e(f"R{d} = PASS R{a};", note)
         self._compute(d, f"R{d} = PASS R{a};", note, (a,))
@@ -401,7 +416,17 @@ class Prog:
         if self.run:
             self.mem.put(addr, self.r[s])
 
+    def bk(self, i: int, k: int) -> int:
+        """2026-11-10 (shrink): word offset K from Ii's unbiased base as the instruction's
+        offset (seti's BIAS). An offset in -32..31 is a 4-byte instruction, else 6 bytes."""
+        return k - self.ibias.get(i, 0)
+
+    def ioff(self, i: int, byte_off: int) -> int:
+        """2026-11-10 (shrink): what to add to geti(Ii) for Ii's unbiased base + BYTE_OFF."""
+        return byte_off - 4 * self.ibias.get(i, 0)
+
     def ldi(self, d: int, k: int, i: int, note: str = "") -> None:
+        k = self.bk(i, k)
         if not (i in PAR_I and self._merge(f"R{d} = DM({k}, I{i});", load=d, k=k)):
             self.e(f"R{d} = DM({k}, I{i});", note)
             if i in PAR_I:
@@ -410,6 +435,7 @@ class Prog:
             self.r[d] = self.mem.get(self.i[i] + 4 * k)
 
     def sti(self, k: int, i: int, s: int, note: str = "") -> None:
+        k = self.bk(i, k)
         if not (i in PAR_I and self._merge(f"DM({k}, I{i}) = R{s};", store=s, k=k)):
             self.e(f"DM({k}, I{i}) = R{s};", note)
             if i in PAR_I:
@@ -417,8 +443,12 @@ class Prog:
         if self.run:
             self.mem.put(self.i[i] + 4 * k, self.r[s])
 
-    def seti(self, i: int, s: int, note: str = "") -> None:
+    def seti(self, i: int, s: int, note: str = "", bias: int | None = None) -> None:
+        """Ii = Rs. BIAS (words, 2026-11-10 shrink): Rs already holds the base + 4 x BIAS, and
+        from here on ldi / sti / par's ldk, stk through Ii take offsets from the base (bk)."""
         self.e(f"I{i} = R{s};", note)
+        if bias is not None:
+            self.ibias[i] = bias
         if self.run:
             self.i[i] = self.r[s]
 
@@ -609,6 +639,7 @@ class Prog:
                         self.i[i] += 4
             else:
                 k, i = (m[2], m[3]) if m[0] == "ldk" else (m[1], m[2])
+                k = self.bk(i, k)
                 assert 0 <= i < 8 and -32 <= k < 32
                 if m[0] == "ldk":
                     texts.append(f"F{m[1]} = DM({k}, I{i})")
@@ -679,16 +710,15 @@ class Prog:
             while True:
                 body()
                 self.ld(0, counter)
-                self.iconst(one, 1)
-                self.iop(0, 0, "-", one)
+                self.dec(0, 0)
                 self.st(counter, 0)
+                self.r[one] = POISON               # the tail no longer leaves 1 in ONE (see POISON)
                 if self.r[0] == 0:
                     break
             return
         body()
         self.ld(0, counter)
-        self.iconst(one, 1)
-        self.iop(0, 0, "-", one)
+        self.dec(0, 0)                         # 2026-11-10 (shrink): DEC, not a 1 in ONE and a subtract
         self.st(counter, 0)
         self.jump("NE", top)
 
@@ -707,14 +737,14 @@ class Prog:
                 before = self.r[counter]
                 body()
                 assert self.r[counter] == before, f"loop_r: the body changed its count R{counter}"
-                self.iconst(one, 1)
-                self.iop(counter, counter, "-", one)
+                self.dec(counter, counter)
+                if one != counter:
+                    self.r[one] = POISON
                 if self.r[counter] == 0:
                     break
             return
         body()
-        self.iconst(one, 1)
-        self.iop(counter, counter, "-", one)
+        self.dec(counter, counter)             # 2026-11-10 (shrink): DEC (16 bits), ONE untouched
         self.jump("NE", top)
 
     # -- leaf subroutines ---------------------------------------------------------------
@@ -737,6 +767,14 @@ class Prog:
         self.jump("", f"wr_{self.prefix}_sub_{name}")
         self.place(ret)
 
+    def ret_addr(self, d: int, label: str) -> None:
+        """2026-11-10 (shrink): Rd = LABEL's address - 1 (filled in by the jump resolver, like a
+        call's return address). Emit mode only."""
+        assert not self.run
+        self.known.clear()
+        self._mg = self._mv = None
+        self.lines.append(f"      R{d} = 0x0;".ljust(40) + f"// return address - 1: {label}. - 1")
+
     def emit_subs(self) -> None:
         for name, body in list(self.subs.items()):
             self.place(f"wr_{self.prefix}_sub_{name}")
@@ -748,4 +786,92 @@ class Prog:
             self.e("JUMP (M14, I12);")
 
     def text(self) -> str:
-        return "\n".join(self.lines) + "\n"
+        return "\n".join(_zero_scale(self.lines)) + "\n"
+
+
+# -- 2026-11-10 (shrink): constant loads only some forms read ----------------------------------
+_KLOAD = re.compile(r"^\s+R(\d+) = (0x0|0x1);")
+_FLOAT_BY = re.compile(r"\bFLOAT (R\d+) BY R(\d+)\b")
+_ADDSUB = re.compile(r"^R(\d+) = R(\d+) ([-+]) R(\d+)$")
+
+
+def _parts(line: str) -> list[str]:
+    body = line.split("//", 1)[0].strip()
+    return [x.strip() for x in body.rstrip(";").split(",") if x.strip()] if body else []
+
+
+def _one_form(part: str, s: str, k: str):
+    """PART rewritten without Rs (which holds K), or None if it reads Rs any other way:
+    `FLOAT Rx BY Rs` (Rs = 0) -> `FLOAT Rx`; `Rd = Ra - Rs`, `Rd = Ra + Rs`, `Rd = Rs + Ra`
+    (Rs = 1, the instruction alone) -> the stock's 16-bit `Rd = Ra - 1` / `Rd = Ra + 1`."""
+    if k == "0x0":
+        return _FLOAT_BY.sub(lambda f: f"FLOAT {f.group(1)}" if f.group(2) == s else f.group(0), part)
+    m = _ADDSUB.match(part)
+    if not m:
+        return part
+    d, a, op, b = m.groups()
+    if b == s and a != s:
+        return f"R{d} = R{a} {op} 1"
+    if op == "+" and a == s and b != s:
+        return f"R{d} = R{b} + 1"
+    return part
+
+
+def _zero_scale(lines: list[str]) -> list[str]:
+    """Emit mode's last pass (2026-11-10, shrink): a constant load `Rs = 0x0` / `Rs = 0x1` whose
+    value is read, before Rs is written again in straight-line code (no label or branch between),
+    only by forms that take the constant themselves (_one_form) is dropped and those
+    instructions rewritten: FLOAT Rx BY Rs (0) is FLOAT Rx, Ra -/+ Rs (1) is DEC / INC Ra (the
+    same result, the same flags the code tests: AZ, AN). Run mode still loads Rs (one more step,
+    the same output); nothing reads Rs before writing it again, so the program's effect is the
+    same. Any doubt (a label, a jump, any other mention of Rs or Fs) keeps both."""
+    out = list(lines)
+    drop = set()
+    for n, line in enumerate(out):
+        m = _KLOAD.match(line)
+        if not m or n in drop:
+            continue
+        s, k = m.group(1), m.group(2)
+        reg = re.compile(rf"\b[RF]{s}\b")
+        rewrites, ok = {}, False
+        for j in range(n + 1, len(out)):
+            body = out[j].split("//", 1)[0].strip()
+            if not body or body.startswith("//"):
+                continue
+            if body.startswith(".") or body.endswith(":") or "JUMP" in body or "CALL" in body \
+                    or "RTS" in body or "RTI" in body:
+                break
+            if not reg.search(body):
+                continue
+            parts = _parts(out[j])
+            if k == "0x1" and len(parts) != 1:
+                break                                  # INC / DEC alone only (the stock's 16-bit form)
+            new, bad, writes = [], False, False
+            for part in parts:
+                lhs, eq, _ = part.partition(" = ")
+                if not eq:
+                    lhs = ""
+                np = _one_form(part, s, k)
+                nl, neq, nr = np.partition(" = ")
+                if not neq:
+                    nl, nr = "", np
+                if reg.search(nr) or ("DM(" in nl and reg.search(nl)):
+                    bad = True
+                if lhs and re.fullmatch(rf"[RF]{s}", lhs.strip()):
+                    writes = True
+                new.append(np)
+            if bad:
+                break
+            if new != parts:
+                code, sep, note = out[j].partition("//")
+                lead = code[:len(code) - len(code.lstrip())]
+                body2 = lead + ", ".join(new) + ";"
+                rewrites[j] = (body2.ljust(40) + sep + note) if sep else body2
+            if writes:
+                ok = True                              # dead from here
+                break
+        if not ok or not rewrites:
+            continue
+        drop.add(n)
+        out.update(rewrites) if isinstance(out, dict) else [out.__setitem__(j, v) for j, v in rewrites.items()]
+    return [x for k, x in enumerate(out) if k not in drop]

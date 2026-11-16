@@ -43,13 +43,14 @@ def table_words(L: M.Layout) -> dict[int, int]:
     from ..shft import live as SL
     from ..waverider import dsp
     out = {}
-    data, _ = M.tables_bytes()
+    data = M.stream_tables() if L.shipped else M.tables_bytes()[0]
     for k in range(len(data) // 4):
         out[L.tables + 4 * k] = struct.unpack_from("<I", data, 4 * k)[0]
-    sdata, sat = SL.tables_bytes()
-    base = L.sin - sat["sin"]
-    for k in range(len(sdata) // 4):
-        out[base + 4 * k] = struct.unpack_from("<I", sdata, 4 * k)[0]
+    if not L.shipped:                            # else tan and the sine are shipped: MDB.table_mem
+        sdata, sat = SL.tables_bytes()
+        base = L.sin - sat["sin"]
+        for k in range(len(sdata) // 4):
+            out[base + 4 * k] = struct.unpack_from("<I", sdata, 4 * k)[0]
     from ..md import bench as MDB                 # the Machinedrum's tables, the sine filled (v0.17)
     out.update(MDB.table_mem(L.md))
     return out

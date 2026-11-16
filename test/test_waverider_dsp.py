@@ -173,8 +173,8 @@ def test_ddr_spans_are_clear_of_the_stock_image_and_the_engine():
     # Waverider's wavetables went in v0.11. v0.26: the Machinedrum's shipped tables (the
     # host's pitch table, zpack) are not in the image: the ColdFire sends them at power-on.
     # v0.45: PING's tables went with PING
-    assert [a for _, a, _ in ddr] == [dsp.SHFT_TABLES_DDR,                      # v0.31: AMD's sine
-                                      dsp.PERC_TABLES_DDR,
+    # 2026-11-10 (shrink): AMD's sine (v0.31) ships over the link now, with PERC's tan
+    assert [a for _, a, _ in ddr] == [dsp.PERC_TABLES_DDR,
                                       dsp.SMP_TABLES_DDR,                       # v0.18: the DT2 reader's
                                       dsp.MD_TABLES_DDR,
                                       dsp.MD_DELAY_DDR,                         # v0.32: P-I's lines, zeroed
@@ -183,15 +183,15 @@ def test_ddr_spans_are_clear_of_the_stock_image_and_the_engine():
                                       0x82510000,                               # the post inserts' rings, zeroed
                                       dsp.SMP_POOL_DDR, dsp.SMP_POOL_DDR + 8]   # v0.17: the MD's
     assert not any(ddr[-1][2])
-    # v0.45: PING's tables went: every index one lower than b4's
-    assert not any(ddr[5][2]) and len(ddr[5][2]) == dsp.FDN8_RING_BYTES       # FDN8: zeros at power-on
-    assert dsp.MD_DELAY_DDR + len(ddr[4][2]) <= dsp.FDN8_RING_DDR
+    # v0.45: PING's tables went: every index one lower than b4's; 2026-11-10: the sine's, one more
+    assert not any(ddr[4][2]) and len(ddr[4][2]) == dsp.FDN8_RING_BYTES       # FDN8: zeros at power-on
+    assert dsp.MD_DELAY_DDR + len(ddr[3][2]) <= dsp.FDN8_RING_DDR
     assert dsp.FDN8_RING_DDR + 0x80000 <= 0x82500000                         # (FDN8 LONG's 512 KB too)
-    assert not any(ddr[6][2]) and 0x82500000 + len(ddr[6][2]) <= 0x82510000
+    assert not any(ddr[5][2]) and 0x82500000 + len(ddr[5][2]) <= 0x82510000
     from dnfw.mnm import plk                                              # PLAITS' per-voice DDR
-    assert not any(ddr[7][2]) and 0x82510000 + len(ddr[7][2]) <= plk.BIG_DDR <= dsp.SMP_POOL_DDR
-    assert not any(ddr[3][2]) and not any(ddr[4][2])      # the MD's tables (the DSP fills them), P-I's lines
-    assert dsp.MD_TABLES_DDR + len(ddr[3][2]) <= dsp.MD_DELAY_DDR
+    assert not any(ddr[6][2]) and 0x82510000 + len(ddr[6][2]) <= plk.BIG_DDR <= dsp.SMP_POOL_DDR
+    assert not any(ddr[2][2]) and not any(ddr[3][2])      # the MD's tables (the DSP fills them), P-I's lines
+    assert dsp.MD_TABLES_DDR + len(ddr[2][2]) <= dsp.MD_DELAY_DDR
     # v0.32: the voices' working state in L2 (zeros), inside the room proven on units
     from dnfw.perc import live as PL
     L = PL.layout()
@@ -474,10 +474,20 @@ def test_every_table_perc_reads_is_loaded_by_a_span():
             if a <= lo and lo + len(data) <= z:
                 return b[lo - a:lo - a + len(data)] == data
         return False
+    # 2026-11-10 (shrink): tan and AMD's sine ship over the link with the Machinedrum's tables
+    # (the voices wait for them: C['fill']); exp2 stays in the stream (the sample machines read it)
+    from dnfw.md import core as MDK
+    shipped, base = MDK.tables_bytes(), L.md.T[MDK.SHIPPED]
+
+    def sent(lo, data):
+        return base <= lo and lo + len(data) <= base + len(shipped) \
+            and shipped[lo - base:lo - base + len(data)] == data
     sdata, at = SL.tables_bytes()
-    assert loaded(L.sin, sdata[at["sin"]:at["pow2"]]), "PERC's sine (AMD) is not loaded"
-    pdata, _ = PM.tables_bytes()
-    assert loaded(L.tables, pdata), "PERC's tables are not loaded"
+    assert sent(L.sin, sdata[at["sin"]:at["pow2"]]), "PERC's sine (AMD) is not shipped"
+    pdata, pat = PM.tables_bytes()
+    assert sent(L.T["tan"], pdata[pat["tan"]:]), "PERC's tan is not shipped"
+    assert loaded(L.tables, pdata[:pat["tan"]]), "PERC's exp2 is not loaded"
+    assert L.T["exp2"] == L.tables
 
 
 def test_v037_the_recorders_main_tap_is_one_place():

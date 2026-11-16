@@ -137,6 +137,7 @@ def init_on(snap, m2mach, image: Image, warm: bool = False):
     for k in range(0, len(shipped), 4):
         m2.poke(runner.state, Lm.T[MDK.SHIPPED] + k, struct.unpack_from("<I", shipped, k)[0])
     m2.poke(runner.state, Lm.ready, SM.TABLE_MAGIC)
+    _twin_copy(runner.state, image)            # 2026-11-10: as entry_mark.asm leaves B (step_twin checks it)
     if warm:
         # v0.17: the Machinedrum's sine and tables as the DSP has them 0.7 s after power-on
         # (it fills them itself, 32 blocks; the "sine" run checks that fill word for word),
@@ -509,7 +510,7 @@ def main(argv=None):
     p.add_argument("--frame-be", help="a frame as the ColdFire holds it at 0x80005e60 (16-bit BE)")
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
-    p.add_argument("--steps", "decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,mainrec,recwhole,pvmix,fdn8,xdly,inserts,inspost,insbus,tdm,stock,mnm,frame", "decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,flexlevel,mainrec,recwhole,pvmix,fdn8,xdly,inserts,tdm,stock,mnm,frame")   # v0.27: shft, gran removed; v0.45: ping removed   # voice: PERC
+    p.add_argument("--steps", "decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,mainrec,recwhole,pvmix,fdn8,xdly,inserts,inspost,insbus,tdm,twin,stock,mnm,frame", "decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,flexlevel,mainrec,recwhole,pvmix,fdn8,xdly,inserts,tdm,stock,mnm,frame")   # v0.27: shft, gran removed; v0.45: ping removed   # voice: PERC
     p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
@@ -739,6 +740,11 @@ def main(argv=None):
             results["3e_tdm"] = step_tdm(init, sound, machines, a.blocks)
             gc.collect()
             show(results["3e_tdm"])
+
+        if "twin" in steps:
+            print("\nstep 4t: the twin table, copied by entry_mark.asm (2026-11-10)")
+            results["4t_twin"] = step_twin(snap, m2mach, m5, stock_img)
+            show(results["4t_twin"])
 
         if "stock" in steps:
             print("\nstep 4: types 0-4 unchanged")
@@ -3604,6 +3610,55 @@ def step_tdm(init, sound, machines, blocks) -> dict:
 
 
 # -- step 4 -------------------------------------------------------------------------------------------
+
+def _twin_copy(state, image) -> None:
+    """2026-11-10 (shrink): an image that loads the twin table at TWIN_A only has TWIN_B filled by
+    entry_mark.asm before the per-block routine's first call; the runs here call that routine
+    directly (sw 0x1c2712), so they start with B as the hook leaves it: B = A.
+    step_twin runs the hook itself and checks it does exactly this."""
+    if image.memory.read(dsp.TWIN_B, 4) == image.memory.read(dsp.TWIN_A, 4) \
+            and image.memory.read(dsp.TWIN_B, dsp.TWIN_BYTES) == image.memory.read(dsp.TWIN_A, dsp.TWIN_BYTES):
+        return                                  # stock, or a build that loads both
+    for k in range(0, dsp.TWIN_BYTES, 4):
+        m2.poke(state, dsp.TWIN_B + k, m2.word(state, dsp.TWIN_A + k))
+    # (TWIN, the hook's own word, stays 0 here: these runs never enter the hook, and the word is
+    # in the state span step 2 holds to the image)
+
+
+def step_twin(snap, m2mach, m5: Image, stock: Image) -> dict:
+    """The twin table (docs/dsp-room.md): from the post-init state on the build's image (B zero,
+    as the stream fills it), the handler's call site through entry_mark.asm to the call: B ends as
+    stock's B word for word, TWIN set, R4 the displaced load, R9 R10 I0 I1 as they were; a second
+    pass copies nothing (B unchanged, a few instructions)."""
+    regs = {f"R{k}": 0x01010101 * (k + 1) for k in range(16)}
+    regs.update({"I0": 0x2DF000, "I1": 0x2DF100})
+    r = fx.sr.load_snapshot(str(snap), m2mach.memory)
+    r.data = m5.memory
+    r.state = dataclasses.replace(r.state, concrete=m5.memory)
+    zero_b = all(m2.word(r.state, dsp.TWIN_B + k) == 0 for k in range(0, dsp.TWIN_BYTES, 4))
+    r = r.fresh_call(dsp.CALL_SITE_SW, regs=regs)
+    how = fx.run(r, 400_000, fx.Fixups(), stop_at=[0x1C9FBC])
+    first_steps = r.state.steps
+    stock_b = [stock.memory.read(dsp.TWIN_B + k, 4) for k in range(0, dsp.TWIN_BYTES, 4)]
+    got_b = [(m2.word(r.state, dsp.TWIN_B + k) or 0).to_bytes(4, "little") for k in range(0, dsp.TWIN_BYTES, 4)]
+    reg = lambda n: (lambda v: v.value if isinstance(v, fx.Const) else None)(r.state.uregs[fx.UREG_CODES[n]])
+    kept = all(reg(n) == regs[n] for n in ("R9", "R10", "I0", "I1"))
+    r2 = r.fresh_call(dsp.CALL_SITE_SW, regs=regs)
+    how2 = fx.run(r2, 400_000, fx.Fixups(), stop_at=[0x1C9FBC])
+    again = [(m2.word(r2.state, dsp.TWIN_B + k) or 0).to_bytes(4, "little") for k in range(0, dsp.TWIN_BYTES, 4)]
+    checks = {
+        "the build's image loads B as zeros (the stream's fill block)": zero_b,
+        "the hook runs to the call (sw 0x1c9fbc)": how[0] == "stop",
+        "B ends as stock's B, word for word": got_b == stock_b,
+        "TWIN is TWIN_MAGIC": m2.word(r.state, dsp.TWIN_FLAG_DM) == dsp.TWIN_MAGIC,
+        "R4 holds the displaced load (0x268438)": reg("R4") == 0x268438,
+        "R9, R10, I0, I1 as they were": kept,
+        "a second pass reaches the call and leaves B as it is": how2[0] == "stop" and again == got_b,
+        "the second pass copies nothing (fewer than 40 instructions)": r2.state.steps - first_steps < 40
+        if r2.state.steps >= first_steps else r2.state.steps < 40,
+    }
+    return {"checks": checks, "first_pass_instructions": first_steps}
+
 
 def step_stock(snap, m2mach, m5: Image, stock: Image, sound, machines, blocks) -> dict:
     others = {1: 1, 2: 0, 3: 2, 4: 3}                       # WaveTone, FM Tone, FM Drum, Swarmer

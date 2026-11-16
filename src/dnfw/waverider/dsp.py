@@ -463,7 +463,7 @@ def _md_core():
 
 def _perc_tables() -> bytes:
     from ..perc import machines as perc_machines
-    return perc_machines.tables_bytes()[0]
+    return perc_machines.stream_tables()
 
 
 def ddr_spans() -> list[tuple[str, int, bytes]]:
@@ -476,8 +476,8 @@ def ddr_spans() -> list[tuple[str, int, bytes]]:
         # instrument any AMD above 0 silenced everything until a reboot (users' reports on
         # v0.29 and v0.30). The sine only; test_waverider_dsp checks every table PERC reads
         # is loaded by a span.
-        ("PERC's amp-modulation sine (SHFT's table, kept for AMD)", SHFT_TABLES_DDR, _perc_sine()),
-        ("PERC tables", PERC_TABLES_DDR, _perc_tables()),
+        # 2026-11-10 (shrink): AMD's sine and PERC's tan ship over the link (perc.machines.shipped_tail)
+        ("PERC tables (exp2; the sample machines read it too)", PERC_TABLES_DDR, _perc_tables()),
         ("the DT2 sample reader's coefficients (from the owner's DT2 image; v0.18)", SMP_TABLES_DDR,
          _smp_tables()),
         ("Machinedrum sine and tables (zeros: the DSP decodes them; v0.24)", MD_TABLES_DDR,
@@ -729,6 +729,31 @@ def _blocks(at: int, payload: bytes) -> bytes:
     return b"".join(out)
 
 
+# 2026-11-10 (shrink): stock's stream loads one 67,652 B table (int16, WaveTone's) twice, at L2
+# TWIN_A and TWIN_B, byte for byte the same; both are read, neither is written (docs/dsp-room.md).
+# The build loads A only and zero-fills B; entry_mark.asm copies A over B the first time the
+# handler calls the per-block routine (TWIN_FLAG_DM == 0 as the state block loads), before any
+# read: engine init, which runs earlier, touches neither (measured in the runner).
+TWIN_A, TWIN_B, TWIN_BYTES = 0x2001E888, 0x200779F8, 67652
+TWIN_FLAG_DM, TWIN_MAGIC = 0x2DE140, 0x54574E31                # entry_mark.asm's TWIN word, "TWN1"
+
+
+def drop_twin(stream: bytes) -> bytes:
+    """STREAM with the block at TWIN_B (the same bytes as TWIN_A's) turned into a fill block."""
+    w = bootstream.walk(stream)
+    a = [b for b in w.blocks if b.has_payload and b.target == TWIN_A and b.count == TWIN_BYTES]
+    b = [x for x in w.blocks if x.has_payload and x.target == TWIN_B and x.count == TWIN_BYTES]
+    if len(a) != 1 or len(b) != 1:
+        raise DspError("the twin tables are not one block each at 0x2001e888 and 0x200779f8")
+    pa = stream[a[0].payload_at:a[0].payload_at + TWIN_BYTES]
+    pb = stream[b[0].payload_at:b[0].payload_at + TWIN_BYTES]
+    if pa != pb:
+        raise DspError("the twin tables differ: B cannot be copied from A")
+    hb = b[0].offset                                             # its header
+    fill = bootstream.block(TWIN_B, flags=bootstream.FLAG_FILL, count=TWIN_BYTES)
+    return stream[:hb] + fill + stream[b[0].payload_at + TWIN_BYTES:]
+
+
 def _finish(out: bytearray) -> bytes:
     result = bytes(out)
     walked = bootstream.walk(result)
@@ -808,7 +833,7 @@ def section7(stock: bytes) -> bytes:
     bootstream.write_span(out, sw_to_load(DELAY_SITE_SW), delay_call())
     bootstream.write_span(out, sw_to_load(SENDS_SITE_SW), sends_cjump())
     bootstream.write_span(out, sw_to_load(OUT_SITE_SW), out_cjump())
-    result = bytes(out)
+    result = drop_twin(bytes(out))            # 2026-11-10: entry_mark.asm copies A over B
     walked = bootstream.walk(result)
     if not walked.complete or walked.stopped_at != len(result):
         raise DspError(f"the result does not walk as a boot stream ({walked.reason})")

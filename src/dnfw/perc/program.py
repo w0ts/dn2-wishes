@@ -20,6 +20,7 @@ MD_LEVEL = 1.4                            # the Machinedrum's full scale on a DN
                                           # its default hits as loud as WaveTone's and FM Tone's default notes
 
 SAVE = 0x2DDE00                          # the save area PING's tail restores from
+I3_BIAS = 96                                 # 2026-11-10 (shrink): words; see voice()
 SAVE_REGS = [f"R{k}" for k in range(16)] + ["I0", "I1", "I2", "I3", "I4", "I5", "I12",
                                             "M0", "M1", "M2", "M3", "M4"]
 NOTE_CELLS = 0x254B14
@@ -336,8 +337,12 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
     p.lsh(12, 9, 10)
     p.iconst(11, L.md.state)
     p.iop(12, 11, "+", 12)
-    p.seti(3, 12, "this slot's Machinedrum words")
     p.st(L.md.C["mdb"], 12)
+    # 2026-11-10 (shrink): I3 = the slot + I3_BIAS words, so the state words S0.. (most of
+    # the slot's moves) take a 6-bit offset (4-byte instructions instead of 6)
+    p.iconst(11, 4 * I3_BIAS)
+    p.iop(12, 11, "+", 12)
+    p.seti(3, 12, "this slot's Machinedrum words + I3_BIAS", bias=I3_BIAS)
     # the slot's buffer
     p.ld(9, C["t"])
     p.lsh(12, 9, 2)
