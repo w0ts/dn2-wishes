@@ -28,9 +28,9 @@ LINK_SOURCES = [SOURCE.parents[1] / "sampler" / "link.c", SOURCE.parents[1] / "s
                 SOURCE.parents[1] / "sampler" / "lib.c",
                 SOURCE.parents[1] / "sampler" / "pools.c",          # v0.38: per-project pools
                 SOURCE.parents[1] / "sampler" / "erase.c",          # v0.39: ERASE MOD DATA
-                SOURCE.parents[1, / "sampler" / "rectrig.c",        # v0.41: REC trigs, buffers, QREC/QPLAY
+                SOURCE.parents[1] / "sampler" / "rectrig.c",        # v0.41: REC trigs, buffers, QREC/QPLAY
+                SOURCE.parent / "lzma7.c",                          # 2026-11-11: section 7 as LZMA (docs/lzma7.md)
                 SOURCE.parent / "lzma7cache.c", SOURCE.parent / "lzma7late.S",   # ... decoded once, kept on the +Drive
-                SOURCE.parent / "lzma7.c"]                          # 2026-11-11: section 7 as LZMA (docs/lzma7.md)
                 SOURCE.parents[1] / "jump" / "jump.c", SOURCE.parents[1] / "jump" / "hooks.S",   # DIRECT JUMP
                 SOURCE.parents[1] / "slides" / "slide.c", SOURCE.parents[1] / "slides" / "hooks.S",   # parameter slides
                 SOURCE.parents[1] / "meter" / "meter.c", SOURCE.parents[1] / "meter" / "hooks.S",   # the system meter
