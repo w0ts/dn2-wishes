@@ -50,7 +50,8 @@ _TABLE_MEM: dict[int, dict[int, int]] = {}
 def table_mem(L: K.Layout) -> dict[int, int]:
     """The tables as the DSP holds them: the ROM's from the firmware, and the sine as the
     DSP's own fill computes it (run once here, through the DSL)."""
-    if L.tables not in _TABLE_MEM:
+    key = (L.tables, tuple(sorted(L.T_src.items())))
+    if key not in _TABLE_MEM:
         m: dict[int, int] = {}
         data = K.tables_bytes()
         base = L.T[K.SHIPPED]
@@ -64,9 +65,11 @@ def table_mem(L: K.Layout) -> dict[int, int]:
         p = Prog("run", mem=mem)
         for _ in range(K.Z_N // K.Z_PER_BLOCK):
             K.table_fill(p, L)
-        m.update({a: v for a, v in mem.w.items() if L.tables <= a < L.T[K.SHIPPED]})
-        _TABLE_MEM[L.tables] = m
-    return _TABLE_MEM[L.tables]
+        l2 = K.l2_copy_spans(L)                                                # (and the L2 copies)
+        m.update({a: v for a, v in mem.w.items()
+                  if L.tables <= a < L.T[K.SHIPPED] or any(lo <= a < hi for lo, hi in l2)})
+        _TABLE_MEM[key] = m
+    return _TABLE_MEM[key]
 
 
 class Bench:

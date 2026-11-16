@@ -130,6 +130,11 @@ MNM_DT_L2 = MNM_SCRATCH_L2 + MNM_SCRATCH_BYTES        # 0x200A8000
 MNM_DT_BYTES = 0x1000
 # v0.37: the main mix, as the master mix call takes it, for the recorder's MAIN (sampler.machines.MAIN_TAP)
 MAIN_TAP_L2 = MNM_DT_L2 + MNM_DT_BYTES                 # 0x200A9000
+# 2026-11-14 (opt-md; main as the memory arbiter): P-I tables copied to L2 at power-on (dnfw.md.core.tables_in_l2):
+# PI-RS's strike (674 words) after the main tap, before fdn8.asm; the modes' curve (512 words) in the gap between
+# a2f.asm's span and smp.asm's (ANALOG 2's filter state left it for L1, 2026-11-11)
+PIRS_TAB_L2, PIRS_TAB_BYTES = MAIN_TAP_L2 + 0x200, 4 * 674          # 0x200A9200 .. 0x200A9C88
+PI_CURVE_L2, PI_CURVE_BYTES = 0x200B5800, 4 * 512                   # .. 0x200B6000
 MAIN_TAP_BYTES = 0x200
 MD_DELAY_DDR = 0x82200000                    # 16 slots x core.PI_DELAY_STRIDE
 # FDN8 (docs/fdn8.md, dnfw.fdn8): the reverb in the stock reverb's slot. Its code in L2 after the
@@ -251,6 +256,8 @@ STOCK_REVERB_SW = 0xB836BC
 # non-cacheable window's 64 KB margin (the User's choice for this limit, 2026-11-08: move the
 # sample code down). Until then it followed PERC's span:
 SMP_L2_LOAD = 0x200B6000                     # 0x200e0400 (PLAITS VA; 0x200df800 TB303; 0x200de400 PLAITS; 0x200dd400 2026-11-08; 0x200e3800 SOPHIE; 0x200e3000 v0.24..v0.42; 0x200d4000 v0.17..v0.23, 0x200d0000 until v0.16)
+assert MAIN_TAP_L2 + 0x200 <= PIRS_TAB_L2 and PIRS_TAB_L2 + PIRS_TAB_BYTES <= FDN8_L2_LOAD          # (opt-md's gaps)
+assert A2F_L2_LOAD + A2F_L2_SPAN <= PI_CURVE_L2 and PI_CURVE_L2 + PI_CURVE_BYTES <= SMP_L2_LOAD
 SMP_L2_SPAN = 0x6000                         # v0.28: 24 KB (the re-latch took the code past 19 KB; 20 KB v0.18..v0.27, 32 KB until v0.16)
 SMP_SW = 0xB80000 + (SMP_L2_LOAD - 0x20000000) // 2          # 0xbdb000 (below PERC, 2026-11-09; 0xbf0200 PLAITS VA; 0xbefc00 TB303; 0xbef200 PLAITS; 0xbeea00 2026-11-08; 0xbf1c00 SOPHIE; 0xbf1800 v0.24..v0.42; 0xbea000 v0.17..v0.23)
 PVMIX_L2_LOAD = SMP_L2_LOAD + SMP_L2_SPAN - 0x400           # v0.25: pvmix.asm (wr_pvmix)

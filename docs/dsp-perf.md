@@ -490,3 +490,35 @@ differ by the declared start only. Code: PERC 170,710 -> 171,922 B of its 172,03
 Traps: in run mode `loop_r` poisons its `one` register (R12 by default) every pass, so a loop keeping a constant
 in F12 passes another `one`; MODL is knob H (`plaits.MODL_K`) since 2026-11-11: a script setting knob 6
 renders WS.
+
+## Machinedrum ports toward 16 voices (2026-11-14, opt-md, branch claude/md16-r5 on r52-r5)
+
+Measured with `scripts/dsp_cost.py` (steady voice-block, the host's 2,012 included; target ~14,000). On r52-r5 only
+PI-SD (15,316), EFM-CY (15,173) and PI-RS (15,008) were over it; every other MD port was at most ~13.2k.
+
+| model | before | after | what |
+|---|---|---|---|
+| PI-SD | 15,316 | 14,570 | one-poles and high-pass with products beside adds (multiplier \|\| ALU), constants in free registers, one product computed once; the curve table in L2 (its 5 KB strike table has no free L2 gap that size: in DDR) |
+| PI-RS | 15,008 | 13,686 | the same, and its strike table in L2 too (-624 with the curve) |
+| EFM-CY | 15,173 | 14,857 | I0 set once a block; the operators' sum in a register |
+
+Every output is word for word v0.52's (`test/test_md_source_identity.py`).
+
+### Parked: two bit-exact options that need L2 nobody has (main, 2026-11-14)
+
+What is left of EFM-CY's and the P-I machines' cost is DDR traffic. Both could go to L2 without changing a word of
+output, but neither fits the free L2 without the User's 64 KB reserve above PERC, which is off limits. For when
+memory frees up (the PERC constant pool, a layout change):
+
+1. **DSP2's sine table in L2, 128 KB** (32,768 words; no exact smaller form: the recursion leaves no half-wave or
+   mirror symmetry, ~16,380 words break each). EFM-CY reads it 256 times a block: -1,536 a voice (14,857 -> ~13,300);
+   every EFM machine and TRX-CB / TRX-S2 read it too, a few hundred to ~1k each.
+2. **The P-I delay lines in L2, 96 KB** (three 512-word lines a slot, 16 slots). PI-SD / PI-RS read three and
+   write three words a sample (192 DDR accesses a block): -1,152 a voice (PI-SD 14,570 -> ~13,420); PI-BD /
+   PI-MT (three lines each) about the same.
+3. **PI-SD's strike table in L2, 5,124 B** (read two words a sample): -~520 a voice (PI-SD 14,570 -> ~14,050),
+   if a 5 KB gap is ever free (the largest free one today is 3.5 KB; main as the arbiter, 2026-11-14: none to allot,
+   the User's reserve off limits).
+
+Checked before the two tables went in: r52-r5's generated assembly (every `.asm`, regenerated on gpufarm) addresses
+nothing inside `0x200A9200..0x200A9C88` or `0x200B5800..0x200B6000`; a2f.asm's state is all L1 (`0x2DD600..`).

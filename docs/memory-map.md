@@ -346,6 +346,9 @@ listed (`scratch/juno-engine/l1consts.py`) and F1, F2 re-checked against them (R
 | L2 `0x200A2800..0x200A4000` | 6,144 | perc-layout | 2b: init bodies (4,788) + vo6_bqx (648) | (with 2a) | used: perc2b 5,480 B (664 B spare) |
 | L2 `0x200A6FC0..0x200A7000` (MNM scratch +0x2FC0) | 64 | opt-host | the budget sums (`perc.program.CUM_OFF`, 16 words) | (the host cut, bf2639fd) | used |
 | L2 `0x200A7400..0x200A7440` (MNM scratch +0x3400) | 64 | clicks | `VEL_OFF`: per-slot velocity (16 words; plus frame slot 62 of our voices, types 5..31) | - | allotted (claude/velocity) |
+| L2 `0x200A4000..0x200A6550` (MNM scratch +0x0000) | 9,552 | lever 5 (opt-inserts) | the FDN8 diffusers of the send and of bus 0 (`fdn8.program.DIFF_SEND_L2`, `DIFF_BUS0_L2`; 0x200A4000..0x200A6000 used, to 0x200A6550 allotted): **persistent** delay state | (lever 5) | used (r5; its own claim in test_dsp_claims.py since 2026-11-14) |
+| L2 `0x200A9200..0x200A9C88` | 2,696 | opt-md | PI-RS's strike table (`PIRS_TAB`), copied once from the decoded tables when they become whole (`md.core.tables_in_l2`, `dsp.PIRS_TAB_L2`) | PI-RS -624 a voice (with the curve) | used (main as arbiter, 2026-11-14; claude/md16-r5) |
+| L2 `0x200B5800..0x200B6000` | 2,048 | opt-md | the P-I modes' curve table (`PI_CURVE_142949`; `dsp.PI_CURVE_L2`), copied the same way: the gap between a2f.asm's span and smp.asm's (ANALOG 2's filter state left it for L1, 2026-11-11) | PI-SD/RS/BD/MT/ML a little each block | used (main as arbiter, 2026-11-14; claude/md16-r5) |
 | L2 128 KB, place open | 131,072 | opt-md | DSP2's sine table (no exact smaller form: no symmetry) | EFM-CY -2.5k a voice, FM / TRX | **decision**: no 128 KB contiguous anywhere today; see below |
 
 Left free: F1 `0x2E0E44..0x2E1000` (444 B), F2 `0x2E1750..0x2E1C00` (1,200 B), F3: none (FDN8 stores),
@@ -353,7 +356,8 @@ L2 `0x2009B400..0x200A0000` (19,456 B) and `0x200A2800..0x200A4000` (6,144 B), b
 nothing is left inside dsp.py's L2 floor but the small gaps between spans.
 
 The Monomachine L2 scratch (`0x200A4000..0x200A8000`, one span): `+0x0000..+0x2FC0` unused since v0.43 (the render scratch
-went to L1): **12,224 B of free L2 inside an existing span**; `+0x2FC0` opt-host's sums; `+0x3000..+0x31C4` the voices'
+went to L1), then **lever 5's FDN8 diffusers at `+0x0000..+0x2550`** (persistent; a 2026-11-14 note here still said
+"unused" and opt-md's P-I tables nearly landed on them); free `+0x2550..+0x2FC0` (2,672 B, main allots it); `+0x2FC0` opt-host's sums; `+0x3000..+0x31C4` the voices'
 bookkeeping (keys, costs, rests, strikes, bounds, SLOT_N); `+0x3200..+0x33A8` ANALOG 2's mix tables (106 words);
 `+0x3400..+0x3440` clicks' VEL_OFF; free `+0x33A8..+0x3400` and `+0x3440..+0x4000`.
 

@@ -59,6 +59,12 @@ PI_DELAY_STRIDE = 8192                   # v0.24: a slot's P-I delay lines, 2048
 PI_DELAY_WORDS = PI_DELAY_STRIDE // 4
 
 
+# 2026-11-14 (opt-md; main as the memory arbiter): P-I tables read every sample (PI-RS's strike, two words) or
+# every block (the modes' curve) kept in L2 (gaps between spans: dnfw.waverider.dsp PIRS_TAB_L2, PI_CURVE_L2),
+# copied there once from the decoded tables (table_fill), read there. PI-SD's strike (5 KB) has no gap that size.
+PI_L2_TABLES = ("PIRS_TAB", "PI_CURVE_142949")
+
+
 class Layout:
     """Where the MD voices live (dnfw.waverider.dsp gives the addresses). DELAY: the
     P-I machines' delay lines, PI_DELAY_STRIDE a slot (default 1 MB past the state)."""
@@ -68,6 +74,7 @@ class Layout:
         self.state, self.tables = state, tables
         self.delay = state + 0x100000 if delay is None else delay
         self.T = {name: tables + off for name, (off, _n) in TABLE_LAYOUT.items()}
+        self.T_src: dict[str, int] = {}        # tables_in_l2: each moved table's decoded place
         # v0.26: what ships (the host's pitch table, zpack) arrives over the fast link at
         # SHIPPED, and READY holds TABLE_MAGIC once it is all there (None: in place, ready)
         if shipped is not None:
@@ -562,6 +569,33 @@ def _mnm_fix(p: Prog, L: Layout) -> None:
     p.ifz(0, "GE", nonneg)
 
 
+def tables_in_l2(L: Layout, at: dict) -> None:
+    """PI_L2_TABLES read at AT[name] instead of in the decoded tables, which table_fill copies them from once
+    whole."""
+    for name in PI_L2_TABLES:
+        L.T_src[name] = L.T[name]
+        L.T[name] = at[name]
+
+
+def l2_copy_spans(L: Layout) -> list[tuple[int, int]]:
+    """the tables_in_l2 copies' byte spans [lo, hi)"""
+    return [(L.T[n], L.T[n] + 4 * TABLE_LAYOUT[n][1]) for n in L.T_src]
+
+
+def _l2_copy(p: Prog, L: Layout) -> None:
+    """the tables_in_l2 copies (once, the block the tables become whole). Clobbers R0, R4, R12, I1, I2."""
+    for name, src in L.T_src.items():
+        p.iconst(4, src)
+        p.seti(1, 4)
+        p.iconst(4, L.T[name])
+        p.seti(2, 4)
+
+        def word():
+            p.ldpost(4, 1)
+            p.stpost(2, 4)
+        p.loop(L.C["n3"], TABLE_LAYOUT[name][1], word)
+
+
 def table_fill(p: Prog, L: Layout) -> None:
     """Z_PER_BLOCK more words of the sine and the Q23 tables from zpack, from C['fill']
     (0 at power-on, as are the bit position C['cw'] and the last words C['cs'], C['cv'],
@@ -650,6 +684,10 @@ def table_fill(p: Prog, L: Layout) -> None:
         p.iconst(12, Z_PER_BLOCK)
         p.iop(0, 12, "+", 0)
         p.st(C["fill"], 0)
+        if L.T_src:                            # whole now: the L2 copies (tables_in_l2)
+            p.iconst(12, Z_N)
+            p.e("COMP(R0, R12);")
+            p._branch(lambda: p.r[0] == Z_N, "EQ", lambda: _l2_copy(p, L), None)
     p._branch(lambda: p.r[0] < Z_N, "LT", more, None)
     if skip is not None:
         p.place(skip)

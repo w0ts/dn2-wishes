@@ -151,8 +151,9 @@ def init_on(snap, m2mach, image: Image, warm: bool = False):
         # so the machines' runs hear them from their first note
         from dnfw.md import bench as MDB
         L = PL.layout().md
-        for a, w in MDB.table_mem(L).items():
-            if L.tables <= a < L.T[MDK.SHIPPED]:
+        l2 = MDK.l2_copy_spans(L)              # 2026-11-14: and the tables_in_l2 copies, as the fill's last block
+        for a, w in MDB.table_mem(L).items():  # leaves them (the fill word says done: the DSP will not copy again)
+            if L.tables <= a < L.T[MDK.SHIPPED] or any(lo <= a < hi for lo, hi in l2):
                 m2.poke(runner.state, a, w)
         m2.poke(runner.state, L.C["fill"], MDK.Z_N)
         # v0.26: and the Digibank stand-in DENS and DDRW read, built (8 s after the tables)
@@ -1109,6 +1110,9 @@ def step_perc(init, sound, machines, blocks, cold=None) -> dict:
         want = MDB.table_mem(L.md)
         lo, hi = L.md.tables, L.md.tables + 4 * MDK.Z_N      # (v0.26: what ships is elsewhere)
         tables_ok = all((m2.word(st, a) or 0) == want.get(a, 0) for a in range(lo, hi, 4))
+        # 2026-11-14: and the tables_in_l2 copies the fill's last block makes (P-I's strike table and curve)
+        tables_ok = tables_ok and all((m2.word(st, a) or 0) == want.get(a, 0)
+                                      for lo2, hi2 in MDK.l2_copy_spans(L.md) for a in range(lo2, hi2, 4))
         sine_ok = sine_ok and tables_ok
     runs["sine"].pop("state", None)
     sw = runs["type_switch"]

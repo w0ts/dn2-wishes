@@ -205,6 +205,13 @@ class Layout:
         # renders alone and no machine reads those rows before writing them in its block
         # (perf scratch rowfirst.py / pifirst.py)
         self.md.pi_scr = self.md.mnm.XB if mnm_render is not None else None
+        # 2026-11-14 (opt-md; main as the memory arbiter): PI-RS's strike and the modes' curve in L2 gaps
+        # (MDK.tables_in_l2; docs/memory-map.md), in the DSP's own layout (the one with the render scratch in L1)
+        if mnm_render is not None:
+            from ..waverider import dsp
+            assert (4 * MDK.TABLE_LAYOUT["PIRS_TAB"][1], 4 * MDK.TABLE_LAYOUT["PI_CURVE_142949"][1]) == \
+                (dsp.PIRS_TAB_BYTES, dsp.PI_CURVE_BYTES)
+            MDK.tables_in_l2(self.md, {"PIRS_TAB": dsp.PIRS_TAB_L2, "PI_CURVE_142949": dsp.PI_CURVE_L2})
 
 
 # -- primitives -----------------------------------------------------------------------------

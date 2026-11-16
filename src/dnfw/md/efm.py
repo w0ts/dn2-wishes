@@ -1294,48 +1294,49 @@ class EFMCY:
 
             def stw(k, r):
                 p.sti(k - 16, 0, r)
-            ldw(11, o["mph"] + j)              # the modulator's offset
+            # (opt-md, 2026-11-14) the operators' temporaries in R13, so R11 holds the four sines' sum
+            ldw(13, o["mph"] + j)              # the modulator's offset
+            p.ipass(2, 13)
             p.ldi(3, 6 + j, 3)
-            p.iop(13, 11, "+", 3)
+            p.iop(13, 13, "+", 3)
             p.iop(13, 13, "AND", 9)
             stw(o["mph"] + j, 13)
-            sine(11)
+            sine(2)
             ldw(5, o["w10"])
             xround_i(p, 7, 5, 7, cr)           # round(MOD * sine)
             ldw(5, o["env2"])
             xround_i(p, 7, 5, 7, cr)           # * the mod env (rounded)
-            ldw(11, o["fb"] + j)
-            p.iop(7, 11, "+", 7)               # b = fb + mod
-            ldw(11, o["cph"] + j)
-            p.iop(2, 11, "+", 7)
+            ldw(13, o["fb"] + j)
+            p.iop(7, 13, "+", 7)               # b = fb + mod
+            ldw(13, o["cph"] + j)
+            p.iop(2, 13, "+", 7)
             p.iop(2, 2, "AND", 9)
             p.ldi(3, 1 + j, 3)
-            p.iop(13, 11, "+", 3)              # phase + inc
+            p.iop(13, 13, "+", 3)              # phase + inc
             stw(o["cph"] + j, 13)
             sine(2)
-            ldw(11, o["sum"])
-            p.iop(11, 11, "+", 7)
-            stw(o["sum"], 11)
+            p.iop(11, 11, "+", 7)              # the sum (R11)
             ldw(5, o["w12"])
             xround_i(p, 7, 5, 7, cr)           # fb = round(FB * sine)
             stw(o["fb"] + j, 7)
+
+        p.geti(13, 3)                          # (opt-md, 2026-11-14: once a block, nothing in the loop moves I0)
+        p.iconst(12, p.ioff(3, 4 * (K.S0 + 16)))                           # (I3 is biased: shrink)
+        p.iop(13, 12, "+", 13)
+        p.seti(0, 13, "I0 = slot state word 16")
 
         def one():
             p.iconst(0, 1)                     # (opt-md) for the four operators: R0 1, R9 0x7FFF, F10 2^23
             p.iconst(9, 0x7FFF)                # (the high-passes below clobber R9, R10)
             p.fconst(10, 2.0 ** 23)
-            zero(p, o["sum"])
-            p.geti(13, 3)
-            p.iconst(12, p.ioff(3, 4 * (K.S0 + 16)))                       # (I3 is biased: shrink)
-            p.iop(13, 12, "+", 13)
-            p.seti(0, 13, "I0 = slot state word 16")
             s(p, 11, o["menv"])
             p.lsh(11, 11, 1)
             ss(p, o["env2"], 11)
+            p.iconst(11, 0)                    # the sum, in R11 through the four operators
             for j in range(4):
                 op(j)
+            p.ipass(7, 11)
             edec(p, o["menv"], o["mdec"])
-            s(p, 7, o["sum"])
             p.ash(7, 7, -2)                    # the mix
             s(p, 11, o["amp"])
             p.lsh(11, 11, 1)

@@ -42,11 +42,14 @@ E, N, X40, X60, X80, XA0, XC0, COEF = 0, 32, 64, 96, 128, 160, 192, 224
 MID = X40 + 16                                     # (the res loop's I0)
 
 
-def q24(p: Prog, d: int, a: int) -> None:
-    """Fd = the 24-bit word in Ra's low bits, signed, as Q23. Clobbers R12."""
+def q24(p: Prog, d: int, a: int, k31: int | None = None) -> None:
+    """Fd = the 24-bit word in Ra's low bits, signed, as Q23. K31: a register the caller holds -31 in
+    (else R12 is loaded). Clobbers R12."""
     p.lsh(d, a, 8)
-    p.iconst(12, -31)
-    p.float_(d, d, 12)
+    if k31 is None:
+        p.iconst(12, -31)
+        k31 = 12
+    p.float_(d, d, k31)
 
 
 def imul_floor(p: Prog, d: int, a: int, b: int, sh: int) -> None:
@@ -140,15 +143,20 @@ def _satr(p: Prog, x: int, top: int, bot: int | None) -> None:
 def _onepole(p: Prog, L: K.Layout, st: int, coef, src, dst: int, extra=None) -> None:
     """y = sat(a) to DST, a += c x - c y (the firmware's mac pair) from state ST: x the
     array SRC (an int) or line (j, pos, tap). EXTRA(): more in the same loop (R5, R9, R14,
-    R15 its own)."""
-    s(p, 4, st)
+    R15 its own).
+    2026-11-14 (opt-md): a in F8, c in F2, so c y rides on the add of c x (the multiplier || ALU form); y
+    straight from a through the limiter (no copy first). The same operations, in the same order."""
     coef()                                     # -> F8
+    p.fpass(2, 8)                              # c
+    s(p, 8, st)                                # a
     line = isinstance(src, tuple)
     if line:
         _line(p, L, src[0], src[1], src[2], 10, 11)
     if extra is None:                          # (opt-md) the limiter's bounds in F14, F15
         p.fconst(14, TOP)
         p.fconst(15, -1.0)
+    else:                                      # (EXTRA has R14, R15: the top in F4, free here)
+        p.fconst(4, TOP)
 
     def body():
         if line:
@@ -156,21 +164,22 @@ def _onepole(p: Prog, L: K.Layout, st: int, coef, src, dst: int, extra=None) -> 
             p.ldi(6, 0, 2)
         else:
             p.ldi(6, src, 5)
-        p.fpass(7, 4)
         if extra is None:
-            _satr(p, 7, 14, 15)
+            p.fop(7, 8, "MIN", 14)             # y = sat(a)
+            p.fop(7, 7, "MAX", 15)
         else:
-            K.sat(p, 7)
+            p.fop(7, 8, "MIN", 4)
+            p.fconst(12, -1.0)
+            p.fop(7, 7, "MAX", 12)
         p.sti(dst, 5, 7)
-        p.fop(13, 8, "*", 6)
-        p.fop(4, 4, "+", 13)
-        p.fop(13, 8, "*", 7)
-        p.fop(4, 4, "-", 13)
+        p.fop(12, 2, "*", 6)                   # c x
+        p.par(("*", 13, 2, 7), ("+", 8, 8, 12))   # c y; a + c x
+        p.fop(8, 8, "-", 13)                   # - c y
         if extra:
             extra()
     _each(p, L, body)
-    K.sat(p, 4)
-    ss(p, st, 4)
+    K.sat(p, 8)
+    ss(p, st, 8)
 
 
 def _word(p: Prog, d: int) -> None:
@@ -387,16 +396,20 @@ class _PI:
 
         T = L.T[cls.TAB]
 
+        # (opt-md, 2026-11-14) the table's address in R1, q24's count (RS: the fraction's) in R2, the
+        # 24-bit mask in R3, held through the loop
+        p.iconst(1, T)
+        p.iconst(2, -24 if rs else -31)
+        p.iconst(3, 0xFFFFFF)
+
         def strike():
             p.lsh(12, 4, 2)
-            p.iconst(13, T)
-            p.iop(13, 13, "+", 12)
+            p.iop(13, 12, "+", 1)
             p.seti(1, 13)
             p.ldi(14, 0, 1)
             p.ldi(15, 1, 1)
             if rs:
-                p.iconst(12, -24)
-                p.float_(9, 5, 12)                 # t
+                p.float_(9, 5, 2)                  # t
                 p.fop(15, 15, "-", 14)
                 p.fop(15, 15, "*", 9)
                 p.fop(15, 15, "+", 14)
@@ -410,10 +423,10 @@ class _PI:
                 p.iop(9, 9, "OR", 7)               # the weight w (with its quirk bit)
                 p.ipass(7, 8)
                 p.iconst(8, 0)
-                q24(p, 10, 9)                      # w
+                q24(p, 10, 9, 2)                   # w
                 p.iconst(12, 0x800001)
                 p.iop(11, 12, "+", 9)
-                q24(p, 11, 11)                     # w - TOP
+                q24(p, 11, 11, 2)                  # w - TOP
                 p.fop(11, 11, "*", 14)
                 p.fop(10, 10, "*", 15)
                 p.fop(11, 11, "-", 10)
@@ -423,8 +436,7 @@ class _PI:
             p.iop(5, 12, "+", 5)
             p.lsh(12, 5, -24)
             p.iop(4, 12, "+", 4)
-            p.iconst(12, 0xFFFFFF)
-            p.iop(5, 5, "AND", 12)
+            p.iop(5, 5, "AND", 3)
         _each(p, L, strike)
 
         # the block's envelopes, the waveguide's gain, the lowpasses' coefficient
@@ -459,19 +471,20 @@ class _PI:
         s(p, 5, 35)
         _i5(p, L, N)
 
+        p.iconst(2, -31)                           # (opt-md, 2026-11-14) q24's count and the mask, held
+        p.iconst(3, 0xFFFFFF)
+
         def noise():
-            q24(p, 7, 5)
+            q24(p, 7, 5, 2)
             p.stpost(5, 7)
             p.ipass(12, 4)
             p.iop(4, 12, "+", 5)
-            p.iconst(12, 0xFFFFFF)
-            p.iop(4, 4, "AND", 12)
+            p.iop(4, 4, "AND", 3)
             p.ipass(12, 5)
             p.iop(6, 12, "+", 4)
-            p.iconst(12, 0xFFFFFF)
-            p.iop(6, 6, "AND", 12)
+            p.iop(6, 6, "AND", 3)
             p.ipass(5, 4)
-            q24(p, 7, 5)
+            q24(p, 7, 5, 2)
             p.stpost(5, 7)
             p.ipass(5, 6)
         p.loop0(16, noise)
@@ -484,8 +497,9 @@ class _PI:
 
         def integ():
             p.ldi(9, N, 5)
-            p.fpass(14, 5)
-            K.sat(p, 14)
+            p.fop(14, 5, "MIN", 4)             # (F4: TOP, _onepole's)
+            p.fconst(12, -1.0)
+            p.fop(14, 14, "MAX", 12)
             p.sti(N, 5, 14)
             p.fop(5, 5, "+", 9)
             p.fconst(15, (0xD9999A - (1 << 24)) * Q)
@@ -567,13 +581,12 @@ class _PI:
             _satr(p, 15, 2, None)
             put(3, 2, 15)
             p.fop(4, 10, "*", 7)
-            p.fop(15, 10, "*", 6)
-            p.fop(15, 14, "+", 15)
+            p.fop(6, 10, "*", 6)                   # (once: the second line used the same product again)
+            p.fop(15, 14, "+", 6)
             p.fop(15, 15, "+", 4)
             _satr(p, 15, 2, None)
             put(2, 1, 15)
-            p.fop(15, 10, "*", 6)
-            p.fop(15, 14, "-", 15)
+            p.fop(15, 14, "-", 6)
             p.fop(15, 15, "+", 4)
             _satr(p, 15, 2, None)
             put(1, 0, 15)
@@ -587,19 +600,22 @@ class _PI:
 
         # the lines' sum, highpassed by a leaky integrator, onto the body (SD) or as the
         # modes' input (RS)
-        s(p, 8, 28)
-        s(p, 4, 32)
+        # (opt-md, 2026-11-14) c in F1, a in F8, the sum in F12: c y rides on the add of the sum (the multiplier
+        # || ALU form); each limited value straight into the register its next use reads (no copies). The same
+        # operations in the same order.
+        s(p, 1, 28)
+        s(p, 8, 32)
         s(p, 5, 33)
-        p.fpass(6, 4)
+        p.fpass(6, 8)
         p.fconst(14, TOP)                          # (opt-md) the limiter's bounds
         p.fconst(15, -1.0)
 
         def hp():
-            p.ldi(7, XA0, 5)
+            p.ldi(12, XA0, 5)
             p.ldi(9, XC0, 5)
-            p.fop(7, 7, "+", 9)
+            p.fop(12, 12, "+", 9)
             p.ldi(9, X80, 5)
-            p.fop(7, 7, "+", 9)
+            p.fop(12, 12, "+", 9)                  # the lines' sum
             if rs:
                 p.sti(X60, 5, 6)
             else:
@@ -607,18 +623,16 @@ class _PI:
                 p.fop(9, 9, "+", 6)
                 _satr(p, 9, 14, 15)
                 p.sti(X40, 5, 9)
-            p.fpass(10, 4)
-            _satr(p, 10, 14, 15)
-            p.fop(4, 4, "-", 5)
-            p.fop(4, 4, "+", 7)
-            p.fop(11, 8, "*", 10)
-            p.fop(4, 4, "-", 11)
-            p.fpass(6, 10)
-            p.fpass(5, 7)
-            _satr(p, 5, 14, 15)
+            p.fop(6, 8, "MIN", 14)                 # y = sat(a)
+            p.fop(6, 6, "MAX", 15)
+            p.fop(8, 8, "-", 5)
+            p.par(("*", 13, 1, 6), ("+", 8, 8, 12))   # c y; a + the sum
+            p.fop(8, 8, "-", 13)
+            p.fop(5, 12, "MIN", 14)                # the sum through the limiter
+            p.fop(5, 5, "MAX", 15)
         _each(p, L, hp)
-        K.sat(p, 4)
-        ss(p, 32, 4)
+        K.sat(p, 8)
+        ss(p, 32, 8)
         ss(p, 33, 5)
 
         # the modes' coefficients, in the 56300's integer arithmetic (a radius or cosine
