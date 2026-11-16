@@ -188,6 +188,7 @@ TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platfo
          "test/test_waverider_mod.py", "test/test_waverider_dsp.py",
          "test/test_waverider_pages.py",                    # v0.45: test_ping_coldfire/_live dropped with PING
          "test/test_shft_live.py", "test/test_mnm.py",
+         "test/test_md_source_identity.py",                  # 2026-11-13: every MD machine as v0.52's source renders it
          "test/test_gran_live.py", "test/test_perc_live.py", "test/test_sampler.py",
          "test/test_sources.py", "test/test_md_ui.py", "test/test_patcher.py",
          "test/test_sampler_relatch.py", "test/test_pools.py",
