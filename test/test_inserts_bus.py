@@ -197,6 +197,34 @@ def test_the_guard_bound_covers_a_clearing_fdn8():
     assert D.FDN8_COST_CLEAR >= 1.2 * clearing
 
 
+def test_the_guard_bound_covers_a_steady_fdn8():
+    # 2026-11-14 (the staged tank): the dearer instance's steady block (1, its diffusers in DDR), as the clearing test
+    # measures, is FDN8_MEASURED's; the bound is 1.2 x the dearest steady block seen over every place of the ring
+    import dnfw.perc.dsl as DSL
+    progs = []
+    init = DSL.Prog.__init__
+
+    def hook(self, *a, **k):
+        init(self, *a, **k)
+        progs.append(self)
+    DSL.Prog.__init__ = hook
+    try:
+        noise = [[0.1 * ((t * 7 + j * 3) % 11 - 5) for j in range(D.BLOCK)] for t in range(D.TRACKS)]
+        costs = []
+        for rows in ({}, {(0, 0): rec(D.FDN8, 1, 64, 10, 90, 30, 64, 0, 127)}):
+            m = _CountMem(mem0())
+            for _ in range(41):
+                m.n = [0, 0, 0]
+                progs.clear()
+                call(m, table(rows), noise, noise, {r: 0 for r in range(16)})
+            costs.append(sum(x.steps for x in progs) + 4 * m.n[1] + 10 * m.n[2])
+    finally:
+        DSL.Prog.__init__ = init
+    steady = costs[1] - costs[0]
+    assert abs(steady - D.FDN8_MEASURED["steady"]) <= 0.02 * steady
+    assert D.COST[D.FDN8] >= 1.2 * D.FDN8_STEADY_MAX >= 1.2 * steady
+
+
 def test_the_fdn8_bound_is_the_clearing_one_only_while_it_clears():
     # 2026-11-12 (the unit's skips with 64,000 on every block): the bus pass charges a block the clearing bound
     # while the instance clears its ring (a new owner, then 32 blocks), the steady one after

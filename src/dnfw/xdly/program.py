@@ -50,6 +50,25 @@ assert STATE + 4 * len(_NAMES) <= STATE + STATE_BYTES
 DYN_WORDS = (C["sv0"] - STATE) // 4               # an instance's words: STATE .. sv0
 
 
+class _Abs:
+    """the words at their own addresses (the sample loop of the send and the instances until 2026-11-14)"""
+
+    @staticmethod
+    def ld(p: Prog, r: int, n: str) -> None:
+        p.ld(r, C[n])
+
+    @staticmethod
+    def st(p: Prog, n: str, r: int) -> None:
+        p.st(C[n], r)
+
+    @staticmethod
+    def out(p: Prog, k: int, r: int) -> None:
+        p.stpost(2 + k, r)
+
+
+ABS = _Abs()
+
+
 def state_bytes() -> bytes:
     """the L1 words at power-on: zeros (cur 0: the stock delay) but the lines' bases"""
     import struct
@@ -144,15 +163,16 @@ def start(p: Prog) -> None:
     p.st(C["db"], 0)
 
 
-def knee(p: Prog) -> None:
+def knee(p: Prog, a=None) -> None:
     """F0 = knee(F0) (ref.knee); clobbers R1-R6, R12"""
-    p.st(C["kv"], 0)
+    a = a or ABS
+    a.st(p, "kv", 0)
     p.fconst(1, 0.0)
     p.fop(1, 1, "-", 0)
     p.fop(5, 0, "MAX", 1)                        # a
 
     def over():
-        p.ld(1, C["kn"])
+        a.ld(p, 1, "kn")
         p.fop(0, 5, "-", 1)
         p.fconst(1, 2.0)
         p.fop(0, 0, "*", 1)
@@ -169,11 +189,11 @@ def knee(p: Prog) -> None:
         p.fop(0, 1, "-", 0)                      # tanh z
         p.fconst(1, 0.5)
         p.fop(0, 0, "*", 1)
-        p.ld(1, C["kn"])
+        a.ld(p, 1, "kn")
         p.fop(0, 0, "+", 1)
         p.fconst(1, 1.0)
         p.fop(0, 0, "MIN", 1)                    # a
-        p.ld(6, C["kv"])
+        a.ld(p, 6, "kv")
         p.fconst(1, 0.0)
 
         def neg():
@@ -181,17 +201,18 @@ def knee(p: Prog) -> None:
         p.if_(6, "LE", 1, neg)
 
     def under():
-        p.ld(0, C["kv"])
-    p.ld(6, C["kn"])
+        a.ld(p, 0, "kv")
+    a.ld(p, 6, "kn")
     p.if_(5, "GT", 6, over, under)
 
 
-def loop_in(p: Prog, f: str, y: str, xn: str = "x") -> None:
+def loop_in(p: Prog, f: str, y: str, xn: str = "x", a=None) -> None:
     """F0 = the line's input (ref.loop_in), F name f updated; the line's input x in C[xn] ('x', 'xb')"""
-    p.ld(5, C[f])
-    p.ld(6, C[y])
+    a = a or ABS
+    a.ld(p, 5, f)
+    a.ld(p, 6, y)
     p.fop(2, 6, "-", 5)
-    p.ld(3, C["c"])
+    a.ld(p, 3, "c")
     p.fop(2, 2, "*", 3)
     p.fop(5, 5, "+", 2)
     p.fconst(2, 0.0)
@@ -199,29 +220,31 @@ def loop_in(p: Prog, f: str, y: str, xn: str = "x") -> None:
     p.fop(2, 5, "MAX", 2)
     p.fconst(3, float(R.FLUSH))
     p.if_(2, "LT", 3, lambda: p.fconst(5, 0.0))
-    p.st(C[f], 5)
-    p.ld(3, C["g"])
+    a.st(p, f, 5)
+    a.ld(p, 3, "g")
     p.fop(2, 5, "*", 3)
-    p.ld(0, C[xn])
+    a.ld(p, 0, xn)
     p.fop(0, 0, "+", 2)
-    knee(p)
+    knee(p, a=a)
 
 
-def line_word(p: Prog, base: str, idx: int) -> None:
+def line_word(p: Prog, base: str, idx: int, a=None) -> None:
     """I4 = the word of the line whose base is the word BASE ('la' / 'lb'), index R{idx} (already
     masked); clobbers R13, R14, R12"""
+    a = a or ABS
     p.lsh(14, idx, 2)
-    p.ld(12, C[base])
+    a.ld(p, 12, base)
     p.iop(13, 12, "+", 14)
     p.seti(4, 13)
 
 
-def moved(p: Prog, d: str, y: str) -> None:
+def moved(p: Prog, d: str, y: str, a=None) -> None:
     """F0 = the time d moved by the other line's last output y (ref.moved)"""
-    p.ld(1, C[y])
-    p.ld(2, C["md"])
+    a = a or ABS
+    a.ld(p, 1, y)
+    a.ld(p, 2, "md")
     p.fop(0, 1, "*", 2)
-    p.ld(1, C[d])
+    a.ld(p, 1, d)
     p.fop(0, 0, "*", 1)
     p.fop(0, 1, "+", 0)
     p.fconst(1, D.D_LO)
@@ -230,20 +253,21 @@ def moved(p: Prog, d: str, y: str) -> None:
     p.fop(0, 0, "MIN", 1)
 
 
-def tap(p: Prog, base: str) -> None:
+def tap(p: Prog, base: str, a=None) -> None:
     """F0 = the line at BASE read F0 samples back (ref.tap); clobbers R1-R9, R12-R14"""
+    a = a or ABS
     p.trunc(5, 0)                                # i
-    p.ld(6, C["fill"])
+    a.ld(p, 6, "fill")
 
     def read():
         p.iconst(1, 0)
         p.float_(1, 5, 1)
         p.fop(7, 0, "-", 1)                      # fr
-        p.ld(8, C["wp"])
+        a.ld(p, 8, "wp")
         p.iop(9, 8, "-", 5)
         p.iconst(12, D.LINE_MASK)
         p.iop(9, 9, "AND", 12)
-        line_word(p, base, 9)
+        line_word(p, base, 9, a=a)
         p.ldi(2, 0, 4)                           # y0
         p.iconst(12, 1)
         p.iop(9, 12, "+", 5)                     # i + 1
@@ -255,7 +279,7 @@ def tap(p: Prog, base: str) -> None:
             p.iop(9, 9, "-", 12)
             p.iconst(12, D.LINE_MASK)
             p.iop(9, 9, "AND", 12)
-            line_word(p, base, 9)
+            line_word(p, base, 9, a=a)
             p.ldi(3, 0, 4)
         p.if_(9, "LT", 6, y1, kind="i")
         p.fop(3, 3, "-", 2)
@@ -265,52 +289,60 @@ def tap(p: Prog, base: str) -> None:
     p.if_(5, "GE", 6, lambda: p.fconst(0, 0.0), read, kind="i")
 
 
-def sample(p: Prog) -> None:
+def sample(p: Prog, a=None) -> None:
     """one sample; I0/I1 in, I2/I3 out; R11 the count (left alone)"""
+    a = a or ABS
     p.ldpost(0, 0)
     p.ldpost(1, 1)
     p.fop(2, 0, "-", 1)                          # l - r
     p.fop(0, 0, "+", 1)
     p.fconst(1, 0.5)
     p.fop(0, 0, "*", 1)
-    p.st(C["x"], 0)
-    p.st(C["xb"], 0)
-    p.ld(3, C["sn"])
+    a.st(p, "x", 0)
+    a.st(p, "xb", 0)
+    a.ld(p, 3, "sn")
     p.fconst(4, 0.0)
 
     def spread():
         p.fop(2, 2, "*", 1)                      # d = (l - r) / 2
         p.fop(2, 2, "*", 3)                      # x sn
         p.fop(5, 0, "+", 2)
-        p.st(C["x"], 5)
+        a.st(p, "x", 5)
         p.fop(5, 0, "-", 2)
-        p.st(C["xb"], 5)
+        a.st(p, "xb", 5)
     p.if_(3, "NE", 4, spread)
-    p.ld(4, C["kf"])
+    core(p, a)
+
+
+def core(p: Prog, a=None) -> None:
+    """one sample after its x / xb (ref.Ref.block's loop): the times, the lines' inputs, the writes, the counts, the
+    taps, the output"""
+    a = a or ABS
+    a.ld(p, 4, "kf")
     for t, d in (("ta", "da"), ("tb", "db")):
-        p.ld(2, C[t])
-        p.ld(3, C[d])
+        a.ld(p, 2, t)
+        a.ld(p, 3, d)
         p.fop(2, 2, "-", 3)
         p.fop(2, 2, "*", 4)
         p.fop(3, 3, "+", 2)
-        p.st(C[d], 3)
-    loop_in(p, "fa", "ya")
-    p.st(C["ia"], 0)
-    loop_in(p, "fb", "yb", "xb")
+        a.st(p, d, 3)
+    loop_in(p, "fa", "ya", a=a)
+    a.st(p, "ia", 0)
+    loop_in(p, "fb", "yb", "xb", a=a)
     p.fpass(7, 0)                                # ib
-    p.ld(8, C["wp"])
+    a.ld(p, 8, "wp")
     p.iconst(12, 1)
     p.iop(8, 12, "+", 8)
     p.iconst(12, D.LINE_MASK)
     p.iop(8, 8, "AND", 12)
-    p.st(C["wp"], 8)
-    p.ld(6, C["ia"])
-    line_word(p, "la", 8)
+    a.st(p, "wp", 8)
+    a.ld(p, 6, "ia")
+    line_word(p, "la", 8, a=a)
     p.sti(0, 4, 6)
-    line_word(p, "lb", 8)
+    line_word(p, "lb", 8, a=a)
     p.sti(0, 4, 7)
     # q: zeros written in a row on both
-    p.ld(0, C["q"])
+    a.ld(p, 0, "q")
 
     def zero_q():
         p.iconst(0, 0)
@@ -327,40 +359,40 @@ def sample(p: Prog) -> None:
     def b_test():
         p.if_(7, "NE", 1, zero_q, count_q)
     p.if_(6, "NE", 1, zero_q, b_test)
-    p.st(C["q"], 0)
-    p.ld(0, C["fill"])
+    a.st(p, "q", 0)
+    a.ld(p, 0, "fill")
     p.iconst(1, D.LINE)
 
     def inc_fill():
         p.iconst(12, 1)
         p.iop(0, 12, "+", 0)
     p.if_(0, "LT", 1, inc_fill, kind="i")
-    p.st(C["fill"], 0)
-    moved(p, "da", "yb")
-    tap(p, "la")
-    p.st(C["na"], 0)
-    moved(p, "db", "ya")
-    tap(p, "lb")
-    p.st(C["yb"], 0)
-    p.ld(1, C["na"])
-    p.st(C["ya"], 1)
-    p.ld(2, C["wr"])
+    a.st(p, "fill", 0)
+    moved(p, "da", "yb", a=a)
+    tap(p, "la", a=a)
+    a.st(p, "na", 0)
+    moved(p, "db", "ya", a=a)
+    tap(p, "lb", a=a)
+    a.st(p, "yb", 0)
+    a.ld(p, 1, "na")
+    a.st(p, "ya", 1)
+    a.ld(p, 2, "wr")
     p.fconst(3, 0.0)
 
     def width():
-        p.ld(4, C["wl"])
+        a.ld(p, 4, "wl")
         p.fop(5, 1, "*", 4)                      # na wl
         p.fop(6, 0, "*", 2)                      # nb wr
         p.fop(5, 5, "+", 6)
         p.fop(6, 0, "*", 4)                      # nb wl
         p.fop(7, 1, "*", 2)                      # na wr
         p.fop(6, 6, "+", 7)
-        p.stpost(2, 5)
-        p.stpost(3, 6)
+        a.out(p, 0, 5)
+        a.out(p, 1, 6)
 
     def hard():
-        p.stpost(2, 1)
-        p.stpost(3, 0)
+        a.out(p, 0, 1)
+        a.out(p, 1, 0)
     p.if_(2, "NE", 3, width, hard)
 
 
@@ -382,6 +414,95 @@ def silent_in(p: Prog) -> None:
     p.loop_r(11, D.BLOCK, one)
 
 
+# 2026-11-14 (insfx): the block's x / xb first (into L1 at XX, in pairs), then the sample loop with every word through
+# I3 (C[...] - REL_BASE, all in -32..31: a move rides on a compute) and the outputs through I1 / I2: the same operations
+# on the same values (test_xdly's A/B); False: the sample loop as it was
+STAGED = True
+REL_BASE = STATE + 4 * 32
+assert all(-32 <= (a - REL_BASE) // 4 < 32 for a in C.values())
+
+
+class _Rel:
+    """the words through I3 at REL_BASE; x / xb from XX through I0 (x then xb, in the order loop_in reads them); the
+    outputs through I1 (L) / I2 (R)"""
+
+    @staticmethod
+    def ld(p: Prog, r: int, n: str) -> None:
+        if n in ("x", "xb"):
+            p.ldpost(r, 0)
+        else:
+            p.ldi(r, (C[n] - REL_BASE) // 4, 3)
+
+    @staticmethod
+    def st(p: Prog, n: str, r: int) -> None:
+        p.sti((C[n] - REL_BASE) // 4, 3, r)
+
+    @staticmethod
+    def out(p: Prog, k: int, r: int) -> None:
+        p.stpost(1 + k, r)
+
+
+REL = _Rel()
+
+
+def _xx() -> int:
+    from ..fdn8 import stages as FS                # FDN8's block buffers: free while XDLY runs
+    return FS.bufs()[2]
+
+
+def _front(p: Prog) -> None:
+    """x and xb of the block's 32 samples into XX (x, xb a pair), as sample() works them out (the spread when sn is
+    not 0). I0 / I1 in, I3 XX"""
+    p.ld(3, C["sn"])
+    p.fconst(4, 0.0)
+    p.fconst(1, 0.5)
+
+    def plain():
+        p.ldpost(0, 0)
+        p.ldpost(1, 1)
+        p.fop(2, 0, "-", 1)                      # (l - r: left unused, as in sample())
+        p.fop(0, 0, "+", 1)
+        p.fconst(1, 0.5)
+        p.fop(0, 0, "*", 1)
+        p.stpost(3, 0)
+        p.stpost(3, 0)
+
+    def spread():
+        p.ldpost(0, 0)
+        p.ldpost(1, 1)
+        p.fop(2, 0, "-", 1)
+        p.fop(0, 0, "+", 1)
+        p.fconst(1, 0.5)
+        p.fop(0, 0, "*", 1)
+        p.fop(2, 2, "*", 1)
+        p.fop(2, 2, "*", 3)
+        p.fop(5, 0, "+", 2)
+        p.stpost(3, 5)
+        p.fop(5, 0, "-", 2)
+        p.stpost(3, 5)
+    p.if_(3, "NE", 4, lambda: p.loop_r(11, D.BLOCK, spread), lambda: p.loop_r(11, D.BLOCK, plain))
+
+
+def _staged_block(p: Prog) -> None:
+    io_ptrs(p)
+    p.geti(13, 2)                                # out L, out R (I2, I3 become XX's and the words')
+    p.geti(14, 3)
+    p.iconst(15, _xx())
+    p.seti(3, 15)
+    _front(p)
+    p.iconst(15, _xx())
+    p.seti(0, 15)
+    p.seti(1, 13)
+    p.seti(2, 14)
+    p.iconst(15, REL_BASE)
+    p.seti(3, 15)
+    p.loop_r(11, D.BLOCK, lambda: core(p, REL))
+    p.ldi(0, -2, 0)                              # x / xb's words as the sample loop leaves them
+    p.st(C["x"], 0)
+    p.ldi(0, -1, 0)
+    p.st(C["xb"], 0)
+
+
 def xdly_block(p: Prog) -> None:
     p.ld(0, C["q"])
     p.iconst(1, D.LINE)
@@ -391,6 +512,9 @@ def xdly_block(p: Prog) -> None:
     p.ld(0, C["any"])
 
     def go():
+        if STAGED:
+            _staged_block(p)
+            return
         io_ptrs(p)
         p.loop_r(11, D.BLOCK, lambda: sample(p))
     p.ifz(0, "NE", go, lambda: silence(p))

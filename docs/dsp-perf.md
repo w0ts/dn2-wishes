@@ -522,3 +522,40 @@ memory frees up (the PERC constant pool, a layout change):
 
 Checked before the two tables went in: r52-r5's generated assembly (every `.asm`, regenerated on gpufarm) addresses
 nothing inside `0x200A9200..0x200A9C88` or `0x200B5800..0x200B6000`; a2f.asm's state is all L1 (`0x2DD600..`).
+## 2026-11-14: the insert FX, bit-identical (session insfx, branch `claude/insfx-fast` on `r52-r5` 464361e2)
+
+Every change keeps the same operations on the same values (only their order across independent work, where they
+live, and which moves ride on computes changed); each keeps the old code behind a flag for the A/B tests
+(`fdn8.program.STAGED`, `xdly.program.STAGED`, `inserts.program.TAPE_STAGED`, `FZ_STAGED`). Cost = the shared scale
+(`scripts/dsp_cost.py`'s: instructions + 4 L2 + 10 DDR accesses, the model counted instruction-exact), steady blocks.
+
+| commit | what | before -> after |
+|---|---|---|
+| `5264c78f` | **FDN8's tank stage by stage over the block** (`dnfw.fdn8.stages`): the input filters and pre-delay writes; the pre-delay read with diffuser 0, then diffusers 1..3; each line over the block (its second tap is the word its first tap read a sample before: one DDR read a sample, not two); the lines' writes; the output. Each tap's 32 words walked by post-modify, a stage split where a tap crosses its ring's start; two samples a pass when nothing wraps. Why the order may change: two accesses meet on one ring word only when their offsets are within 31 of each other, and the layout keeps every such pair in sample order (the module's docstring). Buffers: FDN8's own L1 tail (1,280 B), XDLY's free L1 tail (L / R, 256 B). Code room: params' / lfo's per-line loops and io_ptrs rolled up (fdn8.asm 8,320 of 9,216 B) | bus instance 0 25,125 -> 16,422; instances 1..7 26,657 -> 17,941; send 25,691 -> 17,000; the bound's measure (FDN8_MEASURED, test_inserts_bus's record) 28,874 -> 19,614, dearest block over 4,300 blocks 19,770 |
+| `0eada8a2` | **TAPE in two stages**: x held and the Pade tanh (reciprocal inline, constants in registers) straight into the ring over the block; then the delay's read (44..212 samples back: never this block's writes), age, hiss, PGAIN, AUTO, the mix, state in registers, constants riding through I2 / I3 | per voice slot 5,723 -> 4,331 (track buffers in L1, the unit's map); 6,713 -> 5,961 (the tests' DDR buffers) |
+| `bcf1d6b6` | **XDLY**: x / xb a block ahead, every word through I3 | 9,594 -> 9,134 (taps reading) |
+| `2300cd9c` | **FUZZ / DIST (fz_loop), FOLD, HARM** with their state in registers, constants from a static table (`FZ_TAB` through I2), block values through I3 | per slot (L1 buffers): FUZZ 3,910 -> 2,804, DIST 3,986 -> 2,880, FOLD 4,104 -> 3,346, HARM 3,068 -> 2,376 |
+| `8f54f886` | **SUB, RING** likewise | SUB 2,925 -> 2,295, RING 2,696 -> 2,412 |
+| `31bb415c` | **GATER**'s block values and constants riding | 2,464 -> 2,148 |
+| `95000829` | **FDN8: two lines' writes a loop** (s / 4 and the diffusers' out read once for both: 3 moves a line-sample, not 4; lines 2j, 2j + 1 are always a + and a -) | inst 0 16,422 -> 16,038, inst 1..7 17,941 -> 17,557; fdn8.asm 8,296 B |
+
+**The guard's bounds** (`design.COST`, next commit): each x its unit's new / old cost on the runner-like harness (the
+tests', DDR track buffers, the dearest of five knob settings), so each keeps its margin: FUZZ 6,100 -> 4,800, TAPE 8,200
+-> 7,300, FOLD 6,700 -> 5,800, HARM 5,100 -> 4,300, SUB 3,900 -> 3,300, DIST 5,900 -> 4,600, GATER 2,900 -> 2,700,
+RING 3,400 -> 3,200, XDLY 20,000 -> 19,100; FDN8 by its own rule, 1.2 x its dearest steady block, 34,700 -> 23,400
+(FDN8_STEADY_MAX 19,490 over 4,300 blocks; `test_the_guard_bound_covers_a_steady_fdn8` re-measures FDN8_MEASURED's
+steady 19,334). MV_COST follows (2 x the largest pre bound: 16,400 -> 14,600). The clearing bound (66,000), CHOR,
+WIDE, JUNO unchanged.
+
+inserts.asm 8,572 -> 8,398 B of its 8,576 (the riding moves make the code smaller). CHOR, WIDE and JUNO (the post
+pass) were left as they are: an earlier session already holds their loops in registers (17 instructions a
+sample-voice for CHOR); what is left there needs multifunction instructions.
+
+Tests (all on gpufarm): `test_fdn8` (model = reference: FDN8, LONG, the second page), `test_fdn8_stages` (A/B with a
+random ring and every tap across the ring's start at 6 places), `test_xdly` + `test_xdly_stages`, `test_inserts`
+(model = reference), `test_inserts_held` (A/B of every held loop: buffers and every memory word), `test_inserts_bus`,
+`test_inserts_order`.
+
+Traps: the pre pass's walk counts in `C['cnt']` (not a free scratch word); `loop_r(..., one=11)` keeps R12 usable
+across a loop's passes (run mode poisons ONE otherwise); the L2 diffuser ring's mask is 0xfff (its low bits set),
+the ring's MASK4 0x7fffc: a wrap step is (mask | 3) + 1; the pass's static table (TABLE_WORDS, before TABLE) is full.

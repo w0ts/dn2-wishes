@@ -244,6 +244,14 @@ def sine(p):
 
 # -- the parameters (ref.Ref.params): F5 s, F6 d, F7 y; t0.. spills ------------------------
 
+def _walk(p: Prog, src: int, dst: int) -> None:
+    """I0 = SRC, I1 = DST (a loop over the eight lines reads at I0 and writes at I1, both walked up)"""
+    p.iconst(13, src)
+    p.seti(0, 13)
+    p.iconst(13, dst)
+    p.seti(1, 13)
+
+
 def params(p: Prog) -> None:
     def clamp(k):
         p.ld(0, C[f"last{k}"])
@@ -302,12 +310,15 @@ def params(p: Prog) -> None:
     p.ld(1, A["ktv"])
     p.fop(3, 3, "*", 1)
     p.st(C["t4"], 3)                             # ktr
-    for k in range(8):
+    _walk(p, A["ng0"], C["g0"])                   # 2026-11-14 (code room): the eight lines in a loop, I0 / I1 walked
+
+    def gain():
         p.ld(3, C["t4"])
-        p.ld(1, A[f"ng{k}"])
+        p.ldpost(1, 0)
         p.fop(0, 3, "*", 1)
         exp2(p)
-        p.st(C[f"g{k}"], 0)
+        p.stpost(1, 0)
+    p.loop(C["f6"], 8, gain)
     c0, c1, c2, c3 = D.DAMP_C
     p.fconst(1, c3)
     p.fop(2, 1, "*", 6)
@@ -349,9 +360,11 @@ def params(p: Prog) -> None:
     p.fconst(1, 1 / D.LREF)
     p.fop(3, 3, "*", 1)
     p.st(C["t7"], 3)                             # rl
-    for k in range(8):
+    _walk(p, A["sl0"], C["c0"])
+
+    def damp():
         p.ld(3, C["t7"])
-        p.ld(1, A[f"sl{k}"])
+        p.ldpost(1, 0)
         p.fop(3, 3, "*", 1)                      # sc
         p.ld(0, C["t6"])
         p.fop(0, 0, "*", 3)
@@ -372,7 +385,8 @@ def params(p: Prog) -> None:
         p.fop(0, 7, "+", 0)
         recip(p)
         p.fop(0, 6, "*", 0)
-        p.st(C[f"c{k}"], 0)
+        p.stpost(1, 0)
+    p.loop(C["f6"], 8, damp)
     p.ld(7, C["t0"])                             # y
     p.fconst(1, R.DEP_GROW)
     p.fop(0, 7, "*", 1)
@@ -427,15 +441,19 @@ def params(p: Prog) -> None:
 # -- per block -------------------------------------------------------------------------
 
 def lfo(p: Prog) -> None:
-    for k in range(8):
-        p.ld(0, C[f"ph{k}"])
-        p.iconst(12, D.LFO_INC[k])
-        p.iop(0, 12, "+", 0)
-        p.st(C[f"ph{k}"], 0)
+    """the eight LFOs' phases on (_lfo_phases), then per line (a loop, 2026-11-14: code room; I0 ph, I1 lc, I2 eta,
+    I3 rl, I4 ro, walked up) its read place ro and the fraction's allpass eta"""
+    _lfo_phases(p)
+    for i, a in enumerate((C["ph0"], A["lc0"], C["eta0"], A["rl0"], C["ro0"])):
+        p.iconst(13, a)
+        p.seti(i, 13)
+
+    def line():
+        p.ldpost(0, 0)
         sine(p)
         p.ld(1, C["dq"])
         p.fop(0, 1, "*", 0)
-        p.ld(1, A[f"lc{k}"])
+        p.ldpost(1, 1)
         p.fop(0, 0, "+", 1)
         p.trunc(5, 0)                            # D
         p.iconst(1, 0)
@@ -451,11 +469,12 @@ def lfo(p: Prog) -> None:
         p.fop(3, 0, "*", 3)
         p.fconst(1, 0.0)
         p.fop(3, 1, "-", 3)
-        p.st(C[f"eta{k}"], 3)
-        p.ld(12, A[f"rl{k}"])
+        p.stpost(2, 3)
+        p.ldpost(12, 3)
         p.iop(5, 12, "+", 5)
         p.lsh(5, 5, 2)
-        p.st(C[f"ro{k}"], 5)
+        p.stpost(4, 5)
+    p.loop(C["f6"], 8, line)
 
 
 def ring_at(p: Prog, off: int | None = None) -> None:
@@ -581,7 +600,12 @@ def sample(p: Prog) -> None:
 
 
 def io_ptrs(p: Prog) -> None:
-    """I0, I1 = in L, R; I2, I3 = out L, R (from the I/O descriptor the bus passed in R12)"""
+    """I0, I1 = in L, R; I2, I3 = out L, R (from the I/O descriptor the bus passed in R12). A subroutine (2026-11-14:
+    code room): clobbers R12 and I12 too"""
+    p.call("io", lambda: _io_ptrs(p))
+
+
+def _io_ptrs(p: Prog) -> None:
     p.ld(13, C["io"])
     p.seti(4, 13)
     p.ldi(14, 1, 4)
@@ -605,6 +629,14 @@ def io_ptrs(p: Prog) -> None:
 # QUIET_BLOCKS blocks in a row. NOT bit-exact to the ungated program once the tail is that small: declared
 # sound-neutral (a tail under -144 dB is cut; the LFOs' phases keep moving); False: the old program
 QUIET_GATE = True
+# 2026-11-14 (insfx): the tank stage by stage over the block (dnfw.fdn8.stages), the same values bit for bit as
+# sample() run 32 times; False: the sample loop (the tests' A/B reference)
+STAGED = True
+
+
+def tank(p: Prog) -> None:
+    from . import stages
+    stages.tank(p)
 QUIET_BLOCKS = 4224               # > the ring's length in blocks (RING_WORDS 2^17 / 32 = 4096, 3 s): a delay line holds nothing younger
 QUIET_SMALL = 0x33800000          # 2^-24
 
@@ -731,13 +763,17 @@ def _fdn8_block(p: Prog) -> None:
     p.ifz(3, "NE", lambda: params(p))
     lfo(p)
     extras(p)
-    io_ptrs(p)
+    if not STAGED:
+        io_ptrs(p)
+        diff_ring(p)
+        p.ld(8, C["p4"])
+        p.iconst(9, MASK4)
+        p.ld(10, C["ring"])
+        p.loop_r(11, D.BLOCK, lambda: sample(p))
+        p.st(C["p4"], 8)
+        return
     diff_ring(p)
-    p.ld(8, C["p4"])
-    p.iconst(9, MASK4)
-    p.ld(10, C["ring"])
-    p.loop_r(11, D.BLOCK, lambda: sample(p))
-    p.st(C["p4"], 8)
+    tank(p)
 
 
 def diff_ring(p: Prog) -> None:

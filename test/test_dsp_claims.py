@@ -64,8 +64,13 @@ CLAIMS = [
      ("dnfw.waverider.dsp.MNM_RENDER_DM", "dnfw.inserts.post", "dnfw.inserts.bus", "dnfw.sampler.program"), False),   # post.LINE, bus.UNIT_L1, the circular-buffer probe's PROBE_BUF (read only)
     ("TB303's constants table KTAB (opt-synths, 2026-11-12)", 0x2E6100, 0x2E6300,
      ("dnfw.engines.tb303.tb303_sched", "dnfw.waverider.dsp.TB303_KTAB_DM"), True),
-    ("FDN8 state", 0x2E6400, 0x2E6E00, ("dnfw.fdn8.program", "dnfw.waverider.dsp.FDN8_STATE_DM"), True),
-    ("XDLY state", 0x2E6E00, 0x2E7000, ("dnfw.xdly.program", "dnfw.waverider.dsp.XDLY_STATE_DM"), True),
+    ("FDN8 state", 0x2E6400, 0x2E68EC, ("dnfw.fdn8.program", "dnfw.waverider.dsp.FDN8_STATE_DM"), True),
+    # 2026-11-14 (insfx; main, the arbiter): TRANSIENT, FDN8's block only, written before read (dnfw.fdn8.stages: X S F;
+    # XDLY's x / xb, xdly.program._xx, borrow them while XDLY runs)
+    ("FDN8's block buffers (transient)", 0x2E68EC, 0x2E6DEC, ("dnfw.fdn8", "dnfw.xdly"), False),
+    ("FDN8 state (spare)", 0x2E6DEC, 0x2E6E00, ("dnfw.fdn8.program",), False),
+    ("XDLY state", 0x2E6E00, 0x2E6F00, ("dnfw.xdly.program", "dnfw.waverider.dsp.XDLY_STATE_DM"), True),
+    ("FDN8's L / R sums (transient, FDN8's block only; XDLY's unused tail)", 0x2E6F00, 0x2E7000, ("dnfw.fdn8",), False),
     ("Machinedrum / Monomachine voice slots", 0x2E7000, 0x2EB000, ("dnfw.waverider.dsp.MD_STATE_DM",), True),
     # L2 above the stock image
     # opt-stock: the stock delay's control words and the chorus's state, moved from DDR 0x80459130 (5,532 B, FX_L2;
@@ -168,6 +173,12 @@ def test_real_extents_fit_their_claims():
     assert dsp.SMP_DEC_DM + 16 * 48 <= 0x2E0080
     assert dsp.MD_STATE_DM + 16 * 1024 <= 0x2EB000
     assert dsp.MNM_RENDER_DM + dsp.MNM_RENDER_BYTES <= 0x2E6100   # (TB303's KTAB from 0x2E6100)
+    from dnfw.fdn8 import program as fp, stages      # 2026-11-14: FDN8's transient block buffers
+    from dnfw.xdly import program as xp
+    x, _s, _f = stages.bufs()
+    lo, hi = stages.lr_bufs()
+    assert fp.VT2 + 4 * fp.NV <= x == 0x2E68EC and x + stages.BUF_BYTES <= 0x2E6DEC
+    assert xp.STATE + 4 * len(xp._NAMES) <= 0x2E6F00 <= lo and hi + 4 * 32 <= 0x2E7000
     if hasattr(dsp, "FX_DM"):                      # opt-stock's block (dnfw.waverider.stockfx)
         assert 0x20098400 <= dsp.FX_DM and dsp.FX_DM + dsp.FX_BYTES <= 0x2009B400
 

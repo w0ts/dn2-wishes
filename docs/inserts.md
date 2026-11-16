@@ -528,7 +528,8 @@ the voices' LIMIT from the next frame on (and a sudden one could run past the fr
 - each insert, before it runs in a block, checks it is expected to end before **INS_DEADLINE = P - TAIL -
   P/8** cycles after the frame's start (the frame less the guard's margin and the stock's own tail), with
   its type's bound (`design.COST`: the runner's cost of one unit x 1.5, the DDR-heavy x 2; FDN8 charged by the block it will run since 2026-11-12, evening (`bus.fdn8_bound`): 60,000 while it clears its ring (a new owner, then 32 blocks; 1.2 x the clearing block's 49k on the shared scale), 34,200 after (1.2 x the steady 28k); 64,000 on every block in r11f, where the unit's skips rose 1,579 -> 40,041 a minute on pattern A09; 32,000 before that, under the clearing block),
-  XDLY 20,000, CHOR 13,000, TAPE 8,200 ..); one that would not end in time is left out of that block (the
+  XDLY 20,000, CHOR 13,000, TAPE 8,200 ..; 2026-11-14, the loops made cheaper bit for bit: FDN8 23,400 (1.2 x its dearest
+  steady block), XDLY 19,100, TAPE 7,300, FUZZ 4,800 ..., docs/dsp-perf.md); one that would not end in time is left out of that block (the
   sound passes dry; its state kept; `INS_SKIPS` counts). Until a frame is measured (and in the runner,
   whose clock stands still) every insert runs.
 - **2026-11-12, the hold (`guard.ins_gate`, `program.smooth`; main, after the unit's skips 1,579 -> 40,041 a minute on
