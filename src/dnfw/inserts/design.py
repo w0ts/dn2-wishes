@@ -19,8 +19,10 @@ TRACKS = 16
 # records keep it, so a type added later takes the next number). 2026-11-10: SUB DIST GATER RING
 # (ported from Optimist, ports3) take 9..12. The ColdFire's M.SEL is a 0..127 value, each type a band
 # of it: type = value x len(NAMES) / 128 (csrc/inserts/ins.c TYPES = len(NAMES))
-OFF, FUZZ, TAPE, FOLD, CHOR, WIDE, HARM, FDN8, XDLY, SUB, DIST, GATER, RING = range(13)
-NAMES = ("OFF", "FUZZ", "TAPE", "FOLD", "CHOR", "WIDE", "HARM", "FDN8", "XDLY", "SUB", "DIST", "GATER", "RING")
+# 2026-11-12: JUNO (Optimist's Juno-106 chorus, after the pan) takes 13.
+OFF, FUZZ, TAPE, FOLD, CHOR, WIDE, HARM, FDN8, XDLY, SUB, DIST, GATER, RING, JUNO = range(14)
+NAMES = ("OFF", "FUZZ", "TAPE", "FOLD", "CHOR", "WIDE", "HARM", "FDN8", "XDLY", "SUB", "DIST", "GATER", "RING",
+         "JUNO")
 PORTS = (SUB, DIST, GATER, RING)                 # Optimist's four: each a builder part (dnfw.builder.parts)
 PART = {SUB: "INS_SUB", DIST: "INS_DIST", GATER: "INS_GATER", RING: "INS_RING"}
 
@@ -33,7 +35,7 @@ def _ports_built() -> tuple[int, ...]:
 # the types the pass before the filter runs (mono, per voice): the tree's four, and those of Optimist's
 # four this build has (dnfw.builder: a type left out plays as OFF)
 BUILT = (FUZZ, TAPE, FOLD, HARM) + _ports_built()
-POST = (CHOR, WIDE)                              # the types the pass after the pan runs (stereo)
+POST = (CHOR, WIDE, JUNO)                        # the types the pass after the pan runs (stereo)
 BUS = (FDN8, XDLY)                               # the types the pass on the track's bus runs (dnfw.inserts.bus)
 TYPE_BITS = 4                                    # field 0 of a record: type | instance << TYPE_BITS
 SLOTS = 2                                        # insert slots a track; slot 1 runs before slot 2 within a stage
@@ -242,8 +244,9 @@ STEREO = 0x257EE8
 STEREO_STRIDE = 0x100
 STEREO_R = 0x80
 POST_RING = 1024                                  # samples a voice slot (21.3 ms), CHOR's or WIDE's
-POST_RING_DDR = 0x82510000                        # 32 x (4 KB + 8), after TAPE's rings (post.py: a mirror word, then the ring)
-POST_RING_STRIDE = 4 * POST_RING + 8              # perf 2026-11-11: CHOR's second tap of a read at the ring's first word
+POST_RING_DDR = 0x82510000                        # 32 x (4 KB + 16), after TAPE's rings (post.py: mirror words, then the ring)
+POST_RING_STRIDE = 4 * POST_RING + 16             # perf 2026-11-11: CHOR's second tap of a read at the ring's first word;
+POST_MIRROR = 3                                   # 2026-11-12: three mirror words of the ring's last (JUNO's 4-point reads)
 assert MV_RING_DDR >= POST_RING_DDR + RECORDS * POST_RING_STRIDE    # a moved TAPE's rings after them
 
 # WIDE: K1 WDTH, K2 TIME, K3 BASS, K4 TONE. Mid and side; the side times 2 WDTH, plus the mid delayed by
@@ -265,6 +268,45 @@ CH_FB_MAX = 0.7
 assert CH_DLY_MIN - CH_DEP_MAX >= BLOCK + 2       # every read is of an earlier block's samples
 assert CH_DLY_MIN + CH_DLY_SPAN + CH_DEP_MAX + BLOCK + 2 < POST_RING
 assert WD_D_MIN + WD_D_SPAN < POST_RING
+
+# JUNO (2026-11-12, the User): Optimist's JUNO CHORUS (firmware/src/fx/junocho/juno_cho.h, GPL-3.0-only: fm-106's
+# model of the Juno-106's MN3009 BBD chorus, after KR-106). K1 MODE (I / II / I+II, thirds of 0..127), MIX the
+# dry / Juno blend as Optimist's (MIX 127: dry x 0.863 + taps x 1.257). The mid into one line; two taps in antiphase
+# around 3.5 ms moved by a triangle LFO, each read by 4-point Hermite and low-passed (the BBD's 2nd-order Butterworth),
+# out L = l gd + tap L gw, R = r gd + tap R gw. Optimist runs at 44.1 kHz in Q15: its integers, as times and Hz, here
+# at 48 kHz (juno_consts). The triangle is taken at the block's ends and moved linearly across it (exact but in a
+# block holding a corner of it).
+JN_FS0 = 44100                                    # Optimist's rate
+JN_BASE0 = 154                                    # its taps' centre, d (16.16 >> 16); a read is 1 + d samples back
+JN_DEPTH0 = (94, 75, 10)                          # x the triangle (-32768 .. 32766) >> 16: +-47 / 37.5 / 5 samples
+JN_INC0 = (50098, 82068, 765109)                  # the triangle's phase step a sample, of 2^32 (0.514 / 0.843 / 7.86 Hz)
+JN_LP0 = (27066, 11534, 9527)                     # the low-pass's g, a1, a2 (Q15; 2nd-order Butterworth, ~9.7 kHz)
+JN_GD, JN_GW = 21209 / 32768, 30892 / 32768       # MIX 127's dry and taps' gains (the Juno's IC6 summer)
+JN_MODES = 3
+JN_MODE_K = JN_MODES * 127 / 128                  # MODE = trunc(K1 / 127 x this): 0..42 I, 43..85 II, 86..127 I+II
+
+
+def juno_consts(fs: float = FS) -> dict:
+    """Optimist's integers as times and Hz, at FS: base (the taps' centre: a read 1 + base samples back), dep[mode]
+    (samples a unit of the triangle, -32768 .. 32766), inc[mode] (the phase step a sample, of 2^32), g, a1, a2 (the
+    low-pass: g = tan(pi fc / fs), its fc and damping those Optimist's Q15 values hold at 44.1 kHz)"""
+    k = fs / JN_FS0
+    g0, a10 = JN_LP0[0] / 32768, JN_LP0[1] / 32768
+    wc = math.atan(g0) * JN_FS0                   # pi fc
+    damp = (1 / a10 - 1) / g0 - g0                # a1 = 1 / (1 + g (g + damp))
+    g = math.tan(wc / fs)
+    a1 = 1 / (1 + g * (g + damp))
+    if fs == JN_FS0:                              # (at Optimist's own rate: its very values)
+        g, a1, a2 = g0, a10, JN_LP0[2] / 32768
+    else:
+        a2 = g * a1
+    return {"base": (1 + JN_BASE0) * k - 1, "dep": tuple(d * k / 65536 for d in JN_DEPTH0),
+            "inc": tuple(round(i / k) for i in JN_INC0), "g": g, "a1": a1, "a2": a2}
+
+
+JN = juno_consts()
+assert JN["base"] - JN["dep"][0] * 32768 - 3 >= BLOCK    # every read is of an earlier block's samples
+assert JN["base"] + JN["dep"][0] * 32768 + 3 < POST_RING - BLOCK
 
 
 def pack(table: bytes | list[int], gen: int) -> list[int]:
@@ -324,4 +366,7 @@ COST = {FUZZ: 5_700, TAPE: 8_200, FOLD: 6_300, HARM: 4_700, CHOR: 13_000, WIDE: 
         FDN8: 32_000, XDLY: 20_000,
         # SUB DIST GATER RING (2026-11-10, ins47): not run on the runner yet, so the model's steps of one
         # unit (2,143 / 2,946 / 1,610 / 1,836) x 1.2 (the runner read up to 20 % over the model) x 1.5
-        SUB: 3_900, DIST: 5_400, GATER: 2_900, RING: 3_400}
+        SUB: 3_900, DIST: 5_400, GATER: 2_900, RING: 3_400,
+        # JUNO (2026-11-12): the runner's 3,530 a voice slot (16 slots 58,926 less 1 slot 5,931, / 15) x 2 (DDR-heavy:
+        # eight ring reads and a write a sample)
+        JUNO: 7_100}

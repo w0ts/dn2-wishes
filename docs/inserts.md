@@ -279,7 +279,7 @@ A slot whose track or M.SEL just changed also clears its 4 KB ring once (1,024 s
 2,097,152 B (25,541 free), DSP upload 1,047,016 of 1,048,575 B (1,559 free). inspost.asm: 2,942 B (the
 hook and the slots' lookups 1,238, WIDE 580, CHOR 1,124).
 
-## After the pan: CHOR and WIDE
+## After the pan: CHOR, WIDE and JUNO
 
 `dnfw.inserts.post` (`csrc/waverider/sharc/inspost.asm`, L2 `0x200b0000`, sw `0xbd8000`; its state in L2
 `0x200b1000`, its rings in DDR `0x82510000`, 16 x 4 KB, zeros at power-on).
@@ -328,6 +328,26 @@ block.
 
 A slot starts its post insert from zeros (state and ring) whenever its track or that track's M.SEL
 changes.
+
+**JUNO** (type 13, 2026-11-12, the User): Optimist's JUNO CHORUS (`firmware/src/fx/junocho/juno_cho.h`,
+GPL-3.0-only, the User's own; fm-106's model of the Juno-106's MN3009 BBD chorus, after KR-106). One knob,
+**MODE** (B): I / II / I+II, thirds of 0..127; **MIX** (H) as Optimist's: 0 the dry itself, 127 dry x 0.863 +
+taps x 1.257 (the Juno's IC6 summer). The mid into the ring; two taps in antiphase around 3.5 ms (155 samples
+at 44.1 kHz) moved by a triangle (MODE I 0.514 Hz +-47 samples, II 0.843 Hz +-37.5, I+II 7.86 Hz +-5, at
+44.1 kHz), each read by 4-point Hermite and low-passed (the BBD's 2nd-order Butterworth, ~9.7 kHz); out
+L = l x gd + tap L x gw, R = r x gd + tap R x gw. Optimist runs at 44.1 kHz in Q15: here its integers are
+kept as times and Hz at 48 kHz, in float32 (`design.juno_consts`). The triangle is taken at the block's
+two ends and the taps moved linearly between (exact but in the block that holds a corner). Its soft
+limiter is left out, as Optimist's own header says (below its knee the two are the same).
+
+- **Held to Optimist**: `postref.PostRef.juno` at 44.1 kHz with Optimist's own integers against
+  `juno_cho.h` rendered on the host (`scripts/gen_juno_golden.py` -> `test/data/juno_cho_golden.npz`):
+  -72 .. -78 dB error on a saw / sine mix, every mode, MIX 127 and 64 (the rest is its Q15 rounding).
+- **Memory**: no new DDR or L1. The ring is the slot's post ring (1,024 floats); the ring stride grew
+  from 4 KB + 8 to 4 KB + 16 for three mirror words before each ring (the Hermite's four reads at the
+  ring's start), 32 x 8 B more inside the gap before the moved TAPE rings. Its six state words and
+  scratch are CHOR's (`post.STATE`, `post.C`). Code: `inspost.asm` 4,496 -> 5,674 B (+1,178 B), 342 B
+  left of its 0x1800 L2 span (with the 128 B tail).
 
 ## On the track's bus: FDN8 and XDLY
 

@@ -474,7 +474,7 @@ def mnm_c_header() -> str:
         "enum { MW_KNOB, MW_EMPTY, MW_GRID, MW_SLIDE, MW_VU, MW_SWITCH, MW_SEMIS, MW_CENTS };",
         f"static const unsigned char mnm_widget[MNM_N][MNM_J] = {{{arr([[MNM_WIDGET.get(_ck(M, sh), 1 if sh == '---' or sh in MNM_UNPORTED else 0) for sh in mnm_pnames(M)] for M in _mnm.CF_ALL])}}};",
         # 2026-11-10: the value readout's units (dnfw.mnm.units): kind (bit 7: 0 reads OFF), curve, the curves
-        "enum { MU_RAW, MU_PCT, MU_SPCT, MU_HZ, MU_HZ100, MU_MS, MU_C10, MU_C, MU_DB, MU_OCT, MU_PATN, MU_RATE, MU_PCTC, MU_MODE, MU_MS10, MU_VOIC, MU_GLID, MU_ST10 };",
+        "enum { MU_RAW, MU_PCT, MU_SPCT, MU_HZ, MU_HZ100, MU_MS, MU_C10, MU_C, MU_DB, MU_OCT, MU_PATN, MU_RATE, MU_PCTC, MU_MODE, MU_MS10, MU_VOIC, MU_GLID, MU_ST10, MU_JUNO };",
         f"static const unsigned char mnm_unit[MNM_N][MNM_J] = {{{arr(_UNITS[0])}}};",
         f"static const unsigned char mnm_unit_curve[MNM_N][MNM_J] = {{{arr(_UNITS[1])}}};",
         f"static const short mnm_curves[{len(_UNITS[2])}][17] = {{{arr(_UNITS[2])}}};",
@@ -483,8 +483,8 @@ def mnm_c_header() -> str:
         f"static const unsigned char flt_unit[{len(_fk)}] = {{{', '.join(map(str, _fk))}}};",
         f"static const unsigned char flt_unit_curve[{len(_fk)}] = {{{', '.join(map(str, _fa))}}};",
         f"#define FLT_UNIT_IDS {{{', '.join(map(str, _mnm_units.FLT_IDS))}}}",
-        f"static const unsigned char ins_unit[13][8] = {{{arr(_ik)}}};",
-        f"static const unsigned char ins_unit_curve[13][8] = {{{arr(_ia)}}};",
+        f"static const unsigned char ins_unit[{len(_ik)}][8] = {{{arr(_ik)}}};",
+        f"static const unsigned char ins_unit_curve[{len(_ia)}][8] = {{{arr(_ia)}}};",
     ]
     if _st is not None:                          # only with DN2_STOCK_UNITS: without it the header is as before
         ids, kinds, at, stock, _c = _st

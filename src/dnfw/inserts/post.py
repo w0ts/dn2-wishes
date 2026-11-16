@@ -1,4 +1,4 @@
-"""The stereo inserts after the pan (CHOR, WIDE): their DSP code, in the DSL (dnfw.perc.dsl Prog),
+"""The stereo inserts after the pan (CHOR, WIDE, JUNO): their DSP code, in the DSL (dnfw.perc.dsl Prog),
 emitted as SHARC assembly (inspost.asm) and run in Python as its exact model, held bit for bit to
 dnfw.inserts.postref.
 
@@ -34,6 +34,7 @@ C = {n: SCRATCH + 4 * k for k, n in enumerate(_NAMES)}
 SCRATCH_BYTES = 4 * len(_NAMES)
 SENDS_SW = 0x1C1738              # the FX sends, the call's stock target
 MASK = D.POST_RING - 1
+assert D.POST_RING_STRIDE == (1 << 12) + (1 << 4)       # run(): i << 12 + i << 4
 
 
 # 2026-11-09: DRONE's BEAT (dnfw.mnm.drone): the side of its two ears, per voice slot, written by the
@@ -558,6 +559,234 @@ def chor(p: Prog) -> None:
         sample(k == 3)
 
 
+def _tri(p: Prog, d: int, ph: int) -> None:
+    """Fd = the triangle at the phase R{ph}, less its middle (postref.PostRef.tri); clobbers R12"""
+    p.lsh(d, ph, -16)
+    p.iconst(12, 32768)
+    p.iop(d, d, "-", 12)
+    p.float0(d, d)
+    p.fabs_(d, d)
+    p.fconst(12, 16384.0)
+    p.fop(d, d, "-", 12)
+
+
+def juno_params(p: Prog) -> None:
+    """MODE's phase step and depth, the block's two taps' starts and steps, MIX's gains (postref.PostRef.juno)"""
+    J = D.JN
+    p.ld(0, C["p1"])
+    p.fconst(1, D.JN_MODE_K)
+    p.fop(0, 0, "*", 1)
+    p.trunc(0, 0)                                # MODE 0, 1, 2
+    p.iconst(2, D.BLOCK * J["inc"][0])
+    p.fconst(3, 2 * J["dep"][0])
+    for md in (1, 2):
+        def pick(md=md):
+            p.iconst(2, D.BLOCK * J["inc"][md])
+            p.fconst(3, 2 * J["dep"][md])
+        p.iconst(1, md)
+        p.if_(0, "EQ", 1, pick, kind="i")
+    p.st(C["dep"], 3)
+    p.ld(8, C["s0"])
+    p.iop(9, 8, "+", 2)
+    p.st(C["s0"], 9)                             # the phase at the block's end
+    _tri(p, 4, 8)
+    p.ld(3, C["dep"])
+    p.fop(4, 4, "*", 3)
+    p.fconst(5, J["base"])
+    p.fop(6, 5, "+", 4)
+    p.st(C["d"], 6)                              # the left tap's start
+    p.fop(7, 5, "-", 4)
+    p.st(C["a0"], 7)                             # the right's
+    _tri(p, 4, 9)
+    p.ld(3, C["dep"])
+    p.fop(4, 4, "*", 3)
+    p.fop(4, 5, "+", 4)
+    p.fop(4, 4, "-", 6)
+    p.fconst(12, 1 / D.BLOCK)
+    p.fop(4, 4, "*", 12)
+    p.st(C["step"], 4)                           # the left's step
+    p.fconst(12, 0.0)
+    p.fop(4, 12, "-", 4)
+    p.st(C["k"], 4)                              # the right's
+    p.ld(0, C["p0"])
+    p.fconst(1, 1 - D.JN_GD)
+    p.fop(1, 0, "*", 1)
+    p.fconst(2, 1.0)
+    p.fop(2, 2, "-", 1)
+    p.st(C["gl"], 2)                             # the dry's gain
+    p.fconst(1, D.JN_GW)
+    p.fop(1, 0, "*", 1)
+    p.st(C["gr"], 1)                             # the taps'
+
+
+def juno_tap(p: Prog) -> None:
+    """one tap over the block (Hermite, postref.PostRef.herm), from C['d'] by C['step'] into the words at C['v'];
+    then the right tap's values move into those three. R0 d, R1 step, R2 0.5, R5 0xffc, R6 the ring's base,
+    R7 4, R15 4 x the write place; I0 the wet, I2 the ring's read"""
+    p.ld(0, C["d"])
+    p.ld(1, C["step"])
+    p.fconst(2, 0.5)
+    p.iconst(5, 4 * MASK)
+    p.ld(6, C["rb"])
+    p.iconst(7, 4)
+    p.ld(15, C["s1"])
+    p.iconst(12, 1)
+    p.iop(15, 15, "+", 12)
+    p.lsh(15, 15, 2)
+    p.ld(4, C["v"])
+    p.seti(0, 4)
+
+    def one():
+        p.fop(0, 0, "+", 1)                      # d
+        p.trunc(8, 0)                            # i
+        p.lsh(9, 8, 2)
+        p.iop(9, 15, "-", 9)
+        p.iop(13, 9, "AND", 5)
+        p.iop(13, 13, "+", 6)
+        p.seti(2, 13)                            # the ring at pos - i
+        p.ldi(14, 0, 2)                          # y0 .. y3 (the mirror words before the ring at its first)
+        p.ldi(3, -1, 2)
+        p.ldi(4, -2, 2)
+        p.ldi(10, -3, 2)
+        p.float0(9, 8)
+        p.fop(9, 0, "-", 9)                      # fr
+        p.iop(15, 15, "+", 7)                    # pos
+        p.fop(8, 3, "-", 4)                      # t1
+        p.fop(10, 10, "-", 14)
+        p.fop(10, 10, "*", 2)
+        p.fop(13, 8, "*", 2)
+        p.fop(13, 13, "+", 8)
+        p.fop(10, 10, "+", 13)                   # c3
+        p.fop(4, 4, "-", 14)
+        p.fop(4, 4, "*", 2)                      # c1
+        p.fop(14, 14, "-", 3)
+        p.fop(14, 14, "+", 4)
+        p.fop(14, 14, "-", 10)                   # c2
+        p.fop(13, 10, "*", 9)
+        p.fop(13, 13, "+", 14)
+        p.fop(13, 13, "*", 9)
+        p.fop(13, 13, "+", 4)
+        p.fop(13, 13, "*", 9)
+        p.fop(13, 13, "+", 3)
+        p.stpost(0, 13)
+
+    def two():
+        one()
+        one()
+    p.loop_r(11, D.BLOCK // 2, two)
+    for dst, src in (("d", "a0"), ("step", "k")):
+        p.ld(0, C[src])
+        p.st(C[dst], 0)
+    p.iconst(0, WR)
+    p.st(C["v"], 0)
+
+
+def juno_lp(p: Prog) -> None:
+    """the two low-passes over WL, WR in place (postref.PostRef.lp): R0 R1 the left's states, R2 R3 the right's,
+    R4 a1, R5 a2, R6 g"""
+    for k in range(4):
+        p.ld(k, C[f"s{2 + k}"])
+    p.fconst(4, D.JN["a1"])
+    p.fconst(5, D.JN["a2"])
+    p.fconst(6, D.JN["g"])
+    p.iconst(7, WL)
+    p.seti(0, 7)
+    p.iconst(7, WR)
+    p.seti(1, 7)
+
+    def side(i: int, s0: int, s1: int):
+        p.ldi(7, 0, i)
+        p.fop(8, 7, "-", s1)                     # v3
+        p.fop(9, s0, "*", 4)
+        p.fop(10, 8, "*", 5)
+        p.fop(9, 9, "+", 10)                     # v1
+        p.fop(10, 9, "*", 6)
+        p.fop(10, s1, "+", 10)                   # v2
+        p.fop(13, 9, "+", 9)
+        p.fop(s0, 13, "-", s0)
+        p.fop(13, 10, "+", 10)
+        p.fop(s1, 13, "-", s1)
+        p.stpost(i, 10)
+
+    def both():
+        side(0, 0, 1)
+        side(1, 2, 3)
+    p.loop_r(11, D.BLOCK, both)
+    for k in range(4):
+        p.st(C[f"s{2 + k}"], k)
+
+
+def juno(p: Prog) -> None:
+    """JUNO (postref.PostRef.juno); p0 MIX, p1 MODE; s0 the triangle's phase, s1 wp, s2 s3 the left low-pass,
+    s4 s5 the right's"""
+    juno_params(p)
+    p.ld(8, C["rb"])                             # the three words before the ring = its last three
+    p.iconst(12, 4 * (MASK - 2))
+    p.iop(9, 8, "+", 12)
+    p.seti(2, 9)
+    p.ldi(9, 0, 2)
+    p.ldi(10, 1, 2)
+    p.ldi(13, 2, 2)
+    p.seti(2, 8)
+    p.sti(-3, 2, 9)
+    p.sti(-2, 2, 10)
+    p.sti(-1, 2, 13)
+    p.iconst(0, WL)
+    p.st(C["v"], 0)
+    p.loop(C["bk"], 2, lambda: juno_tap(p))      # the left tap into WL, then the right into WR
+    juno_lp(p)
+    p.ld(4, C["lp"])
+    p.seti(0, 4)
+    p.ld(4, C["rp"])
+    p.seti(1, 4)
+    p.iconst(4, WL)
+    p.seti(2, 4)
+    p.iconst(4, WR)
+    p.seti(3, 4)
+    p.ld(9, C["s1"])                             # wp (a multiple of 32: only the block's last write can wrap)
+    if p.run:
+        assert p.r[9] % 32 == 0, "JUNO: the write place moves 32 a block from 0"
+    p.ld(13, C["rb"])
+    p.iconst(12, 1)
+    p.iop(8, 12, "+", 9)
+    p.iconst(12, MASK)
+    p.iop(8, 8, "AND", 12)
+    p.lsh(8, 8, 2)
+    p.iop(8, 13, "+", 8)
+    p.seti(4, 8)                                 # the first word
+    p.iconst(12, D.BLOCK)
+    p.iop(10, 12, "+", 9)
+    p.iconst(12, MASK)
+    p.iop(10, 10, "AND", 12)
+    p.st(C["s1"], 10)                            # wp + 32
+    p.lsh(10, 10, 2)
+    p.iop(10, 13, "+", 10)                       # the last word's
+    p.ld(0, C["gl"])
+    p.ld(1, C["gr"])
+    p.fconst(2, 0.5)
+
+    def sample(last: bool = False):
+        p.ldi(8, 0, 0)                           # l
+        p.ldi(9, 0, 1)                           # r
+        p.fop(13, 8, "+", 9)
+        p.fop(13, 13, "*", 2)
+        if last:
+            p.seti(4, 10)
+        p.stpost(4, 13)                          # the ring
+        p.fop(13, 8, "*", 0)
+        p.ldpost(14, 2)
+        p.fop(14, 14, "*", 1)
+        p.fop(13, 13, "+", 14)
+        p.stpost(0, 13)
+        p.fop(13, 9, "*", 0)
+        p.ldpost(14, 3)
+        p.fop(14, 14, "*", 1)
+        p.fop(13, 13, "+", 14)
+        p.stpost(1, 13)
+    p.loop_r(11, D.BLOCK - 1, sample)
+    sample(True)
+
+
 def slot(p: Prog) -> None:
     """voice slot C['t']: the track it plays (design.ROUTE), its M.SEL, then CHOR or WIDE"""
     p.ld(0, C["t"])
@@ -588,10 +817,10 @@ def run(p: Prog) -> None:
     p.iconst(12, STATE)
     p.iop(2, 12, "+", 1)
     p.st(C["sa"], 2)
-    p.lsh(8, 0, 12)                              # RING_STRIDE (4 KB + 8) a voice slot and insert slot
-    p.lsh(9, 0, 3)
+    p.lsh(8, 0, 12)                              # RING_STRIDE (4 KB + 16) a voice slot and insert slot
+    p.lsh(9, 0, 4)
     p.iop(8, 8, "+", 9)
-    p.iconst(12, D.POST_RING_DDR + 4)            # the word before the ring is CHOR's mirror of its last
+    p.iconst(12, D.POST_RING_DDR + 4 * D.POST_MIRROR)   # the words before the ring mirror its last (CHOR: one, JUNO: three)
     p.iop(1, 12, "+", 8)
     p.st(C["rb"], 1)
     p.ld(0, C["t"])
@@ -639,8 +868,13 @@ def run(p: Prog) -> None:
     PR.values(p, C)
     p.ld(5, C["sel"])
     p.iconst(6, D.WIDE)
-    p.if_(5, "EQ", 6, lambda: G.ins_admit(p, D.COST[D.WIDE], lambda: wide(p)),
-          lambda: G.ins_admit(p, D.COST[D.CHOR], lambda: chor(p)), kind="i")
+
+    def not_wide():
+        p.ld(5, C["sel"])
+        p.iconst(6, D.JUNO)
+        p.if_(5, "EQ", 6, lambda: G.ins_admit(p, D.COST[D.JUNO], lambda: juno(p)),
+              lambda: G.ins_admit(p, D.COST[D.CHOR], lambda: chor(p)), kind="i")
+    p.if_(5, "EQ", 6, lambda: G.ins_admit(p, D.COST[D.WIDE], lambda: wide(p)), not_wide, kind="i")
     p.ld(2, C["sa"])
     p.seti(4, 2)
     for k in range(6):

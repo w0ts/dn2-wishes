@@ -13,10 +13,10 @@ read it, at wr_inpost's entry, as the unit has it, before the pass runs.
 
 1. Every insert OFF: every slot's block at the sends' entry is the block at wr_inpost's entry, and every
    register the engine passed (R0..R15, I0..I4, I12) is back as it came.
-2. WIDE and CHOR on tracks 1, 2, 5, 16 (and a pre insert on track 4), the slot map rotating them over six
+2. WIDE, CHOR and JUNO on tracks 1, 2, 5, 16 (and a pre insert on track 4), the slot map rotating them over six
    voice slots (track 2 on two at once), knobs moved, a track switched from WIDE to CHOR: each block every
    slot as dnfw.inserts.postref's, bit for bit; the slots whose track has no post insert untouched.
-3. The pass alone, per voice: OFF, WIDE, CHOR with one and four voices, on 1 and 16 slots.
+3. The pass alone, per voice: OFF, WIDE, CHOR with one and four voices, JUNO, on 1 and 16 slots.
 """
 
 from __future__ import annotations
@@ -132,6 +132,11 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
             rows[8:16] = bytes([D.CHOR, 127, 30, 127, 20, 40, 0, 127])
         if b >= 28:
             rows[0:8] = bytes([D.CHOR, 127, 60, 60, 60, 127, 64, 90])
+        if b >= 20:                                  # 2026-11-12: JUNO, MODE I+II, then II
+            rows[120:128] = bytes([D.JUNO, 127, 110, 0, 0, 0, 0, 0])
+        if b >= 34:
+            rows[120:128] = bytes([D.JUNO, 80, 60, 0, 0, 0, 0, 0])
+            rows[32:40] = bytes([D.JUNO, 127, 0, 0, 0, 0, 0, 0])
         return bytes(rows)
     caps, info = blocks(par_of, 40, True)
     ref = R.PostRef()
@@ -151,8 +156,9 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
         regs_back &= c["regs_out"] == c["regs_in"]
         changed += sum(1 for s_ in range(16) for j in range(32) if c["out"][0][s_][j] != c["in"][0][s_][j])
         maps.add(tuple(c["route"][:6]))
-    checks["WIDE, CHOR: every slot after the pass as dnfw.inserts.postref's (40 blocks; tracks 1 2 5 16 "
-           "rotating over six slots, track 2 on two, knobs moved, track 1 WIDE -> CHOR)"] = exact
+    checks["WIDE, CHOR, JUNO: every slot after the pass as dnfw.inserts.postref's (40 blocks; tracks 1 2 5 16 "
+           "rotating over six slots, track 2 on two, knobs moved, track 1 WIDE -> CHOR, track 16 WIDE -> JUNO "
+           "I+II -> II, track 5 CHOR -> JUNO I)"] = exact
     checks["WIDE, CHOR: the slots whose track has no post insert untouched"] = bare_same
     checks["WIDE, CHOR: every register the engine passed back at the sends' entry"] = regs_back
     checks["WIDE, CHOR: they change the sound (not a pass-through)"] = changed > 500
@@ -170,7 +176,10 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
                             ("CHOR 1 voice, on 1 slot", [D.CHOR, 100, 100, 60, 60, 0, 60, 60], 1),
                             ("CHOR 1 voice, on 16 slots", [D.CHOR, 100, 100, 60, 60, 0, 60, 60], 16),
                             ("CHOR 4 voices, on 1 slot", [D.CHOR, 100, 100, 60, 60, 127, 60, 60], 1),
-                            ("CHOR 4 voices, on 16 slots", [D.CHOR, 100, 100, 60, 60, 127, 60, 60], 16)):
+                            ("CHOR 4 voices, on 16 slots", [D.CHOR, 100, 100, 60, 60, 127, 60, 60], 16),
+                            ("JUNO I, on 1 slot", [D.JUNO, 127, 0, 0, 0, 0, 0, 0], 1),
+                            ("JUNO I+II, on 1 slot", [D.JUNO, 127, 127, 0, 0, 0, 0, 0], 1),
+                            ("JUNO I, on 16 slots", [D.JUNO, 127, 0, 0, 0, 0, 0, 0], 16)):
         rows = bytearray(128)
         for t in range(n_on):
             rows[8 * t:8 * t + 8] = bytes(row)

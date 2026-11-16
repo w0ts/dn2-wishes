@@ -136,3 +136,69 @@ def test_two_slots_wide_into_chor():
         lo, ro, _ = call(m, bytes(p1), left, right, route, par2=bytes(p2))
         assert lo == [[fbits(x) for x in row] for row in wl], f"block {b} left"
         assert ro == [[fbits(x) for x in row] for row in wr], f"block {b} right"
+
+
+def test_juno_model_is_the_reference_modes_and_slots():
+    """JUNO (2026-11-12) on tracks 1 and 3, MODE I+II -> I -> II, MIX moved, track 3 CHOR -> JUNO, slot 2 behind a
+    WIDE: every block as the reference, bit for bit"""
+    rnd = random.Random(13)
+    m, ref = Mem(), R.PostRef()
+    route = [0, 2, 0, 4] + [0xFFFF] * 12
+    for b in range(70):
+        p1, p2 = bytearray(128), bytearray(128)
+        p1[0:8] = bytes([D.JUNO, 127, 110 if b < 25 else 0 if b < 50 else 64, 0, 0, 0, 0, 0])
+        p1[16:24] = bytes([D.CHOR, 90, 80, 50, 60, 127, 100, 60] if b < 30 else [D.JUNO, 40, 64, 0, 0, 0, 0, 0])
+        p1[32:40] = bytes([D.WIDE, 127, 100, 60, 40, 80, 0, 0])
+        p2[32:40] = bytes([D.JUNO, 127, 20, 0, 0, 0, 0, 0])
+        left = [[rnd.uniform(-0.5, 0.5) for _ in range(32)] for _ in range(16)]
+        right = [[x * 0.4 + rnd.uniform(-0.1, 0.1) for x in row] for row in left]
+        wl = [[np.float32(x) for x in row] for row in left]
+        wr = [[np.float32(x) for x in row] for row in right]
+        ref.block(expand(bytes(p1), bytes(p2)), wl, wr, route)
+        lo, ro, _ = call(m, bytes(p1), left, right, route, par2=bytes(p2))
+        assert lo == [[fbits(x) for x in row] for row in wl], f"block {b} left"
+        assert ro == [[fbits(x) for x in row] for row in wr], f"block {b} right"
+
+
+def test_juno_reference_is_optimists_juno_chorus():
+    """the reference at Optimist's own rate (design.juno_consts(44100): its very integers) against its juno_cho.h
+    rendered on the host (scripts/gen_juno_golden.py): within -65 dB of the output, every case (the rest is its
+    Q15 arithmetic and the triangle moved linearly across a block); L and R apart (the taps in antiphase)"""
+    g, gold = _golden()
+    x = (g.golden_input() / 32768.0).astype(np.float32)
+    c44 = D.juno_consts(44100)
+    for mode, mix in g.CASES:
+        want = gold[f"m{mode}_x{mix}"] / 32768.0
+        ref = R.PostRef()
+        L, Rr = x.copy(), x.copy()
+        p = [np.float32(mix) * np.float32(1 / 127), np.float32(43 * mode + 20) * np.float32(1 / 127)] + [np.float32(0)] * 5
+        for b in range(len(x) // 32):
+            ref.juno(0, p, L[32 * b:32 * b + 32], Rr[32 * b:32 * b + 32], c44)
+        err = np.stack([L, Rr], 1) - want
+        db = 20 * np.log10(err.std() / want.std())
+        assert db < -65, (mode, mix, db)
+        assert (want[:, 0] - want[:, 1]).std() > 0.01, (mode, mix)
+
+
+def test_juno_at_48k_keeps_optimists_times_and_rates():
+    """the 48 kHz constants hold Optimist's times and rates: the taps' centre 155 / 44.1 kHz (3.51 ms), the depths
+    47 / 37.5 / 5 samples at 44.1 kHz, the triangle 0.514 / 0.843 / 7.86 Hz, the low-pass's corner"""
+    import math
+    c = D.JN
+    assert abs((1 + c["base"]) / 48000 - 155 / 44100) < 1e-9
+    for k, dep in enumerate((47.0, 37.5, 5.0)):
+        assert abs(c["dep"][k] * 32768 / 48000 - dep / 44100) < 1e-9
+        assert abs(c["inc"][k] * 48000 / 2 ** 32 - D.JN_INC0[k] * 44100 / 2 ** 32) < 1e-4
+    fc = lambda g, fs: math.atan(g) * fs / math.pi                                   # noqa: E731
+    assert abs(fc(c["g"], 48000) - fc(D.JN_LP0[0] / 32768, 44100)) < 1e-6
+    assert abs(c["a2"] - c["g"] * c["a1"]) < 1e-12
+
+
+def _golden():
+    import importlib.util
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parent.parent
+    spec = importlib.util.spec_from_file_location("gen_juno_golden", root / "scripts" / "gen_juno_golden.py")
+    g = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(g)
+    return g, np.load(root / "test" / "data" / "juno_cho_golden.npz")

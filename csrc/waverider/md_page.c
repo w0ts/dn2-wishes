@@ -283,6 +283,7 @@ static int ucat(char *b, int n, int v)                  /* v >= 0, up to 3 digit
 static const char *const gt_patn[16] = {"16TH", "8TH", "4TH", "HALF", "OFF8", "OF16", "DOT8", "DOT4",
                                         "TRN1", "TRN2", "TRN3", "TRN4", "GALP", "RGAL", "CLAV", "TRSL"};
 static const char *const mode5[5] = {"LP12", "LP24", "BP", "HP", "NTCH"};
+static const char *const juno3[3] = {"I", "II", "I+II"};
 static const char *const gt_rate[8] = {"1/2", "1/4", "1/8", "1/8T", "1/16", "16T", "1/32", "1/64"};
 
 /* No jump table (2026-11-11, MONOMACHINE): GCC turned the kind tests below into one, a table of offsets inside the
@@ -306,6 +307,8 @@ static const char *unit_text_of(int kind, int curve, int k)
         return gt_rate[(k * 8) >> 7];
     if (kind == MU_MODE)
         return mode5[(k * 5) >> 7];
+    if (kind == MU_JUNO)                            /* JUNO's MODE (dnfw.inserts.design.JN_MODE_K) */
+        return juno3[(k * 3) >> 7];
     if (kind == MU_VOIC) {                          /* CHOR's voices: 1 + trunc(3.99 p) */
         int vv = 1 + (k * 399 / 127) / 100;
         ub[0] = 'V'; ub[1] = (char)('0' + (vv > 4 ? 4 : vv)); ub[2] = 0;
@@ -451,10 +454,10 @@ const char *mu_flt(int w, int k)
     return unit_text_of(flt_unit[w], flt_unit_curve[w], k > 127 ? 127 : k < 0 ? 0 : k);
 }
 
-/* the inserts' knobs (csrc/inserts/ins.c, SYN held): type 0..12, knob 0..5, 7 the MIX; 0 a knob with no unit yet */
+/* the inserts' knobs (csrc/inserts/ins.c, SYN held): type 0..13, knob 0..5, 7 the MIX; 0 a knob with no unit yet */
 const char *mu_ins(int type, int knob, int k)
 {
-    if (type < 0 || type > 12 || knob < 0 || knob > 7)
+    if (type < 0 || type >= (int)(sizeof ins_unit / sizeof ins_unit[0]) || knob < 0 || knob > 7)
         return 0;
     return unit_text_of(ins_unit[type][knob], ins_unit_curve[type][knob], k > 127 ? 127 : k);
 }

@@ -120,7 +120,7 @@ def test_instances_full_after_the_last(exe):
 
 
 def test_unknown_type_is_off(exe):
-    recs = [[13, 100, 1, 2, 3, 4, 5, 6]] + [[0] * 8 for _ in range(D.RECORDS - 1)]
+    recs = [[len(D.NAMES), 100, 1, 2, 3, 4, 5, 6]] + [[0] * 8 for _ in range(D.RECORDS - 1)]   # (13 until JUNO)
     w, back = run(exe, recs)
     assert D.unpack(w[2:])[0] == 0 and back[0][0] == 0
 

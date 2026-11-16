@@ -18,7 +18,7 @@ import math
 import pathlib
 
 KINDS = ("raw", "pct", "spct", "hz", "hz100", "ms", "c10", "c", "db", "oct", "patn", "rate", "pctc", "mode", "ms10", "voic",
-         "glid", "st10")
+         "glid", "st10", "juno")
 # 2026-11-11: GLID up to 5 minutes (dnfw.mnm.a2glide.ms_of): too steep for a 17-point curve, so read exactly a knob
 # from its own table (`glid_table`), one a record span: ANALOG 2's LEV2 0..127, DRONE's AMD 0..120
 GLID_TOPS = (127, 120)
@@ -85,7 +85,8 @@ _XT = lambda k: 10000.0 ** (k / 127.0)     # noqa: E731
 # knob 0..5, 7 the MIX; the types of the ports session's (SUB DIST GATER RING), after Optimist's: the curves
 # are design.py's (SUB: LEV BAND TONE OCT DRY; DIST: DRIV TONE BIAS LOW LEV; GATER: DPTH PATN RATE SHPE SWNG;
 # RING: FREQ SHPE AM LEV)
-INS_TYPES = ("OFF", "FUZZ", "TAPE", "FOLD", "CHOR", "WIDE", "HARM", "FDN8", "XDLY", "SUB", "DIST", "GATER", "RING")
+INS_TYPES = ("OFF", "FUZZ", "TAPE", "FOLD", "CHOR", "WIDE", "HARM", "FDN8", "XDLY", "SUB", "DIST", "GATER", "RING",
+             "JUNO")
 INS_UNITS: dict[str, dict[int, tuple]] = {
     # the older inserts (dnfw.inserts.design's constants): FUZZ DRIV TONE BIAS PRE GATE LEV; TAPE DRIV WOW WRAT FLUT AGE
     # HISS; FOLD AMNT SYMM SHPE TONE LEV; CHOR DPTH RATE DLY VOIC WDTH FDBK; WIDE WDTH TIME BASS TONE; HARM AMNT FREQ
@@ -119,6 +120,7 @@ INS_UNITS: dict[str, dict[int, tuple]] = {
               3: ("pct", None, False), 4: ("pctc", lambda k: k * 50.0 / 127.0, False)},
     "RING": {0: ("hz", lambda k: 26.0 * 100.0 ** (k / 127.0), False), 1: ("pct", None, False),
              2: ("pct", None, False), 3: ("pct", None, False)},
+    "JUNO": {0: ("juno", None, False)},          # MODE I / II / I+II (design.JN_MODE_K)
 }
 
 

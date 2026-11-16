@@ -9,7 +9,7 @@
  * smp_ui_pop hands every item to ins_pop first) and it draws over the screen with stock's own widgets
  * (page.c wr_screen; csrc/waverider/widgets.h), keeping stock's left panel:
  *
- *     A M.SEL (OFF CHOR DIST FDN8 FOLD FUZZ GATR HARM RING SUB TAPE WIDE XDLY: A-Z, each a band of 0..127)   B..G the
+ *     A M.SEL (OFF CHOR DIST FDN8 FOLD FUZZ GATR HARM JUNO RING SUB TAPE WIDE XDLY: A-Z, each a band of 0..127)   B..G the
  *     insert's knobs   H MIX (dry/wet)
  *
  * Each slot keeps every insert's knobs (switching M.SEL and back keeps them). FDN8 and XDLY run on the
@@ -46,8 +46,9 @@ typedef signed char s8;
  * std::string at +0x48: "FX" on entering the FX page, "Delay (1/3)" .. on the SEND pages) */
 #define FX_PAGE_VTABLE 0x401E1448u
 #define TITLE_VTABLE   0x401E1D28u
-#define TYPES     13                            /* OFF and the twelve (dnfw.inserts.design: a type keeps its
-                                                 * number for good; 2026-11-10 SUB DIST GATER RING 9..12, Optimist's) */
+#define TYPES     14                            /* OFF and the thirteen (dnfw.inserts.design: a type keeps its
+                                                 * number for good; 2026-11-10 SUB DIST GATER RING 9..12, Optimist's;
+                                                 * 2026-11-12 JUNO 13, Optimist's Juno-106 chorus) */
 #define SLOTS     2
 #define SUB_DRY   0                             /* SUB's start for DRY (K5), a knob no more (2026-11-11, the User: MIX is the dry / wet): a NEW
                                                  * SUB is the sub alone. The value is still saved, loaded and sent; a project that has one plays as
@@ -61,12 +62,12 @@ typedef signed char s8;
 /* 2026-11-10 (the User): M.SEL lists the types A-Z, OFF first. Only the DISPLAY order is sorted: a type's
  * number (ins_sel, the saved record's first byte, the DSP's) never changes. ORDER[position] = type,
  * POS[type] = position; the knob's band, the popup and a loaded project's band all go through them. */
-static const u8 ORDER[TYPES] = {0, 4, 10, 7, 3, 1, 11, 6, 12, 9, 2, 5, 8};   /* OFF CHOR DIST FDN8 FOLD FUZZ GATR HARM RING SUB TAPE WIDE XDLY */
-static const u8 POS[TYPES] = {0, 5, 10, 4, 1, 11, 7, 3, 12, 9, 2, 6, 8};
-static const u8 BUILT[TYPES] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};   /* what this build runs */
+static const u8 ORDER[TYPES] = {0, 4, 10, 7, 3, 1, 11, 6, 13, 12, 9, 2, 5, 8};   /* OFF CHOR DIST FDN8 FOLD FUZZ GATR HARM JUNO RING SUB TAPE WIDE XDLY */
+static const u8 POS[TYPES] = {0, 5, 11, 4, 1, 12, 7, 3, 13, 10, 2, 6, 9, 8};
+static const u8 BUILT[TYPES] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};   /* what this build runs */
 
 static const char *const NAME[TYPES] = {"OFF", "FUZZ", "TAPE", "FOLD", "CHOR", "WIDE", "HARM", "FDN8", "XDLY",
-                                        "SUB", "DIST", "GATR", "RING"};
+                                        "SUB", "DIST", "GATR", "RING", "JUNO"};
 static const char *const LABEL[TYPES][6] = {
     {"", "", "", "", "", ""},
     {"DRIV", "TONE", "BIAS", "PRE", "GATE", "PGAIN"},
@@ -81,6 +82,7 @@ static const char *const LABEL[TYPES][6] = {
     {"DRIV", "TONE", "BIAS", "LOW", "PGAIN", ""},       /* DIST */
     {"DPTH", "PATN", "RATE", "SHPE", "SWNG", ""},     /* GATER */
     {"FREQ", "SHPE", "AM", "", "", ""},              /* RING (LEV, K4, off the page 2026-11-11) */
+    {"MODE", "", "", "", "", ""},                    /* JUNO: I / II / I+II (thirds of 0..127); MIX as Optimist's */
 };
 /* the knob PLACES of a type start at its stored field DOFF (the DSP reads the fields by position, so a hidden first field
  * is skipped on the page, never moved): SUB 1 (LEV hidden), the rest 0. LABEL[y][k] is place k, stored field k + DOFF(y). */
@@ -90,6 +92,7 @@ static const u8 DEFAULT[TYPES][6] = {
     {50, 50, 40, 64, 100, 0}, {90, 20, 40, 80, 0, 0}, {50, 70, 64, 80, 100, 0},
     {0, 60, 30, 64, 0, 127}, {60, 70, 60, 0, 98, 0},
     {100, 85, 59, 0, SUB_DRY, 0}, {64, 90, 20, 64, 64, 0}, {127, 64, 64, 20, 0, 0}, {64, 0, 0, 100, 0, 0},
+    {0, 0, 0, 0, 0, 0},
 };
 
 u8 ins_sel[16][SLOTS] __attribute__((section(".data")));    /* the type (from ins_selv's band) */
@@ -248,8 +251,8 @@ static void turn(int knob, int delta)
 {
     int t = UI_TRACK & 15, j = (ins_up - 1) & 1;
     if (knob == 1) {
-        /* as a stock multi-choice: turned as a 0..127 knob, each type a band of it (about 10 of it
-         * for thirteen types, in ORDER: OFF 0..9, CHOR 10..19 .. XDLY 118..127), so a type takes a band
+        /* as a stock multi-choice: turned as a 0..127 knob, each type a band of it (about 9 of it
+         * for fourteen types, in ORDER: OFF 0..9, CHOR 10..18 .. XDLY 119..127), so a type takes a band
          * of a turn of the range, not one step */
         int was = ins_sel[t][j];
         ins_selv[t][j] = (u8)clamp(ins_selv[t][j] + delta, 0, 127);
