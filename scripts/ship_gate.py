@@ -182,6 +182,7 @@ TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platfo
          "test/test_gate_cache_foreign.py",                 # v0.48: the cache's cross-worktree guard and its control
          "test/test_slides.py",
          "test/test_modulation.py",                           # 2026-11-11: the lists, the cascade, the moving controls
+         "test/test_moving_ours.py",                          # 2026-11-12: the moving controls on our own pages
          "test/test_libtree.py", "test/test_web_tool.py",   # v0.40: nested folders (the model, the page's levels)
          "test/test_fdn8.py",                                 # FDN8: its DSP program against the reference
          "test/test_xdly.py",                                 # XDLY: the same

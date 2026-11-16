@@ -41,6 +41,11 @@ extern int smp_values_held(void);                /* v0.35: SYN held long: the pa
 #define TOP_Y 34
 #define BOT_Y 7
 
+/* 2026-11-12: a modulated control's line (csrc/modulation/moving.c), as on stock's pages: in the row
+ * between the widget (from y up) and its label (y - 7 .. y - 3), 21 px centred on the widget */
+extern void mv_knob(void *canvas, int x, int y, int w, u32 id, int lo, int hi);
+#define MV_LINE(c, x, y, id) mv_knob((c), (x) + 2, (y) - 2, 21, (id), RECORD(id)[2], RECORD(id)[3])
+
 extern int smp_count(void);
 extern int smp_slot_empty(int k);
 extern int smp_lstate;                  /* link.c: 0 idle, 4 done, else loading */
@@ -546,6 +551,8 @@ static void cell(void *c, void *view, int kind, u32 id, int x, int y, int labell
         LABEL(c, x + 12, y - 7, "%s", vb);
     } else if (labelled && id)
         LABEL(c, x + 12, y - 7, "%.4s", label);
+    if (id && w != W_EMPTY)
+        MV_LINE(c, x, y, id);
     if (locked(view, id))
         invert(c, x - 1, y - 8, x + 24, y + 19);
 }
@@ -567,6 +574,7 @@ void smp_knob_page(void *view, void *c, const unsigned short *ids, const char *c
             int top, v = value(view, ids[i], &top);
             w_knob_at(c, x, y, v, top, 0);
         }
+        MV_LINE(c, x, y, ids[i]);
         if (shows(i)) {                         /* v0.35: SYN held (v0.48: or just turned): the value (O14) */
             char vb[32];
             vb[0] = 0;

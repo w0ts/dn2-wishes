@@ -101,7 +101,7 @@ DEVTEST_ENTRIES = ["dt_rx", "dt_poll", "dt_sw", "smp_bulk_at", "prof_isr", "prof
                    "dt_glass", "dt_present", "dt_inv"]   # the test channel (csrc/devtest)
 LZMA7_ENTRIES = ["dn_depack7", "dn7_status", "dn7_length", "dn7_late", "dn7c_state", "dn7c_why"]    # 2026-11-11 (docs/lzma7.md)
 MOD_ENTRIES = ["mod_mask_hook", "mod_lfo_mask", "mod_eval", "mod_eval_pre", "mod_wb", "mod_wb_cell",   # csrc/modulation
-               "mv_begin", "mv_cell", "mv_poll"]
+               "mv_begin", "mv_cell", "mv_cell_span", "mv_knob", "mv_poll"]
 # the wishes record (csrc/wishes, docs/wishes-record.md): its four stubs and the state the checks read
 WISH_ENTRIES = ["wish_memcpy_stub", "wish_memset_stub", "wish_load_stub", "wish_save_stub", "wish_poll",
                 "wish_n", "wish_ready", "wish_busy", "wish_reentered", "wish_full", "wish_wants",

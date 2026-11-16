@@ -22,6 +22,11 @@
  * machines' hook in it) gives the cell's record back for the record's slot (+0x04): the global
  * FX pages, the MIDI tracks and anything else outside the 101 slots get no line.
  *
+ * Our own pages (PERC's, the Monomachine's, the sample machines': md_page.c, smp_page.c) draw their
+ * own knobs, not stock cells: each knob calls mv_knob with the row and width its line goes in and the
+ * value range its knob spans (the Monomachine's knobs a part of the record's), and gets the same line
+ * by the same rules (2026-11-12).
+ *
  * Redraws (mv_poll, from page.c wr_poll): the cells of the last draw are kept; the screen is
  * asked for a redraw (stock setDirty) only when a line would now be drawn elsewhere than it is
  * (a pixel's move, appearing, leaving), at most 25 times a second.
@@ -58,8 +63,9 @@ extern s8 sl_lastv[16];         /* csrc/slides: the voice a track last played on
 
 struct mv_cell {
     u16 id;
-    u8 slot, gen;
-    short x, y;
+    u8 slot, gen, w, pad;       /* w: the line's width in pixels */
+    short x, y;                 /* the line's first pixel */
+    int lo, hi;                 /* the values at its two ends */
     short drawn;                /* the line's end column as drawn, -1: no line */
     u32 last;                   /* the last frame heard != set */
 };
@@ -121,19 +127,12 @@ static int line_at(struct mv_cell *c, int v, u32 now)
         c->last = now;
     else if (!c->last || now - c->last >= LINGER)
         return -1;
-    const int *r = RECORD(c->id);
-    int lo = r[2], hi = r[3];
+    int lo = c->lo, hi = c->hi;
     if (hi <= lo)
         return -1;
     if (heard < lo) heard = lo;
     if (heard > hi) heard = hi;
-    return (heard - lo) * (MV_W - 1) / (hi - lo);
-}
-
-static int bipolar(u32 id)
-{
-    const int *r = RECORD(id);
-    return 2 * r[4] == r[2] + r[3];
+    return (heard - lo) * (c->w - 1) / (hi - lo);
 }
 
 /* the screen is about to draw: the cells it draws now are this generation's */
@@ -145,8 +144,10 @@ void mv_begin(void)
     MV->draws++;
 }
 
-/* after each stock cell (page.c wr_cell): keep it, and draw its line */
-void mv_cell(void *canvas, int x0, int y0, u32 id)
+/* a knob of record ID drawn on the canvas: keep it, and draw its line from (x, y), W pixels wide,
+ * LO at its left end and HI at its right (record units, 0..0x7f00); from its centre when the
+ * record's default is the middle of LO..HI */
+void mv_knob(void *canvas, int x, int y, int w, u32 id, int lo, int hi)
 {
     mv_ready();
     int filter, m = track_sound(&filter);
@@ -172,19 +173,37 @@ void mv_cell(void *canvas, int x0, int y0, u32 id)
     }
     c->slot = (u8)slot;
     c->gen = MV->gen;
-    c->x = (short)x0;
-    c->y = (short)y0;
+    c->w = (u8)(w < 2 ? 2 : w > 255 ? 255 : w);
+    c->x = (short)x;
+    c->y = (short)y;
+    c->lo = lo;
+    c->hi = hi;
     MV->n++;
     int at = line_at(c, heard_voice(), FRAMES);
     c->drawn = (short)at;
     if (at < 0)
         return;
     MV->lines++;
-    int y = y0 + MV_DY, xs = x0 + MV_DX;
-    int from = bipolar(id) ? (MV_W - 1) / 2 : 0;
+    int from = 2 * RECORD(id)[4] == lo + hi ? (c->w - 1) / 2 : 0;
     int a = from < at ? from : at, b = from < at ? at : from;
-    for (int x = a; x <= b; x++)
-        SET_PIXEL(canvas, xs + x, y, 1);
+    for (int k = a; k <= b; k++)
+        SET_PIXEL(canvas, x + k, y, 1);
+}
+
+/* a cell laid out as stock's (x0, y0 its corner): the line in its free bottom row, LO..HI across it
+ * (md_page.c's PERC and Monomachine cells are stock's widgets at stock's places) */
+void mv_cell_span(void *canvas, int x0, int y0, u32 id, int lo, int hi)
+{
+    mv_knob(canvas, x0 + MV_DX, y0 + MV_DY, MV_W, id, lo, hi);
+}
+
+/* after each stock cell (page.c wr_cell): across the record's range */
+void mv_cell(void *canvas, int x0, int y0, u32 id)
+{
+    if (id == 0 || id > 320u)
+        return;
+    const int *r = RECORD(id);
+    mv_cell_span(canvas, x0, y0, id, r[2], r[3]);
 }
 
 /* the UI loop's redraw test (page.c wr_poll): a redraw when a shown line would move */

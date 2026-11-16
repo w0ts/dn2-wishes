@@ -1084,7 +1084,7 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     for name in ("mx_poll", "mx_eval", "mx_lay", "mx_compiles"):
         layout[name] = csyms[name]              # 2026-11-12: the matrix (csrc/matrix): the checks call them
     for name in ("mod_mask_hook", "mod_lfo_mask", "mod_eval", "mod_eval_pre", "mod_wb", "mod_wb_cell",
-                 "mv_begin", "mv_cell", "mv_poll", "sl_lastv", "wr_screen"):
+                 "mv_begin", "mv_cell", "mv_cell_span", "mv_knob", "mv_poll", "sl_lastv", "wr_screen"):
         layout[name] = csyms[name]              # 2026-11-11: csrc/modulation (the checks call them)
     layout.update(playout)
     # W2: where the C renderer's code ends (its rodata and data follow): the ship gate

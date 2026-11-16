@@ -29,6 +29,13 @@ line     the FLTR page on track 1 (WaveTone): test values written into the heard
          modulated, no line on WaveTone's SYN page. The instructions of mv_cell, of a poll and of
          the page's draws are printed, also with every cell of the page modulated (the worst case).
 
+ours     the same line on our own pages (2026-11-12): MACHINEDRUM, SOPHIE, PLAITS, TB-303, DRONE, ANALOG 2,
+         MONOMACHINE, ONESHOT, SLICE on track 1, SYN page 1: every knob drawn goes through mv_knob, its
+         line's row free (nothing lit across it) before anything is modulated; one knob's heard value
+         moved draws exactly moving.c's line in that row, and nothing 400 ms after heard = set again;
+         on MACHINEDRUM and MONOMACHINE, LFO1 aimed at that knob, run by the frame's evaluator: the line
+         moves by itself, and leaves once LFO1's depth is zero.
+
 Last line PASS or FAIL.
 """
 
@@ -551,12 +558,176 @@ def scenario_line(a, report, sym):
     print(f"    instructions: {cost}", flush=True)
 
 
+# 2026-11-12: our own pages (md_page.c, smp_page.c) draw their knobs themselves and call mv_knob for each
+OURS = (("MACHINEDRUM", 5), ("SOPHIE", 20), ("PLAITS", 18), ("TB303", 19), ("DRONE", 21), ("ANALOG2", 22),
+        ("MONOMACHINE", 6), ("ONESHOT", 8), ("SLICE", 13))
+
+
+LFO_ON = ("MACHINEDRUM", "MONOMACHINE")       # a real LFO, run by the evaluator, on these two
+
+
+def lfo_moves(m, panel, sym, name, s, x, y, w, row_lit, shots):
+    """voice 1's LFO1 aimed at slot S at full depth (LFO2, LFO3 without), the frame's parameter path run 150 frames (0.1 s)
+    between screens: the knob's line must move by itself (several lengths), then leave once LFO1's
+    depth is back at zero (heard = set again) past the linger"""
+    lfo = {slot(1, "SPD"): 0x5800, slot(1, "MULT"): 4 << 8, slot(1, "FADE"): 0x4000, slot(1, "DEST"): s << 8,
+           slot(1, "WAVE"): 0, slot(1, "SPH"): 0, slot(1, "MODE"): 0, slot(1, "DEP"): TOP,
+           slot(2, "DEP"): 0x4000, slot(3, "DEP"): 0x4000}     # the sound's own LFO2 and LFO3: no depth
+    keep = {k: (u16(m, SRC + 2 * idx(0, k)), m.read(STATE + 4 * idx(0, k), 4)) for k in lfo}
+    for k, val in lfo.items():
+        w16(m, SRC + 2 * idx(0, k), val)
+        m.write(STATE + 4 * idx(0, k), struct.pack(">I", val << 16))
+    frac = m.alloc(len(SET_FRAC))
+    m.write(frac, SET_FRAC)
+    m.flush()
+    guest(m, frac)
+    rate, o1, o2 = m.long(RATE), m.alloc(256), m.alloc(256)
+
+    def run(frames):
+        for _ in range(frames):
+            guest(m, SMOOTHER, SRC)
+            guest(m, sym["mod_eval"], OUT, rate, 1, 1, o1, o2, 0)
+        m.write(FRAMES, struct.pack(">I", m.long(FRAMES) + frames))
+        panel.settle(30_000_000)
+
+    seen = []
+    for k in range(6):
+        run(150)
+        px = row_lit(x, y, w) or []
+        seen.append((min(px), max(px)) if px else None)
+        shots[f"{name}-lfo{k}"] = panel.screen(f"{name}-lfo{k}")
+    ends = {e for e in seen if e}
+    check(f"{name}: LFO1 -> slot {s} at full depth: the line moves by itself", len(ends) >= 3, f"{seen}")
+    w16(m, SRC + 2 * idx(0, slot(1, "DEP")), 0x4000)       # DEP's middle: no depth
+    m.write(STATE + 4 * idx(0, slot(1, "DEP")), struct.pack(">I", 0x4000 << 16))
+    run(150)
+    run(700)
+    px = row_lit(x, y, w)
+    check(f"{name}: LFO1's depth back to zero: no line past the linger", px == [], f"{px}")
+    for k, (src, st) in keep.items():
+        w16(m, SRC + 2 * idx(0, k), src)
+        m.write(STATE + 4 * idx(0, k), st)
+    return seen
+
+
+def ours_machine(m, panel, mtype):
+    """track 1 on MTYPE: MACHINE SEL's commit, else the sound's type byte as mnmpages pokes it"""
+    if set_machine(m, panel, 0, mtype) == mtype:
+        return True
+    kit = m.long(KIT)
+    m.write(kit + 52 + 0xDE, bytes([mtype]))
+    m.flush()
+    panel.settle(5_000_000)
+    return struct.unpack(">b", m.read(kit + 52 + 0xDE, 1))[0] == mtype
+
+
+def scenario_ours(a, report, sym):
+    """each of our machines' SYN page 1: every knob drawn calls mv_knob with a row that is free (no lit
+    pixel across the line's width before anything is modulated, so the line never overdraws the
+    page); then the first knob's heard value moved: exactly the line moving.c's rule gives, in that
+    row, and no line once heard = set again past the linger"""
+    from emulib.panel import Panel
+    from unicorn import UC_HOOK_CODE
+    from unicorn import m68k_const as K
+    m = machine(a.build, a.snapshot)
+    panel = Panel(m, png_dir=str(pathlib.Path(a.json or "out/modulation").with_suffix("")) + "_ours_png")
+    from emu import panel as P                  # (digikit's, on the path once a Panel exists)
+    m.write(UI_TRACK, b"\x00")
+    panel.settle(3_000_000)
+    knobs = []
+
+    def on_knob(uc, ad, sz, us):
+        sp = uc.reg_read(K.UC_M68K_REG_A7)
+        vals = struct.unpack(">7i", m.read(sp + 4, 28))
+        knobs.append(vals[1:])                  # x, y, w, id, lo, hi
+    m.uc.hook_add(UC_HOOK_CODE, on_knob, begin=sym["mv_knob"], end=sym["mv_knob"])
+    m.uc.hook_add(UC_HOOK_CODE, lambda uc, ad, sz, us: knobs.clear(),   # the last draw's knobs only
+                  begin=sym["mv_begin"], end=sym["mv_begin"])
+    m.flush()
+    frame(m, sym)
+    m.write(sym["sl_lastv"], b"\x00")           # track 1 last played voice 1, which plays it
+    m.write(OWNER, struct.pack(">I", 0))
+    rep, shots = {}, {}
+
+    def row_lit(x, y, w):
+        buf = bytes(panel.capture.frames[-1]) if panel.capture.frames else None
+        if buf is None:
+            return None
+        lit = P.lit(buf)
+        return [k for k in range(w) if (x + k, 63 - y) in lit]
+
+    for name, mtype in OURS:
+        if not ours_machine(m, panel, mtype):
+            check(f"{name}: track 1 set to type {mtype}", False)
+            continue
+        for sl in range(1, 101):                # nothing modulated: heard = set on every slot of voice 1 (the
+            st = struct.unpack(">I", m.read(STATE + 4 * idx(0, sl), 4))[0]   # snapshot's sound has its own
+            w16(m, OUT + 2 * idx(0, sl), (st + 0x8000) >> 16)                # sources), past any linger
+        m.write(FRAMES, struct.pack(">I", m.long(FRAMES) + 700))
+        pages = []
+        for tap in range(3):                    # SYN cycles the pages (3 at most): each one once
+            knobs.clear()
+            panel.tap((0, 1))
+            panel.settle(40_000_000)            # past the page title's flash
+            drawn = {}
+            for x, y, w, rid, lo, hi in knobs:
+                drawn[rid] = (x, y, w, lo, hi)
+            if drawn and drawn in pages:
+                break
+            pages.append(drawn)
+            busy = {f"{rid}@({x},{y})": px for rid, (x, y, w, lo, hi) in drawn.items() if (px := row_lit(x, y, w))}
+            check(f"{name}, page {tap + 1} seen: every knob's line row is free while nothing is modulated", not busy,
+                  f"{busy}")
+            shots[f"{name}-p{tap + 1}"] = panel.screen(f"{name}-p{tap + 1}")
+        drawn = max(pages, key=len) if pages else {}
+        check(f"{name}: its pages call mv_knob for their knobs", sum(map(len, pages)) >= 4,
+              f"{[len(p) for p in pages]} knobs")
+        for _ in range(3):                      # back to the page with the most knobs
+            if dict((r, (x, y, w, lo, hi)) for x, y, w, r, lo, hi in knobs) == drawn:
+                break
+            knobs.clear()
+            panel.tap((0, 1))
+            panel.settle(40_000_000)
+        cand = [r for r in drawn if 0 < record(m, r)[1] <= 100 and drawn[r][4] > drawn[r][3]]
+        if not cand:
+            check(f"{name}: a knob to modulate", False)
+            continue
+        rid = cand[0]
+        x, y, w, lo, hi = drawn[rid]
+        s = record(m, rid)[1]
+        setv = (struct.unpack(">I", m.read(STATE + 4 * idx(0, s), 4))[0] + 0x8000) >> 16
+        heard = lo + (hi - lo) * 3 // 4
+        if heard == setv:
+            heard += 0x100
+        w16(m, OUT + 2 * idx(0, s), heard)
+        m.write(FRAMES, struct.pack(">I", m.long(FRAMES) + 100))
+        panel.settle(30_000_000)
+        at = (min(max(heard, lo), hi) - lo) * (w - 1) // (hi - lo)
+        frm = (w - 1) // 2 if 2 * record(m, rid)[4] == lo + hi else 0
+        want = list(range(min(frm, at), max(frm, at) + 1))
+        px = row_lit(x, y, w)
+        shots[f"{name}-line"] = panel.screen(f"{name}-line")
+        check(f"{name}: record {rid} (slot {s}) heard {heard:#06x} of {lo:#x}..{hi:#x}: the line in row {y}",
+              px == want, f"lit {px}, want {want[0]}..{want[-1]}")
+        w16(m, OUT + 2 * idx(0, s), setv)
+        m.write(FRAMES, struct.pack(">I", m.long(FRAMES) + 700))
+        panel.settle(30_000_000)
+        m.write(FRAMES, struct.pack(">I", m.long(FRAMES) + 700))
+        panel.settle(30_000_000)
+        px = row_lit(x, y, w)
+        check(f"{name}: heard = set, 400 ms later: no line", px == [], f"{px}")
+        rep[name] = {"knobs": [len(p) for p in pages], "record": rid, "line": [x, y, w], "range": [lo, hi]}
+        if name in LFO_ON:
+            rep[name]["lfo"] = lfo_moves(m, panel, sym, name, s, x, y, w, row_lit, shots)
+    report["ours"] = {"pages": rep, "screens": shots}
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--build", required=True)
     p.add_argument("--before", default=None)
     p.add_argument("--snapshot", default=SNAP)
-    p.add_argument("--scenario", default="lists,cascade,line,cost")
+    p.add_argument("--scenario", default="lists,cascade,line,ours,cost")
     p.add_argument("--frames", type=int, default=3000)
     p.add_argument("--mv-dy", type=int, default=MV_DY_DEFAULT)
     p.add_argument("--json", default=None)
@@ -568,7 +739,8 @@ def main() -> int:
         {"lists": lambda: scenario_lists(a, report),
          "cascade": lambda: scenario_cascade(a, report, lay),
          "cost": lambda: scenario_cost(a, report, lay),
-         "line": lambda: scenario_line(a, report, lay)}[sc]()
+         "line": lambda: scenario_line(a, report, lay),
+         "ours": lambda: scenario_ours(a, report, lay)}[sc]()
     if a.json:
         pathlib.Path(a.json).write_text(json.dumps(report, indent=1))
     print(("FAIL: " + "; ".join(FAILS[:6])) if FAILS else "PASS: modulation (" + a.scenario + ")")

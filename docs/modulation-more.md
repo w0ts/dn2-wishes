@@ -113,9 +113,24 @@ centre for a parameter whose default is mid-range. Shown while heard != set, kep
 - **TUNE:** not skipped. With nothing modulated, after a frame of the parameter path, no line was
   drawn on WaveTone's SYN page (TUN1, TUN2 included) [E]: the mirror holds TUNE as set. Whether a
   modulated TUNE's line reads well on the unit is [O].
+- **Our own pages (2026-11-12)** [E]: PERC's Machinedrum page, the Monomachine machines' pages
+  (SOPHIE, PLAITS, TB-303, DRONE, ANALOG 2, MONOMACHINE) and the sample machines' pages draw their
+  own knobs, so each knob asks for the line itself: `mv_knob(canvas, x, y, w, id, lo, hi)` is the
+  one drawer (stock's `mv_cell` calls it through `mv_cell_span`), told the row, the width and the
+  values at the line's two ends. `md_page.c`'s cells are stock's widgets at stock's places: the same
+  row and width as stock's cells, the Machinedrum's across the record, the Monomachine's across
+  the knob's part of it (`mnm_lo .. mnm_lo + mnm_top`, as the knob reads). `smp_page.c`'s cells:
+  21 px centred on the widget, in the row between the widget (from y up) and its label
+  (y - 7 .. y - 3), at y - 2. The line is drawn before a p-locked cell is inverted, so it inverts
+  with it. Emulator (`emu_modulation.py --scenario ours`, every page of each of the nine machines):
+  every knob's row free before anything is modulated; one knob's heard value moved gives exactly
+  the line; LFO1 aimed at Machinedrum's AMD and at MONOMACHINE's WAV1 at full depth, run by the
+  frame's evaluator, moves the line by itself (0.1 s apart: ends 8, 17, 16, 7, 0; 20, 19, 11, 2, 0
+  of 20) and it leaves once LFO1's depth is zero.
 - **Not shown:** what the DSP modulates itself (envelopes, key tracking inside the DSP, our DSP
-  machines' internal modulation), and our own pages (PERC, the Monomachine and sample pages draw
-  their own controls, not stock cells).
+  machines' internal modulation); PAGE 2 of a sample machine shows the line on its top row only
+  (its bottom row is labels and LEV's pill, no widgets); PERC's fallback grid (page.c, drawn only
+  when the Machinedrum's fonts are missing from the build) has none.
 
 ### Cost, in the UI task [E, FLTR page]
 

@@ -29,6 +29,10 @@ typedef unsigned char u8;
 
 enum { SMALL, SYM, BIG };
 
+/* csrc/modulation/moving.c: a modulated control's line, as on stock's pages (2026-11-12) */
+extern void mv_cell(void *canvas, int x0, int y0, u32 id);
+extern void mv_cell_span(void *canvas, int x0, int y0, u32 id, int lo, int hi);
+
 static int ok(void)
 {
     return MDUI[0] == 'M' && MDUI[1] == 'D' && MDUI[2] == 'U' && MDUI[3] == 'I'
@@ -220,6 +224,7 @@ int md_page_draw(void *view, void *c, int page, int type)
         } else {
             wg_knob(c, s, knob(view, id));              /* 2026-11-09: stock's knob */
         }
+        mv_cell(c, x0, base, id);                       /* 2026-11-12: the heard value's line (csrc/modulation) */
         if (locked(view, id))                           /* v0.27: p-locked, as stock lights it */
             wg_lit(c, s);
     }
@@ -656,6 +661,8 @@ int mnm_page_draw(void *view, void *c, int mi, int page)
         } else {
             wg_knob(c, s, k);
         }
+        mv_cell_span(c, wg_x(s), wg_y(s), mnm_rid[j],   /* 2026-11-12: the heard value's line, across */
+                     mnm_lo[j] << 8, (mnm_lo[j] + mnm_top[j]) << 8);   /* the knob's part of the record */
         if (locked(view, mnm_rid[j]))   /* p-locked, as stock lights it */
             wg_lit(c, s);
     }
