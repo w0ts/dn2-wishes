@@ -10,7 +10,7 @@ Every non-obvious key combination and setting of the custom Digitone II firmware
 - **Hold a trig + turn (grid recording on)**: p-lock, as stock. It also works for the ENV2 knobs, and on TRIG page 2 for SLD / SLEN.
 - **TRIG page 2: E = SLD, F = SLEN**: hold a trig, turn E right for a parameter slide on that trig, F for the slide's length (1/8 .. 64 steps). Pushing E or F on held steps clears their slides.
 - **LFO destination lists**: 13 controls stock hides are offered (PTIM, PORT, amp DEL / MODE / RSET and several FM TONE ones), and each LFO can modulate the other two LFOs' controls.
-- **[AMP] repeatedly**: AMP 1/3 (stock) -> 2/3 (ENV2) -> 3/3 (scope) -> 1/3. NO or any page key closes 2/3 and 3/3.
+- **[AMP] repeatedly**: AMP 1/3 (stock, titled ENV1/AMP) -> 2/3 (ENV2) -> 3/3 (the scope, titled WAVEFORM) -> 1/3. NO or any page key closes 2/3 and 3/3.
 - **AMP 3/3 scope: any encoder but G**: time across the screen, 2 / 4 / 8 / 17 / 33 / 67 ms. **G** is the vertical zoom x1 / x2 / x4 / x8 / x16 / AUTO. Both are shared by all tracks and not saved.
 
 ## Matrix (routes popup)
