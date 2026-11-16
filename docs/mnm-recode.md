@@ -107,3 +107,27 @@ memory arbiter's allotment after trackbuf.asm, whose span now ends there), and i
 stores, integer series resonators); DDRW (15,991) its two waves' builds, interpolators and the 2:1
 decimator. The User chose SIMD (voice pairs) before any approximation. PERC's code grew 470 B
 (171,916 of 172,032).
+
+## 4. v0.52's engines re-scheduled, bit-identical to v0.52 (2026-11-13)
+
+(Section 3's work was on the v0.42 engines; v0.52 took v0.51's lighter ones, and this carries it over to them.)
+
+v0.51's lighter engines (SID at 4x, DDRW and DENS read at 1x, VO-6's series formants in float) re-scheduled
+without changing a word: `scripts/mnm_identity.py` against v0.52's own code, SID 213, WAVE 240, DDRW 198,
+DENS 183, VO-6 222 runs, 0 differ. One voice, steady block, the engine's own part (`scripts/dsp_cost.py`):
+
+| engine | v0.52 | now | what |
+|---|---|---|---|
+| SID 6581 | 9,367 | 4,245 | the decimator: constants held, y1 x1 once a sample, the state's shifts as renaming, products and sums on multifunction instructions; TRI/SAW/PULS fused with the phases (a << 8 wraps as AND M24) |
+| DPRO-WAVE | 15,708 | 8,436 | the sample loop in registers; the decimator as SID's |
+| DPRO-DDRW | 18,778 | 9,884 | one Digibank read a sample when no wave change is pending (old + fade (new - old) is old); the mix loop in registers; the interpolator's taps on multifunction instructions; its table in L1 |
+| DPRO-DENS | 10,153 | 4,455 | the build loop in registers, the partner not read at crossfade weight 0; the interpolator as DDRW's |
+| VO-6 | 30,412 | 17,801 | the 24-bit MPY as one SSF; the floor's LSB down by `IF LT`; ramps held, skipped when the targets hold, floats when the series is float; the resonators' y1/y2 renamed, their input through I0 |
+
+Where a fast path stands in for the general one (DDRW's steady wave, DENS's weight 0, SID's TRI without its
+MAX), the general path's arithmetic gives the same word there: x - x = +0, and +-0 added to a non-zero word or to
++0 leaves it; a limit the value is already within. With NaN in the state (the runner's garbage step) those paths,
+and VO-6's floor, give finite words where they gave NaN.
+
+**DPRO's interpolator table in L1.** DDRW and DENS read ~10 words a sample of its 320 words; build() also copies
+it to L1 `dsp.MNM_INTERP_DM` (0x2e1200..0x2e1700, docs/memory-map.md), where interp reads it.
