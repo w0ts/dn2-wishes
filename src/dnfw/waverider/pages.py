@@ -915,7 +915,10 @@ wr_count:
     bne.w   3f
     moveq   #{len(PAGES)},%d0
     rts
-3:  moveq   #2,%d1                         | d0 = kind - 1: 1, 2 and 9.. the Monomachine's
+3:  moveq   #{_smp.BOUNCE_TYPE - 5},%d1    | FLEX (BOUNCE, kind 13): its one page, as before the Monomachine's
+    cmp.l   %d1,%d0                        | page tables (2026-11-14: it fell into them, read 0 pages there, and
+    beq.w   6f                             | stock's SYN page then clamped to -1: every knob on record 0)
+    moveq   #2,%d1                         | d0 = kind - 1: 1, 2 and 9.. the Monomachine's
     cmp.l   %d1,%d0
     bls.w   4f
     moveq   #8,%d1
@@ -940,6 +943,8 @@ wr_count:
     move.l  %d1,%d0
     rts
 5:  moveq   #2,%d0                         | a sample machine: its two pages (v0.22: the recorder is FUNC + VOICE)
+    rts
+6:  moveq   #1,%d0                         | FLEX: its one page
     rts
 1:  move.l  %sp@(8),%d0
     cmpi.l  #{NEW_TYPE},%d0

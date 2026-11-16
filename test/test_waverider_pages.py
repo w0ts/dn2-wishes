@@ -184,3 +184,18 @@ def test_every_new_type_has_our_pages():
     # v0.44: BOUNCE's kind (13) reaches the sample tables' seventh row through SMP_IDX
     h = P.c_header()
     assert "#define SMP_N 7" in h and "#define SMP_N0 6" in h and "#define SMP_BOUNCE_KIND 13" in h
+
+
+def test_flex_has_its_one_syn_page_not_a_monomachine_count():
+    """2026-11-14 (the gate's flex links 8..8d, r6): wr_count, stock's SYN page count for our tracks, sent FLEX
+    (BOUNCE, kind 13) into the Monomachine's page tables (kind - 8 -> mnm_ix_tab -> mnm_npages_tab), which read 0
+    pages for it: stock clamped the SYN page to -1, the empty page, and every knob of a FLEX track's SYN page
+    turned record 0 (BUF never moved). FLEX is told apart first and has its one page, as before those tables"""
+    from dnfw.sampler import machines as SMM                    # noqa: PLC0415
+    src = pages.source(0, 0)
+    body = src[src.index("wr_count:"):]
+    body = body[:body.index("\n1:  move.l  %sp@(8),%d0")]
+    flex = body.index(f"moveq   #{SMM.BOUNCE_TYPE - 5},%d1")
+    assert flex < body.index("lea     mnm_npages_tab,%a0")
+    assert flex < body.index("beq.w   6f") < body.index("moveq   #2,%d1")
+    assert "6:  moveq   #1,%d0" in body
