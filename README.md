@@ -1,15 +1,5 @@
-# DN2 WISHES
-
 Custom firmware for the Elektron Digitone II, OS 1.12. Built on
 [dn2mk2](https://github.com/De-Pattern/dn2mk2-firmware) by De-Pattern.
-
-## From dn2mk2
-
-- Digitakt II sample machines: ONESHOT, WERP, STRETCH, REPITCH, GRID, SLICE, sample browser,
-  recorder, FLEX.
-- PERC: the Machinedrum's TRX, EFM, GND and P-I machines.
-- Monomachine machines: SID 6581, DPRO WAVE, DPRO DDRW, DPRO DENS, VO-6, polyphonic.
-- Seven new LFO waveforms.
 
 ## Added in DN2 WISHES
 
@@ -20,6 +10,14 @@ Custom firmware for the Elektron Digitone II, OS 1.12. Built on
   RING, JUNO.
 - Modulation matrix.
 - Voice budget: new notes take the voice of an old one before the DSP runs out of time.
+
+## From dn2mk2
+
+- Digitakt II sample machines: ONESHOT, WERP, STRETCH, REPITCH, GRID, SLICE, sample browser,
+  recorder, FLEX.
+- PERC: the Machinedrum's TRX, EFM, GND and P-I machines.
+- Monomachine machines: SID 6581, DPRO WAVE, DPRO DDRW, DPRO DENS, VO-6, polyphonic.
+- Seven new LFO waveforms.
 
 ## Changelog
 
