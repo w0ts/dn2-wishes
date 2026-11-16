@@ -454,8 +454,22 @@ def spans() -> list[tuple[str, int, bytes]]:
     Each payload is zero-padded up to the next span's start (the last to REGION's
     end), so the region is written end to end and every code object is followed by
     at least 64 bytes of zeros (a zero word is a NOP)."""
+    raw = _raw_spans()
+    out = []
+    for k, (what, at, payload) in enumerate(raw):
+        end = raw[k + 1][1] if k + 1 < len(raw) else REGION[1]
+        if len(payload) > end - at:
+            raise DspError(f"{what} ({len(payload)} bytes) does not fit before {end:#x}")
+        if "asm" in what and end - at - len(payload) < 64:
+            raise DspError(f"{what} leaves fewer than 64 bytes of NOP padding")
+        out.append((what, dm_to_load(at), payload + bytes(end - at - len(payload))))
+    return out
+
+
+def _raw_spans() -> list[tuple[str, int, bytes]]:
+    """spans()' blocks before their padding: (what, DM address, payload), in address order"""
     obj = objects()
-    raw = [
+    return [
         _a2f_state_span(obj),
         ("state: save area, PERC scratch, idle_load's counters (zeros)", STATE_DM, bytes(STATE_BYTES)),
         ("PERC state: 16 voices x 128 bytes (zeros)", PERC_STATE_DM, bytes(16 * PERC_STATE_STRIDE)),
@@ -483,15 +497,6 @@ def spans() -> list[tuple[str, int, bytes]]:
         ("Machinedrum / Monomachine voices: 16 slots x 1 KB (zeros; L2 until 2026-11-10)", MD_STATE_DM,
          bytes(16 * _md_core().MD_STRIDE)),
     ]
-    out = []
-    for k, (what, at, payload) in enumerate(raw):
-        end = raw[k + 1][1] if k + 1 < len(raw) else REGION[1]
-        if len(payload) > end - at:
-            raise DspError(f"{what} ({len(payload)} bytes) does not fit before {end:#x}")
-        if "asm" in what and end - at - len(payload) < 64:
-            raise DspError(f"{what} leaves fewer than 64 bytes of NOP padding")
-        out.append((what, dm_to_load(at), payload + bytes(end - at - len(payload))))
-    return out
 
 
 def _perc_exp2() -> bytes:
@@ -963,6 +968,83 @@ def _finish(out: bytearray) -> bytes:
     return result
 
 
+# 2026-11-12 (the memory arbiter, after PERC's tan was given L1 0x2e4080 inside the bus FDN8 stores, inserts.bus.FD_L1,
+# a run-time area no span showed: spans() pads each block to the next, so its zeros hid the stores): every area of ours
+# the DSP touches, loaded or not, at its real extent. section7() refuses two that overlap; a sub-area (a named part of
+# a container, e.g. the Monomachine L2 scratch's words) must lie inside its container and clear of its siblings.
+def regions() -> list[tuple[str, int, int, str]]:
+    """(what, lo, hi, container: "" for a top-level area) of every L1 / L2 / DDR area of ours, byte addresses"""
+    from ..inserts import bus as ins_bus, design as ins_d
+    from ..mnm import analog2 as A2, plk
+    from ..perc import machines as PM, program as PP
+    from ..sampler import machines as SM, program as SP
+    mdc = _md_core()
+    out: list[tuple[str, int, int, str]] = []
+
+    def area(what, lo, n, container=""):
+        out.append((what, lo, lo + n, container))
+    # L1: the loaded blocks (a code object with the 64 B of NOPs its jumps may run into), then the run-time areas
+    for what, at, payload in _raw_spans():
+        area(what, at, len(payload) + (64 if "asm" in what else 0))
+    area("SLICE / GRID relatch words (sampler.program.RELATCH)", SP.RELATCH, 16 * 16)
+    if "SMP_LINE_DM" in globals():
+        area("the sample reader's taps line (SMP_LINE_DM - 8)", SMP_LINE_DM - 8, 0x2E0100 - (SMP_LINE_DM - 8))
+    area("the bus FDN8 instances' stores (inserts.bus.FD_L1)", ins_bus.FD_L1, ins_d.FDN8_INSTANCES * ins_bus.FD_L1_BYTES)
+    area("the Monomachine render scratch", MNM_RENDER_DM, MNM_RENDER_BYTES)
+    # L2: the loaded code and state, then the run-time areas
+    for what, at, payload in l2_spans():
+        area(what, at, len(payload))
+    area("the bus inserts' scratch and stores (inserts.bus HEAD_END..MV_STATE)", ins_bus.HEAD_END,
+         ins_bus.MV_STATE - ins_bus.HEAD_END)
+    scr = "Monomachine scratch and the voice order, in L2 (zeros; v0.32; ANALOG2's mix tables)"
+    scr = next((w for w, _a, _p in l2_spans() if w.startswith("Monomachine scratch")), scr)
+    mnm = MNM_SCRATCH_L2
+    words = [("the budget sums (CUM_OFF)", getattr(PP, "CUM_OFF", None), 64), ("the keys", PP.MNM_KEYS_OFF, 64),
+             ("the costs", PP.MNM_COSTS_OFF, 64), ("the voice order", PP.ORDER_OFF, 0x50),
+             ("the rests", PP.RESTS_OFF, 64), ("the strikes", PP.STRIKES_OFF, 64), ("the bounds", PP.BOUNDS_OFF, 64),
+             ("the slot counter", PP.SLOT_N, 4), ("ANALOG 2's mix tables", A2.TABLES_OFF, 4 * len(A2.table_words())),
+             ("the velocities (VEL_OFF)", getattr(PP, "VEL_OFF", None), 64)]
+    for what, off, n in words:
+        if off is not None:
+            area(what, mnm + off, n, scr)
+    # DDR: the loaded spans (the pool's header lies inside the pool: its sub-area), then the run-time areas
+    pool = "the sample pool"
+    for what, at, payload in ddr_spans():
+        area(what, at, len(payload), pool if SMP_POOL_DDR <= at < SMP_POOL_DDR + SM.POOL_BYTES else "")
+    area("the link's shipped tables (perc.machines.shipped_tail)", MD_TABLES_DDR + mdc.TABLE_LAYOUT["_end"][0],
+         len(PM.shipped_tail()))
+    if _dpro_on():
+        from ..mnm import core as MNC
+        area("DDRW's and DENS's Digibank stand-in", MD_TABLES_DDR + mdc.TABLE_LAYOUT["mnm"][0] + MNC.DIGI_OFF,
+             4 * MNC.DIGI_WORDS)
+    area("the moved inserts' rings (MV_RING_DDR)", ins_d.MV_RING_DDR, ins_d.MV_INSTANCES * 2048)
+    area("PLAITS' big buffers (plk.BIG_DDR)", plk.BIG_DDR, 16 * plk.BIG_STRIDE)
+    area("the bus FDN8 instances' rings", ins_d.FDN8_RING_DDR, ins_d.FDN8_INSTANCES * ins_d.FDN8_RING_STRIDE)
+    area("the bus XDLY instances' lines", ins_d.XDLY_LINES_DDR, ins_d.XDLY_INSTANCES * ins_d.XDLY_LINES_STRIDE)
+    area(pool, SMP_POOL_DDR, SM.POOL_BYTES)
+    return out
+
+
+def check_regions() -> None:
+    """refuse two areas of ours that overlap (regions()), by real extent"""
+    reg = regions()
+    tops = sorted((lo, hi, w) for w, lo, hi, c in reg if not c)
+    for (a0, a1, w0), (b0, b1, w1) in zip(tops, tops[1:]):
+        if b0 < a1:
+            raise DspError(f"{w0} ({a0:#x}..{a1:#x}) and {w1} ({b0:#x}..{b1:#x}) overlap")
+    for cont in {c for *_r, c in reg if c}:
+        box = [(lo, hi) for w, lo, hi, c in reg if w == cont and not c]
+        if not box:
+            raise DspError(f"{cont}: no such area for its sub-areas")
+        kids = sorted((lo, hi, w) for w, lo, hi, c in reg if c == cont)
+        for lo, hi, w in kids:
+            if not (box[0][0] <= lo and hi <= box[0][1]):
+                raise DspError(f"{w} ({lo:#x}..{hi:#x}) leaves {cont}")
+        for (a0, a1, w0), (b0, b1, w1) in zip(kids, kids[1:]):
+            if b0 < a1:
+                raise DspError(f"{w0} ({a0:#x}..{a1:#x}) and {w1} ({b0:#x}..{b1:#x}) overlap in {cont}")
+
+
 def section7_idle_only(stock: bytes) -> bytes:
     """Stock DN2 1.11's section 7 plus the idle-time stub and nothing else: the stock
     engine, measured. Refuses anything but stock."""
@@ -1026,6 +1108,7 @@ def section7(stock: bytes) -> bytes:
     _check_ddr(stock, ddr)
     l2 = l2_spans()
     _check_l2(stock, l2)
+    check_regions()
 
     out = bytearray(bootstream.insert_before_final(
         stock, b"".join(_blocks(at, payload) for _, at, payload in added + ddr + l2)))
