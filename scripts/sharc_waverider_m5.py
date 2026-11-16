@@ -3735,6 +3735,8 @@ def _chorus_copy(state, image) -> None:
     the same words in L2 at FX_DM: every access is base-relative, and no word of L1, L2 or the FX's DDR holds an
     address inside the block after init (scratch/opt-stock ptrscan_fx.py: only a stack spill of the chorus base).
     So a build's run starts with them copied."""
+    if not dsp.fx_patches():
+        return                                  # a build without the move (stockfx.ENABLED off)
     _, at, _, new = dsp.fx_patches()[1]
     if image.memory.read(at, len(new)) != new:
         return                                  # stock, or a build without the move

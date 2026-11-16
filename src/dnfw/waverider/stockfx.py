@@ -20,6 +20,9 @@ import struct
 
 from ..image import sharc_object
 
+# 2026-11-13 (main: round 14 played no sound on the unit, optstock the top suspect): OFF builds the DSP program
+# without the move (no re-pointed instruction, no L2 span): stock's code and its DDR state as they were.
+ENABLED = False
 FX_DDR, FX_BYTES = 0x80459130, 0x159C            # the delay's control words, then the chorus's struct
 FX_L2 = 0x20098400                               # the arbiter's allotment 0x20098400..0x2009b400 (docs/memory-map.md)
 FX_ALLOT = (0x20098400, 0x2009B400)
@@ -112,7 +115,9 @@ def _moved(stock_hex: str, add: int) -> tuple[bytes, bytes]:
 
 
 def patches(sw_to_load, l2_sw_to_load) -> list[tuple[int, int, bytes, bytes]]:
-    """(sw, load address, stock bytes, new bytes) of every re-pointed instruction"""
+    """(sw, load address, stock bytes, new bytes) of every re-pointed instruction (none while not ENABLED)"""
+    if not ENABLED:
+        return []
     assert DELTA % 4 == 0 and FX_ALLOT[0] <= FX_L2 and FX_L2 + FX_BYTES <= FX_ALLOT[1]
     out = [(sw, sw_to_load(sw), *_moved(h, DELTA)) for sw, h in CHORUS_SITES]
     out += [(sw, l2_sw_to_load(sw), *_moved(h, DELTA if k == "b" else DELTA // 4)) for sw, h, k in DELAY_SITES]

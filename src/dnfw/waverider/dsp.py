@@ -235,6 +235,8 @@ def fx_patches() -> list[tuple[int, int, bytes, bytes]]:
 def fx_spans(stock: bytes) -> list[tuple[str, int, bytes]]:
     """the block loaded in L2 as the stock stream loads it in DDR: zeros but for the initial words stock's .data
     gives it (the chorus's last word, base + 0x1340, starts at 1.0: found by running engine init on both)"""
+    if not _stockfx.ENABLED:
+        return []
     return [("the stock delay's control words and chorus's state, from DDR 0x80459130, in L2 (stock's initial "
              "words; opt-stock)", FX_DM, bootstream.read_span(stock, FX_DDR, FX_BYTES))]
 
@@ -861,8 +863,9 @@ def placements() -> list[dict]:
     out = [{"what": what, "load_address": f"{at:#010x}", "dm_byte": f"{at - LOAD_ALIAS:#08x}",
             "bytes": len(payload), "sha256": hashlib.sha256(payload).hexdigest()}
            for what, at, payload in spans() + ddr_spans() + l2_spans()]
-    out.append({"what": "the stock delay's control words and chorus's state in L2 (the stock stream's initial words "
-                        f"at {FX_DDR:#x}; opt-stock)", "load_address": f"{FX_DM:#010x}", "bytes": FX_BYTES})
+    if _stockfx.ENABLED:                          # (none while the move is off: stock's block stays in DDR)
+        out.append({"what": "the stock delay's control words and chorus's state in L2 (the stock stream's initial "
+                            f"words at {FX_DDR:#x}; opt-stock)", "load_address": f"{FX_DM:#010x}", "bytes": FX_BYTES})
     obj = objects()
     out += [{"what": f"patch: entry JUMP {COUNT_SW:#x} (the block counter, then PERC) + NOP at sw 0x1c9448",
              "load_address": f"{sw_to_load(ENTRY_SW):#010x}",
@@ -1051,7 +1054,7 @@ def regions() -> list[tuple[str, int, int, str]]:
     # L2: the loaded code and state, then the run-time areas
     for what, at, payload in l2_spans():
         area(what, at, len(payload))
-    if "FX_DM" in globals():                     # (fx_spans(stock): built in section7 from stock's initial words)
+    if _stockfx.ENABLED:                         # (fx_spans(stock): built in section7 from stock's initial words)
         area("the stock delay's control words and chorus's state (opt-stock, dnfw.waverider.stockfx)", FX_DM, FX_BYTES)
     area("the bus inserts' XDLY stores (inserts.bus HEAD_END..MV_STATE)", ins_bus.HEAD_END,
          ins_bus.MV_STATE - ins_bus.HEAD_END)

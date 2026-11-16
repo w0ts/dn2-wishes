@@ -105,6 +105,8 @@ def own(a: int) -> bool:
 
 def moved(a: int) -> int:
     """2026-11-12 (opt-stock): an address in the build's L2 copy of the stock FX block, where stock has it in DDR"""
+    if not stockfx.ENABLED:                      # the move off: the build keeps the block where stock has it
+        return a
     return a - dsp.FX_DM + dsp.FX_DDR if dsp.FX_DM <= a < dsp.FX_DM + dsp.FX_BYTES else a
 
 
@@ -113,9 +115,9 @@ def same_word(M5, rs, rb, a: int) -> bool:
     FX_DM in the build's: dnfw.waverider.stockfx); a pointer into the block, saved on the stack, as stock's when it
     names the same word. (The overlay is kept by byte: the word compared is the one holding A.)"""
     a &= ~3
-    if dsp.FX_DM <= a < dsp.FX_DM + dsp.FX_BYTES:
+    if stockfx.ENABLED and dsp.FX_DM <= a < dsp.FX_DM + dsp.FX_BYTES:
         sa, ba = moved(a), a
-    elif dsp.FX_DDR <= ddr(a) < dsp.FX_DDR + dsp.FX_BYTES:
+    elif stockfx.ENABLED and dsp.FX_DDR <= ddr(a) < dsp.FX_DDR + dsp.FX_BYTES:
         sa, ba = ddr(a), ddr(a) - dsp.FX_DDR + dsp.FX_DM
     else:
         sa = ba = a
