@@ -318,10 +318,17 @@ else takes; the owner adds it to `dsp.py` (a span or a constant) in its own comm
 | L1 block 3, `0x380000..0x3A0000` | loaded to `0x39BFFC`; I-cache `0x39C000..` | nothing | none |
 | L2 `0x20000000..0x20100000` | image to `0x2008823C`; non-cacheable window `0x200FA000..0x200FDFFF` | `0x200A4000..0x200EA000` (spans, PERC after the move) | `0x2009823C..0x200A4000` inside dsp.py's floor (image + 64 KB); `0x20088400..0x2009823C` below that floor (complex-ping's mods ran there on units); `0x200EA000..0x200FA000` the User's 64 KB margin above PERC; small gaps between spans (3.5 KB at `0x200A9200`, 3.2 KB at `0x200BD050`, 2.7 KB at `0x200AF542`, 2 KB at `0x200B5800`, 1.5 KB at `0x200B1210`) |
 
+PERC's tan table stays in DDR (opt-synths ed672287: read once per SVF coefficient set; L2 would save ~25-35 a voice).
+The checks: `test/test_dsp_claims.py` holds these claims as data (every claim disjoint, every L1 / L2 address constant of
+`dnfw` inside its owner's claim, every span starting in a claim that takes spans).
+
 Holes inside REGION (a padded span's zeros; real sizes from `dsp.objects()` and the state constants):
 F1 `0x2E0640..0x2E1000` (2,496 B: after ping.asm's 182 B and its 128 B tail), F2 `0x2E1200..0x2E1C00` (2,560 B: after
-trackbuf.asm's 342 B), F3 `0x2E4080..0x2E5400` (4,992 B: after the stereo inserts' state, which ends `0x2E4044`). Their
-only references in our code are constants (FDN8's LFO step `0x2E41D8`) and GRAN's removed state (`0x2E4B00`).
+trackbuf.asm's 342 B), ~~F3~~ `0x2E4080..0x2E5400` is **not free**: the bus FDN8 instances' stores live there at run time
+(`inserts.bus.FD_L1` `0x2E4050..0x2E53D0`, 8 x 624 B, since day1). Corrected 2026-11-12: the first scan grepped for
+addresses inside each hole and missed an area starting 48 B below it; now every module-level L1 constant of `dnfw` is
+listed (`scratch/juno-engine/l1consts.py`) and F1, F2 re-checked against them (RELATCH ends `0x2E0200`, ping's code
+`0x2E05B6`, trackbuf's `0x2E1156`).
 
 | range | bytes | owner | what | measured gain (per block) | status |
 |---|---|---|---|---|---|
@@ -329,7 +336,8 @@ only references in our code are constants (FDN8's LFO step `0x2E41D8`) and GRAN'
 | L1 `0x2E0080..0x2E0100` | 128 | opt-samples | (their claim) | (theirs) | taken |
 | L1 F2 `0x2E1200..0x2E1700` | 1,280 | opt-mnm | DPRO's interp table (`dsp.MNM_INTERP_DM`; trackbuf's span cut to `0x2E1200`) | measured (dsp_cost.py, engine): DPRO-DDRW -5,120 a voice, DPRO-DENS -2,560 (a 3-PCH chord ~-10k) | released (v0.52 merge: opt-mnm dropped, main's rule b) |
 | L1 F1 `0x2E0640..0x2E0E44` | 2,052 | opt-synths | PERC's exp2 table | SOPHIE -2.2..3.9k a voice (with tan), MD too | allotted |
-| L1 F3 `0x2E4080..0x2E4888` | 2,056 | opt-synths | PERC's tan table, a REGION span (copy; the DDR original and the link stay) | (with exp2) | allotted |
+| L1 `0x2E4050..0x2E53D0` | 4,992 | inserts (bus) | the bus FDN8 instances' stores (`inserts.bus.FD_L1`), live across blocks | (perf 2026-11-11) | used |
+| L1 `0x2E5400..0x2E5600` (MNM render IN) | 512, transient | opt-inserts | the post-insert pass's per-voice copy of the JUNO/CHOR ring span; only during the pass (IN is per-render scratch, dead after the voices) | bit-identical | allotted |
 | L1 `0x25D980..0x25DD84` (stock's) | 0 new | opt-synths (reads) | stock's own L1 sine S1, now SOPHIE's / AMD's sine (rounding only: 26 of 257 words 1 ulp; never written in the runner) | SHFT.sin's 1,288 B L1 copy not needed | used (457f79a4, after 12:00) |
 | L2 `0x20098400..0x2009B400` | 12,288 | opt-stock | the send FX' hot state: the stock chorus's state at `0x20098400..0x20099744` (4,932 B, `dsp.CHORUS_DM`, `_check_l2`); the rest reserved for the delay's control words (~600 B) and the reverb's hot words | -69k (L2); block 2 another ~-21k | used in part (L2, the User 2026-11-12); L1 block 2: **pending unit test** when the User is back |
 | L2 `0x200A1800..0x200A2800` | 4,096 | juno-chorus | jsend.asm, the chorus send's JUNO (1,976 B code, sw `0xBD0C00`) | (a feature, not a saving) | allotted (3b3b1aae / 6e982a5c) |
@@ -339,7 +347,7 @@ only references in our code are constants (FDN8's LFO step `0x2E41D8`) and GRAN'
 | L2 `0x200A7400..0x200A7440` (MNM scratch +0x3400) | 64 | clicks | `VEL_OFF`: per-slot velocity (16 words; plus frame slot 62 of our voices, types 5..31) | - | allotted (claude/velocity) |
 | L2 128 KB, place open | 131,072 | opt-md | DSP2's sine table (no exact smaller form: no symmetry) | EFM-CY -2.5k a voice, FM / TRX | **decision**: no 128 KB contiguous anywhere today; see below |
 
-Left free: F1 `0x2E0E44..0x2E1000` (444 B), F2 `0x2E1700..0x2E1C00` (1,280 B), F3 `0x2E4888..0x2E5400` (2,936 B),
+Left free: F1 `0x2E0E44..0x2E1000` (444 B), F2 `0x2E1700..0x2E1C00` (1,280 B), F3: none (FDN8 stores),
 L2 `0x2009B400..0x200A0000` (19,456 B) and `0x200A2800..0x200A4000` (6,144 B), both taken by perc-layout: with them,
 nothing is left inside dsp.py's L2 floor but the small gaps between spans.
 
