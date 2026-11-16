@@ -460,7 +460,6 @@ static int shows(int i)
                                  && *(volatile u32 *)0x4058F8D4u - smp_knob_at < VALUE_SHOW);
 }
 
-/* one cell: its widget at (X, Y) and, LABELLED, its label under it */
 /* v0.55: a control's value text as its record writes it; SAMP on a FLEX buffer reads B1..B8 */
 static void val_text(void *view, u32 id, char *vb)
 {
@@ -478,6 +477,10 @@ static void val_text(void *view, u32 id, char *vb)
     }
 }
 
+/* one cell: its widget at (X, Y) and, LABELLED, its label under it. No jump table (2026-11-11, v0.48 + ours):
+ * GCC put the widget if-chain's offsets inline in the code, and one offset pair (05f2 06c4) disassembles as a
+ * 68020 bset with a scaled index of 8, which cbuild's ColdFire check refuses; an if-chain has no data in it */
+__attribute__((optimize("no-jump-tables")))
 static void cell(void *c, void *view, int kind, u32 id, int x, int y, int labelled, int pill)
 {
     int top, v, w = id ? widget_of(id, kind) : W_EMPTY;
@@ -2103,17 +2106,7 @@ static void clear(void *c, int x0, int y0, int x1, int y1)
             SET_PIXEL(c, x, y, 0);
 }
 
-/* a meter position for a level 0..32767: about 60 dB across W pixels (6 dB a step of W/10) */
-static int meter_x(int v, int w)
-{
-    int x = 0, t = 32767;
-    while (t > 32 && v < t) {                   /* each halving of the level: W/10 to the left */
-        t >>= 1;
-        x++;
-    }
-    int pos = w - x * w / 10;
-    return pos < 0 ? 0 : pos;
-}
+/* (meter_x, the old RECORDER panel's meter, is gone with it: rec_dt2.c's meter_px draws the DT2's) */
 
 /* v0.22: the DT2's steps after a recording (rec.c): TRIM, NAME, ASSIGN */
 extern int rec_phase, trim_slot, nm_cur, as_done, smp_saved;
