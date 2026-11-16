@@ -568,12 +568,28 @@ def scenario_titles(a, report, sym):
     panel.settle(3_000_000)
     check("titles: track 1 is WaveTone", MO.set_machine(m, panel, 0, 1) == 1)
 
+    from unicorn import UC_HOOK_CODE
+
     def title():
         p = MO.guest(m, sym["ins_title_now"]) & 0xFFFFFFFF
         return bytes(m.read(p, 24)).split(b"\0")[0].decode("ascii", "replace") if p else None
 
+    # 2026-11-14 (r5 on the unit showed "Amplitude" on AMP 1/3): reading the message line back (title()) passes even
+    # when the bar still draws stock's text, so each title must also be POSTED through stock's message call, SAY
+    # 0x4005628C (message, std::string*), the path the bar draws from
+    posted = []
+
+    def on_say(uc, ad, sz, us):
+        sp = uc.reg_read(__import__("unicorn").m68k_const.UC_M68K_REG_A7)
+        s = struct.unpack(">I", bytes(uc.mem_read(sp + 8, 4)))[0]
+        p = struct.unpack(">I", bytes(uc.mem_read(s, 4)))[0] if 0x40000000 <= s < 0x48000000 else 0
+        text = bytes(uc.mem_read(p, 24)).split(b"\0")[0] if 0x40000000 <= p < 0x48000000 else b""
+        posted.append(text.decode("ascii", "replace"))
+    say_hook = m.uc.hook_add(UC_HOOK_CODE, on_say, begin=0x4005628C, end=0x4005628C)
+
     seen = {}
     for want in ("ENV1/AMP", "ENV2", "WAVEFORM", "ENV1/AMP"):
+        del posted[:]
         panel.tap((0, 3))                               # [AMP]
         panel.settle(30_000_000)                        # the title's slide over
         name = f"title_{len(seen)}_{want.replace('/', '_')}"
@@ -583,6 +599,9 @@ def scenario_titles(a, report, sym):
         dark = [x for x in range(20, 128) if any((x, y) not in lit for y in range(2, 8))]
         seen[name] = (title(), max(dark) if dark else None)   # the bar is lit, its letters dark: where they end
         check(f"titles: [AMP] shows {want!r}", seen[name][0] == want, f"title {seen[name][0]!r}")
+        check(f"titles: [AMP] posts {want!r} through stock's message call, last", bool(posted) and posted[-1] == want,
+              f"posted {posted!r}")
+    m.uc.hook_del(say_hook)
     report["titles"] = seen
     print(f"    titles, where each title's letters end: {seen}", flush=True)
     check("titles: every title's letters end inside the bar, clear of its right end (x < 120)",

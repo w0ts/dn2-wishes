@@ -257,13 +257,17 @@ static int named(const char *t, const char *w)
 }
 
 /* page.c wr_screen, after stock's page when nothing of ours covers it: AMP 1/3's dots, and its title ENV1/AMP over
- * stock's own (1.12 says "Amplitude" on its title line; inserts' ins_header renames a bare "AMP" header) */
+ * stock's own (1.12 says "Amplitude" on its title line; inserts' ins_header renames a bare "AMP" header).
+ * 2026-11-14 (r5 on the unit showed "Amplitude"): the title goes through stock's message call (SAY, slide 1), as
+ * AMP 2/3 and 3/3 do in amp_open. Writing the message line's string alone (slide 0) changed what ins_title_now
+ * reads, not what the bar draws: stock had already posted "Amplitude". Once posted, the line reads ENV1/AMP, so
+ * this runs once per entry. */
 void scope_dots(void *c)
 {
     if (amp_sub == AMP_STOCK && amp_page()) {
         const char *t = ins_title_now();
         if (t && (named(t, "Amplitude") || named(t, "AMP")))
-            ins_say(amp_title1, 0);
+            ins_say(amp_title1, 1);
         PAGE_DOTS(0, c, AMP_PAGES, AMP_STOCK, 7);
     }
 }
