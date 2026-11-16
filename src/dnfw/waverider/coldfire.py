@@ -599,6 +599,7 @@ def _cave_free(content: bytes, cave: tuple[int, int]) -> None:
 
 
 def compose(stock: bytes, assemble, compile_c) -> dict:
+    from . import msel as _msel                  # 2026-11-11: MACHINE SEL in two columns (csrc/msel)
     """-> {"content", "edits", "layout", "chunk"}. ASSEMBLE(source, base=...) -> bytes;
     COMPILE_C(header, base=...) -> (image, symbols, bss): csrc/waverider/page.c linked at
     BASE with `header` as its generated `wr_gen.h`."""
@@ -612,7 +613,7 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     from .. import slides as SL
     from .. import modversion                   # v0.39: the mod's version (VERSION), shown at the browser's top
     from ..a2f import pages as flt_pages        # 2026-11-10: the A2 filter machines' FLTR names
-    cimage, csyms, cbss = compile_c(pages.c_header() + flt_pages.c_header() + SL.c_header(stock)
+    cimage, csyms, cbss = compile_c(pages.c_header() + _msel.c_header() + flt_pages.c_header() + SL.c_header(stock)
                                     + modversion.c_define(),
                                      base=pages.C_LOAD)
     if cbss:

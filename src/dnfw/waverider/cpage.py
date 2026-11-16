@@ -42,6 +42,7 @@ LINK_SOURCES = [SOURCE.parents[1] / "sampler" / "link.c", SOURCE.parents[1] / "s
                 SOURCE.parents[1] / "hold" / "hold.c",                # DRONE's HOLD latch (2026-11-10)
                 SOURCE.parents[1] / "hold" / "hooks.S",
                 SOURCE.parent / "popup.c",                            # the list popup (2026-11-09)
+                SOURCE.parents[1] / "msel" / "msel.c",               # MACHINE SEL in two columns (2026-11-11)
                 SOURCE.parent / "popup_stock.c",                      # ... on stock parameters' lists
                 SOURCE.parents[1] / "devtest" / "devtest.c",          # the test channel (docs/remote-ui.md, 2026-11-11)
                 SOURCE.parents[1] / "devtest" / "whitelist.c",        # ... its one whitelist

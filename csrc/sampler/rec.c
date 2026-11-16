@@ -1880,6 +1880,11 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
      * and the list's YES then did nothing (the owner's v0.24 report). Released is "not
      * down", for every key. */
     int down = (flags & F_PRESS) && !(flags & F_RELEASE);
+    {   /* 2026-11-11 (the User's E): FUNC + SYN with MACHINE SEL up switches its page (csrc/msel) */
+        extern int msel_key(u8 *it, u32 code, int down);
+        if (it[0] == IT_KEY && msel_key(it, code, down))
+            code = it[7];
+    }
     if (it[0] == IT_KEY && down && !(flags & F_REPEAT) && code != K_FUNC && !(code >= K_ENC_A && code <= K_ENC_H))
         smp_key_seq = ++smp_ui_seq;                     /* a press (not FUNC, nor an encoder's push: held while turning): the popup goes */
     if (it[0] == IT_KEY && code < 64) {

@@ -342,7 +342,12 @@ void wr_screen(void *screen, void *canvas)
         extern int scope_visible(void);
         extern void scope_draw(void *canvas);
         extern void scope_dots(void *canvas);
-        if (ins_visible()) {                    /* the per-track inserts' page (csrc/inserts) */
+        extern int msel_visible(void);
+        extern void msel_draw(void *canvas);
+        if (msel_visible()) {                   /* MACHINE SEL in two columns (csrc/msel, 2026-11-11) */
+            wpop_begin();
+            msel_draw(canvas);
+        } else if (ins_visible()) {             /* the per-track inserts' page (csrc/inserts) */
             wpop_begin();                       /* (the stock page under it offers nothing of ours) */
             ins_draw(canvas);
         } else if (scope_visible()) {           /* AMP page 2, the oscilloscope (csrc/scope) */
