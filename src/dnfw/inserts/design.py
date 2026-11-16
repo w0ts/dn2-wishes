@@ -203,6 +203,9 @@ DS_LEV_MAX = 2.0
 # insert slot), and per moved slot 2 (L and R), in L2 after the bus pass's moved state (zeros at power-on; zeroed
 # with the insert's state when its type or track changes)
 AUTO_TYPES = (DIST, FOLD, HARM)
+# 2026-11-13 (the User: PGAIN on F and AUTO on G on every distortion): FUZZ's six fields are all its knobs, so its AUTO
+# rides in field 0's instance bits (FUZZ has no instance): bit 4 (FZ_AUTO_BIT), on or off; GATE goes to page 2
+FZ_AUTO_BIT = 1 << TYPE_BITS
 AUTO_ON = 0.5                                     # p6 = field 5 / 127 above this: on (the page writes 0 or 127)
 AUTO_TAU = 0.05
 AUTO_A = 1.0 - math.exp(-BLOCK / (AUTO_TAU * FS))

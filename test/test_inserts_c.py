@@ -94,6 +94,8 @@ def expected(recs):
                 used[y] += 1
             else:
                 f0 = 0
+        if y == D.FUZZ and r[1] & 0x80:                       # FUZZ's AUTO: saved in MIX's bit 7, sent in field 0's bit 4
+            f0 |= D.FZ_AUTO_BIT
         knobs = [x & 0x7F for x in r[2:8]]
         out += [f0, r[1] & 0x7F] + knobs
     return out
@@ -138,3 +140,23 @@ def test_new_sub_starts_without_the_dry():
     src = (ROOT / "csrc" / "inserts" / "ins.c").read_text()
     assert "{100, 85, 59, 0, SUB_DRY, 0}" in src and "#define SUB_DRY   0 " in src
     assert '{"BAND", "TONE", "OCT", "", "", ""}' in src      # compact: place k is stored field k + 1 (test_ins_sub_compact.py)
+
+
+def test_fuzz_auto_is_saved_in_mix_bit_7_and_sent_in_field_0_bit_4(exe):
+    """2026-11-13 (the User: AUTO on G for FUZZ, GATE to page 2): an old project's FUZZ (bit 7 clear) loads with AUTO off,
+    as before; one saved with AUTO on comes back with it and sends field 0 = FUZZ | bit 4; GATE (field 4) unchanged"""
+    recs = [[D.FUZZ, 100, 10, 20, 30, 40, 55, 66], [D.FUZZ, 0x80 | 90, 1, 2, 3, 4, 77, 88], [D.DIST, 0x80 | 70, 1, 2, 3, 4, 5, 6]]
+    recs += [[0] * 8 for _ in range(D.RECORDS - 3)]
+    w, back = run(exe, recs)
+    got = D.unpack(w[2:])
+    assert got[0:8] == [D.FUZZ, 100, 10, 20, 30, 40, 55, 66]
+    assert got[8:16] == [D.FUZZ | D.FZ_AUTO_BIT, 90, 1, 2, 3, 4, 77, 88]
+    assert got[16:24] == [D.DIST, 70, 1, 2, 3, 4, 5, 6]                      # bit 7 means nothing to DIST: dropped
+    assert back[0] == recs[0] and back[1] == recs[1] and back[2] == [D.DIST, 70, 1, 2, 3, 4, 5, 6]
+
+
+def test_fuzz_has_pgain_and_auto_on_page_1_and_gate_on_page_2():
+    src = (ROOT / "csrc" / "inserts" / "ins.c").read_text()
+    assert '{"DRIV", "TONE", "BIAS", "PRE", "PGAIN", AUTO_LABEL},' in src
+    assert '[T_FUZZ] = {"GATE", "", "", "", "", ""},' in src
+    assert "return pg ? (k == 0 ? 4 : -1) : (k < 4 ? k : k == 4 ? 5 : X_AUTO);" in src

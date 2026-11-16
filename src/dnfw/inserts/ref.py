@@ -70,6 +70,7 @@ class Ref:
                 self.ring[k][:] = 0
         p = [F(b) * F(1 / 127) for b in v[1:8]]
         self.k = k
+        self.fz_auto = bool(v[0] & D.FZ_AUTO_BIT)
         if sel == D.FUZZ:
             self.fuzz(self.st[k], p, buf)
         elif sel == D.TAPE:
@@ -116,7 +117,7 @@ class Ref:
         k = pre * F(D.FZ_PRE_MAX)
         thr = gate * F(D.FZ_GATE_MAX)
         v = dict(g=g, k=k, thr=thr, pa=F(D.FZ_PRE_A), rel=F(D.FZ_ENV_REL), a1=F(1.0), lv=lev, kl=F(0.0),
-                 au=False, at=F(0.0))
+                 au=self.fz_auto, at=lev)
         self.fz_loop(s, v, tone, bias, mod, buf)
 
     def dist(self, s, p, buf) -> None:

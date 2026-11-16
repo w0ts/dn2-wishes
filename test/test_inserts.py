@@ -294,3 +294,31 @@ def test_silent_slots_skip_their_insert_bit_identically():
         assert got == [[fbits(x) for x in w] for w in want], f"block {b}"
     assert max(steps[400:]) < 0.5 * min(steps[1:20]), (steps[1:20], steps[400:])
     assert all(m.get(D.QUIET_L2 + 4 * (2 * s)) for s in (3, 4, 8, 9, 15)), "silent slots, +0.0 and -0.0, marked"
+
+
+def test_fuzz_auto_rides_in_field_0_and_holds_the_level():
+    # 2026-11-13 (the User: AUTO on G for every distortion): FUZZ's AUTO is field 0's bit 4 (design.FZ_AUTO_BIT; FUZZ has
+    # no instance); T is its PGAIN. The model is the reference, on and off; on, the wet's level is the dry's x PGAIN
+    import math
+    on, off = D.FUZZ | D.FZ_AUTO_BIT, D.FUZZ
+    rows = {0: [on, 127, 20, 90, 0, 30, 0, 100], 1: [off, 127, 20, 90, 0, 30, 0, 100]}
+    m, r = mem0(), R.Ref()
+    acc = {0: [0.0, 0.0], 1: [0.0, 0.0]}
+    for b in range(260):
+        if b == 100:
+            for t in rows:
+                rows[t] = rows[t][:2] + [127] + rows[t][3:]          # DRIV to full
+        ph = [2 * math.pi * 110 * (32 * b + j) / D.FS for j in range(32)]
+        bufs = [[0.25 * math.sin(x) for x in ph] for _ in range(D.TRACKS)]
+        par = par_of(rows)
+        want = [[np.float32(x) for x in buf] for buf in bufs]
+        r.block(par, want)
+        got = call(m, par, bufs)
+        assert got == [[fbits(x) for x in w] for w in want], f"block {b}"
+        if 60 <= b < 100 or 220 <= b < 260:
+            for t in (0, 1):
+                acc[t][b >= 220] += sum(float(x) ** 2 for x in want[t]) / (40 * 32)
+    lv = {t: [math.sqrt(a) / (0.25 / math.sqrt(2)) for a in v] for t, v in acc.items()}
+    for x in lv[0]:
+        assert abs(20 * math.log10(x / (100 / 127))) < 1.5, lv
+    assert 20 * math.log10(lv[1][1]) > 6                          # off: much louder at full drive

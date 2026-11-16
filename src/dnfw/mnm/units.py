@@ -111,7 +111,8 @@ INS_UNITS: dict[str, dict[int, tuple]] = {
     # EVEN TONE LEV; FDN8 PRE SIZE DAMP MOD HPF LPF; XDLY TIM1 TIM2 FDBK MOD TONE (a TONE whose range the design does
     # not give reads in percent)
     "FUZZ": {0: ("db", lambda k: 48.0 * k / 127.0, False), 1: ("hz", lambda k: 300.0 * 40.0 ** (k / 127.0), False),
-             2: ("pct", None, False), 3: ("pct", None, False), 4: ("pct", None, False), 5: ("pct", None, False)},
+             2: ("pct", None, False), 3: ("pct", None, False), 4: ("pct", None, False), 5: ("pct", None, False),
+             6: ("onoff", None, False)},           # 6: AUTO (2026-11-13, ins.c X_AUTO)
     "TAPE": {0: ("db", lambda k: 18.0 * k / 127.0, False), 1: ("pct", None, False),
              2: ("hz100", lambda k: 10.0 * 20.0 ** (k / 127.0), False), 3: ("pct", None, False),
              4: ("hz", lambda k: 16000.0 * 2.0 ** (-3.0 * k / 127.0), False), 5: ("pct", None, False)},

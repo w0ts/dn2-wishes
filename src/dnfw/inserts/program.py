@@ -166,9 +166,16 @@ def fuzz(p: Prog) -> None:
     p.st(C["fz"], 0)
     p.ld(0, C["p6"])
     p.st(C["lv"], 0)
+    p.st(C["at"], 0)                             # AUTO's T: PGAIN (2026-11-13)
     p.fconst(0, 0.0)
     p.st(C["kl"], 0)
-    auto_set(p, None)
+    p.st(C["au"], 0)
+    p.ld(2, C["rec"])                            # AUTO: field 0's bit 4 (design.FZ_AUTO_BIT)
+    p.seti(4, 2)
+    p.ldi(1, 0, 4)
+    p.iconst(12, D.FZ_AUTO_BIT)
+    p.iop(1, 1, "AND", 12)
+    p.ifz(1, "NE", lambda: (p.fconst(0, 1.0), p.st(C["au"], 0)))
 
 
 def dist(p: Prog) -> None:

@@ -74,7 +74,7 @@ static const char *const NAME[TYPES] = {"OFF", "FUZZ", "TAPE", "FOLD", "CHOR", "
 static const char AUTO_LABEL[] = "AUTO";
 static const char *const LABEL[TYPES][6] = {
     {"", "", "", "", "", ""},
-    {"DRIV", "TONE", "BIAS", "PRE", "GATE", "PGAIN"},
+    {"DRIV", "TONE", "BIAS", "PRE", "PGAIN", AUTO_LABEL},   /* FUZZ: GATE on page 2 (FIELD) */
     {"DRIV", "WOW", "WRAT", "FLUT", "AGE", "HISS"},
     {"AMNT", "SYMM", "SHPE", "TONE", "PGAIN", AUTO_LABEL},
     {"DPTH", "RATE", "DLY", "VOIC", "WDTH", "FDBK"},
@@ -91,6 +91,25 @@ static const char *const LABEL[TYPES][6] = {
 /* the knob PLACES of a type start at its stored field DOFF (the DSP reads the fields by position, so a hidden first field
  * is skipped on the page, never moved): SUB 1 (LEV hidden), the rest 0. LABEL[y][k] is place k, stored field k + DOFF(y). */
 #define DOFF(y) ((y) == 9)
+/* 2026-11-13 (the User: PGAIN on F, AUTO on G on every distortion; FUZZ's GATE to a page 2, its values unchanged): the
+ * stored field of place k on page PG (0, 1). FUZZ: DRIV TONE BIAS PRE PGAIN (field 5) AUTO (X_AUTO: ins_fza, sent in
+ * field 0's bit 4, saved in the MIX byte's bit 7), page 2 GATE (field 4). -1: an empty place. A FUNC tap switches a
+ * type with a page 2 between its pages (ins_pop); [FX] goes on to the next FX page, page 1 again. */
+#define T_FUZZ    1
+#define X_AUTO    6
+static const char *const LABEL2[TYPES][6] = {
+    [T_FUZZ] = {"GATE", "", "", "", "", ""},
+};
+static int field_of(int y, int pg, int k)
+{
+    if (y == T_FUZZ)
+        return pg ? (k == 0 ? 4 : -1) : (k < 4 ? k : k == 4 ? 5 : X_AUTO);
+    return pg || !LABEL[y][k][0] ? -1 : k + DOFF(y);
+}
+static int has_page2(int y)
+{
+    return LABEL2[y][0] != 0;
+}
 static const u8 DEFAULT[TYPES][6] = {
     {0, 0, 0, 0, 0, 0}, {64, 90, 0, 30, 0, 100}, {50, 30, 20, 25, 50, 10}, {80, 64, 0, 100, 100, 0},
     {50, 50, 40, 64, 100, 0}, {90, 20, 40, 80, 0, 0}, {50, 70, 64, 80, 100, 0},
@@ -102,6 +121,9 @@ static const u8 DEFAULT[TYPES][6] = {
 u8 ins_sel[16][SLOTS] __attribute__((section(".data")));    /* the type (from ins_selv's band) */
 u8 ins_selv[16][SLOTS] __attribute__((section(".data")));   /* M.SEL as turned, 0..127: each type a band of it */
 u8 ins_mod[16][SLOTS] __attribute__((section(".data")));
+u8 ins_fza[16][SLOTS] __attribute__((section(".data")));   /* FUZZ's AUTO (0 / 127; X_AUTO) */
+static int ins_pg __attribute__((section(".data"))) = 0;      /* the INSERT page's page: 0, 1 (page 2) */
+static int ins_armed __attribute__((section(".data"))) = 0;   /* FUNC went down on an insert with a page 2 */
 u8 ins_inst[16][SLOTS] __attribute__((section(".data")));   /* FDN8 / XDLY: the DSP's instance, NO_INST: FULL */
 u8 ins_kv[16][SLOTS][TYPES][6] __attribute__((section(".data")));
 u32 ins_gen __attribute__((section(".data"))) = 0;      /* moves on every change: the link sends */
@@ -119,6 +141,7 @@ void ins_defaults(void)
             ins_sel[t][j] = 0;
             ins_selv[t][j] = 0;
             ins_mod[t][j] = 127;
+            ins_fza[t][j] = 0;
             ins_inst[t][j] = NO_INST;
             for (int y = 0; y < TYPES; y++)
                 for (int k = 0; k < 6; k++)
@@ -188,6 +211,8 @@ static void fields(int t, int j, u8 *f)
     int y = ins_sel[t][j];
     int full = instances(y) && ins_inst[t][j] == NO_INST;
     f[0] = full || !BUILT[y] ? 0 : (u8)(y | (instances(y) ? ins_inst[t][j] << 4 : 0));
+    if (y == T_FUZZ && ins_fza[t][j] >= 64)
+        f[0] |= 0x10;                           /* FUZZ's AUTO (dnfw.inserts.design.FZ_AUTO_BIT) */
     f[1] = ins_mod[t][j];
     for (int k = 0; k < 6; k++)
         f[2 + k] = ins_kv[t][j][y][k];
@@ -220,7 +245,8 @@ void ins_record(int t, int j, u8 *f)
     init();
     int y = ins_sel[t][j];
     f[0] = (u8)y;
-    f[1] = ins_mod[t][j];
+    f[1] = (u8)(ins_mod[t][j] | (y == T_FUZZ && ins_fza[t][j] >= 64 ? 0x80 : 0));   /* FUZZ's AUTO: MIX's bit 7 (an
+                                                 * older build masks it: the FUZZ loads, without AUTO) */
     for (int k = 0; k < 6; k++)
         f[2 + k] = ins_kv[t][j][y][k];
 }
@@ -232,6 +258,8 @@ void ins_set_record(int t, int j, const u8 *f)
     ins_sel[t][j] = (u8)y;
     ins_selv[t][j] = (u8)((POS[y] * 128 + 64) / TYPES);   /* the middle of its band, by display position */
     ins_mod[t][j] = f[1] & 0x7F;
+    if (y == T_FUZZ)
+        ins_fza[t][j] = f[1] & 0x80 ? 127 : 0;
     for (int k = 0; k < 6; k++)
         ins_kv[t][j][y][k] = f[2 + k] & 0x7F;
     ins_inst[t][j] = NO_INST;
@@ -249,6 +277,11 @@ void ins_loaded(void)
 static int clamp(int v, int lo, int hi)
 {
     return v < lo ? lo : v > hi ? hi : v;
+}
+
+static u8 *value_of(int t, int j, int y, int f)  /* a place's value: a stored field, or FUZZ's AUTO */
+{
+    return f == X_AUTO ? &ins_fza[t][j] : &ins_kv[t][j][y][f];
 }
 
 static void turn(int knob, int delta)
@@ -272,10 +305,10 @@ static void turn(int knob, int delta)
         touched = 7;
     } else {
         touched = knob - 2;
-        int y = ins_sel[t][j];
-        if (y && LABEL[y][knob - 2][0]) {
-            u8 *v = &ins_kv[t][j][y][knob - 2 + DOFF(y)];
-            if (LABEL[y][knob - 2] == AUTO_LABEL)
+        int y = ins_sel[t][j], f = field_of(y, ins_pg, knob - 2);
+        if (y && f >= 0) {
+            u8 *v = value_of(t, j, y, f);
+            if (!ins_pg && LABEL[y][knob - 2] == AUTO_LABEL)
                 *v = delta > 0 ? 127 : delta < 0 ? 0 : *v;   /* a switch */
             else
                 *v = (u8)clamp(*v + delta, 0, 127);
@@ -420,9 +453,26 @@ int ins_pop(u8 *it)
     u32 flags = (u32)it[8] << 24 | (u32)it[9] << 16 | (u32)it[10] << 8 | it[11];
     int press = (flags & 1u) && !(flags & 0x10u);
     extern int smp_overlay_dirty;
-    if (ins_up && it[0] == IT_KEY && code >= 41 && code <= 48)
+    if (ins_up && it[0] == IT_KEY && code >= 41 && code <= 48) {
+        ins_armed = 0;
         return 1;                               /* an encoder's push (and its release): ours while up, so
                                                  * the stock page under it does not switch to its values */
+    }
+    /* 2026-11-13 (main: as the send pages' second page, csrc/fxpage/fxp.c): a FUNC TAP (FUNC pressed and released with
+     * no other key, push or turn between) switches an insert with a page 2 (FUZZ) between its pages; FUNC goes on to
+     * stock as ever */
+    if (it[0] == IT_KEY && code == K_FUNC && !(flags & 8u)) {
+        if (press)
+            ins_armed = ins_up && has_page2(ins_sel[UI_TRACK & 15][(ins_up - 1) & 1]);
+        else if (ins_armed && ins_up) {
+            ins_armed = 0;
+            ins_pg ^= 1;
+            touched = -1;
+            smp_overlay_dirty = 1;
+        }
+        return 0;
+    }
+    ins_armed = 0;                              /* any other key, push or turn: FUNC is a modifier now */
     if (it[0] == IT_KEY && press && !(flags & 8u)) {
         if (code == K_FX) {
             if (KEY_HELD(K_FUNC)) {             /* FUNC + FX: stock's SEND pages, as stock */
@@ -434,6 +484,7 @@ int ins_pop(u8 *it)
                 return 0;
             }
             if (ins_up || ins_fx_page()) {      /* FX 1/3 -> 2/3 -> 3/3 -> 1/3 (stock's page, under ours) */
+                ins_pg = 0;
                 ins_up = (ins_up + 1) % PAGES;
                 smp_overlay_dirty = 1;
                 say(PAGE_NAME[ins_up], 1);
@@ -510,22 +561,26 @@ void ins_draw(void *c)
 {
     init();
     static int last_up __attribute__((section(".data"))) = 0;
-    if (ins_up != last_up) {                    /* another INSERT page: no knob touched yet */
+    if (ins_up != last_up) {                    /* another INSERT page: no knob touched yet, its page 1 */
         last_up = ins_up;
         touched = -1;
+        ins_pg = 0;
     }
     int t = UI_TRACK & 15, j = (ins_up - 1) & 1, y = ins_sel[t][j];
     fill(c, 22, 0, 127, 53, 0);                 /* the places; stock's title bar and left panel stay */
     wg_choice(c, 0, NAME[y]);
     wpop_offer_mv(0, "M.SEL", TYPES, POS[y], ins_name, 0, 0, ins_move);   /* the list popup (csrc/waverider/popup.c) */
-    wg_label(c, 0, !BUILT[y] ? "SOON" : instances(y) && ins_inst[t][j] == NO_INST ? "FULL" : "M.SEL");
+    wg_label(c, 0, !BUILT[y] ? "SOON" : instances(y) && ins_inst[t][j] == NO_INST ? "FULL" : ins_pg ? "PG 2" : "M.SEL");
+    if (!has_page2(y))
+        ins_pg = 0;
     for (int k = 0; k < 6; k++) {
-        if (!LABEL[y][k][0])
+        int f = field_of(y, ins_pg, k);         /* the stored field of place k (or FUZZ's AUTO) */
+        if (f < 0)
             continue;
-        int f = k + DOFF(y);                    /* the stored field of place k */
-        wg_knob(c, k + 1, ins_kv[t][j][y][f]);
-        const char *vt = (smp_values_held() || k == touched) ? mu_ins(y, f, ins_kv[t][j][y][f]) : 0;   /* the knob turned last (or SYN held): its value in its unit */
-        wg_label(c, k + 1, vt ? vt : LABEL[y][k]);
+        u8 v = *value_of(t, j, y, f);
+        wg_knob(c, k + 1, v);
+        const char *vt = (smp_values_held() || k == touched) ? mu_ins(y, f, v) : 0;   /* the knob turned last (or SYN held): its value in its unit */
+        wg_label(c, k + 1, vt ? vt : ins_pg ? LABEL2[y][k] : LABEL[y][k]);
     }
     wg_knob(c, 7, ins_mod[t][j]);
     {

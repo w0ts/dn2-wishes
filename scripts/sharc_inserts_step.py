@@ -98,7 +98,8 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
         rows = bytearray(128)
         rows[0:8] = bytes([D.FUZZ, 127, 100, 60, 30, 40, 0, 110] if b < 20 else
                           [D.FUZZ, 90, 60, 127, 127, 127, 50, 127])
-        rows[8:16] = bytes([D.FUZZ, 64, 127, 20, 0, 0, 20, 100]) if b >= 8 else bytes(8)
+        rows[8:16] = bytes([D.FUZZ | (D.FZ_AUTO_BIT if b >= 25 else 0), 64, 127, 20, 0, 0, 20, 100]) if b >= 8 else bytes(8)
+        # (2026-11-13: FUZZ's AUTO, field 0's bit 4, switched on at block 25)
         rows[40:48] = bytes([D.WIDE, 127, 127, 127, 127, 127, 127, 127])
         rows[16:24] = bytes([D.TAPE, 127, 90, 110, 100, 110, 80, 60])          # TAPE on track 2
         rows[24:32] = bytes([D.FOLD, 127, 100, 70, 64, 90, 110, 0])            # FOLD on track 3 (silent)

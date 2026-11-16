@@ -199,8 +199,12 @@ SUB DRY 0). The place is left empty.
 The User: "the drive post gain is hard to control when the gain/drive is on max. Could we have an 'auto adjust
 level'", and "put the post gain in the same position everywhere for all distos". On the distortions **PGAIN is knob F
 and AUTO knob G**, an on/off switch (a turn right sets ON, left OFF; stored 127 / 0, the DSP reads ON above 63). Done
-for **DIST, FOLD and HARM** (HARM's PGAIN is its stored LEV, K5, back on the page); FUZZ and TAPE wait for the
-User's call on which of their six knobs leaves the page.
+for **DIST, FOLD and HARM** (HARM's PGAIN is its stored LEV, K5, back on the page). **FUZZ** (2026-11-13): page 1
+DRIV TONE BIAS PRE PGAIN AUTO, **GATE on a page 2** (a FUNC tap switches pages, as the send pages' second page, csrc/fxpage;
+"PG 2" under M.SEL; [FX] goes on to the next FX page). Its stored fields do not move (ins.c `field_of`: a place -> a field); its AUTO has no field of
+its own: on the ColdFire `ins_fza`, saved in the MIX byte's bit 7 (an older build masks it: the FUZZ loads without
+AUTO), sent in field 0's bit 4 (`design.FZ_AUTO_BIT`; FUZZ has no instance), T its PGAIN. TAPE (PGAIN and AUTO, HISS
+to page 2) follows.
 
 Measured on the reference models (110 Hz, MIX 127, defaults), the wet's level against the drive 0 .. 127 without
 AUTO: FUZZ +1 .. +13 dB on a -12 dBFS sine (+2.5 dB at 0 dBFS), TAPE -0 .. +13, FOLD -2 .. +10, DIST -1 .. +1.5
