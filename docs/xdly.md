@@ -1,7 +1,7 @@
 # XDLY: the owner's cross delay beside the stock delay (OS 1.12 fork, not released)
 
 The Delay page gets a **TYPE** knob on its empty position **G**: **STOCK** (every existing kit)
-or **XDLY**, shown in its cell. With XDLY, five of the page's knobs change roles. The header's long
+or **XDLY**, shown in its cell (2026-11-11: STOCK first in the list and at the knob's left end; the stored values stay 0 XDLY, 1 STOCK: `dlt_step`, called from `fx_type_quant`, the kit setter's hook). With XDLY, five of the page's knobs change roles. The header's long
 names say so as a knob turns; the knob labels stay stock's (see below):
 
 | knob | XDLY | range |

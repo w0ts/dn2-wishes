@@ -20,6 +20,9 @@ typedef unsigned int u32;
 typedef unsigned char u8;
 void *wr_screen_obj = 0;
 int smp_overlay_dirty = 0;
+const char *mu_ins(int type, int knob, int k) { return 0; }      /* the page's draw (ins_draw) is not run here */
+int smp_values_held(void) { return 0; }
+void wpop_offer(int slot, const char *label, int n, int cur, const char *(*name)(int, int), const char *(*tag)(int, int), int arg) {}
 extern void ins_set_record(int t, int j, const u8 *f);
 extern void ins_loaded(void);
 extern void ins_words(u32 *w);
@@ -91,7 +94,10 @@ def expected(recs):
                 used[y] += 1
             else:
                 f0 = 0
-        out += [f0, r[1] & 0x7F] + [x & 0x7F for x in r[2:8]]
+        knobs = [x & 0x7F for x in r[2:8]]
+        if y == D.SUB:
+            knobs[4] = 0                                       # 2026-11-11: SUB's DRY is gone: always 0 to the DSP
+        out += [f0, r[1] & 0x7F] + knobs
     return out
 
 
@@ -103,7 +109,7 @@ def test_words_are_design_pack(exe):
         w, back = run(exe, recs)
         assert w[2:] == D.pack(expected(recs), 0)[2:]
         assert w[1] == 0
-        assert back == [[r[0]] + r[1:] for r in recs]          # the record as saved: type, MIX, knobs
+        assert back == [[r[0]] + r[1:] for r in recs]          # the record as saved: type, MIX, knobs (an old SUB's DRY kept)
 
 
 def test_instances_full_after_the_last(exe):
@@ -119,3 +125,10 @@ def test_unknown_type_is_off(exe):
     recs = [[13, 100, 1, 2, 3, 4, 5, 6]] + [[0] * 8 for _ in range(D.RECORDS - 1)]
     w, back = run(exe, recs)
     assert D.unpack(w[2:])[0] == 0 and back[0][0] == 0
+
+
+def test_sub_dry_is_not_sent_but_kept(exe):
+    recs = [[D.SUB, 90, 10, 20, 30, 40, 99, 6]] + [[0] * 8 for _ in range(D.RECORDS - 1)]
+    w, back = run(exe, recs)
+    assert D.unpack(w[2:])[:8] == [D.SUB, 90, 10, 20, 30, 40, 0, 6]   # DRY (K5) 0 to the DSP
+    assert back[0] == recs[0]                                          # an old project's DRY stays in the record

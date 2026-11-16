@@ -44,6 +44,27 @@ smp_quant_hook:
         move.w  %d3, 0x14(%a0,%d2.l*2)
         rts
 
+| 2026-11-11, the kit setter 0x40037d86 at 0x40037df6 (was: movea.l %d0,%a0 ; move.w %d3,(%a0,%d2.l*2)), the
+| Reverb and Delay pages' TYPE (records 131, 122): d0 the value words, d2 the slot, d3 the value, d4 the record
+| id. fx_type_quant (fmt.c) may move the value to the next entry of the list's order; d3 leaves as what was
+| written, a0 as d0, every other register as it came (the setter goes on to compare d4 and pass d3 along).
+        .globl  fx_type_hook
+fx_type_hook:
+        lea     -12(%sp), %sp
+        movem.l %d0-%d1/%a1, (%sp)
+        move.l  %d4, -(%sp)
+        move.l  %d3, -(%sp)
+        move.l  %d2, -(%sp)
+        move.l  %d0, -(%sp)
+        jsr     fx_type_quant
+        lea     16(%sp), %sp
+        move.l  %d0, %d3
+        movem.l (%sp), %d0-%d1/%a1
+        lea     12(%sp), %sp
+        movea.l %d0, %a0
+        move.w  %d3, (%a0,%d2.l*2)
+        rts
+
 | The SSI audio ISR 0x40025e36 at 0x40026098 (was: move.l %fp,%d2 ; addi.l #-72,%d2, 8
 | bytes; now jsr here and a nop), v0.16: every mode's transmit fill has ended there
 | (docs/link-research.md 6c), so smp_tdm(h) writes our packet into slots 8..15 of the

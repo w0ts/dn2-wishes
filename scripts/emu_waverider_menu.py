@@ -2257,6 +2257,8 @@ def main() -> int:
             if len(parts) == 5 and parts[3] == "tap":     # blocks:NAME:M:tap:CODE -- a key, e.g. the page key
                 code = int(parts[4])
                 panel.tap(((code - 1) // 8, (code - 1) % 8))
+            elif len(parts) == 6 and parts[3] == "turn":  # blocks:NAME:M:turn:ENC:DELTA -- a pushed turn, the one that moves values
+                panel.push_and_turn(int(parts[4]), int(parts[5]))
             elif len(parts) == 5:
                 machine.pc = panel.panelin.encoder(machine.m, panel.profile, int(parts[3]), int(parts[4]))
             panel.settle(int(float(millions) * 1_000_000))

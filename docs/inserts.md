@@ -57,7 +57,7 @@ OFF 0..14 .. XDLY 114..127). A saved record keeps the type; loaded, M.SEL sits i
 | HARM | AMNT | FREQ | EVEN | TONE | LEV | |
 | FDN8 | PRE | SIZE | DAMP | MOD | HPF | LPF |
 | XDLY | TIM1 | TIM2 | FDBK | MOD | TONE | |
-| SUB | LEV | BAND | TONE | OCT | DRY | |
+| SUB | LEV | BAND | TONE | OCT | | |
 | DIST | DRIV | TONE | BIAS | LOW | LEV | |
 | GATR (GATER) | DPTH | PATN | RATE | SHPE | SWNG | |
 | RING | FREQ | SHPE | AM | LEV | | |
@@ -149,6 +149,14 @@ sample (~0.2 ms), down at 1/1024 (~21 ms); a Schmitt trigger at +-1/8 of the env
 each rising crossing (the octave down) and, OCT 64..127, a second flip-flop on the first's rising edges
 (two octaves down); a square at the envelope's level, rounded by TONE (a one-pole, 60 Hz x 16^p: 60 ..
 960 Hz; Optimist's ~220 Hz at TONE 59); out = DRY x the voice + LEV x the square, then MIX.
+
+2026-11-11 (the User: "remove it", MIX does the dry / wet): SUB's **DRY knob is gone** (place E left empty). The
+DSP's DRY is always 0 now (`SUB_DRY` in ins.c, applied where the fields go to the DSP): the wet is the sub
+alone, MIX blends the voice back. A project saved with a DRY keeps it in its record (saved and loaded
+unchanged) but it is not sent: a SUB that had DRY above 0 loses that share of the voice in its wet path (a
+default SUB had 127, the full voice added to the sub at MIX 127: now the sub alone). **OCT** reads **-1**
+(knob 0..63) and **-2** (64..127): the same two sounds as before (one flip-flop, two), only the readout
+changed, so an old project's octave is the same sound.
 
 **DIST**: Optimist's DIST, on FUZZ's sample loop (one copy of the loop, `fz_loop`, run after FUZZ's or
 DIST's block values; DIST adds its block values only). The drive is relative to the voice's peak (FUZZ's

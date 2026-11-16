@@ -49,6 +49,8 @@ typedef signed char s8;
 #define TYPES     13                            /* OFF and the twelve (dnfw.inserts.design: a type keeps its
                                                  * number for good; 2026-11-10 SUB DIST GATER RING 9..12, Optimist's) */
 #define SLOTS     2
+#define T_SUB     9
+#define SUB_DRY   0                             /* SUB's DRY knob is gone (2026-11-11, the User: MIX is the dry / wet): the DSP always gets 0, the wet is the sub alone; a saved DRY is kept in the project but not sent */
 #define T_FDN8    7
 #define T_XDLY    8
 #define N_FDN8    8                             /* the DSP's instances (design.FDN8_INSTANCES, XDLY_INSTANCES) */
@@ -74,7 +76,7 @@ static const char *const LABEL[TYPES][6] = {
     {"AMNT", "FREQ", "EVEN", "TONE", "LEV", ""},
     {"PRE", "SIZE", "DAMP", "MOD", "HPF", "LPF"},     /* FDN8 (docs/fdn8.md's knobs) */
     {"TIM1", "TIM2", "FDBK", "MOD", "TONE", ""},      /* XDLY (docs/xdly.md's knobs) */
-    {"LEV", "BAND", "TONE", "OCT", "DRY", ""},        /* SUB (docs/inserts.md, ported from Optimist) */
+    {"LEV", "BAND", "TONE", "OCT", "", ""},           /* SUB (docs/inserts.md, ported from Optimist); DRY (knob 5) removed 2026-11-11 */
     {"DRIV", "TONE", "BIAS", "LOW", "LEV", ""},       /* DIST */
     {"DPTH", "PATN", "RATE", "SHPE", "SWNG", ""},     /* GATER */
     {"FREQ", "SHPE", "AM", "LEV", "", ""},            /* RING */
@@ -83,7 +85,7 @@ static const u8 DEFAULT[TYPES][6] = {
     {0, 0, 0, 0, 0, 0}, {64, 90, 0, 30, 0, 100}, {50, 30, 20, 25, 50, 10}, {80, 64, 0, 100, 100, 0},
     {50, 50, 40, 64, 100, 0}, {90, 20, 40, 80, 0, 0}, {50, 70, 64, 80, 100, 0},
     {0, 60, 30, 64, 0, 127}, {60, 70, 60, 0, 98, 0},
-    {100, 85, 59, 0, 127, 0}, {64, 90, 20, 64, 64, 0}, {127, 64, 64, 20, 0, 0}, {64, 0, 0, 100, 0, 0},
+    {100, 85, 59, 0, SUB_DRY, 0}, {64, 90, 20, 64, 64, 0}, {127, 64, 64, 20, 0, 0}, {64, 0, 0, 100, 0, 0},
 };
 
 u8 ins_sel[16][SLOTS] __attribute__((section(".data")));    /* the type (from ins_selv's band) */
@@ -177,7 +179,7 @@ static void fields(int t, int j, u8 *f)
     f[0] = full || !BUILT[y] ? 0 : (u8)(y | (instances(y) ? ins_inst[t][j] << 4 : 0));
     f[1] = ins_mod[t][j];
     for (int k = 0; k < 6; k++)
-        f[2 + k] = ins_kv[t][j][y][k];
+        f[2 + k] = y == T_SUB && k == 4 ? SUB_DRY : ins_kv[t][j][y][k];
 }
 
 /* the 58 words the DSP reads from GEN_OFFSET (dnfw.inserts.design.pack, held to it by

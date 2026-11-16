@@ -92,7 +92,17 @@ static void dlt_label(void *canvas, int x0, int y0, const char *name)
 typedef const char *(*wpop_name_fn)(int i, int arg);
 extern void wpop_offer(int slot, const char *label, int n, int cur, wpop_name_fn name, wpop_name_fn tag, int arg);
 extern int wpop_slot_of(int x0, int y0);
-static const char *const dlt_list[2] = {"XDLY", "STOCK"};
+/* 2026-11-11 (the User: "stock should be the first item"): the list is STOCK XDLY; the stored value
+ * keeps its meaning (0 XDLY, 1 STOCK). Position = 1 - value; the knob's step is dlt_step (fmt.c smp_quant) */
+static const char *const dlt_list[2] = {"STOCK", "XDLY"};
+
+/* TYPE's knob turned by D: the other value when the turn goes towards it, else the same; OLD0 the word
+ * held (value << 8 | fine) -> the word to write */
+int dlt_step(int old0, int d)
+{
+    (void)old0;
+    return (d > 0 ? 0 : 1) << 8;                 /* right: XDLY (0), left: STOCK (1) */
+}
 
 static const char *dlt_pop_name(int i, int arg)
 {
@@ -113,5 +123,5 @@ void dlt_cell(void *view, void *canvas, int x0, int y0, u32 id)
     TEXT(canvas, FONT, x0 + 12, y0 + 17, CENTRED, dlt_seen ? "STO" : "XDL");
     TEXT(canvas, FONT, x0 + 12, y0 + 9, CENTRED, dlt_seen ? "CK" : "Y");
     dlt_label(canvas, x0, y0, "TYPE");
-    wpop_offer(wpop_slot_of(x0, y0), "TYPE", 2, dlt_seen, dlt_pop_name, 0, 0);
+    wpop_offer(wpop_slot_of(x0, y0), "TYPE", 2, 1 - dlt_seen, dlt_pop_name, 0, 0);
 }

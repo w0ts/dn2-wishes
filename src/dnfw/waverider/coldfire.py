@@ -436,6 +436,8 @@ KEY_STOCK = 0x40016480                   # stock's: code 2 cycles the pages, the
 QUANT_SITE = 0x40037BE6                  # the setter's write: movea.l %d0,%a0 ; move.w %d3,14(%a0,%d2.l*2)
 QUANT_STOCK = bytes.fromhex("204031832a14")
 MUTE_SITE, MUTE_STOCK = 0x400275B0, "4eb940134770"   # v0.52: the frame ISR, after its voice loop: jsr 0x40134770 (a copy)
+FX_TYPE_SITE = 0x40037DF6                # the kit setter's store: movea.l %d0,%a0 ; move.w %d3,0(%a0,%d2.l*2) (the FX TYPE hook, 2026-11-11)
+FX_TYPE_STOCK = bytes.fromhex("204031832a00")
 TDM_SITE = 0x40026098                    # the SSI ISR, its transmit fill done: move.l %fp,%d2 ; addi.l #-72,%d2 (v0.16)
 TDM_STOCK = bytes.fromhex("240e0682ffffffb8")
 # DIRECT JUMP (csrc/jump, docs/jump.md): the PTN view's single cue, the sequencer tick ISR's
@@ -917,6 +919,14 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     edit(QUANT_SITE, bytes.fromhex("4eb9") + _long(csyms["smp_quant_hook"]),
          "the parameter setter's write: smp_quant moves a sample machine's few-choice "
          "control one choice a detent, then writes as stock", QUANT_STOCK)
+
+    # 2026-11-11: the Reverb / Delay pages' TYPE (FX records 131, 122) are written by the kit setter 0x40037d86:
+    # its store goes through fx_type_hook, which steps them in the list's order (STOCK first)
+    _need(content, FX_TYPE_SITE - 4, bytes.fromhex("4e90588f"), "the kit setter's jsr %a0@ ; addq #4 before its write")
+    _need(content, FX_TYPE_SITE + 6, bytes.fromhex("0c840000" "0094"), "... and its cmpi.l #148,%d4 after")
+    edit(FX_TYPE_SITE, bytes.fromhex("4eb9") + _long(csyms["fx_type_hook"]),
+         "the kit setter's write: fx_type_quant steps the Reverb / Delay TYPE in the list's order "
+         "(STOCK first), then writes as stock", FX_TYPE_STOCK)
 
     # 7. getMachineType(track): WaveTone for the UI, the real type where it is identity
     _need(content, TRACK_TYPE_FN, TRACK_TYPE_FN_STOCK, "getMachineType(track), as raw_track copies it")

@@ -34,8 +34,10 @@ RT60 of the reference (DAMP 30, MOD 64; an impulse, T30 x 2): SIZE 0 0.43 s, 45 
 ## LONG: the longer lines (TYPE 2, 2026-11-09)
 
 TYPE has a third value, **LONG**: FDN8 in a bigger, darker room. Record 131's top value is widened
-at run time from 1 to 2 (`RECORD_MAX`, record + 0x0c, `0x100` -> `0x200`). The order is FDN8 (0),
-STOCK (1, what every kit stores), LONG (2). What differs (`design.variant`):
+at run time from 1 to 2 (`RECORD_MAX`, record + 0x0c, `0x100` -> `0x200`). The stored values are FDN8 (0),
+STOCK (1, what every kit stores), LONG (2); 2026-11-11 (the User: STOCK first) the **knob and the popup list go
+STOCK, FDN8, LONG**: STOCK at the knob's left end, the stored values unchanged (`rvt_step`, called from the setter's
+hook `fx_type_hook` -> `fx_type_quant`, fmt.c, at the kit setter 0x40037d86's store 0x40037df6, while a knob turn is fresh). What differs (`design.variant`):
 
 - every line and diffuser about twice as long: the nearest unused primes to 2 x FDN8's (lines
   5927 .. 11243 samples, 123 .. 234 ms; diffusers 199, 157, 479, 359);

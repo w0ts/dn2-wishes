@@ -285,7 +285,7 @@ static const char *unit_text_of(int kind, int curve, int k)
         return ub;
     }
     if (kind == MU_OCT) {
-        ub[0] = k < 64 ? '1' : '2'; ub[1] = 'o'; ub[2] = 'c'; ub[3] = 't'; ub[4] = 0;
+        ub[0] = '-'; ub[1] = k < 64 ? '1' : '2'; ub[2] = 0;   /* 2026-11-11: -1 at the left, -2 right */
         return ub;
     }
     if (kind == MU_GLID) {                          /* 2026-11-11: GLID up to 5 minutes, exact a knob */

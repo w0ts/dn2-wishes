@@ -349,6 +349,22 @@ int smp_quant(u8 *s, int slot, int value, u32 id)
     return value;
 }
 
+/* 2026-11-11: the Reverb page's TYPE (record 131) and the Delay page's (122): FX records, written by the
+ * kit setter 0x40037d86 (not the sound setter above): its store at 0x40037df6 (hooks.S, fx_type_hook).
+ * A knob turn (fresh, as func_kind reads it) moves them in the list's order (STOCK first), not in the
+ * stored values' (csrc/fdn8/ui.c rvt_step, csrc/xdly/ui.c dlt_step). BASE the kit's value words, SLOT
+ * the record's place in them, VALUE the word stock is writing -> the word to write */
+int fx_type_quant(u8 *base, int slot, int value, u32 id)
+{
+    if ((id == 131u || id == 122u) && smp_knob_d && *(volatile u32 *)0x4058F8D4u - smp_knob_at <= KNOB_FRESH) {
+        extern int rvt_step(int old0, int d);
+        extern int dlt_step(int old0, int d);
+        int old0 = *(volatile u16 *)(base + 2 * slot);
+        return id == 131u ? rvt_step(old0, smp_knob_d) : dlt_step(old0, smp_knob_d);
+    }
+    return value;
+}
+
 /* -- the header's text -------------------------------------------------------------------- */
 
 static void put(char *buf, const char *s, int max)

@@ -110,7 +110,22 @@ static void rvt_label(void *canvas, int x0, int y0, const char *name)
 typedef const char *(*wpop_name_fn)(int i, int arg);
 extern void wpop_offer(int slot, const char *label, int n, int cur, wpop_name_fn name, wpop_name_fn tag, int arg);
 extern int wpop_slot_of(int x0, int y0);
-static const char *const rvt_list[3] = {"FDN8", "STOCK", "LONG"};
+/* 2026-11-11 (the User: "stock should be the first item", the knob's left end): the list's order is
+ * STOCK FDN8 LONG; the stored value keeps its meaning (0 FDN8, 1 STOCK, 2 LONG: kits, the frame and the
+ * DSP). rvt_pos[stored] is the list position, rvt_val[position] the stored value (the swap of 0 and 1,
+ * so one table is both); the knob's step goes through rvt_step (fmt.c smp_quant, the setter's hook). */
+static const char *const rvt_list[3] = {"STOCK", "FDN8", "LONG"};
+static const unsigned char rvt_pos[3] = {1, 0, 2};
+
+/* TYPE's knob turned by D (its sign: right is +): the next stored value in the list's order; OLD0 the
+ * word held (value << 8 | fine) -> the word to write */
+int rvt_step(int old0, int d)
+{
+    int c = (old0 >> 8) & 0xFF;
+    int p = rvt_pos[c > 2 ? 1 : c] + (d > 0 ? 1 : -1);
+    p = p < 0 ? 0 : p > 2 ? 2 : p;
+    return rvt_pos[p] << 8;
+}
 
 static const char *rvt_pop_name(int i, int arg)
 {
@@ -133,5 +148,5 @@ void rvt_cell(void *view, void *canvas, int x0, int y0, u32 id)
     TEXT(canvas, FONT, x0 + 12, y0 + 17, CENTRED, rvt_seen == 1 ? "STO" : rvt_seen == 2 ? "LON" : "FDN");
     TEXT(canvas, FONT, x0 + 12, y0 + 9, CENTRED, rvt_seen == 1 ? "CK" : rvt_seen == 2 ? "G" : "8");
     rvt_label(canvas, x0, y0, "TYPE");
-    wpop_offer(wpop_slot_of(x0, y0), "TYPE", 3, rvt_seen, rvt_pop_name, 0, 0);
+    wpop_offer(wpop_slot_of(x0, y0), "TYPE", 3, rvt_pos[rvt_seen], rvt_pop_name, 0, 0);
 }
