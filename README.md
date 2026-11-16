@@ -3,7 +3,7 @@ Custom firmware for the Elektron Digitone II, OS 1.12. Built on
 
 ## Added in DN2 WISHES
 
-- OS 1.12 support.
+- 1.12 support.
 - Machines: JUNO, ANALOG (filters SVF, LADR, OTA, DIODE, MS-20), TB-303, PLAITS, SOPHIE, DRONE.
 - Paraphonic mode on ANALOG and JUNO (VOICE page, knob B): a chord through one filter.
 - Insert effects: FUZZ, TAPE, FOLD, CHOR, WIDE, HARM, FDN8, XDLY, SUB, DIST, GATER,
