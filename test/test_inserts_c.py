@@ -23,6 +23,8 @@ int smp_overlay_dirty = 0;
 const char *mu_ins(int type, int knob, int k) { return 0; }      /* the page's draw (ins_draw) is not run here */
 int smp_values_held(void) { return 0; }
 void wpop_offer(int slot, const char *label, int n, int cur, const char *(*name)(int, int), const char *(*tag)(int, int), int arg) {}
+void wpop_offer_mv(int slot, const char *label, int n, int cur, const char *(*name)(int, int), const char *(*tag)(int, int), int arg,
+                   void (*move)(int, int)) {}   /* (v0.52: the popup's move form; the draw is not run here) */
 extern void ins_set_record(int t, int j, const u8 *f);
 extern void ins_loaded(void);
 extern void ins_words(u32 *w);
