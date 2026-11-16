@@ -48,8 +48,19 @@ static int hold_on(int t)
     return (*(const u16 *)(snd + SOUND_PARAMS + 2u * SLOT_HOLD) >> 8) >= 64u;   /* the page's two-way rule */
 }
 
-/* at a voice's note-on (the frame ISR, hooks.S): its gate length; v the voice, t its track */
+/* at a voice's note-on (the frame ISR, hooks.S): its gate length; v the voice, t its track. A note that plays
+ * (not dropped) restarts the voice's envelopes (csrc/matrix) */
+static int hold_len_of(int v, int t, int len);
 int hold_len(int v, int t, int len)
+{
+    extern void mx_env_on(u32 v);
+    int r = hold_len_of(v, t, len);
+    if (r >= 0)
+        mx_env_on((u32)v);
+    return r;
+}
+
+static int hold_len_of(int v, int t, int len)
 {
     u32 bit = 1u << v;
     if (!hold_on(t)) {
@@ -102,5 +113,6 @@ u32 hold_final(u32 off36, u32 *w40)
     *w40 = (*w40 & ~hold_seq) | hold_rel;
     off36 = (off36 & ~hold_seq) | hold_rel;
     hold_rel = 0;
+    { extern void mx_env_off(u32 bits); mx_env_off(off36); }     /* the voices' envelopes released (csrc/matrix) */
     return off36;
 }

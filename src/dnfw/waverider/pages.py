@@ -821,7 +821,7 @@ WISH_RAM = 0x47280000                           # 512 KB clear above the profile
 WISH_BYTES = 0x464200                           # 4 x 8192 + 2 x 8192 x 2 + 2 x 16384 + 512 x 512 + 512 + 6 x 8192 + 512 x 8192
 assert PROF_RAM + PROF_BYTES + (512 << 10) <= WISH_RAM and WISH_RAM + WISH_BYTES <= 0x47800000, "DSP tables, profiler, wishes, the stack"
 MX_RAM = 0x476F0000                             # the matrix's tables (csrc/matrix/matrix.c struct mx_state): each
-MX_BYTES = 0x4000                               # track's routes laid out twice, the scratch row; read every frame
+MX_BYTES = 0x8000                               # track's routes laid out twice, the envelopes, the scratch row
 assert WISH_RAM + WISH_BYTES <= MX_RAM and MX_RAM + MX_BYTES <= 0x47800000, "wishes, matrix, the stack"
 MD_FX_NIBBLES = 0x31313311                      # AMD-AMF, EQF-EQG, FLTF-FLTW-FLTQ clipped, as the MD's
 TRACK_LEVEL_ID = 10                             # record 10, "Track Level" / LEV, 0..0x7f00 (read from the 1.11 record table)

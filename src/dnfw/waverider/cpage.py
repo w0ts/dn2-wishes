@@ -59,6 +59,7 @@ LINK_SOURCES = [SOURCE.parents[1] / "sampler" / "link.c", SOURCE.parents[1] / "s
                 SOURCE.parents[1] / "wishes" / "item.c",              # ... on kits and patterns (2026-11-12)
                 SOURCE.parents[1] / "wishes" / "items.S",
                 SOURCE.parents[1] / "matrix" / "matrix.c",          # the matrix's routes (docs/matrix.md)
+                SOURCE.parents[1] / "matrix" / "env2_page.c",       # ... AMP's ENV2 page
                 SOURCE.parents[1] / "modulation" / "cascade.c",       # LFOs on the LFOs above them (2026-11-11)
                 SOURCE.parents[1] / "modulation" / "hooks.S",
                 SOURCE.parents[1] / "modulation" / "moving.c",        # controls that move (2026-11-11)
@@ -123,7 +124,7 @@ WISH_ENTRIES = ["wish_memcpy_stub", "wish_memset_stub", "wish_load_stub", "wish_
                 "wish_item", "wish_kit_load_stub", "wish_kit_save_stub", "wish_pat_load_stub", "wish_pat_save_stub",
                 "wish_song_load_stub", "wish_song_save_stub", "wish_ps_load_stub", "wish_ps_save_stub",
                 "wish_item_loads", "wish_item_saves", "wish_item_nolane", "wish_item_dropped",
-                "mx_poll", "mx_eval", "mx_lay", "mx_compiles"]     # the matrix (csrc/matrix)
+                "mx_poll", "mx_eval", "mx_lay", "mx_compiles", "mx_env_on", "mx_env_off"]     # the matrix (csrc/matrix)
 # the preset browser's ENGINE filter (csrc/presets, dnfw.waverider.engfilt): its hooks and the state the checks read
 ENG_ENTRIES = ["eng_test_hook", "eng_sort_hook", "eng_ctor_hook", "eng_label", "eng_title", "eng_list", "eng_sort_row",
                "eng_clear", "eng_toggle", "eng_tick", "eng_match", "eng_mask", "eng_tests", "eng_lists", "eng_n"]

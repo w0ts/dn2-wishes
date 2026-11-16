@@ -61,8 +61,12 @@ failure:
 6x. **the matrix** (2026-11-12, `emu_matrix.py`, docs/matrix.md): the frame's parameter path called by hand,
    stock's route 1 on every voice row against the same route in the row's sound's record: the heard slot the same
    every frame (one route a row; then three into one slot, clamped in stock's order); the matrix's instructions the
-   same with no route and with every route, under its bound.
-6s.**DIRECT JUMP** (`emu_jump.py`, docs/jump.md): the sequencer ticked through stock's own ISR;
+   same with no route and with every route, under its bound; ENV1 (the row's AMP cells) and ENV2 (the record) through
+   HOLD's own note hooks, each routed cell every frame as the clone's model.
+6y. **the envelope clone** (2026-11-12, `sharc_matrix_env.py --quick`): the model ENV1/ENV2 run against stock's own AMP
+   envelope in Elektron's DSP code (the SHARC runner), block by block: ADSR and AHD, a note-off in the attack, RSET
+   off, the fastest knobs.
+6s. **DIRECT JUMP** (`emu_jump.py`, docs/jump.md): the sequencer ticked through stock's own ISR;
    off is stock's state every tick; on, every track goes on from its own step (Elektron's rule); a cue
    that is not the PTN view's stays stock's; the setting persists in its sector.
 6q. **UI fuzz** (v0.33, `emu_fuzz_ui.py`): the sample pages driven at random, two seeds.
@@ -255,6 +259,7 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("wishes", "the wishes record through stock's SAVE, LOAD, memcpy, memset (ColdFire)"),
        ("wishitems", "the wishes record on kits, patterns, songs and the project settings (ColdFire)"),
        ("matrix", "the matrix's routes heard as stock's route 1, at a constant cost (ColdFire)"),
+       ("envclone", "ENV1/ENV2's clone against stock's own AMP envelope (SHARC runner)"),
        ("engine", "engine + LOAD/SAVE"),
        ("boot", "boot from reset"),
        ("fuzz", "UI fuzz, two seeds, the audio interrupt at its real rate (ColdFire)"),
@@ -929,6 +934,23 @@ def main() -> int:
             later("matrix", "the matrix's routes heard as stock's route 1, at a constant cost (ColdFire)",
                   "the matrix's routes heard as stock's route 1, at a constant cost (ColdFire)",
                   [mx_cmd, sorted(EMU_ENV.items())], mx_body)
+
+            # 2026-11-12: ENV1/ENV2 (the User: ENV1 is stock's AMP envelope, ENV2 its clone): the clone's model against
+            # stock's own envelope in Elektron's DSP code, block by block (scripts/sharc_matrix_env.py --quick); the
+            # target's C against the model is the matrix step's env scenario
+            ec_js = work / "envclone.json"
+            ec_cmd = [a.venv, "-u", "scripts/sharc_matrix_env.py", "--image", a.stock, "--digikit", a.digikit_sharc,
+                      "--quick", "--json", ec_js]
+
+            def ec_body(tdir):
+                rc, out = run("envclone", ec_cmd, logs, env={"PYTHONPATH": str(ROOT / "src")}, trace=tdir)
+                last = out.strip().splitlines()[-1] if out.strip() else ""
+                if rc != 0 or not last.startswith("PASS"):
+                    return False, "\n".join(l for l in out.splitlines() if "FAIL" in l)[-900:] or out[-900:]
+                return True, last[6:][:800]
+            later("envclone", "ENV1/ENV2's clone against stock's own AMP envelope (SHARC runner)",
+                  "ENV1/ENV2's clone against stock's own AMP envelope (SHARC runner)",
+                  [ec_cmd, sorted(EMU_ENV.items())], ec_body)
 
         # 6c. the RECORDER screen (v0.22): FUNC+VOICE opens it over any page, its knobs
         # change the recorder and never the track's sound, NO closes it, and the UI keeps

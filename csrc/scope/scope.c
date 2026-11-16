@@ -1,9 +1,10 @@
-/* AMP page 2: the selected track's oscilloscope (docs/scope.md), OS 1.12.
+/* An AMP page: the selected track's oscilloscope (docs/scope.md), OS 1.12; its place is AMP_SCOPE (amp_pages.h).
  *
  * 2026-11-11 (the User): "an Oscilocope page for each track, i would put it as AMP page 2", "per track,
  * after the inserts", "A, follow overbridge. simple, logical." Stock AMP has one page; [AMP] on it now
- * steps AMP 1/2 (stock's) -> 2/2 (this scope) -> 1/2. FUNC + [AMP] and [AMP] from another page are
- * stock's. NO or any page key closes the scope, as the INSERT pages (csrc/inserts/ins.c).
+ * steps through the AMP pages (amp_pages.h; 2026-11-12: stock's, ENV2's, this scope's) and back to stock's.
+ * FUNC + [AMP] and [AMP] from another page are stock's. NO or any page key closes ours, as the INSERT pages
+ * (csrc/inserts/ins.c).
  *
  * The audio is what Overbridge's track outputs carry (docs/link-research.md §2, §5): the DSP's output
  * stage 0x1c244d writes every block, for every track, either the routing's block after the inserts (A,
@@ -58,7 +59,10 @@ static const char *const SPAN[ZOOMS] = {"2ms", "4ms", "8ms", "17ms", "33ms", "67
 static const char *const GAIN_TEXT[GAINS + 1] = {"x1", "x2", "x4", "x8", "x16", "AUTO"};
 static const char *const AUTO_TEXT[GAINS] = {"Ax1", "Ax2", "Ax4", "Ax8", "Ax16"};
 
-int scope_up __attribute__((section(".data"))) = 0;
+#include "../waverider/amp_pages.h"
+
+int amp_sub __attribute__((section(".data"))) = AMP_STOCK;   /* the AMP page up (amp_pages.h) */
+int scope_up __attribute__((section(".data"))) = 0;            /* amp_sub == AMP_SCOPE: the tap runs */
 u32 scope_taps __attribute__((section(".data"))) = 0;   /* blocks tapped (the checks read it) */
 static int zoom __attribute__((section(".data"))) = 2;
 static int gain __attribute__((section(".data"))) = 0;      /* x1; GAINS is AUTO */
@@ -118,13 +122,17 @@ static int amp_page(void)                       /* stock's AMP page is the page 
     return ins_view_of(AMP_PAGE_VTABLE) != 0;
 }
 
-static void scope_open(int up)
+static void amp_open(int sub)
 {
-    scope_up = up;
+    static const char *const TITLE[AMP_PAGES] = {"AMP (1/3)", "AMP (2/3)", "AMP (3/3)"};
+    amp_sub = sub;
+    scope_up = sub == AMP_SCOPE;
     phase = 0;
     smp_overlay_dirty = 1;
-    ins_say(up ? "AMP (2/2)" : "AMP (1/2)", 1);
+    ins_say(TITLE[sub], 1);
 }
+
+extern int env2_turn(u32 knob, int step);       /* csrc/matrix/env2_page.c: a knob on ENV2's page */
 
 /* rec.c smp_ui_pop, after ins_pop: 1 when the item is ours (then dropped) */
 int scope_pop(u8 *it)
@@ -132,19 +140,25 @@ int scope_pop(u8 *it)
     u32 code = (u32)it[4] << 24 | (u32)it[5] << 16 | (u32)it[6] << 8 | it[7];
     u32 flags = (u32)it[8] << 24 | (u32)it[9] << 16 | (u32)it[10] << 8 | it[11];
     int press = (flags & 1u) && !(flags & 0x10u);
-    if (scope_up && it[0] == IT_KEY && code >= 41 && code <= 48)
+    if (amp_sub != AMP_STOCK && it[0] == IT_KEY && code >= 41 && code <= 48)
         return 1;                               /* an encoder's push: ours while up */
     if (it[0] == IT_KEY && press && !(flags & 8u)) {
-        if (code == K_AMP && !KEY_HELD(K_FUNC) && (scope_up || amp_page())) {
-            scope_open(!scope_up);                    /* AMP 1/2 <-> 2/2 */
+        if (code == K_AMP && !KEY_HELD(K_FUNC) && (amp_sub != AMP_STOCK || amp_page())) {
+            amp_open((amp_sub + 1) % AMP_PAGES);        /* AMP 1/3 -> 2/3 -> 3/3 -> 1/3 */
             return 1;
         }
-        if (scope_up && (code == K_NO || !(code == K_FUNC || (code >= 10 && code <= 15) || (code >= 25 && code <= 48)))) {
-            scope_up = 0;                       /* NO, or a key that leaves: the page closes */
+        if (amp_sub != AMP_STOCK && (code == K_NO || !(code == K_FUNC || (code >= 10 && code <= 15) || (code >= 25 && code <= 48)))) {
+            amp_sub = AMP_STOCK;                /* NO, or a key that leaves: the page closes */
+            scope_up = 0;
             smp_overlay_dirty = 1;
             return code == K_NO;
         }
         return 0;
+    }
+    if (amp_sub == AMP_ENV2 && it[0] == IT_KNOB && code >= 1 && code <= 8) {
+        if (env2_turn(code - 1, (s8)it[8]))
+            smp_overlay_dirty = 1;
+        return 1;
     }
     if (scope_up && it[0] == IT_KNOB && code >= 1 && code <= 8) {
         int step = (s8)it[8] > 0 ? 1 : (s8)it[8] < 0 ? -1 : 0;
@@ -226,12 +240,12 @@ void scope_draw(void *c)
     wg_label(c, 6, gain == GAINS ? AUTO_TEXT[g == 16 ? 4 : g == 8 ? 3 : g == 4 ? 2 : g == 2 ? 1 : 0]
                                  : GAIN_TEXT[gain]);
     wg_label(c, 7, SPAN[zoom]);
-    PAGE_DOTS(0, c, 2, 1, 7);
+    PAGE_DOTS(0, c, AMP_PAGES, AMP_SCOPE, 7);
 }
 
-/* page.c wr_screen, after stock's page when nothing of ours covers it: AMP 1/2's dots */
+/* page.c wr_screen, after stock's page when nothing of ours covers it: AMP 1/3's dots */
 void scope_dots(void *c)
 {
-    if (!scope_up && amp_page())
-        PAGE_DOTS(0, c, 2, 0, 7);
+    if (amp_sub == AMP_STOCK && amp_page())
+        PAGE_DOTS(0, c, AMP_PAGES, AMP_STOCK, 7);
 }

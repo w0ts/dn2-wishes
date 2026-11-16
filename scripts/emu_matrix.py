@@ -14,7 +14,11 @@ exact    two runs of the same machine, every voice row v set up differently (its
                    plays (wish_put, then the UI pass mx_poll);
          the slot as heard (OUT) must be the same every frame of every row. Then all three LFOs into one slot (stock:
          three route 1s; ours: three routes listed LFO3, LFO2, LFO1, the order stock adds them, each clamped).
-cost     the evaluator call with no route anywhere and with every track's 15 routes set: the same instructions (the
+env      ENV1 (the clone of stock's AMP envelope, from the voice row's AMP cells) and ENV2 (from the record), through
+         HOLD's own note hooks (csrc/hold hold_len, hold_final: the paths the frame takes), each routed into a cell:
+         the cell every frame as test_matrix_c.model's level gives it (ADSR, AHD, RSET off). The model against
+         stock's own envelope is scripts/sharc_matrix_env.py's (the gate's envclone step).
+cost     the evaluator call with no route anywhere and with every track's 23 routes set: the same instructions (the
          User's constant cost) within the clamp's branches, and the matrix's own share (mx_eval) under its bound.
 
 Last line PASS or FAIL.
@@ -34,11 +38,12 @@ sys.path.insert(0, str(HERE.parent / "src"))
 
 import emu_modulation as MO                                         # noqa: E402 -- its machine and frame recipe
 
-TAG = 0x0010                            # WT_MX_ROUTES (csrc/wishes/wish.h)
+TAG, ENV_TAG = 0x0010, 0x0011           # WT_MX_ROUTES, WT_MX_ENV (csrc/wishes/wish.h)
 VSOUND = 0x800052A8                     # the sound each voice plays
 WISH_MAP = (0x47280000, 0x500000)       # the wishes record's RAM and the matrix's tables (dnfw.waverider.pages)
-SLOTS, TOP, NONE = 15, 0x7F00, 0x4000
-COST_BOUND = 6000                       # the matrix's instructions a frame (16 rows x 15 routes)
+LFO, SLOTS, TOP, NONE = 15, 23, 0x7F00, 0x4000
+FULL, REST = 0x7FFFFFFF, 0x100
+COST_BOUND = 10000                      # the matrix's instructions a frame (16 rows: 2 envelopes, 23 routes; 9,466 measured)
 FAILS: list[str] = []
 
 
@@ -81,13 +86,15 @@ def set_lfo(m, v, lfo, wave, mult, dest, dep):
         set_cell(m, v, MO.slot(lfo, f), val)
 
 
-def put_routes(m, sym, t, rs):
-    val = b"".join(struct.pack(">BBH", src, slot, dep) for src, slot, dep in rs)
+def put_field(m, sym, t, tag, val):
     buf = m.alloc(max(len(val), 4))
     m.write(buf, val)
     m.flush()
-    r = m.call(sym["wish_put"], sound(m, t), TAG, buf, len(val)) & 0xFFFFFFFF
-    return r
+    return m.call(sym["wish_put"], sound(m, t), tag, buf, len(val)) & 0xFFFFFFFF
+
+
+def put_routes(m, sym, t, rs):
+    return put_field(m, sym, t, TAG, b"".join(struct.pack(">BBH", src, slot, dep) for src, slot, dep in rs))
 
 
 def run(m, sym, frames, slots):
@@ -175,8 +182,9 @@ def scenario_cost(a, report, sym):
             for k in (1, 2, 3):
                 set_lfo(m, v, k, k, 4, 0, NONE)
             if label == "full":
-                r = put_routes(m, sym, v, [(k % 3, 25 + 5 * k, 0x5000 + 0x100 * k) for k in range(SLOTS)])
-                check(f"full: track {v}'s 15 routes put", r == 0, f"{r:#x}")
+                r = put_routes(m, sym, v, [(k % 3, 25 + 3 * k, 0x5000 + 0x100 * k) for k in range(LFO)]
+                               + [(3 + k // 4, 70 + k, 0x3000 + 0x200 * k) for k in range(8)])
+                check(f"full: track {v}'s 23 routes put", r == 0, f"{r:#x}")
         m.flush()
         m.call(sym["mx_poll"])
         rate = m.long(MO.RATE)
@@ -198,11 +206,66 @@ def scenario_cost(a, report, sym):
     report["cost"] = rep
 
 
+def scenario_env(a, report, sym):
+    """ENV1 (the row's AMP cells) and ENV2 (the record) through HOLD's own note hooks, each routed at full depth into a
+    cell: the cell every frame as test_matrix_c.model's level gives it (the clone's arithmetic; scripts/sharc_matrix_env.py
+    holds that model to stock's AMP envelope in the SHARC runner)"""
+    sys.path.insert(0, str(HERE.parent / "test"))
+    import test_matrix_c as T
+    rep = {}
+    cases = ["ADSR, held then released", "AHD, held until the note-off", "RSET off: a note-on goes on from the level"]
+    for name in cases:
+        knobs, events, frames = T.CASES[name]
+        frames = min(frames, 200)
+        m = setup(a.build, a.snapshot)
+        v1, v2, slot, base = 5, 6, 60, 0x2000
+        for v in range(16):
+            m.write(VSOUND + 4 * v, struct.pack(">I", sound(m, v)))
+            for k in (1, 2, 3):
+                set_lfo(m, v, k, 0, 4, 0, NONE)
+        for s, kn in zip((81, 82, 83, 84, 85, 91, 92), knobs):      # ENV1: voice v1's own AMP cells
+            set_cell(m, v1, s, kn << 8)
+        set_cell(m, v1, slot, base)
+        set_cell(m, v2, slot, base)
+        put_routes(m, sym, v1, [(3, slot, TOP)])
+        put_routes(m, sym, v2, [(4, slot, TOP)])
+        put_field(m, sym, v2, ENV_TAG, bytes(list(knobs) + [0]))
+        m.flush()
+        m.call(sym["mx_poll"])
+        rate = m.long(MO.RATE)
+        o1, o2 = m.alloc(256), m.alloc(256)
+        w40 = m.alloc(4)
+        got = {v1: [], v2: []}
+        for f in range(frames):
+            ev = events.get(f)
+            if ev == "on":                                          # the frame's note-on, as hold_note_hook calls it
+                for v in (v1, v2):
+                    m.call(sym["hold_len"], v, v, 100)
+            if ev == "off":                                         # the frame's note-off word
+                m.write(w40, bytes(4))
+                m.flush()
+                m.call(sym["hold_final"], (1 << v1) | (1 << v2), w40)
+            m.call(MO.SMOOTHER, MO.SRC)
+            m.call(sym["mod_eval"], MO.OUT, rate, 1, 1, o1, o2, 0, limit=4_000_000)
+            for v in (v1, v2):
+                got[v].append(MO.u16(m, MO.OUT + 2 * MO.idx(v, slot)))
+        d1 = (TOP - NONE) * 2
+        want = [max(0, min(TOP, base + ((d1 * x) >> 31))) for x in T.model(knobs, events, frames)]
+        for v, label in ((v1, "ENV1 (the row's AMP cells)"), (v2, "ENV2 (the record)")):
+            bad = [f for f in range(frames) if got[v][f] != want[f]]
+            check(f"{name}: {label} routed, every frame as the clone's model", not bad,
+                  f"{len(bad)} frames differ, first {[(f, got[v][f], want[f]) for f in bad[:3]]}" if bad
+                  else f"{frames} frames, {min(got[v]):#06x}..{max(got[v]):#06x}")
+        rep[name] = {"frames": frames, "env1_differ": sum(1 for f in range(frames) if got[v1][f] != want[f]),
+                     "env2_differ": sum(1 for f in range(frames) if got[v2][f] != want[f])}
+    report["env"] = rep
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--build", required=True)
     p.add_argument("--snapshot", default=MO.SNAP)
-    p.add_argument("--scenario", default="exact,cost")
+    p.add_argument("--scenario", default="exact,env,cost")
     p.add_argument("--frames", type=int, default=240)
     p.add_argument("--json", default=None)
     a = p.parse_args()
@@ -210,7 +273,8 @@ def main() -> int:
     report = {}
     for sc in a.scenario.split(","):
         print(f"  --- {sc} ---", flush=True)
-        {"exact": lambda: scenario_exact(a, report, sym), "cost": lambda: scenario_cost(a, report, sym)}[sc]()
+        {"exact": lambda: scenario_exact(a, report, sym), "env": lambda: scenario_env(a, report, sym),
+         "cost": lambda: scenario_cost(a, report, sym)}[sc]()
     report["ok"] = not FAILS
     if a.json:
         pathlib.Path(a.json).write_text(json.dumps(report, indent=1))

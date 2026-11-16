@@ -201,7 +201,7 @@ between them, adds its row and an `assert` against its neighbours in `dnfw.waver
 | `0x47100000` .. `0x47200000` | remoteui, `csrc/devtest/prof.c` (`pages.PROF_RAM`, `PROF_BYTES`) | the CPU profiler's state and sample ring (1 MB) |
 | `0x47200000` .. `0x47280000` | (free) | 512 KB kept clear between the profiler and the wishes record |
 | `0x47280000` .. `0x476E4200` | the wishes record, `csrc/wishes` (`pages.WISH_RAM`, `docs/wishes-record.md`) | index, free stack, hash cache, queue, carry scratch, 8,192 entries of 512 B (4,604,416 B) |
-| `0x476F0000` .. `0x476F4000` | the matrix, `csrc/matrix` (`pages.MX_RAM`, `docs/matrix.md`) | each track's routes laid out twice for the audio frame, the scratch row (16 KB) |
+| `0x476F0000` .. `0x476F8000` | the matrix, `csrc/matrix` (`pages.MX_RAM`, `docs/matrix.md`) | each track's routes and envelope times laid out twice for the audio frame, the voices' envelopes, the scratch row (32 KB) |
 | `0x47800000` | (bound) | the claims above stay under it; the stack descends from `0x48000000` |
 
 | mod | caves | in-place edits | appended | RAM |

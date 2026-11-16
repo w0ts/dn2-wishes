@@ -83,6 +83,7 @@ struct wish {
 #define WT_MUST 0x8000u
 #define WT_MACHINE 0x4000u
 #define WT_MX_ROUTES 0x0010u           /* the matrix's routes (csrc/matrix/matrix.c, docs/matrix.md) */
+#define WT_MX_ENV 0x0011u              /* ENV2: ATK HOLD DEC SUS REL MODE RSET, a byte kept 0 (csrc/matrix/env2_page.c) */
 
 /* table.c */
 extern u8 wish_busy;

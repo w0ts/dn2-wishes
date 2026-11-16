@@ -1,4 +1,4 @@
-# AMP page 2: the selected track's oscilloscope
+# The AMP scope page: the selected track's oscilloscope
 
 2026-11-11. The User asked for "an Oscilocope page for each track, i would put it as AMP page 2",
 "per track, after the inserts", and chose "A, follow overbridge. simple, logical."
@@ -6,12 +6,14 @@ The feasibility study is `scratch/scope/feasibility.md` (not in the repo).
 
 ## Use
 
-Stock's AMP page has one page. [AMP] on it now steps between two pages:
+Stock's AMP page has one page. [AMP] on it now steps through three pages (2026-11-12, the User: ENV2 "right
+after the stock envelope page", the scope one page later; each place one constant in `csrc/waverider/amp_pages.h`):
 
-- **AMP 1/2** is stock's page, with two page dots added.
-- **AMP 2/2** is the scope.
+- **AMP 1/3** is stock's page, with three page dots added.
+- **AMP 2/3** is ENV2 (`docs/matrix.md`).
+- **AMP 3/3** is the scope.
 
-The title line says "AMP (2/2)" / "AMP (1/2)" on each switch. FUNC + [AMP], and [AMP] from any other page, work as on stock.
+The title line says "AMP (n/3)" on each switch. FUNC + [AMP], and [AMP] from any other page, work as on stock.
 NO, or any page key, closes the scope (as the INSERT pages do, docs/inserts.md).
 
 While the scope is up, any encoder but G sets the time across the screen: 2, 4, 8, 17, 33 or 67 ms

@@ -370,6 +370,8 @@ void wr_screen(void *screen, void *canvas)
         extern int scope_visible(void);
         extern void scope_draw(void *canvas);
         extern void scope_dots(void *canvas);
+        extern int env2_visible(void);
+        extern void env2_draw(void *canvas);
         extern int msel_visible(void);
         extern void msel_draw(void *canvas);
         if (msel_visible()) {                   /* MACHINE SEL in two columns (csrc/msel, 2026-11-11) */
@@ -378,12 +380,15 @@ void wr_screen(void *screen, void *canvas)
         } else if (ins_visible()) {             /* the per-track inserts' page (csrc/inserts) */
             wpop_begin();                       /* (the stock page under it offers nothing of ours) */
             ins_draw(canvas);
-        } else if (scope_visible()) {           /* AMP page 2, the oscilloscope (csrc/scope) */
+        } else if (scope_visible()) {           /* AMP's oscilloscope page (csrc/scope, amp_pages.h) */
             wpop_begin();
             scope_draw(canvas);
+        } else if (env2_visible()) {            /* AMP's ENV2 page (csrc/matrix/env2_page.c) */
+            wpop_begin();
+            env2_draw(canvas);
         } else {
             ins_dots(canvas);                   /* stock's FX page: FX 1/2's dots */
-            scope_dots(canvas);                 /* stock's AMP page: AMP 1/2's dots */
+            scope_dots(canvas);                 /* stock's AMP page: AMP 1/3's dots */
             { extern void fxp_draw(void *canvas); fxp_draw(canvas); }   /* XDLY's and FDN8's page 1/2, 2/2 */
         }
         wpop_draw(canvas);                      /* the list popup, over the page */

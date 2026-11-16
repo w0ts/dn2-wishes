@@ -3,7 +3,8 @@
 More routes than stock's one per LFO. Decided by the User, 2026-11-11:
 
 - up to **16 LFO routes a track**, shared by LFO1-3; stock's route 1 of each LFO counts, and is filled first;
-- ENV1 and ENV2 (phase 3) with four destinations each;
+- ENV1 and ENV2 (phase 3) with four destinations each. 2026-11-12, the User: ENV1 **is** stock's AMP envelope (still on
+  the amp, now also routable); ENV2 is "just a clone of env1", routed only;
 - MOD SETUP keeps stock's four per source;
 - a **constant-cost** evaluator: a frame costs the same whatever is routed;
 - the popup (phase 4): FUNC + short push opens it on a parameter, FUNC + long push (0.6 s) resets the parameter;
@@ -19,12 +20,12 @@ the machine), four bytes a route:
 
 | byte | |
 |---|---|
-| 0 | the source: 0 LFO1, 1 LFO2, 2 LFO3 (3 ENV1, 4 ENV2 from phase 3) |
+| 0 | the source: 0 LFO1, 1 LFO2, 2 LFO3, 3 ENV1, 4 ENV2 |
 | 1 | the destination: a slot of the voice row, 25..100 (a sound parameter) |
 | 2-3 | the depth, big-endian, in stock DEP's units: 0..0x7f00, 0x4000 adds nothing |
 
-At most 15 routes are laid out (16 a track, at least one of them stock's route 1). Anything out of range is
-skipped. A route into an LFO's own controls (slots 1..24) is not offered: it would land after that LFO has read
+At most 15 LFO routes are laid out (16 a track, at least one of them stock's route 1) and four for each envelope.
+Anything out of range is skipped. A route into an LFO's own controls (slots 1..24) is not offered: it would land after that LFO has read
 them. Stock's DEST, and the cascade (`docs/modulation-more.md`), still reach them.
 
 ## How a route is heard
@@ -54,6 +55,50 @@ and checks the sound against that track's. A voice on any other sound gets no ro
 an offset that fits every row, so no route and every route take the same instructions. The clamp's two branches are
 the only difference.
 
+## The envelopes (phase 3)
+
+Stock's AMP envelope runs on the SHARC (section 7), and the ColdFire cannot read it. ENV1 and ENV2 are a **ColdFire
+clone** of it (the User's choice A), one pair a voice, stepped once a frame in `mx_eval` (one DSP block, 32
+samples) before the routes. The amp's own envelope is untouched; nothing is sent to the DSP.
+
+- **ENV1** takes its knobs from the voice row's own AMP cells every frame: ATK 81, HOLD 82, DEC 83, SUS 84,
+  REL 85, MODE 91, RSET 92. Those are what the DSP is sent, so LFO modulation and p-locks of the AMP page reach
+  ENV1 as they reach the amp.
+- **ENV2** takes the same seven from the sound's wishes record (`WT_MX_ENV` 0x0011: ATK HOLD DEC SUS REL MODE
+  RSET, a byte kept 0). With no field it uses stock's own defaults (records 62..66, 73, 74: ATK 8, HOLD 127, DEC 32,
+  SUS 96, REL 24, ADSR, RSET on). ENV2 is not p-lockable yet: the User's order is the record first, the lock study
+  next, then lockable ENV2 as its own step.
+- **Note-on and note-off** come from DRONE HOLD's hooks, which every note passes through: `hold_len` (a note that
+  plays, not one HOLD drops) and `hold_final` (the frame's composed amp note-off word, `+36`).
+
+**Measured in Elektron's own DSP code** (the SHARC runner; the level is the DSP's word `0x2547c8`, found by searching
+its memory for the amp's measured gain; `csrc/matrix/amp_env.json`, `scripts/gen_matrix_env.py` ->
+`csrc/matrix/env_table.h`):
+
+| stage | law | measured |
+|---|---|---|
+| attack | linear, a length in samples | all 128 knobs: the level after n blocks is s (32 n + 0.5) from a reset, to 6e-7; s = 1/33, 1/48, 1/67, 1/90 for knobs 5..8; knobs 0..4 end inside the first block |
+| decay | geometric toward SUS, a ratio a block | all 128 knobs, the same ratio over 3 blocks to 3e-7; knob 127 does not fall; DEC 40 gives the 1,742 ms (60 dB) of `docs/stock-units.md` |
+| release | geometric toward 0 | all 128 knobs: the same table as the decay's, to the last bit of the DSP's float |
+| MODE 1 (ADSR, the default) | attack, decay to SUS, at the note-off a release from the level reached | |
+| MODE 0 (AHD) | attack, HOLD, then a decay to 0 at DEC's rate; SUS and REL unused | a note-off in the attack starts the decay; HOLD 127 (the default) lasts until the note-off; HOLD 0 none; a timed hold is not ended by a note-off |
+| RSET | 1: a note-on restarts from 0; 0: the attack goes on from the level reached | |
+
+Knobs 8 and 9 give the same values in every table, as do 12 and 13, and 17 and 18: the DSP steps its own curve.
+Its memory holds no table of these (L1, L2 and DDR searched), so the clone's tables are the measurements.
+
+**Checked:** the C against the model on the host (`test/test_matrix_c.py`, every case), the target's C against the
+model in the ColdFire emulator through HOLD's own hooks (gate step `matrix`, its `env` scenario), and the model
+against stock's own envelope in the SHARC runner, block by block (`scripts/sharc_matrix_env.py`, gate step
+`envclone`).
+
+## The AMP pages
+
+[AMP] on stock's AMP page now steps AMP 1/3 (stock's) -> 2/3 (ENV2) -> 3/3 (the scope) -> 1/3. Each page's place is
+one constant in `csrc/waverider/amp_pages.h` (the User: the scope "might move elsewhere"). ENV2's page
+(`csrc/matrix/env2_page.c`) lays out the envelope as stock's AMP page does: A ATK, B DEC, C SUS, D REL, E RSET,
+F MODE (ADSR / AHD). HOLD is not on stock's 1.12 page either. The destinations are set from the knob popup (phase 4).
+
 ## Read in the UI pass, never in the frame
 
 `mx_poll` (from `page.c` `wr_poll`) lays the tables out again when any record changed (`wish_edits`, counted at every
@@ -67,6 +112,11 @@ record's lock and never looks a sound up.
 table, the scratch row (16 x 101 words).
 
 ## Known limits
+
+- ENV1 and ENV2 step once a frame (32 samples): where a stage ends inside a block, the clone is one block behind
+  the DSP for that block. They also hear a note one frame before the DSP does.
+- HOLD 1..126 in AHD mode is not measured: the clone holds until the note-off, as at 127. On 1.12 HOLD is not on the
+  AMP page; its default is 127.
 
 - A voice playing a sound other than its track's kit sound (a sound lock) hears no routes of ours. Stock's route 1
   still plays.
