@@ -114,10 +114,11 @@ _Static_assert(CMD_OFFSET % 4u == 0 && CMD_OFFSET >= 8u + 16u * POOL_SLOTS + NAM
 #define LIBID(k) (DIR + LIBID_OFFSET + 4u * (u32)(k))
 _Static_assert(LIBID_OFFSET >= META_PTR + 12u && LIBID_OFFSET % 4u == 0 && LIBID_OFFSET + 4u * REC_FIRST <= CMD_OFFSET,
                "the slots' library identities lie between the meta pointer and the command block");
-/* the per-track inserts' values (dnfw.inserts.design.PAR_OFFSET): 16 x 8 bytes after the command
- * block, inside the directory page, which loads never write past CMD_OFFSET */
-#define INS_OFFSET 0xF80u
-#define INS_WORDS 32u
+/* the per-track inserts' values (dnfw.inserts.design.GEN_OFFSET; 2026-11-10, two slots a track): the
+ * change word, a zero, 56 packed words (32 records x eight 7-bit fields), right after the command block,
+ * inside the directory page, which loads never write past CMD_OFFSET (16 x 8 bytes at 0xf80 until then) */
+#define INS_OFFSET 0xF18u
+#define INS_WORDS 58u
 #define INS_REPEAT 3u
 _Static_assert(INS_OFFSET >= CMD_OFFSET + 4u * CMD_WORDS && INS_OFFSET + 4u * INS_WORDS <= DIR_BYTES,
                "the inserts' values lie after the command block, inside the directory page");
@@ -2532,6 +2533,8 @@ void smp_boot(void)
             span_drop(REC_OFFSET, REC_END);
         }
     }
+    extern void ins_store_poll(void);
+    ins_store_poll();                                   /* 2026-11-10: the inserts' record per project */
     load_poll();
     save_poll();
     edits_poll();

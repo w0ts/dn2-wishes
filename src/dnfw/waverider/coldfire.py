@@ -521,6 +521,10 @@ PJ_END_SITE = 0x40042EE6                # move.b %d4,%d0 ; movem.l (%sp),%d2-%d5
 PJ_END_STOCK = bytes.fromhex("10044cd7043c4fef0024")
 PJ_NEW_SITE = 0x40042AF0                # move.l 12(%fp),(%sp) ; move.l %a2,-(%sp) ; jsr 0x4003eb62
 PJ_NEW_STOCK = bytes.fromhex("2eae000c2f0a4ebac06a")
+# 2026-11-10: the inserts saved with the project (csrc/inserts/store.c): stock's write of a project slot
+# 0x40040190(project, slot, cb) (SAVE, SAVE AS, and the temp slot 128 at LOAD, NEW and autosave)
+PJ_WRITE_SITE = 0x40040190              # lea -52(%sp),%sp ; movem.l %d2-%d4/%a2-%fp,(%sp)
+PJ_WRITE_STOCK = bytes.fromhex("4fefffcc48d77c1c")
 POLL_STOCK = bytes.fromhex("4eb94011d5d4")
 # the system meter (csrc/meter/hooks.S, docs/meter.md): the ColdFire's load from the idle
 # task's parked time (usbprobe's method, docs/usbprobe.md): the context switch and the audio
@@ -793,6 +797,11 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     edit(PJ_NEW_SITE, bytes.fromhex("4ef9") + _long(csyms["smp_pj_new_hook"]) + bytes.fromhex("4e714e71"),
          "NEW project: the slot set as stock, then noted (an empty pool, the owner's decision 1)",
          PJ_NEW_STOCK)
+    _need(content, PJ_WRITE_SITE + 8, bytes.fromhex("246f0040286f0038262f003c"),
+          "the project write goes on: movea.l 64(%sp),%a2 ; movea.l 56(%sp),%a4 ; move.l 60(%sp),%d3 (the slot)")
+    edit(PJ_WRITE_SITE, bytes.fromhex("4ef9") + _long(csyms["ins_pj_write_hook"]) + bytes.fromhex("4e71"),
+         "the project write (a slot to the +Drive): replayed, the slot noted, the inserts' record follows "
+         "(csrc/inserts/store.c)", PJ_WRITE_STOCK)
 
     # the sample link: SysEx in (v0.14); out over the TDM link alone (v0.20)
     edit(LINK_RX_SITE, bytes.fromhex("4eb9") + _long(csyms["smp_rx_hook"]),

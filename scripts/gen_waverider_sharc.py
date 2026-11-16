@@ -88,6 +88,7 @@ def main(argv=None) -> int:
             xdly = assemble("xdly", dsp.XDLY_SW, work)
             inserts = assemble("inserts", dsp.INS_SW, work)
             inspost = assemble("inspost", dsp.POST_SW, work)
+            insbus = assemble("insbus", dsp.INSBUS_SW, work)
             pjump = one_jump(PVMIX_LINE, dsp.PVMIX_SITE_SW, work)
             ejump = one_jump(EMARK_LINE, dsp.CALL_SITE_SW, work)
             lptr = one_jump(LOOKUP_LINE, dsp.LOOKUP_SITE_SW, work)
@@ -105,6 +106,7 @@ def main(argv=None) -> int:
             xdly = committed("xdly")
             inserts = committed("inserts")
             inspost = committed("inspost")
+            insbus = committed("insbus")
             pjump = old["pvmix_jump"]
             ejump = old["emark_jump"]
             lptr = old["lookup_ptr"]
@@ -127,7 +129,8 @@ def main(argv=None) -> int:
             "fdn8": {k: v for k, v in fdn8.items() if k != "instruction_offsets"},
             "xdly": {k: v for k, v in xdly.items() if k != "instruction_offsets"},
             "inserts": {k: v for k, v in inserts.items() if k != "instruction_offsets"},
-            "inspost": {k: v for k, v in inspost.items() if k != "instruction_offsets"}}
+            "inspost": {k: v for k, v in inspost.items() if k != "instruction_offsets"},
+            "insbus": {k: v for k, v in insbus.items() if k != "instruction_offsets"}}
     dsp.CODE.write_text(json.dumps(spec, indent=2) + "\n", encoding="utf-8", newline="\n")
     print(f"wrote {dsp.CODE.relative_to(ROOT)}: perc {len(perc['object_parcels_be']) // 2} B, ping {len(ping['object_parcels_be']) // 2} B, entry {len(jump['object_parcels_be']) // 2} B")
     return 0

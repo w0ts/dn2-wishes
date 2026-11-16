@@ -54,10 +54,10 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
         caps = []
         cur = {}
 
-        def put_par(r):
-            par = par_of(len(caps))
-            for k in range(0, 128, 4):
-                m2.poke(r.state, D.PAR + k, struct.unpack_from("<I", par, k)[0])
+        def put_par(r):                          # (2026-11-10: packed, a new change word each block, as the
+            par = par_of(len(caps))              # link sends them: the pass's own unpack runs every block)
+            for k, w in enumerate(D.pack(D.records(par), 1 + len(caps))):
+                m2.poke(r.state, D.GEN + 4 * k, w)
 
         def at_ins(r):
             cur.clear()
@@ -111,7 +111,7 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
     exact, first_bad, others_same, changed = bool(caps), None, True, 0
     for b, c in enumerate(caps):
         bufs = [[bf(w) for w in c["in"][t]] for t in range(16)]
-        ref.block(c["par"], bufs, c["route"])
+        ref.block(D.records(c["par"]), bufs, c["route"])
         want = [[fb(x) for x in bufs[t]] for t in range(16)]
         if c.get("out") != want:
             exact = False
@@ -141,7 +141,7 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
     exact, first_bad, rotated, quiet = bool(caps), None, set(), True
     for b, c in enumerate(caps):
         bufs = [[bf(w) for w in c["in"][t]] for t in range(16)]
-        ref.block(c["par"], bufs, c["route"])
+        ref.block(D.records(c["par"]), bufs, c["route"])
         want = [[fb(x) for x in bufs[t]] for t in range(16)]
         if c.get("out") != want:
             exact = False
@@ -170,8 +170,8 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
             rows[8 * t:8 * t + 8] = bytes([typ, 100, 100, 60, 30, 40, 20, 110])
         for k in range(8):                       # slot s plays track s: the cost per voice
             m2.poke(r.state, D.ROUTE + 4 * k, (2 * k) | (2 * k + 1) << 16)
-        for k in range(0, 128, 4):
-            m2.poke(r.state, D.PAR + k, struct.unpack_from("<I", bytes(rows), k)[0])
+        for k, v in enumerate(D.records(bytes(rows))):   # the unpacked records (no change word moved)
+            m2.poke(r.state, D.TABLE + 4 * k, v)
         how = fx.run(r, 3_000_000, fx.Fixups(), stop_at=[dsp.PING_SW])
         cost[name] = (how[0], how[2])
     numbers["the pass alone: instructions a block (stop, count)"] = cost

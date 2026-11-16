@@ -32,28 +32,29 @@ MASK = D.POST_RING - 1
 
 class PostRef:
     def __init__(self):
-        self.st = [[0] * 6 for _ in range(D.TRACKS)]
-        self.last = [(0, 0)] * D.TRACKS
-        self.ring = [np.zeros(D.POST_RING, F) for _ in range(D.TRACKS)]
+        self.st = [[0] * 6 for _ in range(D.RECORDS)]        # per (voice slot, insert slot), i = 2 t + j
+        self.last = [(0, 0)] * D.RECORDS
+        self.ring = [np.zeros(D.POST_RING, F) for _ in range(D.RECORDS)]
 
     def block(self, par: bytes, left, right, route=None) -> None:
-        for t in range(D.TRACKS):
+        for i in range(D.RECORDS):
+            t, j = i >> 1, i & 1
             tr = t if route is None else route[t] & 0xFFFF
             if tr > 15:
                 continue
-            v = par[8 * tr:8 * tr + 8]
-            sel = v[0]
+            v = par[8 * (2 * tr + j):8 * (2 * tr + j) + 8]
+            sel = v[0] & ((1 << D.TYPE_BITS) - 1)
             if sel not in D.POST:
                 continue
-            if (sel, tr) != self.last[t]:
-                self.st[t] = [0] * 6
-                self.last[t] = (sel, tr)
-                self.ring[t][:] = 0
+            if (sel, tr) != self.last[i]:
+                self.st[i] = [0] * 6
+                self.last[i] = (sel, tr)
+                self.ring[i][:] = 0
             p = [F(b) * F(1 / 127) for b in v[1:8]]
             if sel == D.WIDE:
-                self.wide(t, p, left[t], right[t])
+                self.wide(i, p, left[t], right[t])
             else:
-                self.chor(t, p, left[t], right[t])
+                self.chor(i, p, left[t], right[t])
 
     def wide(self, t, p, L, R) -> None:
         """state s0 the ring's write place, s1 the bass one-pole, s2 the tone one-pole"""

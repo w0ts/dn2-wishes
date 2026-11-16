@@ -20,9 +20,18 @@ def fbits(x) -> int:
     return struct.unpack("<I", struct.pack("<f", float(x)))[0]
 
 
-def call(m: Mem, par: bytes, left, right, route, regs=None):
-    for k in range(0, 128, 4):
-        m.put(D.PAR + k, struct.unpack_from("<I", par, k)[0])
+def expand(par: bytes, par2: bytes | None = None) -> bytes:
+    """slot 1's 16 records (and slot 2's) -> the 32 records (track t's slot j at 8 (2 t + j))"""
+    out = bytearray(8 * D.RECORDS)
+    for j, src in enumerate((par, par2 or bytes(128))):
+        for t in range(D.TRACKS):
+            out[8 * (2 * t + j):8 * (2 * t + j) + 8] = src[8 * t:8 * t + 8]
+    return bytes(out)
+
+
+def call(m: Mem, par: bytes, left, right, route, regs=None, par2=None):
+    for k, v in enumerate(expand(par, par2)):              # the pre pass's unpacked table
+        m.put(D.TABLE + 4 * k, v)
     for k in range(8):
         m.put(D.ROUTE + 4 * k, (route[2 * k] & 0xFFFF) | (route[2 * k + 1] & 0xFFFF) << 16)
     for s in range(D.TRACKS):
@@ -68,7 +77,7 @@ def test_model_is_the_reference_with_voices_moving():
         right = [[x * 0.6 + rnd.uniform(-0.05, 0.05) for x in row] for row in left]
         wl = [[np.float32(x) for x in row] for row in left]
         wr = [[np.float32(x) for x in row] for row in right]
-        ref.block(par, wl, wr, route)
+        ref.block(expand(par), wl, wr, route)
         lo, ro, p = call(m, par, left, right, route, regs)
         assert lo == [[fbits(x) for x in row] for row in wl], f"block {b} left"
         assert ro == [[fbits(x) for x in row] for row in wr], f"block {b} right"
@@ -102,3 +111,26 @@ def test_wide_at_noon_with_no_delay_keeps_the_side_and_chor_alone_is_centred():
     for _ in range(4):
         lo, ro, _ = call(m, bytes(par), left, right, list(range(16)))
     assert lo[0] == ro[0]                                                    # alone: centred
+
+
+def test_two_slots_wide_into_chor():
+    """track 1: WIDE in slot 1, CHOR in slot 2 (both on its voices, in that order); track 3: CHOR in slot 2
+    alone; track 5: a pre insert in slot 1, WIDE in slot 2: every block as the reference"""
+    rnd = random.Random(8)
+    m, ref = Mem(), R.PostRef()
+    p1, p2 = bytearray(128), bytearray(128)
+    p1[0:8] = bytes([D.WIDE, 127, 100, 60, 40, 80, 0, 0])
+    p2[0:8] = bytes([D.CHOR, 127, 60, 60, 60, 127, 64, 90])
+    p2[16:24] = bytes([D.CHOR, 90, 80, 50, 60, 127, 100, 60])
+    p1[32:40] = bytes([D.FUZZ, 127, 127, 127, 127, 127, 127, 127])
+    p2[32:40] = bytes([D.WIDE, 64, 0, 127, 127, 0, 0, 0])
+    route = [0, 2, 4, 0] + [0xFFFF] * 12
+    for b in range(40):
+        left = [[rnd.uniform(-0.3, 0.3) for _ in range(32)] for _ in range(16)]
+        right = [[x * 0.5 for x in row] for row in left]
+        wl = [[np.float32(x) for x in row] for row in left]
+        wr = [[np.float32(x) for x in row] for row in right]
+        ref.block(expand(bytes(p1), bytes(p2)), wl, wr, route)
+        lo, ro, _ = call(m, bytes(p1), left, right, route, par2=bytes(p2))
+        assert lo == [[fbits(x) for x in row] for row in wl], f"block {b} left"
+        assert ro == [[fbits(x) for x in row] for row in wr], f"block {b} right"

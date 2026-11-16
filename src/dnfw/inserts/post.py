@@ -13,17 +13,19 @@ which then runs as if the engine had called it.
 from __future__ import annotations
 
 from ..fdn8 import program as FP
+from ..perc import guard as G
 from ..perc.dsl import Mem, Prog
 from . import design as D
+from . import program as PR
 
 STATE = 0x200B1000               # L2, after the code (dnfw.waverider.dsp.POST_STATE_L2)
 STATE_WORDS = 8                  # per slot: words 0..5 the insert's, 6 the last track, 7 the last M.SEL
-STATE_BYTES = D.TRACKS * 4 * STATE_WORDS
+STATE_BYTES = D.RECORDS * 4 * STATE_WORDS   # 2026-11-10: per voice slot and insert slot (i = 2 s + j)
 WL = STATE + STATE_BYTES         # CHOR's wet, 32 + 32 words
 WR = WL + 4 * D.BLOCK
 SCRATCH = WR + 4 * D.BLOCK
 SAVE_I = (0, 1, 2, 3, 4, 12)
-_NAMES = (["t", "cnt", "tr", "sel", "w0", "w1", "sa", "rb", "lp", "rp"] + [f"p{k}" for k in range(7)]
+_NAMES = (["t", "cnt", "tr", "sel", "i", "j", "rec", "sa", "rb", "lp", "rp"] + [f"p{k}" for k in range(7)]
           + [f"s{k}" for k in range(6)]
           + ["wg", "dl", "ab", "ct", "nv", "inc", "base", "dep", "fb", "k", "ph0", "v", "a0", "d",
              "step", "gl", "gr", "pos"]
@@ -355,24 +357,7 @@ def slot(p: Prog) -> None:
     p.iconst(12, 0xFFFF)
     p.iop(3, 3, "AND", 12)
     p.st(C["tr"], 3)
-    p.iconst(5, 0)
-    p.iconst(12, 15)
-
-    def plays():
-        p.ld(0, C["tr"])
-        p.lsh(1, 0, 3)
-        p.iconst(12, D.PAR)
-        p.iop(2, 12, "+", 1)
-        p.seti(4, 2)
-        p.ldi(3, 0, 4)
-        p.st(C["w0"], 3)
-        p.ldi(3, 1, 4)
-        p.st(C["w1"], 3)
-        p.ld(3, C["w0"])
-        p.iconst(12, 0xFF)
-        p.iop(5, 3, "AND", 12)
-    p.if_(3, "LE", 12, plays, kind="i")
-    p.st(C["sel"], 5)
+    PR.record(p, C)
     p.iconst(7, 0)
     for typ in D.POST:
         p.ld(5, C["sel"])
@@ -382,16 +367,17 @@ def slot(p: Prog) -> None:
 
 
 def run(p: Prog) -> None:
-    p.ld(0, C["t"])
+    p.ld(0, C["i"])
     p.lsh(1, 0, 5)
     p.iconst(12, STATE)
     p.iop(2, 12, "+", 1)
     p.st(C["sa"], 2)
-    p.lsh(1, 0, 12)                              # 4 KB a slot
+    p.lsh(1, 0, 12)                              # 4 KB a voice slot and insert slot
     p.iconst(12, D.POST_RING_DDR)
     p.iop(1, 12, "+", 1)
     p.st(C["rb"], 1)
-    p.lsh(1, 0, 8)                               # the slot's stereo block
+    p.ld(0, C["t"])
+    p.lsh(1, 0, 8)                               # the voice slot's stereo block
     p.iconst(12, D.STEREO)
     p.iop(1, 12, "+", 1)
     p.st(C["lp"], 1)
@@ -432,21 +418,11 @@ def run(p: Prog) -> None:
     for k in range(6):
         p.ldi(8, k, 4)
         p.st(C[f"s{k}"], 8)
-    for k in range(7):                           # MIX, K1..K6: byte k + 1, / 127
-        w, sh = ("w0", 8 * (k + 1)) if k < 3 else ("w1", 8 * (k - 3))
-        p.ld(8, C[w])
-        if sh:
-            p.lsh(8, 8, -sh)
-        p.iconst(12, 0xFF)
-        p.iop(8, 8, "AND", 12)
-        p.iconst(9, 0)
-        p.float_(8, 8, 9)
-        p.fconst(9, 1 / 127)
-        p.fop(8, 8, "*", 9)
-        p.st(C[f"p{k}"], 8)
+    PR.values(p, C)
     p.ld(5, C["sel"])
     p.iconst(6, D.WIDE)
-    p.if_(5, "EQ", 6, lambda: wide(p), lambda: chor(p), kind="i")
+    p.if_(5, "EQ", 6, lambda: G.ins_admit(p, D.COST[D.WIDE], lambda: wide(p)),
+          lambda: G.ins_admit(p, D.COST[D.CHOR], lambda: chor(p)), kind="i")
     p.ld(2, C["sa"])
     p.seti(4, 2)
     for k in range(6):
@@ -456,18 +432,24 @@ def run(p: Prog) -> None:
 
 def body(p: Prog) -> None:
     p.iconst(0, 0)
-    p.st(C["t"], 0)
-    p.iconst(0, D.TRACKS)
+    p.st(C["i"], 0)
+    p.iconst(0, D.RECORDS)
     p.st(C["cnt"], 0)
     top = p.label("slot")
     p.place(top)
 
     def each():
+        p.ld(0, C["i"])
+        p.lsh(1, 0, -1)
+        p.st(C["t"], 1)
+        p.iconst(12, 1)
+        p.iop(1, 0, "AND", 12)
+        p.st(C["j"], 1)
         slot(p)
-        p.ld(0, C["t"])
+        p.ld(0, C["i"])
         p.iconst(12, 1)
         p.iop(0, 12, "+", 0)
-        p.st(C["t"], 0)
+        p.st(C["i"], 0)
         p.ld(0, C["cnt"])
         p.iconst(12, 1)
         p.iop(0, 0, "-", 12)
@@ -492,7 +474,9 @@ def program(prefix: str = "ip") -> str:
     p.raw(".GLOBAL wr_inpost.;")
     p.raw("wr_inpost.:")
     save(p)
+    G.ins_start(p)
     body(p)
+    G.ins_end(p)
     restore(p)
     p.jump_abs("", SENDS_SW, "the FX sends, entered as the engine called them")
     p.emit_subs()

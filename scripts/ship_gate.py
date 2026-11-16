@@ -173,7 +173,9 @@ TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platfo
          "test/test_fdn8.py",                                 # FDN8: its DSP program against the reference
          "test/test_xdly.py",                                 # XDLY: the same
          "test/test_inserts.py",                              # the inserts: the same
-         "test/test_inserts_post.py"]                         # the post inserts (CHOR, WIDE): the same
+         "test/test_inserts_post.py",                         # the post inserts (CHOR, WIDE): the same
+         "test/test_inserts_bus.py",                          # the bus inserts (FDN8, XDLY per track): the same
+         "test/test_inserts_c.py"]                            # the ColdFire's packed values against design.pack
 HIT = re.compile(r"^\s+([0-9a-f]{8}):", re.M)
 
 # v0.38 (owner, 2026-11-01): the steps by name, for --only and --list, in the order a full run

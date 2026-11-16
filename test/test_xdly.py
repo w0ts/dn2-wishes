@@ -25,6 +25,9 @@ def fbits(x) -> int:
 
 def mem0() -> Mem:
     m = Mem()
+    st = P.state_bytes()                         # (2026-11-10: the lines' bases are words now)
+    for k in range(0, len(st), 4):
+        m.put(P.STATE + k, struct.unpack_from("<I", st, k)[0])
     for a, v in ((IO, 32), (IO + 4, PAIRI), (IO + 12, PAIRO), (PAIRI, INL), (PAIRI + 4, INR),
                  (PAIRO, OUTL), (PAIRO + 4, OUTR)):
         m.put(a, v)

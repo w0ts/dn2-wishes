@@ -32,12 +32,24 @@ def mem0() -> Mem:
     return m
 
 
+_GEN = [0]
+
+
+def send(m: Mem, par: bytes) -> None:
+    """the ColdFire's send (ins.c ins_words): the records packed after a moved change word, only when
+    they differ from the last sent (as the link sends on a change)"""
+    words = D.pack(par, 0)[2:]
+    if [m.get(D.PACK + 4 * k) for k in range(D.PACK_WORDS)] != words or m.get(D.GEN) == 0:
+        _GEN[0] += 1
+        for k, w in enumerate(D.pack(par, _GEN[0])):
+            m.put(D.GEN + 4 * k, w)
+
+
 def call(m: Mem, par: bytes, bufs, route=None) -> list[list[int]]:
     rt = list(range(16)) if route is None else route
     for k in range(8):
         m.put(D.ROUTE + 4 * k, (rt[2 * k] & 0xFFFF) | (rt[2 * k + 1] & 0xFFFF) << 16)
-    for k in range(0, 128, 4):
-        m.put(D.PAR + k, struct.unpack_from("<I", par, k)[0])
+    send(m, par)
     for t in range(D.TRACKS):
         for j in range(D.BLOCK):
             m.put(BUF + 0x80 * t + 4 * j, fbits(bufs[t][j]))
@@ -45,10 +57,12 @@ def call(m: Mem, par: bytes, bufs, route=None) -> list[list[int]]:
     return [[m.get(BUF + 0x80 * t + 4 * j) for j in range(D.BLOCK)] for t in range(D.TRACKS)]
 
 
-def par_of(rows: dict[int, list[int]]) -> bytes:
-    b = bytearray(128)
-    for t, v in rows.items():
-        b[8 * t:8 * t + 8] = bytes(v)
+def par_of(rows: dict, rows2: dict | None = None) -> bytes:
+    """ROWS: track -> slot 1's record; ROWS2: track -> slot 2's"""
+    b = bytearray(8 * D.RECORDS)
+    for j, rr in enumerate((rows, rows2 or {})):
+        for t, v in rr.items():
+            b[8 * (2 * t + j):8 * (2 * t + j) + 8] = bytes(v)
     return bytes(b)
 
 
@@ -103,7 +117,7 @@ def test_all_off_leaves_every_buffer():
     m = mem0()
     rnd = random.Random(1)
     bufs = [[rnd.uniform(-1, 1) for _ in range(32)] for _ in range(D.TRACKS)]
-    got = call(m, bytes(128), bufs)
+    got = call(m, bytes(8 * D.RECORDS), bufs)
     assert got == [[fbits(np.float32(x)) for x in b] for b in bufs]
 
 
@@ -134,3 +148,47 @@ def test_each_voice_gets_the_insert_of_the_track_it_plays():
             else:
                 slots_seen.add(s_)
     assert len(slots_seen) >= 12                         # the tracks moved over most slots
+
+
+def test_pack_round_trip():
+    rnd = random.Random(4)
+    v = [rnd.randrange(128) for _ in range(D.RECORDS * D.FIELDS)]
+    w = D.pack(v, 77)
+    assert len(w) == 2 + D.PACK_WORDS and w[0] == 77
+    assert D.unpack(w[2:]) == v
+
+
+def test_unpack_model_is_design_unpack():
+    """the DSP's unpack (run in the model) gives design.unpack's table, and only on a change"""
+    rnd = random.Random(5)
+    m = mem0()
+    v = [rnd.randrange(128) for _ in range(D.RECORDS * D.FIELDS)]
+    for k, w in enumerate(D.pack(v, 9)):
+        m.put(D.GEN + 4 * k, w)
+    P.run(m)
+    assert [m.get(D.TABLE + 4 * k) for k in range(D.RECORDS * D.FIELDS)] == v
+    m.put(D.PACK, 0x7F)                          # no change word moved: the table stays
+    P.run(m)
+    assert [m.get(D.TABLE + 4 * k) for k in range(D.RECORDS * D.FIELDS)] == v
+
+
+def test_two_slots_run_in_order():
+    """slot 1 then slot 2 on the same voice (FUZZ into FOLD; TAPE into HARM), slot 2 alone (slot 1 OFF),
+    slot 2 switched while slot 1 keeps its state; every block as the reference"""
+    rnd = random.Random(11)
+    rows = {0: [D.FUZZ, 127, 90, 70, 20, 40, 0, 100], 3: [D.TAPE, 100, 80, 100, 90, 100, 60, 40],
+            6: [D.OFF, 127, 0, 0, 0, 0, 0, 0]}
+    rows2 = {0: [D.FOLD, 90, 100, 60, 64, 90, 110, 0], 3: [D.HARM, 127, 100, 60, 64, 90, 110, 0],
+             6: [D.FUZZ, 127, 127, 127, 0, 0, 0, 127], 9: [D.CHOR, 127, 64, 64, 64, 64, 64, 64]}
+    m, r = mem0(), R.Ref()
+    for b in range(60):
+        if b == 30:
+            rows2[0] = [D.TAPE, 127, 64, 64, 64, 64, 64, 64]
+        par = par_of(rows, rows2)
+        bufs = [[rnd.uniform(-0.8, 0.8) for _ in range(32)] for _ in range(16)]
+        want = [[np.float32(x) for x in buf] for buf in bufs]
+        r.block(par, want)
+        got = call(m, par, bufs)
+        assert got == [[fbits(x) for x in w] for w in want], f"block {b}"
+        assert got[9] == [fbits(np.float32(x)) for x in bufs[9]]
+        assert got[6] != [fbits(np.float32(x)) for x in bufs[6]]

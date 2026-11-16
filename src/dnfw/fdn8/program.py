@@ -21,6 +21,13 @@ Both of ours return with the stock C epilogue.
 
 Where things are: the code in L2 (FDN8_SW), its state in L1 (STATE), its ring in DDR (RING,
 256 KB of float32, zeros at power-on).
+
+**2026-11-10: also the per-track FDN8 inserts' engine** (dnfw.inserts.bus). The bus pass swaps an
+instance's words (DYN_WORDS from STATE, and the active variant table ACT) in for the send reverb's,
+sets MODE to 1 and enters wr_fdn8 as a leaf call (I12 = its return address - 1). After save(), MODE 1
+runs one block of that instance (its ring at the word `ring`, its parameters and I/O where `par` and
+`io` point, a fresh instance (`cur` 0) switched to FDN8 first: the ring cleared, the filters at 0),
+restores every register and returns with JUMP (M14, I12). MODE 0, the bus's call: as before.
 """
 
 from __future__ import annotations
@@ -37,13 +44,14 @@ STOCK_REVERB = 0xB836BC
 STOCK_STATE = R.STOCK_STATE
 MASK4 = D.RING_MASK << 2
 
-_NAMES = (["cur", "clr", "pos", "force", "p4", "pd4", "xw", "gd1", "gd2", "gh", "ah", "al", "hs", "ls",
+_NAMES = (["ring", "mode", "im", "cur", "clr", "pos", "force", "p4", "pd4", "xw", "gd1", "gd2", "gh", "ah", "al", "hs", "ls",
            "dq", "io", "par", "went", "t0", "t1", "t2", "t3", "t4", "t5", "t6", "t7"]
           + [f"{n}{k}" for n in ("ph", "ro", "eta", "ap", "lp", "c", "g", "f") for k in range(8)]
           + [f"last{k}" for k in range(6)] + [f"pr{k}" for k in range(6)]
           + [f"sv{k}" for k in range(16)] + ["svi0", "svi1", "svi2", "svi3", "svi4", "svi12", "sva"])
 C = {n: STATE + 4 * k for k, n in enumerate(_NAMES)}
 assert len(C) == len(_NAMES), "a state word named twice"
+DYN_WORDS = (C["sv0"] - STATE) // 4               # an instance's words: STATE .. sv0 (then ACT's)
 CTAB = STATE + 4 * len(_NAMES)                    # the stock buffers' chunk addresses
 N_STOCK_CHUNKS = R.STOCK_WORDS // R.CHUNK
 assert all((b - a) % (4 * R.CHUNK) == 0 for a, b in R.STOCK_BUFS)
@@ -93,6 +101,7 @@ def state_bytes() -> bytes:
     phases, and the chunk table"""
     import struct
     w = [0] * (STATE_BYTES // 4)
+    w[(C["ring"] - STATE) // 4] = RING
     for k in range(8):
         w[(C[f"ph{k}"] - STATE) // 4] = D.LFO_PH0[k]
     for k, a in enumerate(stock_chunks()):
@@ -575,7 +584,7 @@ def fdn8_block(p: Prog) -> None:
     io_ptrs(p)
     p.ld(8, C["p4"])
     p.iconst(9, MASK4)
-    p.iconst(10, RING)
+    p.ld(10, C["ring"])
     p.loop_r(11, D.BLOCK, lambda: sample(p))
     p.st(C["p4"], 8)
 
@@ -597,7 +606,7 @@ def clearing(p: Prog) -> None:
 
     def fdn():                                   # the ring, from its start
         p.lsh(2, 0, 2)
-        p.iconst(12, RING)
+        p.ld(12, C["ring"])
         p.iop(2, 12, "+", 2)
         p.seti(4, 2)
 
@@ -696,8 +705,9 @@ def ret(p: Prog) -> None:
     p.e("NOP;")
 
 
-def body(p: Prog) -> None:
-    """after save(): R8 and R12 as the bus passed them are in sv8 / sv12"""
+def send(p: Prog) -> None:
+    """the bus's call (MODE 0): R8 and R12 as the bus passed them are in sv8 / sv12; the type asked for
+    (a switch when it changed); the stock reverb, when it is the type and nothing is to be cleared"""
     p.ld(0, C["sv8"])
     p.st(C["par"], 0)
     p.ld(0, C["sv12"])
@@ -711,7 +721,6 @@ def body(p: Prog) -> None:
     p.if_(0, "EQ", 2, lambda: p.iconst(1, 2), kind="i")
     p.ld(2, C["cur"])
     p.if_(1, "NE", 2, lambda: switch(p), kind="i")
-    p.ld(0, C["clr"])
 
     def go_stock():
         restore(p)
@@ -720,18 +729,43 @@ def body(p: Prog) -> None:
             return
         p.jump_abs("", STOCK_REVERB, "the stock reverb, entered as the bus called it")
 
-    def run_one():
+    def no_clear():
         p.ld(1, C["cur"])
+        p.ifz(1, "EQ", go_stock)
+    p.ld(0, C["clr"])
+    p.ifz(0, "EQ", no_clear)
 
-        def fdn():
-            fdn8_block(p)
-            ret(p)
-        p.ifz(1, "EQ", go_stock, fdn)
 
-    def clear():
-        clearing(p)
-        ret(p)
-    p.ifz(0, "NE", clear, run_one)
+def instance(p: Prog) -> None:
+    """MODE 1: the instance swapped in (dnfw.inserts.bus); a fresh one (cur 0) switched to FDN8 (R1 = 1)"""
+    p.ld(2, C["cur"])
+    p.iconst(1, 1)
+    p.if_(2, "NE", 1, lambda: switch(p), kind="i")
+
+
+def entry(p: Prog) -> None:
+    """after save(): the call's own part (send or instance), then one block (clearing, or FDN8), then back
+    as the call came (the stock C epilogue to the bus, or JUMP (M14, I12) to the bus pass)"""
+    if p.run:
+        p.mem.put(C["went"], 0)
+    p.ld(0, C["mode"])
+    p.st(C["im"], 0)
+    p.iconst(1, 0)
+    p.st(C["mode"], 1)
+    p.ifz(0, "NE", lambda: instance(p), lambda: send(p))
+    if p.run and p.mem.get(C["went"]) == 1:     # (the model: the stock reverb took the call)
+        return
+    p.ld(0, C["clr"])
+    p.ifz(0, "NE", lambda: clearing(p), lambda: fdn8_block(p))
+    p.ld(0, C["im"])
+
+    def to_pass():
+        restore(p)
+        if not p.run:
+            p.e("JUMP (M14, I12);", "back to the bus pass (dnfw.inserts.bus)")
+            p.e("NOP;", "(never run: the if's own jump follows, and BRANCH-WIN wants 3 parcels")
+            p.e("NOP;", " between two branches, scripts/gate_hwrules.py)")
+    p.ifz(0, "NE", to_pass, lambda: ret(p))
 
 
 def program(prefix: str = "fd") -> str:
@@ -744,7 +778,7 @@ def program(prefix: str = "fd") -> str:
     p.raw(".GLOBAL wr_fdn8.;")
     p.raw("wr_fdn8.:")
     save(p)
-    body(p)
+    entry(p)
     p.emit_subs()
     p.raw(".wr_fdn8..end:")
     p.raw("      .type wr_fdn8.,STT_FUNC;")
@@ -757,6 +791,14 @@ def run(mem: Mem, regs: dict[int, int]) -> tuple[str, Prog]:
     for k, v in regs.items():
         p.r[k] = v & 0xFFFFFFFF
     save(p)
-    body(p)
+    entry(p)
     went = mem.get(C["went"])
     return ("stock" if went == 1 else "ours"), p
+
+
+def run_instance(mem: Mem) -> Prog:
+    """the model of the bus pass's call (MODE 1 set, the instance's words in place)"""
+    p = Prog("run", mem=mem)
+    save(p)
+    entry(p)
+    return p

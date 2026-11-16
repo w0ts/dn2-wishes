@@ -7,21 +7,26 @@ pass ends with a JUMP to PING (dnfw.waverider.dsp.PING_SW), which restores the r
 saved and returns to the stock chain. So every machine has rendered into its track buffer, and the
 filter, amp and pan are still to come. Like PING it uses the registers freely.
 
-For each track whose M.SEL is a built insert: its 8 value bytes from the pool (design.PAR), its
-state (zeros when M.SEL changed), the insert run over its buffer in place. OFF (and a type this
-build does not run) costs a load and a compare.
+2026-11-10, two slots a track: first, when the ColdFire's change word (design.GEN) moved, the 56
+packed words (design.PACK) are unpacked into TABLE (32 records x 8 words: type | instance << 4, MIX,
+K1..K6), which this pass, the post pass and the bus pass read. Then for each voice slot s and insert
+slot j (i = 2 s + j, slot 1 before slot 2): the track s plays, its record 2 tr + j; when that is a built
+type, its state (8 words at STATE + 32 i, zeros when the type or the track changed), the insert run over
+the voice's buffer in place. OFF (and a type this pass does not run) costs a load and a compare.
 """
 
 from __future__ import annotations
 
 from ..fdn8 import program as FP
+from ..perc import guard as G
 from ..perc.dsl import Mem, Prog
 from . import design as D
 
-STATE = 0x200AF800               # L2: 16 x 32 bytes of state, after the code (dnfw.waverider.dsp)
-STATE_BYTES = D.TRACKS * 4 * D.STATE_WORDS
+STATE = 0x200AF400               # L2: 32 x 32 bytes of state, after the code (dnfw.waverider.dsp)
+STATE_BYTES = D.RECORDS * 4 * D.STATE_WORDS
 SCRATCH = STATE + STATE_BYTES    # the pass's own words
-_NAMES = ["t", "w0", "w1", "sa", "buf"] + [f"p{k}" for k in range(7)] + [f"s{k}" for k in range(8)] + [
+TABLE = D.TABLE                  # the unpacked records (design.TABLE), and the last change word seen
+_NAMES = ["t", "i", "j", "rec", "w1", "sa", "buf", "gn"] + [f"p{k}" for k in range(7)] + [f"s{k}" for k in range(8)] + [
     "g", "c", "b", "y0", "k", "thr", "cnt",
     "gd", "step", "lvl", "d", "rb", "sel", "tr"]
 C = {n: SCRATCH + 4 * k for k, n in enumerate(_NAMES)}
@@ -29,8 +34,12 @@ assert len(C) == len(_NAMES)
 SCRATCH_BYTES = 4 * len(_NAMES)
 
 
+assert SCRATCH + SCRATCH_BYTES <= TABLE
+
+
 def state_bytes() -> bytes:
-    return bytes(STATE_BYTES + SCRATCH_BYTES)
+    """the state, the pass's words, then the unpacked records and the last change word: zeros"""
+    return bytes(TABLE + D.TABLE_BYTES - STATE)
 
 
 def fuzz(p: Prog) -> None:
@@ -220,8 +229,8 @@ def tape(p: Prog) -> None:
     p.fconst(1, D.TP_HISS_MAX)
     p.fop(0, 0, "*", 1)
     p.st(C["lvl"], 0)
-    p.ld(0, C["t"])
-    p.lsh(1, 0, 11)                              # 2 KB a track
+    p.ld(0, C["i"])
+    p.lsh(1, 0, 11)                              # 2 KB a voice slot and insert slot
     p.iconst(12, D.TP_RING_DDR)
     p.iop(1, 12, "+", 1)
     p.st(C["rb"], 1)
@@ -502,27 +511,10 @@ def track(p: Prog) -> None:
     p.iconst(12, 0xFFFF)
     p.iop(3, 3, "AND", 12)
     p.st(C["tr"], 3)
-    p.iconst(5, 0)                               # M.SEL 0 unless the slot plays a track
-    p.iconst(12, 15)
-
-    def plays():
-        p.ld(0, C["tr"])
-        p.lsh(1, 0, 3)
-        p.iconst(12, D.PAR)
-        p.iop(2, 12, "+", 1)
-        p.seti(4, 2)
-        p.ldi(3, 0, 4)
-        p.st(C["w0"], 3)
-        p.ldi(3, 1, 4)
-        p.st(C["w1"], 3)
-        p.ld(3, C["w0"])
-        p.iconst(12, 0xFF)
-        p.iop(5, 3, "AND", 12)                   # M.SEL
-    p.if_(3, "LE", 12, plays, kind="i")
-    p.st(C["sel"], 5)
+    record(p, C)
 
     def run():
-        p.ld(0, C["t"])
+        p.ld(0, C["i"])
         p.lsh(1, 0, 5)
         p.iconst(12, STATE)
         p.iop(2, 12, "+", 1)
@@ -545,7 +537,7 @@ def track(p: Prog) -> None:
             p.sti(D.STATE_WORDS - 1, 4, 5)
 
             def fresh_ring():                    # TAPE starts from a silent ring
-                p.ld(0, C["t"])
+                p.ld(0, C["i"])
                 p.lsh(1, 0, 11)
                 p.iconst(12, D.TP_RING_DDR)
                 p.iop(1, 12, "+", 1)
@@ -570,18 +562,7 @@ def track(p: Prog) -> None:
         for k in range(D.STATE_WORDS):
             p.ldi(8, k, 4)
             p.st(C[f"s{k}"], 8)
-        for k in range(7):                       # MIX, K1..K6: byte k + 1, / 127
-            w, sh = ("w0", 8 * (k + 1)) if k < 3 else ("w1", 8 * (k - 3))
-            p.ld(8, C[w])
-            if sh:
-                p.lsh(8, 8, -sh)
-            p.iconst(12, 0xFF)
-            p.iop(8, 8, "AND", 12)
-            p.iconst(9, 0)
-            p.float_(8, 8, 9)
-            p.fconst(9, 1 / 127)
-            p.fop(8, 8, "*", 9)
-            p.st(C[f"p{k}"], 8)
+        values(p, C)
         p.ld(0, C["t"])
         p.lsh(1, 0, 2)
         p.iconst(12, D.BUFFERS)
@@ -589,7 +570,8 @@ def track(p: Prog) -> None:
         p.seti(4, 2)
         p.ldi(3, 0, 4)
         p.st(C["buf"], 3)
-        _by_type(p, [(D.FUZZ, fuzz), (D.TAPE, tape), (D.FOLD, fold), (D.HARM, harm)])
+        _by_type(p, [(typ, (lambda fn, typ: lambda p: G.ins_admit(p, D.COST[typ], lambda: fn(p)))(fn, typ))
+                     for typ, fn in ((D.FUZZ, fuzz), (D.TAPE, tape), (D.FOLD, fold), (D.HARM, harm))])
         p.ld(2, C["sa"])
         p.seti(4, 2)
         for k in range(D.STATE_WORDS - 2):
@@ -620,22 +602,103 @@ def _by_type(p: Prog, table) -> None:
     pick(table)
 
 
+def record(p: Prog, C: dict) -> None:
+    """C['tr'] (the track voice slot C['t'] plays, past 15 none) and C['j'] (the insert slot) -> C['rec']
+    the record's address in TABLE, C['sel'] its type (0 when the slot plays no track). Clobbers R0-R5, R12"""
+    p.iconst(5, 0)
+    p.ld(3, C["tr"])
+    p.iconst(12, 15)
+
+    def plays():
+        p.ld(0, C["tr"])
+        p.lsh(1, 0, 6)                           # 2 records x 32 bytes a track
+        p.ld(0, C["j"])
+        p.lsh(0, 0, 5)
+        p.ipass(12, 1)
+        p.iop(1, 12, "+", 0)
+        p.iconst(12, TABLE)
+        p.iop(2, 12, "+", 1)
+        p.st(C["rec"], 2)
+        p.seti(4, 2)
+        p.ldi(3, 0, 4)
+        p.iconst(12, (1 << D.TYPE_BITS) - 1)
+        p.iop(5, 3, "AND", 12)                   # the type
+    p.if_(3, "LE", 12, plays, kind="i")
+    p.st(C["sel"], 5)
+
+
+def values(p: Prog, C: dict) -> None:
+    """MIX, K1..K6 of the record at C['rec'] -> C['p0'] .. C['p6'], each / 127. Clobbers R2, R8, R9, R12, I4"""
+    p.ld(2, C["rec"])
+    p.seti(4, 2)
+    for k in range(7):
+        p.ldi(8, k + 1, 4)
+        p.iconst(9, 0)
+        p.float_(8, 8, 9)
+        p.fconst(9, 1 / 127)
+        p.fop(8, 8, "*", 9)
+        p.st(C[f"p{k}"], 8)
+
+
+def unpack(p: Prog, C: dict) -> None:
+    """when the change word moved: the packed words into TABLE (design.unpack). Clobbers R0-R3, R12, I0, I4"""
+    def go():
+        p.st(TABLE + 4 * D.RECORDS * D.FIELDS, 0)
+        p.iconst(1, D.PACK)
+        p.seti(4, 1)
+        p.iconst(1, TABLE)
+        p.seti(0, 1)
+
+        def group():
+            p.iconst(3, 0)                       # X: the words' top nibbles
+
+            def word():
+                p.ldpost(0, 4)
+                for sh in (0, 7, 14, 21):
+                    p.lsh(1, 0, -sh) if sh else p.ipass(1, 0)
+                    p.iconst(12, 0x7F)
+                    p.iop(1, 1, "AND", 12)
+                    p.stpost(0, 1)
+                p.lsh(3, 3, -4)
+                p.lsh(1, 0, -28)
+                p.lsh(1, 1, 24)
+                p.iop(3, 3, "OR", 1)
+            p.loop_r(11, 7, word, one=2)
+            for sh in (0, 7, 14, 21):
+                p.lsh(1, 3, -sh) if sh else p.ipass(1, 3)
+                p.iconst(12, 0x7F)
+                p.iop(1, 1, "AND", 12)
+                p.stpost(0, 1)
+        p.loop(C["gn"], D.RECORDS * D.FIELDS // 32, group)
+    p.ld(0, D.GEN)
+    p.ld(1, TABLE + 4 * D.RECORDS * D.FIELDS)
+    p.if_(0, "NE", 1, go, kind="i")
+
+
 def body(p: Prog) -> None:
+    G.ins_start(p)
+    unpack(p, C)
     p.iconst(0, 0)
-    p.st(C["t"], 0)
+    p.st(C["i"], 0)
 
     def each():
+        p.ld(0, C["i"])
+        p.lsh(1, 0, -1)
+        p.st(C["t"], 1)
+        p.iconst(12, 1)
+        p.iop(1, 0, "AND", 12)
+        p.st(C["j"], 1)
         track(p)
-        p.ld(0, C["t"])
+        p.ld(0, C["i"])
         p.iconst(12, 1)
         p.iop(0, 12, "+", 0)
-        p.st(C["t"], 0)
-    _tracks(p, each)
+        p.st(C["i"], 0)
+    _tracks(p, each, D.RECORDS)
 
 
-def _tracks(p: Prog, each) -> None:
-    """EACH for t = 0 .. 15 (C['t'] counts; a scratch word counts down)"""
-    p.iconst(0, D.TRACKS)
+def _tracks(p: Prog, each, n: int = D.TRACKS) -> None:
+    """EACH n times (the caller counts; a scratch word counts down)"""
+    p.iconst(0, n)
     p.st(C["cnt"], 0)
     top = p.label("trk")
     p.place(top)
@@ -667,6 +730,7 @@ def program(next_sw: int, prefix: str = "in") -> str:
     p.raw(".GLOBAL wr_ins.;")
     p.raw("wr_ins.:")
     body(p)
+    G.ins_end(p)
     p.jump_abs("", next_sw, "ping.asm's wr_ping (it returns to the stock chain)")
     p.emit_subs()
     p.raw(".wr_ins..end:")

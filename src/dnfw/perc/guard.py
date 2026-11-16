@@ -66,7 +66,17 @@ RES_I = GUARD + 0xE0             # perc_limit's loop counter
 # measures), so one heavy start cannot get the note's next blocks refused twice and the note
 # stolen. Only PLAITS sets it: every other machine's guard decisions are as before.
 FRESH = GUARD + 0xE4                # (v0.52 merge: after v0.49's RESERVE .. RES_I)
-END = GUARD + 0xE8
+# 2026-11-10 (the User: the inserts "should not affect voices"): the insert passes' time is measured
+# apart (INS_ACC, the frame's; INS_LAST the last frame's) and taken out of the stock's tail, so it no
+# longer lowers the voices' LIMIT; instead each insert runs in a block only if it is expected to end
+# before INS_DEADLINE (cycles after MARK0: P - P/8 - TAIL, the end of the frame less the guard's margin
+# and the stock's own tail), else it passes the sound through for that block (INS_SKIPS counts them)
+INS_DEADLINE = GUARD + 0xE8
+INS_ACC = GUARD + 0xEC
+INS_T0 = GUARD + 0xF0
+INS_SKIPS = GUARD + 0xF4
+END = GUARD + 0xF8
+assert END <= 0x2DE100
 
 
 # 2026-11-09 (the User's choice B): a PLAITS note's first START_BLOCKS blocks are expected at the
@@ -144,6 +154,8 @@ def entry(p) -> None:
     p.iconst(8, LIMIT_DEFAULT)
     p.st(LIMIT, 8)
     p.place(ok)
+    p.iconst(8, 0)
+    p.st(INS_ACC, 8)                           # 2026-11-10: the inserts' time, this frame's from here
 
 
 def tail_limit(p) -> None:
@@ -165,7 +177,9 @@ def tail_limit(p) -> None:
     p.ld(10, OURS_END)
     p.ld(11, PREV_MARK)
     p.e("R10 = R10 - R11;", "our own time then")
-    p.e("R8 = R8 - R10;", "the stock's tail")
+    p.e("R8 = R8 - R10;", "the stock's tail ..")
+    p.ld(10, INS_ACC)
+    p.e("R8 = R8 - R10;", ".. less the inserts' (2026-11-10)")
     p.jump("LE", no)
     p.lsh(10, 13, -1)                          # 0.7 P = P/2 + P/8 + P/16 (0.6875)
     p.lsh(11, 13, -3)
@@ -187,6 +201,7 @@ def tail_limit(p) -> None:
     p.e("R10 = R13 - R8;", "P - TAIL")
     p.lsh(11, 13, -3)
     p.e("R10 = R10 - R11;", "less P/8")
+    p.st(INS_DEADLINE, 10)                     # 2026-11-10: the inserts' deadline
     p.lsh(11, 13, -2)
     p.e("COMP(R10, R11);")
     p.jump("GE", done)
@@ -497,4 +512,55 @@ def around(p, t_word: int, cost: int, buffers: int, voice, rests: int | None = N
     p.seti(4, 9, "the slot's buffer")
     p.iconst(8, 0)
     p.loop(COUNT, 8, lambda: [p.stpost(4, 8) for _ in range(4)])
+    p.place(done)
+
+
+# -- 2026-11-10: the inserts (dnfw.inserts): their time apart, and their deadline ---------------------
+def ins_start(p) -> None:
+    """an insert pass begins: INS_T0 = EMUCLK. Emit only. Clobbers R8."""
+    if p.run:
+        return
+    p.e("R8 = EMUCLK;", "the inserts' time: this pass from here")
+    p.st(INS_T0, 8)
+
+
+def ins_end(p) -> None:
+    """an insert pass ends: INS_ACC += EMUCLK - INS_T0. Emit only. Clobbers R8, R9."""
+    if p.run:
+        return
+    p.e("R8 = EMUCLK;")
+    p.ld(9, INS_T0)
+    p.e("R8 = R8 - R9;", "this pass's time")
+    p.ld(9, INS_ACC)
+    p.e("R8 = R8 + R9;")
+    p.st(INS_ACC, 8)
+
+
+def ins_admit(p, cost: int, run) -> None:
+    """RUN() if the insert is expected to end before INS_DEADLINE (EMUCLK - MARK0 + COST), or no
+    deadline is known yet (0: the runner, a frame not measured); else INS_SKIPS + 1 and the insert
+    left out of this block (the sound passes as it is). The model always runs it (the runner's clock
+    does not move either). Clobbers R8-R10 before RUN."""
+    if p.run:
+        run()
+        return
+    go = p.label("iago")
+    done = p.label("iadone")
+    p.ld(10, INS_DEADLINE)
+    p.e("R10 = PASS R10;")
+    p.jump("EQ", go)
+    p.e("R8 = EMUCLK;")
+    p.ld(9, MARK0)
+    p.e("R8 = R8 - R9;", "into the frame")
+    p.iconst(9, cost)
+    p.e("R8 = R8 + R9;", "and this insert's bound")
+    p.e("COMP(R8, R10);")
+    p.jump("LE", go)
+    p.ld(8, INS_SKIPS)
+    p.iconst(9, 1)
+    p.e("R8 = R8 + R9;")
+    p.st(INS_SKIPS, 8)
+    p.jump("", done)
+    p.place(go)
+    run()
     p.place(done)

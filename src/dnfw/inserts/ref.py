@@ -3,12 +3,14 @@ code (dnfw.inserts.program) does it, so the two agree bit for bit (the SHARC run
 assembled code to this module).
 
     r = Ref()
-    r.block(par_bytes, buffers, route)   # par_bytes: 128 bytes (16 tracks x M.SEL MIX K1..K6),
+    r.block(par_bytes, buffers, route)   # par_bytes: the records, 32 x 8 bytes (track t's slot j at
+                                         # 8 (2 t + j): type | instance << 4, MIX, K1..K6),
                                          # buffers: the 16 voice slots' 32 floats, changed in place;
                                          # route: the track each slot plays (default slot s plays
                                          # track s; a value past 15 plays none)
-Each voice slot gets the insert of the track it plays (a track on several voices gets it on each);
-a slot's state starts from zeros whenever its track or that track's M.SEL changes.
+Each voice slot gets the inserts of the track it plays (a track on several voices gets them on each),
+slot 1 then slot 2; a (voice slot, insert slot)'s state starts from zeros whenever its track or that
+insert slot's type changes.
 
 FUZZ (K1 DRIV, K2 TONE, K3 BIAS, K4 PRE, K5 GATE, K6 LEV), per sample x:
     x = clamp(x, -4, 4)
@@ -31,33 +33,34 @@ from . import design as D
 
 class Ref:
     def __init__(self):
-        self.st = [[F(0)] * D.STATE_WORDS for _ in range(D.TRACKS)]
-        self.last = [(0, 0)] * D.TRACKS          # per slot: (M.SEL, track) it last ran
-        self.ring = [np.zeros(D.TP_RING, F) for _ in range(D.TRACKS)]
+        self.st = [[F(0)] * D.STATE_WORDS for _ in range(D.RECORDS)]
+        self.last = [(0, 0)] * D.RECORDS         # per (voice slot, insert slot): (type, track) it last ran
+        self.ring = [np.zeros(D.TP_RING, F) for _ in range(D.RECORDS)]
 
     def block(self, par: bytes, bufs, route=None) -> None:
-        for t in range(D.TRACKS):                  # t: the voice slot
+        for i in range(D.RECORDS):                 # i = 2 t + j: voice slot t, insert slot j
+            t, j = i >> 1, i & 1
             tr = t if route is None else route[t] & 0xFFFF
             if tr > 15:
                 continue
-            v = par[8 * tr:8 * tr + 8]
-            sel = v[0]
+            v = par[8 * (2 * tr + j):8 * (2 * tr + j) + 8]
+            sel = v[0] & ((1 << D.TYPE_BITS) - 1)
             if sel not in D.BUILT:
                 continue
-            if (sel, tr) != self.last[t]:
-                self.st[t] = [F(0)] * D.STATE_WORDS
-                self.last[t] = (sel, tr)
+            if (sel, tr) != self.last[i]:
+                self.st[i] = [F(0)] * D.STATE_WORDS
+                self.last[i] = (sel, tr)
                 if sel == D.TAPE:
-                    self.ring[t][:] = 0
+                    self.ring[i][:] = 0
             p = [F(b) * F(1 / 127) for b in v[1:8]]
             if sel == D.FUZZ:
-                self.fuzz(self.st[t], p, bufs[t])
+                self.fuzz(self.st[i], p, bufs[t])
             elif sel == D.TAPE:
-                self.tape(t, self.st[t], p, bufs[t])
+                self.tape(i, self.st[i], p, bufs[t])
             elif sel == D.FOLD:
-                self.fold(self.st[t], p, bufs[t])
+                self.fold(self.st[i], p, bufs[t])
             elif sel == D.HARM:
-                self.harm(self.st[t], p, bufs[t])
+                self.harm(self.st[i], p, bufs[t])
 
     def fuzz(self, s, p, buf) -> None:
         mod, drv, tone, bias, pre, gate, lev = p

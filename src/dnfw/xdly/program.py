@@ -19,6 +19,12 @@ register it uses, then
 Both of ours return with the stock C epilogue.
 
 The code in L2 (XDLY_SW), its words in L1 (STATE), its lines in the stock delay's DDR.
+
+**2026-11-10: also the per-track XDLY inserts' engine** (dnfw.inserts.bus), as FDN8's: the bus pass
+swaps an instance's words (DYN_WORDS from STATE: its lines' bases `la` / `lb` among them) in, sets MODE
+to 1 and enters wr_xdly as a leaf call; MODE 1 runs one block of the instance (a fresh one, `cur` 0,
+started first: its times set, nothing of its lines read), restores every register and returns with
+JUMP (M14, I12).
 """
 
 from __future__ import annotations
@@ -33,18 +39,23 @@ STATE_BYTES = 0x200
 TYPE_WORD = 0x25CEA4             # the frame image's k 40 (Delay FX Routing), low half
 STOCK_DELAY = 0xB8482C
 
-_NAMES = (["cur", "clr", "pos", "par", "io", "went", "wp", "fill", "q", "da", "db", "ya", "yb", "fa", "fb",
+_NAMES = (["la", "lb", "mode", "im", "cur", "clr", "pos", "par", "io", "went", "wp", "fill", "q", "da", "db", "ya", "yb", "fa", "fb",
            "ta", "tb", "md", "g", "c", "x", "ia", "na", "kv", "any"]
           + [f"pr{k}" for k in range(6)]
           + [f"sv{k}" for k in range(16)] + ["svi0", "svi1", "svi2", "svi3", "svi4", "svi12", "sva"])
 C = {n: STATE + 4 * k for k, n in enumerate(_NAMES)}
 assert len(C) == len(_NAMES), "a state word named twice"
 assert STATE + 4 * len(_NAMES) <= STATE + STATE_BYTES
+DYN_WORDS = (C["sv0"] - STATE) // 4               # an instance's words: STATE .. sv0
 
 
 def state_bytes() -> bytes:
-    """the L1 words at power-on: zeros (cur 0: the stock delay)"""
-    return bytes(STATE_BYTES)
+    """the L1 words at power-on: zeros (cur 0: the stock delay) but the lines' bases"""
+    import struct
+    w = [0] * (STATE_BYTES // 4)
+    w[(C["la"] - STATE) // 4] = D.LINE_A
+    w[(C["lb"] - STATE) // 4] = D.LINE_B
+    return struct.pack(f"<{len(w)}I", *w)
 
 
 def params(p: Prog) -> None:
@@ -168,10 +179,11 @@ def loop_in(p: Prog, f: str, y: str) -> None:
     knee(p)
 
 
-def line_word(p: Prog, base: int, idx: int) -> None:
-    """I4 = the word of the line at BASE, index R{idx} (already masked); clobbers R13, R14, R12"""
+def line_word(p: Prog, base: str, idx: int) -> None:
+    """I4 = the word of the line whose base is the word BASE ('la' / 'lb'), index R{idx} (already
+    masked); clobbers R13, R14, R12"""
     p.lsh(14, idx, 2)
-    p.iconst(12, base)
+    p.ld(12, C[base])
     p.iop(13, 12, "+", 14)
     p.seti(4, 13)
 
@@ -190,7 +202,7 @@ def moved(p: Prog, d: str, y: str) -> None:
     p.fop(0, 0, "MIN", 1)
 
 
-def tap(p: Prog, base: int) -> None:
+def tap(p: Prog, base: str) -> None:
     """F0 = the line at BASE read F0 samples back (ref.tap); clobbers R1-R9, R12-R14"""
     p.trunc(5, 0)                                # i
     p.ld(6, C["fill"])
@@ -252,9 +264,9 @@ def sample(p: Prog) -> None:
     p.iop(8, 8, "AND", 12)
     p.st(C["wp"], 8)
     p.ld(6, C["ia"])
-    line_word(p, D.LINE_A, 8)
+    line_word(p, "la", 8)
     p.sti(0, 4, 6)
-    line_word(p, D.LINE_B, 8)
+    line_word(p, "lb", 8)
     p.sti(0, 4, 7)
     # q: zeros written in a row on both
     p.ld(0, C["q"])
@@ -284,10 +296,10 @@ def sample(p: Prog) -> None:
     p.if_(0, "LT", 1, inc_fill, kind="i")
     p.st(C["fill"], 0)
     moved(p, "da", "yb")
-    tap(p, D.LINE_A)
+    tap(p, "la")
     p.st(C["na"], 0)
     moved(p, "db", "ya")
-    tap(p, D.LINE_B)
+    tap(p, "lb")
     p.st(C["yb"], 0)
     p.ld(1, C["na"])
     p.st(C["ya"], 1)
@@ -399,7 +411,9 @@ def ret(p: Prog) -> None:
     p.e("NOP;")
 
 
-def body(p: Prog) -> None:
+def send(p: Prog) -> None:
+    """the bus's call (MODE 0): the type asked for (a switch when it changed); the stock delay, when it is
+    the type and nothing is to be cleared"""
     p.ld(0, C["sv8"])
     p.st(C["par"], 0)
     p.ld(0, C["sv12"])
@@ -411,7 +425,6 @@ def body(p: Prog) -> None:
     p.ifz(0, "EQ", lambda: p.iconst(1, 1))      # the type asked for: 1 XDLY
     p.ld(2, C["cur"])
     p.if_(1, "NE", 2, lambda: switch(p), kind="i")
-    p.ld(0, C["clr"])
 
     def go_stock():
         restore(p)
@@ -420,19 +433,55 @@ def body(p: Prog) -> None:
             return
         p.jump_abs("", STOCK_DELAY, "the stock delay, entered as the bus called it")
 
-    def run_one():
+    def no_clear():
         p.ld(1, C["cur"])
+        p.ifz(1, "EQ", go_stock)
+    p.ld(0, C["clr"])
+    p.ifz(0, "EQ", no_clear)
 
-        def ours():
-            params(p)
-            xdly_block(p)
-            ret(p)
-        p.ifz(1, "EQ", go_stock, ours)
 
-    def clear():
-        clearing(p)
-        ret(p)
-    p.ifz(0, "NE", clear, run_one)
+def instance(p: Prog) -> None:
+    """MODE 1: the instance swapped in (dnfw.inserts.bus); a fresh one (cur 0) started (R1 = 1)"""
+    p.ld(2, C["cur"])
+    p.iconst(1, 1)
+    p.if_(2, "NE", 1, lambda: switch(p), kind="i")
+
+
+def entry(p: Prog) -> None:
+    """after save(): the call's own part (send or instance), then one block (clearing, or XDLY), then back
+    as the call came (the stock C epilogue to the bus, or JUMP (M14, I12) to the bus pass)"""
+    if p.run:
+        p.mem.put(C["went"], 0)
+    p.ld(0, C["mode"])
+    p.st(C["im"], 0)
+    p.iconst(1, 0)
+    p.st(C["mode"], 1)
+    p.ifz(0, "NE", lambda: instance(p), lambda: send(p))
+    if p.run and p.mem.get(C["went"]) == 1:     # (the model: the stock delay took the call)
+        return
+    p.ld(0, C["clr"])
+
+    def ours():
+        params(p)
+        xdly_block(p)
+    p.ifz(0, "NE", lambda: clearing(p), ours)
+    p.ld(0, C["im"])
+
+    def to_pass():
+        restore(p)
+        if not p.run:
+            p.e("JUMP (M14, I12);", "back to the bus pass (dnfw.inserts.bus)")
+            p.e("NOP;", "(never run: the if's own jump follows, and BRANCH-WIN wants 3 parcels")
+            p.e("NOP;", " between two branches, scripts/gate_hwrules.py)")
+    p.ifz(0, "NE", to_pass, lambda: ret(p))
+
+
+def run_instance(mem: Mem) -> Prog:
+    """the model of the bus pass's call (MODE 1 set, the instance's words in place)"""
+    p = Prog("run", mem=mem)
+    save(p)
+    entry(p)
+    return p
 
 
 def io_ptrs(p: Prog) -> None:
@@ -474,7 +523,7 @@ def program(prefix: str = "xd") -> str:
     p.raw(".GLOBAL wr_xdly.;")
     p.raw("wr_xdly.:")
     save(p)
-    body(p)
+    entry(p)
     p.emit_subs()
     p.raw(".wr_xdly..end:")
     p.raw("      .type wr_xdly.,STT_FUNC;")
@@ -487,6 +536,6 @@ def run(mem: Mem, regs: dict[int, int]) -> tuple[str, Prog]:
     for k, v in regs.items():
         p.r[k] = v & 0xFFFFFFFF
     save(p)
-    body(p)
+    entry(p)
     went = mem.get(C["went"])
     return ("stock" if went == 1 else "ours"), p

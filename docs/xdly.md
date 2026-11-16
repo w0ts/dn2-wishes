@@ -98,6 +98,16 @@ XDLY makes up to 6 DDR accesses a sample (2 writes, 2 x 2 reads), so up to 192 a
 unit a DDR access costs several times an instruction. Unmeasured**: read the system meter's D with
 TYPE on XDLY.
 
+## Also the per-track XDLY inserts' engine (2026-11-10)
+
+The same code runs the XDLY inserts on the tracks' buses (docs/inserts.md "On the track's bus"): a MODE
+word after its register save; the bus pass swaps an instance's words in for the send's (and back), sets
+MODE 1 and enters `wr_xdly` as a leaf call, which runs one block of that instance and returns with
+`JUMP (M14, I12)`. The send path (MODE 0) is the one it was, three instructions longer; its
+lines' bases are words now
+(each instance has its own DDR). Its runner step holds the send path to stock and to the reference as
+before.
+
 ## Checked, and not
 
 - `test/test_xdly.py`: the DSL program's model equals `dnfw.xdly.ref` bit for bit over 200 blocks,

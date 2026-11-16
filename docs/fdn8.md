@@ -108,6 +108,16 @@ several times an instruction. Unmeasured**: read the system meter's D with TYPE 
 **Budgets**: section 7 1,030,696 of 1,048,575 B (+7,148 over the combined base); USB image
 2,088,377 of 2,097,152 B.
 
+## Also the per-track FDN8 inserts' engine (2026-11-10)
+
+The same code runs the FDN8 inserts on the tracks' buses (docs/inserts.md "On the track's bus"): a MODE
+word after its register save; the bus pass swaps an instance's words in for the send's (and back), sets
+MODE 1 and enters `wr_fdn8` as a leaf call, which runs one block of that instance and returns with
+`JUMP (M14, I12)`. The send path (MODE 0) is the one it was, three instructions longer; its
+ring's base is a word now
+(each instance has its own DDR). Its runner step holds the send path to stock and to the reference as
+before.
+
 ## Checked, and not
 
 - `test/test_fdn8.py`: the DSL program's model equals `dnfw.fdn8.ref` bit for bit, ring included.

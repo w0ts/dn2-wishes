@@ -135,7 +135,8 @@ STOCK_DELAY_SW = 0xB8482C
 # the range proven on units; XDLY's branch ends its span here), their state after the code. smp.asm's
 # tail JUMPs to wr_ins, which JUMPs on to PING.
 INS_L2_LOAD = 0x200AE000
-INS_L2_SPAN = 0x1800                         # the code; then the state (dnfw.inserts.program.STATE)
+INS_L2_SPAN = 0x1400                         # the code; then the state (dnfw.inserts.program.STATE; 0x1800 until
+                                             # 2026-11-10: two slots' state and the unpacked records need the room)
 INS_SW = 0xB80000 + (INS_L2_LOAD - 0x20000000) // 2          # 0xbd7000
 INS_STATE_L2 = INS_L2_LOAD + INS_L2_SPAN                     # 0x200af800
 # the stereo inserts after the pan (docs/inserts.md "After the pan", dnfw.inserts.post): their code in
@@ -148,6 +149,23 @@ POST_SW = 0xB80000 + (POST_L2_LOAD - 0x20000000) // 2        # 0xbd8000
 POST_STATE_L2 = POST_L2_LOAD + POST_L2_SPAN                  # 0x200b1000
 SENDS_SITE_SW = 0x1C3054                     # the engine: CJUMP 0x1c1738 (DB), then its two pushes
 SENDS_SITE_STOCK = bytes.fromhex("04181c003817")
+# 2026-11-10: the bus inserts (docs/inserts.md "On the track's bus", dnfw.inserts.bus): FDN8 and XDLY per
+# track on the routing's per-track blocks. The engine's call of the output stage (sw 0x1c307b, after the
+# routing 0x1c1f1e) gets wr_inbus as its target; wr_inbus JUMPs on to 0x1c244d. Its code in L2 in the
+# 16 KB between the sample machines' (to 0x200bc000) and PERC's (0x200c0000); its state after it (the
+# instances' stores, not loaded); each instance's DDR in dnfw.inserts.design (FDN8_RING_DDR,
+# XDLY_LINES_DDR), not loaded either (a fresh instance clears, or never reads, what it has not written)
+INSBUS_L2_LOAD = 0x200BC000
+INSBUS_L2_SPAN = 0xC00
+INSBUS_SW = 0xB80000 + (INSBUS_L2_LOAD - 0x20000000) // 2    # 0xbde000
+INSBUS_STATE_L2 = INSBUS_L2_LOAD + INSBUS_L2_SPAN            # 0x200bcc00
+OUT_SITE_SW = 0x1C307B                       # the engine: CJUMP 0x1c244d (DB), then its two pushes
+OUT_SITE_STOCK = bytes.fromhex("04181c004d24")
+# 2026-11-10: the L2 code spans are loaded as the code and 128 bytes of zeros, not padded to the span
+# (each span's zeros counted in the 1 MiB DSP upload); what lies between is loaded with nothing. 128:
+# the hardware rule BRANCH-12 (scripts/gate_hwrules.py) wants 12 valid 48-bit instructions (36 parcels,
+# 72 bytes) after every branch, the code's last one included
+L2_TAIL = 128
 REVERB_SITE_SW = 0x1C1D11                    # the FX bus: CJUMP 0xb836bc (DB), then its two pushes
 REVERB_SITE_STOCK = bytes.fromhex("0418b800bc36")
 STOCK_REVERB_SW = 0xB836BC
@@ -311,7 +329,7 @@ def objects() -> dict[str, bytes]:
     return {name: sharc_object.load_bytes(bytes.fromhex(spec[name]["object_parcels_be"]))
             for name in ("perc", "smp", "entry_jump", "idle_load", "idle_jump", "block_count",
                          "entry_mark", "emark_jump", "lookup_ptr", "ping",
-                         "pvmix", "pvmix_jump", "fdn8", "xdly", "inserts", "inspost")}
+                         "pvmix", "pvmix_jump", "fdn8", "xdly", "inserts", "inspost", "insbus")}
 
 
 def pvmix_object() -> bytes:
@@ -403,6 +421,14 @@ def sends_cjump() -> bytes:
     if POST_SW >> 24:
         raise DspError("wr_inpost is beyond a 24-bit address")
     return SENDS_SITE_STOCK[:2] + struct.pack("<HH", POST_SW >> 16, POST_SW & 0xFFFF)
+
+
+def out_cjump() -> bytes:
+    """the engine's CJUMP at OUT_SITE_SW with wr_inbus as its target: the same instruction (type 8a
+    CJUMP (DB), parcels 0x1804, then the 24-bit address), only the address changed"""
+    if INSBUS_SW >> 24:
+        raise DspError("wr_inbus is beyond a 24-bit address")
+    return OUT_SITE_STOCK[:2] + struct.pack("<HH", INSBUS_SW >> 16, INSBUS_SW & 0xFFFF)
 
 
 def reverb_cjump() -> bytes:
@@ -504,30 +530,40 @@ def l2_spans() -> list[tuple[str, int, bytes]]:
     out.append(("the main mix's tap for the recorder's MAIN, in L2 (zeros; v0.37)", MAIN_TAP_L2,
                 bytes(MAIN_TAP_BYTES)))
     code = obj["fdn8"]
-    if FDN8_L2_SPAN - len(code) < 64:
+    if FDN8_L2_SPAN - len(code) < L2_TAIL:
         raise DspError(f"fdn8.asm ({len(code)} bytes) leaves fewer than 64 bytes of its L2 span")
-    out.append(("fdn8.asm (wr_fdn8), in L2", FDN8_L2_LOAD, code + bytes(FDN8_L2_SPAN - len(code))))
+    out.append(("fdn8.asm (wr_fdn8), in L2", FDN8_L2_LOAD, code + bytes(L2_TAIL)))
     code = obj["xdly"]
-    if XDLY_L2_SPAN - len(code) < 64:
+    if XDLY_L2_SPAN - len(code) < L2_TAIL:
         raise DspError(f"xdly.asm ({len(code)} bytes) leaves fewer than 64 bytes of its L2 span")
-    out.append(("xdly.asm (wr_xdly), in L2", XDLY_L2_LOAD, code + bytes(XDLY_L2_SPAN - len(code))))
+    out.append(("xdly.asm (wr_xdly), in L2", XDLY_L2_LOAD, code + bytes(L2_TAIL)))
     code = obj["inserts"]
-    if INS_L2_SPAN - len(code) < 64:
+    if INS_L2_SPAN - len(code) < L2_TAIL:
         raise DspError(f"inserts.asm ({len(code)} bytes) leaves fewer than 64 bytes of its L2 span")
-    out.append(("inserts.asm (wr_ins), in L2", INS_L2_LOAD, code + bytes(INS_L2_SPAN - len(code))))
+    out.append(("inserts.asm (wr_ins), in L2", INS_L2_LOAD, code + bytes(L2_TAIL)))
     from ..inserts import program as ins_program
     assert ins_program.STATE == INS_STATE_L2
-    out.append(("the inserts' state: 16 tracks x 32 bytes, then the pass's words (zeros)", INS_STATE_L2,
-                ins_program.state_bytes()))
+    out.append(("the inserts' state: 32 voice and insert slots x 32 bytes, the pass's words, the unpacked "
+                "records (zeros)", INS_STATE_L2, ins_program.state_bytes()))
     code = obj["inspost"]
-    if POST_L2_SPAN - len(code) < 64:
+    if POST_L2_SPAN - len(code) < L2_TAIL:
         raise DspError(f"inspost.asm ({len(code)} bytes) leaves fewer than 64 bytes of its L2 span")
-    out.append(("inspost.asm (wr_inpost), in L2", POST_L2_LOAD, code + bytes(POST_L2_SPAN - len(code))))
+    out.append(("inspost.asm (wr_inpost), in L2", POST_L2_LOAD, code + bytes(L2_TAIL)))
     from ..inserts import post as ins_post
     assert ins_post.STATE == POST_STATE_L2
     assert POST_STATE_L2 + len(ins_post.state_bytes()) <= SMP_L2_LOAD
-    out.append(("the post inserts' state: 16 slots x 32 bytes, CHOR's wet, the pass's words (zeros)",
-                POST_STATE_L2, ins_post.state_bytes()))
+    out.append(("the post inserts' state: 32 voice and insert slots x 32 bytes, CHOR's wet, the pass's "
+                "words (zeros)", POST_STATE_L2, ins_post.state_bytes()))
+    code = obj["insbus"]
+    if INSBUS_L2_SPAN - len(code) < L2_TAIL:
+        raise DspError(f"insbus.asm ({len(code)} bytes) leaves fewer than 64 bytes of its L2 span")
+    out.append(("insbus.asm (wr_inbus), in L2", INSBUS_L2_LOAD, code + bytes(L2_TAIL)))
+    from ..inserts import bus as ins_bus
+    assert ins_bus.STATE == INSBUS_STATE_L2 and ins_bus.END <= PERC_L2_LOAD
+    assert SMP_L2_LOAD + SMP_L2_SPAN <= INSBUS_L2_LOAD
+    assert (_ins().FDN8_SW, _ins().XDLY_SW, _ins().BUS_STATE) == (FDN8_SW, XDLY_SW, INSBUS_STATE_L2)
+    out.append(("the bus inserts' head: each instance's owner (zeros), the engines' I/O descriptor",
+                INSBUS_STATE_L2, ins_bus.state_bytes()))
     return out
 
 
@@ -598,7 +634,11 @@ def placements() -> list[dict]:
             {"what": f"patch: the engine's call of the FX sends at sw {SENDS_SITE_SW:#x} -> target {POST_SW:#x} "
                      "(the post inserts, which JUMP on to the sends)",
              "load_address": f"{sw_to_load(SENDS_SITE_SW):#010x}", "bytes": len(SENDS_SITE_STOCK),
-             "stock": SENDS_SITE_STOCK.hex(), "new": sends_cjump().hex()}]
+             "stock": SENDS_SITE_STOCK.hex(), "new": sends_cjump().hex()},
+            {"what": f"patch: the engine's call of the output stage at sw {OUT_SITE_SW:#x} -> target {INSBUS_SW:#x} "
+                     "(wr_inbus, then 0x1c244d)",
+             "load_address": f"{sw_to_load(OUT_SITE_SW):#010x}", "bytes": len(OUT_SITE_STOCK),
+             "stock": OUT_SITE_STOCK.hex(), "new": out_cjump().hex()}]
     return out
 
 
@@ -729,6 +769,8 @@ def section7(stock: bytes) -> bytes:
         raise DspError("sw 0x1c1c58 is not the stock `CALL 0xb8482c (DB)`")
     if bootstream.read_span(stock, sw_to_load(SENDS_SITE_SW), len(SENDS_SITE_STOCK)) != SENDS_SITE_STOCK:
         raise DspError("sw 0x1c3054 is not the stock `CJUMP 0x1c1738 (DB)`")
+    if bootstream.read_span(stock, sw_to_load(OUT_SITE_SW), len(OUT_SITE_STOCK)) != OUT_SITE_STOCK:
+        raise DspError("sw 0x1c307b is not the stock `CJUMP 0x1c244d (DB)`")
     if len(obj["emark_jump"]) != len(CALL_SITE_STOCK):
         raise DspError(f"the entry-mark JUMP is {len(obj['emark_jump'])} bytes, not {len(CALL_SITE_STOCK)}")
     lookup = struct.unpack("<8I", bootstream.read_span(stock, dm_to_load(LOOKUP_DM), 32))
@@ -755,6 +797,7 @@ def section7(stock: bytes) -> bytes:
     bootstream.write_span(out, sw_to_load(REVERB_SITE_SW), reverb_cjump())
     bootstream.write_span(out, sw_to_load(DELAY_SITE_SW), delay_call())
     bootstream.write_span(out, sw_to_load(SENDS_SITE_SW), sends_cjump())
+    bootstream.write_span(out, sw_to_load(OUT_SITE_SW), out_cjump())
     result = bytes(out)
     walked = bootstream.walk(result)
     if not walked.complete or walked.stopped_at != len(result):

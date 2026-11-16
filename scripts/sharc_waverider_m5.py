@@ -509,7 +509,7 @@ def main(argv=None):
     p.add_argument("--frame-be", help="a frame as the ColdFire holds it at 0x80005e60 (16-bit BE)")
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
-    p.add_argument("--steps", "decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,mainrec,recwhole,pvmix,fdn8,xdly,inserts,inspost,tdm,stock,mnm,frame", "decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,flexlevel,mainrec,recwhole,pvmix,fdn8,xdly,inserts,tdm,stock,mnm,frame")   # v0.27: shft, gran removed; v0.45: ping removed   # voice: PERC
+    p.add_argument("--steps", "decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,mainrec,recwhole,pvmix,fdn8,xdly,inserts,inspost,insbus,tdm,stock,mnm,frame", "decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,flexlevel,mainrec,recwhole,pvmix,fdn8,xdly,inserts,tdm,stock,mnm,frame")   # v0.27: shft, gran removed; v0.45: ping removed   # voice: PERC
     p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
@@ -723,6 +723,11 @@ def main(argv=None):
             results["3j_inspost"] = post_step.run(sys.modules[__name__], snap, m2mach, m5, sound, machines)
             gc.collect()
             show(results["3j_inspost"])
+        if "insbus" in steps:
+            print("\n-- step 3k: the bus inserts (FDN8, XDLY per track, after the routing) --")
+            bus_step = importlib.import_module("sharc_insbus_step")
+            results["3k_insbus"] = bus_step.run(sys.modules[__name__], snap, m2mach, m5, sound, machines)
+            show(results["3k_insbus"])
 
         if "tdm" in steps:
             print("\nstep 3e: the fast link (TDM)")

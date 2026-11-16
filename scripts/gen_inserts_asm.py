@@ -28,13 +28,16 @@ dsp = importlib.import_module("dnfw.waverider.dsp")
 OUT = ROOT / "csrc" / "waverider" / "sharc" / "inserts.asm"
 POST = importlib.import_module("dnfw.inserts.post")
 OUT_POST = ROOT / "csrc" / "waverider" / "sharc" / "inspost.asm"
+BUS = importlib.import_module("dnfw.inserts.bus")
+OUT_BUS = ROOT / "csrc" / "waverider" / "sharc" / "insbus.asm"
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--no-resolve", action="store_true")
     a = ap.parse_args(argv)
-    for text, at, out in ((P.program(dsp.PING_SW), dsp.INS_SW, OUT), (POST.program(), dsp.POST_SW, OUT_POST)):
+    for text, at, out in ((P.program(dsp.PING_SW), dsp.INS_SW, OUT), (POST.program(), dsp.POST_SW, OUT_POST),
+                          (BUS.program(), dsp.INSBUS_SW, OUT_BUS)):
         if not a.no_resolve:
             R = importlib.import_module("sharc_resolve_jumps")      # (selas)
             with tempfile.TemporaryDirectory() as tmp:

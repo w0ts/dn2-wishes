@@ -40,12 +40,16 @@ def ranges() -> list[tuple[int, int, str]]:
            (dsp.PING_SW, dsp.PING_SW + len(obj["ping"]) // 2, "ping.asm"),
            (dsp.INS_SW, dsp.INS_SW + len(obj["inserts"]) // 2, "inserts.asm"),
            (dsp.POST_SW, dsp.POST_SW + len(obj["inspost"]) // 2, "inspost.asm"),
+           (dsp.INSBUS_SW, dsp.INSBUS_SW + len(obj["insbus"]) // 2, "insbus.asm"),
+           (dsp.FDN8_SW, dsp.FDN8_SW + len(obj["fdn8"]) // 2, "fdn8.asm"),        # (2026-11-10: also the bus
+           (dsp.XDLY_SW, dsp.XDLY_SW + len(obj["xdly"]) // 2, "xdly.asm"),        # inserts' engines)
            (dsp.IDLE_SW, dsp.IDLE_SW + len(obj["idle_load"]) // 2, "idle_load.asm"),
            (dsp.COUNT_SW, dsp.COUNT_SW + len(obj["block_count"]) // 2, "block_count.asm"),
            (dsp.EMARK_SW, dsp.EMARK_SW + len(obj["entry_mark"]) // 2, "entry_mark.asm")]
     for name, sw in (("the entry JUMP", dsp.ENTRY_SW), ("the machine lookup's base", dsp.LOOKUP_SITE_SW),
                      ("the idle loop's back edge", dsp.IDLE_SITE_SW), ("the handler's call", dsp.CALL_SITE_SW),
-                     ("the driver's call of the mix", dsp.PVMIX_SITE_SW)):
+                     ("the driver's call of the mix", dsp.PVMIX_SITE_SW),
+                     ("the engine's call of the output stage (wr_inbus)", dsp.OUT_SITE_SW)):
         out.append((sw - 48, sw + 48, f"round {name}"))
     return out
 

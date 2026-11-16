@@ -84,8 +84,8 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
                             m2.word(st, EMU_STEREO + EMU_STRIDE * s_ + 4 * j) or 0)
                     m2.poke(st, D.STEREO + D.STEREO_STRIDE * s_ + D.STEREO_R + 4 * j,
                             m2.word(st, EMU_STEREO + EMU_STRIDE * s_ + EMU_R + 4 * j) or 0)
-            for k in range(0, 128, 4):
-                m2.poke(st, D.PAR + k, struct.unpack_from("<I", par_of(len(caps)), k)[0])
+            for k, v in enumerate(D.records(par_of(len(caps)))):   # the pre pass's unpacked records
+                m2.poke(st, D.TABLE + 4 * k, v)
             cur.clear()
             cur["par"] = par_of(len(caps))
             cur["in"] = stereo(st)
@@ -137,7 +137,7 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
     for b, c in enumerate(caps):
         lin = [[bf(w) for w in c["in"][0][s_]] for s_ in range(16)]
         rin = [[bf(w) for w in c["in"][1][s_]] for s_ in range(16)]
-        ref.block(c["par"], lin, rin, c["route"])
+        ref.block(D.records(c["par"]), lin, rin, c["route"])
         want = ([[fb(x) for x in row] for row in lin], [[fb(x) for x in row] for row in rin])
         if c["out"][0] != want[0] or c["out"][1] != want[1]:
             exact = False
@@ -177,8 +177,8 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
             r = (out["state"] if k_call == 0 else r).fresh_call(dsp.POST_SW, regs={})
             for k in range(8):
                 m2.poke(r.state, D.ROUTE + 4 * k, (2 * k) | (2 * k + 1) << 16)
-            for k in range(0, 128, 4):
-                m2.poke(r.state, D.PAR + k, struct.unpack_from("<I", bytes(rows), k)[0])
+            for k, v in enumerate(D.records(bytes(rows))):
+                m2.poke(r.state, D.TABLE + 4 * k, v)
             how = fx.run(r, 3_000_000, fx.Fixups(), stop_at=[P.SENDS_SW])
             res = (how[0], how[2])
             if how[0] != "stop":
