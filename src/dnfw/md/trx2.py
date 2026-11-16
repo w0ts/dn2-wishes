@@ -1182,12 +1182,31 @@ class TRXCH:
             p.st(C["g"], 0)
         phase(9, 0, lambda: phase(10, 1, exp_))
         state_base(p, L)
+        # the filters inline: RS, HP, FX are 32 consecutive state words, one I1 at their middle; the limiter's
+        # bounds in R15, R14 and 2^-22 in F10 (none of them used in the loop)
+        cr = (15, 14)
+        if not EXACT:
+            assert cls.HP == cls.RS + RES4_N and cls.FX == cls.HP + HP1_N
+            p.iconst(15, 0x7FFFFF)
+            p.iconst(14, -0x800000)
+            p.fconst(10, 2.0 ** -22)
+
+        def filters():
+            if EXACT:
+                res4(p, cls.RS)
+                hp1(p, cls.HP)
+                hp1(p, cls.FX)
+                return
+            mid = cls.RS + 16
+            at(p, mid)
+            _res2f_body(p, cls.RS - mid, cr, 10)
+            _res2f_body(p, cls.RS + RES2_N - mid, cr, 10)
+            _hp1f_body(p, cls.HP - mid, cr, 10)
+            _hp1f_body(p, cls.FX - mid, cr, 10)
 
         def one():
             p.ldi(4, 0, 5)
-            res4(p, cls.RS)
-            hp1(p, cls.HP)
-            hp1(p, cls.FX)
+            filters()
             p.ipass(6, 4)
             p.ipass(5, 1)
             wmul(p)
