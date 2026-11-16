@@ -24,6 +24,20 @@ FLAGS = dict(unblock=True, softfloat=True, bitmap=True, dsp=True,
              weakptr=True, slc=True, sdgate=True, esdhc=True)
 
 
+
+def _free_gap(n: int, after: int) -> int:
+    """The first 16-aligned gap of N bytes at or above AFTER between the RAM ranges this build claims
+    (dnfw.mods.waverider.ram(): its code chunks and every run-time area), below the last of them: room no
+    part of the build loads or uses, so a harness's scratch there cannot overlap the code under test."""
+    from dnfw.mods import waverider
+    claims = sorted((e.start, e.start + e.length) for e in waverider.ram() if e.start + e.length > after)
+    at = (after + 15) & ~15
+    for lo, hi in claims:
+        if lo >= at + n:
+            return at
+        at = max(at, (hi + 15) & ~15)
+    raise MemoryError(f"no free gap of {n:#x} bytes among the build's RAM claims above {after:#x}")
+
 class Machine:
     """A snapshot, restored and ready to be asked things."""
 
@@ -117,9 +131,9 @@ class Machine:
 
     def alloc(self, n):
         va = (self.at + 15) & ~15
+        if va < SCRATCH_END < va + n:              # 2026-11-13: the fixed scratch is full (our C renderer starts
+            va = _free_gap(n, va)                  # at SCRATCH_END): the next fit in the build's own RAM claims
         self.at = va + n
-        if va < SCRATCH_END < self.at:
-            raise MemoryError(f"scratch {va:#x}+{n:#x} runs into the C renderer at {SCRATCH_END:#x}")
         self.write(va, bytes(n))
         return va
 
