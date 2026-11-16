@@ -129,6 +129,7 @@ def type_of(word: int) -> int:
 from ..mnm import machines as _mnm
 from ..mnm import plaits as _mnm_plaits
 MNM_LONG = {"TUNE": "Tune", "---": "Unused",
+            "ENGN": "Engine",                   # 2026-11-11: MONOMACHINE's (page 1 H)
             # SOPHIE (docs/sophie.md)
             "DCAY": "Decay", "COLR": "Color", "METL": "Metal", "FBK": "Feedback", "SWEP": "Sweep",
             "CRSH": "Crush", "MODL": "Model",
@@ -156,6 +157,22 @@ MNM_LONG = {"TUNE": "Tune", "---": "Unused",
             "PCH2": "Pitch 2", "PCH3": "Pitch 3", "PCH4": "Pitch 4",
             "VOC1": "Vocal Freq 1", "VOC2": "Vocal Freq 2", "V-SW": "Vowel Switch",
             "VOIC": "Voice Type", "CONS": "Consonant", "CLEN": "Cons Length", "CVOL": "Cons Volume"}
+
+
+def _ck(M, sh: str) -> tuple[str, str]:
+    """2026-11-11: the key a control's choices, widget and tags go by: (machine, control); on a MONOMACHINE place
+    ENGN is MONOMACHINE's, its other controls the engine's (M.NAME)"""
+    return (M.HOST, sh) if sh == _mnm.MONO_ENGN and hasattr(M, "HOST") else (M.NAME, sh)
+
+
+def _choices(M) -> dict:
+    """machine M's controls with choices (MNM_CHOICES), MONOMACHINE's ENGN on its places"""
+    out = dict(MNM_CHOICES.get(M.NAME, {}))
+    if hasattr(M, "HOST"):
+        out.update(MNM_CHOICES.get(M.HOST, {}))
+    return out
+
+
 # a name one machine means otherwise (MNM_LONG is by short name across machines)
 MNM_LONG_BY = {("ANALOG2", "WAVE"): "Waveform",
                ("SID 6581", "WAVE"): "Waveform", ("DPRO-WAVE", "WAVE"): "Waveform", ("DPRO-DENS", "WAVE"): "Waveform",
@@ -214,12 +231,14 @@ MNM_CHOICES = {
               # 2026-11-11, the User: an octave knob, -3..+3 (dnfw.mnm.drone q2), in its unit
               "OCT": ("-3oc", "-2oc", "-1oc", "0oct", "+1oc", "+2oc", "+3oc")},
     "PLAITS": {"MODL": _mnm_plaits.MODELS, "TUNE": 49, "FINE": 128},   # TUNE, FINE: steps (MW_SEMIS, MW_CENTS)      # 2026-11-09: every engine ported (dnfw.mnm.plaits)
+    # 2026-11-11: MONOMACHINE's engine (page 1 H), the list popup's names (dnfw.mnm.machines MONO_CHOICES)
+    _mnm.MONO_NAME: {_mnm.MONO_ENGN: tuple(_mnm.MONO_CHOICES[n] for n in _mnm.MONO_ENGINES)},
 }
 # v0.27: the controls the Monomachine draws as other than a knob (owner, 2026-10-27; 0 a knob,
 # 1 empty): 2 a grid the marker steps through row by row, 3 a bar sliding along a line, 4 a
 # needle at the bottom moving left or right, 5 a knob switch pointing at its position (the
 # removed machines used 2..4; md_page.c keeps their drawing)
-MNM_WIDGET = {("SOPHIE", "MODL"): 5, ("PLAITS", "MODL"): 5,
+MNM_WIDGET = {("SOPHIE", "MODL"): 5, ("PLAITS", "MODL"): 5, (_mnm.MONO_NAME, _mnm.MONO_ENGN): 5,
               # the Monomachine's own (back 2026-11-11, as at 28eb110's parent): DPRO-WAVE's WAVE and
               # VO-6's CONS a grid, DDRW's WAV1 / WAV2 and DENS's WAVE a bar, DENS's PCH2..4 a needle
               ("DPRO-WAVE", "WAVE"): 2, ("VO-6", "CONS"): 2,
@@ -283,7 +302,7 @@ MNM_SUBTITLES = tuple(lo for lo, _sh in _mnm.CF_LIST_NAMES)
 
 def mnm_named(k: int) -> dict[int, tuple[str, str]]:
     """record -> (long, short) on a Monomachine machine's track"""
-    M = _mnm.CF_MACHINES[k]
+    M = _mnm.CF_ALL[k]
     out = {r: ((MNM_LONG_BY.get((M.NAME, sh), MNM_LONG.get(sh, sh)), sh) if sh != "---" and sh not in MNM_UNPORTED
                else (UNUSED_LONG, "-"))
            for r, sh in zip(PARAM_IDS + MNM_PAGE2 + MNM_PAGE3, mnm_pnames(M))}
@@ -295,9 +314,9 @@ def mnm_retired() -> str:
     """MNM_RETIRED's C test: the (machine, control, choice) whose name is empty (one at most);
     "0" for none"""
     hits = []
-    for mi, M in enumerate(_mnm.CF_MACHINES):
+    for mi, M in enumerate(_mnm.CF_ALL):
         for j, sh in enumerate(M.PNAMES):
-            names = MNM_CHOICES.get(M.NAME, {}).get(sh, 0)
+            names = _choices(M).get(sh, 0)
             if isinstance(names, tuple):
                 hits += [(mi, j, c) for c, n in enumerate(names) if n == ""]
     if len(hits) > 1:
@@ -307,7 +326,7 @@ def mnm_retired() -> str:
     mi, j, c = hits[0]
     if c == 0:
         raise ValueError("a retired choice needs one before it")
-    if c == len(MNM_CHOICES[_mnm.CF_MACHINES[mi].NAME][_mnm.CF_MACHINES[mi].PNAMES[j]]) - 1:
+    if c == len(_choices(_mnm.CF_ALL[mi])[_mnm.CF_ALL[mi].PNAMES[j]]) - 1:
         raise ValueError("a retired choice needs one after it")
     return f"((mi) == {mi} && (j) == {j} && (c) == {c})"
 
@@ -331,6 +350,8 @@ MNM_CHOICE_TAGS = {
                          "PARTICLES", "STRING", "RESONATOR", "BASS DRUM", "SNARE", "HI-HAT"),
     ("SOPHIE", "MODL"): ("SERIES FM", "FM STACK", "PARALLEL FM", "12-BIT WAVE", "FM + RING", "METAL SKIN",
                          "TUNED KICK"),
+    # 2026-11-11: MONOMACHINE's engines (page 1 H)
+    (_mnm.MONO_NAME, _mnm.MONO_ENGN): tuple(_mnm.MONO_TAGS[n] for n in _mnm.MONO_ENGINES),
 }
 TAG_MAX = 11                                    # popup.c TAG_X 64 .. the box's edge, "%.11s"
 
@@ -338,8 +359,8 @@ TAG_MAX = 11                                    # popup.c TAG_X 64 .. the box's 
 def mnm_c_header() -> str:
     q = chr(34)
     names, tags, tag_lists, rows_n, rows_at = [], [], [], [], []
-    for M in _mnm.CF_MACHINES:
-        ch = MNM_CHOICES.get(M.NAME, {})
+    for M in _mnm.CF_ALL:
+        ch = _choices(M)
         n_row, at_row = [], []
         for sh in mnm_pnames(M):
             c = ch.get(sh, 0) if sh != "---" else 0
@@ -354,10 +375,10 @@ def mnm_c_header() -> str:
                 n_row.append(len(c))
                 at_row.append(len(names))
                 names += list(c)
-                tg = MNM_CHOICE_TAGS.get((M.NAME, sh))
+                tg = MNM_CHOICE_TAGS.get(_ck(M, sh))
                 if tg:
                     assert len(tg) == len(c) and all(len(t) <= TAG_MAX for t in tg), (M.NAME, sh)
-                    tag_lists.append((_mnm.CF_MACHINES.index(M), mnm_pnames(M).index(sh), len(tags)))
+                    tag_lists.append((_mnm.CF_ALL.index(M), mnm_pnames(M).index(sh), len(tags)))
                     tags += list(tg)
         rows_n.append(n_row)
         rows_at.append(at_row)
@@ -365,9 +386,9 @@ def mnm_c_header() -> str:
     def arr(rows):
         return ", ".join("{" + ", ".join(map(str, r)) + "}" for r in rows)
     labels = ", ".join("{" + ", ".join(q + (sh if sh != "---" and sh not in MNM_UNPORTED else "-") + q
-                                       for sh in mnm_pnames(M)) + "}" for M in _mnm.CF_MACHINES)
+                                       for sh in mnm_pnames(M)) + "}" for M in _mnm.CF_ALL)
     pidx = _pch_names()[0]
-    _UNITS = _mnm_units.tables(_mnm.CF_MACHINES, mnm_pnames, tops=lambda j: MNM_RECS[j][3])
+    _UNITS = _mnm_units.tables(_mnm.CF_ALL, mnm_pnames, tops=lambda j: MNM_RECS[j][3])
     _ik, _ia, _ic = _mnm_units.ins_tables()
     _base = len(_UNITS[2])
     _UNITS = (_UNITS[0], _UNITS[1], _UNITS[2] + _ic)
@@ -375,12 +396,12 @@ def mnm_c_header() -> str:
     _UNITS = (_UNITS[0], _UNITS[1], _UNITS[2] + _fc)
     _ia = [[(x + _base) if k & 127 and x < len(_ic) and _ic else x for x, k in zip(r, kr)] for r, kr in zip(_ia, _ik)]
     lines = [
-        f"#define MNM_N {len(_mnm.CF_MACHINES)}",
+        f"#define MNM_N {len(_mnm.CF_ALL)}",
         # the machine's name in the track box (MACHINE SEL's long name, in capitals; a reserved
         # type's REMOVED), one per place: generated so a machine added or removed cannot leave a hole
-        f"static const char *const mnm_name_upper[MNM_N] = {{{', '.join(q + lo.upper() + q for lo, _sh in _mnm.CF_LIST_NAMES)}}};",
+        f"static const char *const mnm_name_upper[MNM_N] = {{{', '.join(q + lo.upper() + q for lo, _sh in _mnm.CF_ALL_LIST_NAMES)}}};",
         # 2026-11-09: the left panel's track box (stock's SYN place): MACHINE SEL's short name
-        f"static const char *const mnm_name_short[MNM_N] = {{{', '.join(q + sh.upper() + q for _lo, sh in _mnm.CF_LIST_NAMES)}}};",
+        f"static const char *const mnm_name_short[MNM_N] = {{{', '.join(q + sh.upper() + q for _lo, sh in _mnm.CF_ALL_LIST_NAMES)}}};",
         "/* is_wr's kind -> the Monomachine machine's index, -1 for any other kind */",
         "static inline int mnm_index(int kind)",
         "{",
@@ -391,7 +412,7 @@ def mnm_c_header() -> str:
         f"#define MNM_PCH {MNM_PCH}",
         f"static const unsigned char mnm_pch_idx[128] = {{{', '.join(map(str, pidx))}}};",
         "#define MNM_J 24                       /* a machine's controls: page 1's eight, page 2's, page 3's */",
-        f"static const unsigned char mnm_npages[MNM_N] = {{{', '.join(str(mnm_pages(M)) for M in _mnm.CF_MACHINES)}}};",
+        f"static const unsigned char mnm_npages[MNM_N] = {{{', '.join(str(mnm_pages(M)) for M in _mnm.CF_ALL)}}};",
         f"static const char mnm_labels[MNM_N][MNM_J][6] = {{{labels}}};",
         f"static const unsigned char mnm_lo[MNM_J] = {{{', '.join(str(lo) for _r, _s, lo, _t in MNM_RECS)}}};",
         f"static const unsigned char mnm_top[MNM_J] = {{{', '.join(str(t) for _r, _s, _lo, t in MNM_RECS)}}};",
@@ -411,13 +432,13 @@ def mnm_c_header() -> str:
         f"static const unsigned short mnm_rid[MNM_J] = {{{', '.join(str(r) for r, _s, _lo, _t in MNM_RECS)}}};",
         # page 2's and page 3's start: a machine with PNAMES2 / PNAMES3 its DEFAULTS2 / DEFAULTS3 (knob
         # 0..127 each), else the records' words untouched (0xffff: not written)
-        f"static const unsigned short mnm_default[MNM_N][MNM_J] = {{{arr([mnm_default_words(d, M) for d, M in zip(_mnm.CF_DEFAULTS, _mnm.CF_MACHINES)])}}};",
+        f"static const unsigned short mnm_default[MNM_N][MNM_J] = {{{arr([mnm_default_words(d, M) for d, M in zip(_mnm.CF_ALL_DEFAULTS, _mnm.CF_ALL)])}}};",
         # 2026-11-09: a RETIRED choice (an empty name: PLAITS' GRAN, removed): shown as the choice
         # before it, stepped past (md_page.c, page.c, fmt.c); its knob slot stays, so saved knobs keep
         # their choice
         f"#define MNM_RETIRED(mi, j, c) {mnm_retired()}",
         "enum { MW_KNOB, MW_EMPTY, MW_GRID, MW_SLIDE, MW_VU, MW_SWITCH, MW_SEMIS, MW_CENTS };",
-        f"static const unsigned char mnm_widget[MNM_N][MNM_J] = {{{arr([[MNM_WIDGET.get((M.NAME, sh), 1 if sh == '---' or sh in MNM_UNPORTED else 0) for sh in mnm_pnames(M)] for M in _mnm.CF_MACHINES])}}};",
+        f"static const unsigned char mnm_widget[MNM_N][MNM_J] = {{{arr([[MNM_WIDGET.get(_ck(M, sh), 1 if sh == '---' or sh in MNM_UNPORTED else 0) for sh in mnm_pnames(M)] for M in _mnm.CF_ALL])}}};",
         # 2026-11-10: the value readout's units (dnfw.mnm.units): kind (bit 7: 0 reads OFF), curve, the curves
         "enum { MU_RAW, MU_PCT, MU_SPCT, MU_HZ, MU_HZ100, MU_MS, MU_C10, MU_C, MU_DB, MU_OCT, MU_PATN, MU_RATE, MU_PCTC, MU_MODE, MU_MS10, MU_VOIC, MU_GLID, MU_ST10 };",
         f"static const unsigned char mnm_unit[MNM_N][MNM_J] = {{{arr(_UNITS[0])}}};",
@@ -431,7 +452,44 @@ def mnm_c_header() -> str:
         f"static const unsigned char ins_unit[13][8] = {{{arr(_ik)}}};",
         f"static const unsigned char ins_unit_curve[13][8] = {{{arr(_ia)}}};",
     ]
-    return "\n".join(lines) + "\n"
+    return "\n".join(lines + mnm_mono_lines()) + "\n"
+
+
+def mnm_mono_lines() -> list[str]:
+    """2026-11-11: MONOMACHINE (dnfw.mnm.machines): its place (the type's, MNM_MONO; -1 none) is its first engine's,
+    the others' after the types' places; ENGN (control MNM_MONO_J, page 1 H) picks the place every table is read at
+    (mnm_live), the choice as the page shows it and the DSP reads it (dnfw.perc.program MONO_THRESHOLDS)"""
+    from ..perc import program as _pp
+    n = len(_mnm.MONO_ENGINES)
+    places = _mnm.CF_MONO_PLACES or (0,)
+    th = _pp.MONO_THRESHOLDS or (0,)
+    k, j = _mnm.MONO_ENGINE_K, _mnm.MONO_TUNE_J
+    assert MNM_RECS[k][:4] == _pp.MONO_ENGN_REC and MNM_RECS[j][:2] == _pp.MONO_TUNE_REC[:2]
+    for e in range(n):                         # MACHINE SEL's and an engine change's ENGN word lands on the engine
+        w = _knob_word(_mnm.mono_knob(e), MNM_RECS[k][3], MNM_RECS[k][2]) >> 8
+        assert sum(w >= t for t in _pp.MONO_THRESHOLDS) == e, (e, w)
+    return [
+        f"#define MNM_MONO {_mnm.CF_MONO}",
+        f"#define MNM_MONO_TYPE {_mnm.MONO_TYPE}",
+        f"#define MNM_MONO_N {max(1, n)}",
+        f"#define MNM_MONO_J {k}                    /* ENGN: page 1 H */",
+        f"static const unsigned char mnm_mono_place[MNM_MONO_N] = {{{', '.join(map(str, places))}}};",
+        f"static const unsigned char mnm_mono_th[MNM_MONO_N] = {{{', '.join(map(str, th))}}};",
+        "/* ENGN's record value (word >> 8) -> the engine, 0..MNM_MONO_N-1 */",
+        "static inline int mnm_mono_engine(int v)",
+        "{",
+        "    int e = 0;",
+        "    for (int i = 0; i < MNM_MONO_N - 1; i++)",
+        "        if (v >= mnm_mono_th[i])",
+        "            e++;",
+        "    return e;",
+        "}",
+        "/* the place the tables are read at: MONOMACHINE's engine's (ENGN's word W), any other machine's own */",
+        "static inline int mnm_live(int mi, int w)",
+        "{",
+        "    return MNM_MONO >= 0 && mi == MNM_MONO ? mnm_mono_place[mnm_mono_engine((w >> 8) & 0xFF)] : mi;",
+        "}",
+    ]
 
 
 # the Digitakt II's sample machines (types 8..12, docs/sampler.md): one page each, on
@@ -507,8 +565,9 @@ def c_header() -> str:
     names = ",\n".join(" {" + ", ".join(f'"{label(r)}"' for r in page) + "}" for page in PAGES)
     wr = {r: (lo, sh) for r, lo, sh in named()}
     mnm = [mnm_named(k) for k in range(len(_mnm.CF_MACHINES))]
+    mono = [mnm_named(k) for k in _mnm.CF_MONO_PLACES[1:]]     # 2026-11-11: MONOMACHINE's other engines
     smp = [smp_named(n) for n in _smp.NAMES]
-    order = sorted(set(wr) | set(PARAM_IDS) | {r for m in mnm + smp for r in m})
+    order = sorted(set(wr) | set(PARAM_IDS) | {r for m in mnm + mono + smp for r in m})
     # by kind (is_wr: the type - 4), from 1: PERC, the sample machines at SMP_FIRST_KIND..,
     # the Monomachine's at MNM_KINDS
     # (v0.44: a sample machine's kind is its type - 4: 4..9, and BOUNCE's 13)
@@ -528,6 +587,10 @@ def c_header() -> str:
             f"#define WR_KINDS {len(kinds)}\n"
             f"static const char *const wr_named_long[WR_KINDS][WR_NAMED] = {{{', '.join(row(m, 0) for m in kinds)}}};\n"
             f"static const char *const wr_named_short[WR_KINDS][WR_NAMED] = {{{', '.join(row(m, 1) for m in kinds)}}};\n"
+            # 2026-11-11: MONOMACHINE on its second engine on (wr_names: its kind's row is its first engine's)
+            f"#define WR_MONO_ROWS {max(1, len(mono))}\n"
+            f"static const char *const wr_mono_long[WR_MONO_ROWS][WR_NAMED] = {{{', '.join(row(m, 0) for m in mono) or row({}, 0)}}};\n"
+            f"static const char *const wr_mono_short[WR_MONO_ROWS][WR_NAMED] = {{{', '.join(row(m, 1) for m in mono) or row({}, 1)}}};\n"
             + perc_c_header() + smp_c_header() + mnm_c_header())
 
 

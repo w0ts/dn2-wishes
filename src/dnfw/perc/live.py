@@ -69,6 +69,21 @@ def knob_word(knob: int, top: int, low: int) -> int:
     return (v + low) << 8
 
 
+def mnm_slot_words(k: int, knobs) -> dict[int, int]:
+    """frame slot -> word for Monomachine voice K (dnfw.mnm.machines NAMES' order) at its eight knobs (0..127, in its
+    own order), as the ColdFire leaves them: on PERC's eight records; for one of MONOMACHINE's engines (2026-11-11)
+    the first seven there, ENGN on page 1 H (the engine's middle knob) and the eighth (TUNE) on page 2 H"""
+    from ..mnm import machines as MM
+    words = {slot: knob_word(x, top, lo) for (_rid, slot, lo, top), x in zip(M.PARAMS, knobs)}
+    name = MM.NAMES[k]
+    if name in MM.MONO_ENGINES:
+        _rid, slot, lo, top = P.MONO_ENGN_REC
+        words[slot] = knob_word(MM.mono_knob(MM.MONO_ENGINES.index(name)), top, lo)
+        _rid, slot, lo, top = P.MONO_TUNE_REC
+        words[slot] = knob_word(knobs[7], top, lo)
+    return words
+
+
 class Harness:
     def __init__(self, t: int = 0, L: M.Layout | None = None):
         self.t, self.L = t, L or layout()
@@ -97,6 +112,14 @@ class Harness:
         self.mem.put(a & ~3, w)
         for (_rid, slot, lo, top), x in zip(M.PARAMS, knobs):
             self._half(M.frame_offset(slot), knob_word(x, top, lo))
+
+    def set_mnm_voice(self, k: int, knobs) -> None:
+        """2026-11-11: the track on Monomachine voice K (its machine type; MONOMACHINE's engine by ENGN), its eight
+        knobs 0..127 in its own order (mnm_slot_words)"""
+        from ..mnm import machines as MM
+        self.set_mnm(MM.TYPES[k], ())
+        for slot, w in mnm_slot_words(k, knobs).items():
+            self._half(M.frame_offset(slot), w)
 
     def _half(self, off: int, value: int) -> None:
         a = M.FRAME + off + 146 * self.t

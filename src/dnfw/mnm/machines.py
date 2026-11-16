@@ -216,36 +216,71 @@ MACHINES = tuple(_adapter(M) for M in MODULES)
 NAMES = tuple(M.NAME for M in MACHINES)
 DEFAULTS = {M.NAME: M.DEFAULTS for M in MODULES}
 
-# each machine its own machine type (MACHINE SEL entry), in MODULES order. One table for the
-# ColdFire (dnfw.waverider.coldfire, pages), the DSP's lookup (dnfw.waverider.dsp) and PERC's
-# voice (dnfw.perc.program).
+# each voice's machine type (MACHINE SEL entry), in MODULES order. One table for the ColdFire
+# (dnfw.waverider.coldfire, pages), the DSP's lookup (dnfw.waverider.dsp) and PERC's voice
+# (dnfw.perc.program).
 # v0.45 (2026-11-09, the User: keep upstream dn2mk2's numbers): BOUNCE is upstream's type 17, so
-# SOPHIE moved 17 -> 20; PLAITS and TB303 keep 18 and 19. 2026-11-11: the Monomachine's five keep
-# their own 6, 7, 14, 15, 16 (CZ's and RESONATOR's former types, then the ones after the sample
-# machines), reserved while they were out
-ALL_TYPE_SLOTS = (20, 18, 19, 21, 22, 6, 7, 14, 15, 16)   # 20: SOPHIE (docs/sophie.md), 18: PLAITS, 19: TB303,
-                                                          # 2026-11-10: 21 DRONE, 22 ANALOG2
-TYPE_SLOTS = tuple(t for M, t in zip(ALL_MODULES, ALL_TYPE_SLOTS) if M in MODULES)   # each machine keeps its type
-TYPES = TYPE_SLOTS[:len(MACHINES)]
-# MACHINE SEL's order (dnfw.waverider.coldfire LIST_NEW): the Monomachine's five first, as before
-# their removal (SOPHIE after VO-6), then the others in TYPES' order
-LIST_TYPES = (tuple(t for t, n in zip(TYPES, NAMES) if n in MNM_OS_NAMES)
-              + tuple(t for t, n in zip(TYPES, NAMES) if n not in MNM_OS_NAMES))
+# SOPHIE moved 17 -> 20; PLAITS and TB303 keep 18 and 19.
+# 2026-11-11 (the User: "i think one mono machine makes sense. and we should have uniformity about where we put
+# the sub engine knob. so that it is logical and aligned with machinedrum"): the Monomachine's five ports are ONE
+# machine, MONOMACHINE, on type 6 (SID's); its engine (SID 6581, DPRO-WAVE, DPRO-DDRW, DPRO-DENS, VO-6) is chosen
+# by page 1 knob H (ENGN, the list popup with tags, as MACHINEDRUM's TYPE), the engine's first seven controls on
+# A..G, its eighth (TUNE) on page 2 H (MACHINEDRUM's eighth's place). On the DSP each engine stays its own PERC
+# voice (its index here), chosen by ENGN as PERC's TYPE chooses a Machinedrum machine (dnfw.perc.program). Types 7,
+# 14, 15, 16 (the four engines' own until then) are reserved, never reused (RETIRED).
+MONO_NAME = "MONOMACHINE"
+MONO_TYPE = 6
+MONO_ENGN = "ENGN"                       # the engine's control
+MONO_ENGINE_K = 7                        # its place: page 1 H (PERC's eighth record, PD1: 0..100)
+MONO_TUNE_J = 15                         # the engine's eighth (TUNE): page 2 H (PERC's TYPE record, 0..127)
+ALL_TYPE_SLOTS = (20, 18, 19, 21, 22, 6, 6, 6, 6, 6)   # 20: SOPHIE (docs/sophie.md), 18: PLAITS, 19: TB303,
+                                                       # 2026-11-10: 21 DRONE, 22 ANALOG2; 6: MONOMACHINE's five
+# the four engines' former types (2026-11-11): a project's track on one stays there, silent, its page empty
+RETIRED = {7: "DPRO-WAVE", 14: "DPRO-DDRW", 15: "DPRO-DENS", 16: "VO-6"}
+TYPE_SLOTS = tuple(t for M, t in zip(ALL_MODULES, ALL_TYPE_SLOTS) if M in MODULES)   # each voice's type
+TYPES = TYPE_SLOTS[:len(MACHINES)]       # per voice (NAMES' order): MONOMACHINE's engines all MONO_TYPE
+MACHINE_TYPES = tuple(dict.fromkeys(TYPES))   # each machine type once
+# MONOMACHINE's engines in this build (ENGN's choices, in this order): consecutive voices from MONO_FIRST
+MONO_ENGINES = tuple(n for n in MNM_OS_NAMES if n in NAMES)
+MONO_FIRST = NAMES.index(MONO_ENGINES[0]) if MONO_ENGINES else -1
+assert all(NAMES.index(n) == MONO_FIRST + e for e, n in enumerate(MONO_ENGINES))
+assert all((t == MONO_TYPE) == (n in MNM_OS_NAMES) for t, n in zip(TYPES, NAMES))
+# ENGN's choices by name (4 characters: the page's choice box) and their tags (the list popup's, 11 at most)
+MONO_CHOICES = {"SID 6581": "SID", "DPRO-WAVE": "WAVE", "DPRO-DDRW": "DDRW", "DPRO-DENS": "DENS", "VO-6": "VO-6"}
+MONO_TAGS = {"SID 6581": "SID CHIP", "DPRO-WAVE": "32 WAVES", "DPRO-DDRW": "WAVE XFADE",
+             "DPRO-DENS": "4-OSC CHORD", "VO-6": "FORMANTS"}
+
+
+def mono_engine_of_knob(knob: int) -> int:
+    """ENGN's knob (0..127) -> the engine, as the page reads a choice: (knob x n) >> 7"""
+    return (knob * len(MONO_ENGINES)) >> 7
+
+
+def mono_knob(e: int) -> int:
+    """the knob in the middle of engine E's span (where MACHINE SEL and an engine change put ENGN)"""
+    n = len(MONO_ENGINES)
+    k = ((2 * e + 1) * 128) // (2 * n)
+    assert mono_engine_of_knob(k) == e
+    return k
+
+
+# MACHINE SEL's order (dnfw.waverider.coldfire LIST_NEW): MONOMACHINE first (as the five were before their
+# removal, SOPHIE after them), then the others in TYPES' order
+LIST_TYPES = ((MONO_TYPE,) if MONO_ENGINES else ()) + tuple(t for t in MACHINE_TYPES if t != MONO_TYPE)
 # the machines this build leaves out (dnfw.builder): their types are reserved, never reused, so
 # every other machine keeps its number and a project's track on one stays on it (silent, its
-# page empty). None in the full build.
-LEFT_OUT = {t: M.NAME for M, t in zip(ALL_MODULES, ALL_TYPE_SLOTS) if M not in MODULES}
-RESERVED = dict(LEFT_OUT)
+# page empty). None in the full build; MONOMACHINE's four retired types always.
+LEFT_OUT = {t: (MONO_NAME if t == MONO_TYPE else M.NAME)
+            for M, t in zip(ALL_MODULES, ALL_TYPE_SLOTS) if t not in TYPES}
+RESERVED = {**LEFT_OUT, **RETIRED}
 assert not set(RESERVED) & set(TYPES)
-assert len(set(ALL_TYPE_SLOTS)) == len(ALL_TYPE_SLOTS), "two machines of ours on one type"
+assert all(TYPES.count(t) == 1 for t in MACHINE_TYPES if t != MONO_TYPE), "two machines of ours on one type"
 from ..sampler import machines as _smp  # noqa: E402
 assert not set(_smp.TYPES) & (set(TYPES) | set(RESERVED)), "a machine type of ours is a sample machine's (v0.44 BOUNCE: 17)"
 # MACHINE SEL's names (long, short), as the DN2 lists its own
 LIST_NAMES = {"SOPHIE": ("Sophie", "SOP"), "PLAITS": ("Plaits", "PLT"), "TB303": ("TB-303", "303"),
               "DRONE": ("Drone", "DRN"), "ANALOG2": ("Analog 2", "AN2"),
-              "SID 6581": ("SID 6581", "SID"), "DPRO-WAVE": ("DPRO Wave", "DPW"),
-              "DPRO-DDRW": ("DPRO Ddrw", "DDW"), "DPRO-DENS": ("DPRO Dens", "DNS"),
-              "VO-6": ("VO-6", "VO6")}
+              MONO_NAME: ("Monomachine", "MNM")}
 REMOVED_NAMES = ("Removed", "---")       # a reserved type's name (MACHINE SEL never lists it)
 
 
@@ -254,10 +289,40 @@ class Removed:
     NAME, PNAMES, DEFAULTS = "REMOVED", ("---",) * 8, (0,) * 8
 
 
+def _mono_place(name: str):
+    """MONOMACHINE on engine NAME as the ColdFire's tables hold a machine: the engine's controls (its NAME: its
+    choices, widgets, units and long names are the engine's), ENGN on page 1 H, the engine's TUNE on page 2 H"""
+    V = MACHINES[NAMES.index(name)]
+    e = MONO_ENGINES.index(name)
+    d = DEFAULTS[name]
+    assert V.PNAMES[7] == "TUNE", name
+    return type("Mono" + V.__name__, (), {
+        "NAME": name, "HOST": MONO_NAME, "ENGINE": e, "ID": V.ID, "MNM": V.MNM,
+        "PNAMES": tuple(V.PNAMES[:7]) + (MONO_ENGN,),
+        "PNAMES2": ("---",) * 7 + (V.PNAMES[7],),
+        "DEFAULTS": tuple(d[:7]) + (mono_knob(e),),
+        "DEFAULTS2": (0,) * 7 + (d[7],),
+    })
+
+
+MONO_PLACES = tuple(_mono_place(n) for n in MONO_ENGINES)
+
 # the ColdFire's Monomachine places, one per type 6, 7, 14.. in type order (its page code turns a
 # type into this index by arithmetic: dnfw.waverider.pages is_wr): the live machines and the
-# reserved types' placeholders
+# reserved types' placeholders; MONOMACHINE's is its first engine's
 CF_TYPES = tuple(sorted(set(TYPES) | set(RESERVED)))
-CF_MACHINES = tuple(MACHINES[TYPES.index(t)] if t in TYPES else Removed for t in CF_TYPES)
-CF_LIST_NAMES = tuple(LIST_NAMES[M.NAME] if M is not Removed else REMOVED_NAMES for M in CF_MACHINES)
-CF_DEFAULTS = tuple(DEFAULTS.get(M.NAME, Removed.DEFAULTS) for M in CF_MACHINES)
+CF_MACHINES = tuple(MONO_PLACES[0] if t == MONO_TYPE else MACHINES[TYPES.index(t)] if t in TYPES else Removed
+                    for t in CF_TYPES)
+CF_LIST_NAMES = tuple(LIST_NAMES[getattr(M, "HOST", M.NAME)] if M is not Removed else REMOVED_NAMES
+                      for M in CF_MACHINES)
+CF_DEFAULTS = tuple(M.DEFAULTS if hasattr(M, "HOST") else DEFAULTS.get(M.NAME, Removed.DEFAULTS)
+                    for M in CF_MACHINES)
+# 2026-11-11: MONOMACHINE's other engines' places, after the types' (no kind reaches them: the page code picks one
+# by ENGN, dnfw.waverider.pages MNM_MONO); CF_ALL every place, the page code's tables
+CF_EXTRA = MONO_PLACES[1:]
+CF_ALL = CF_MACHINES + CF_EXTRA
+CF_ALL_LIST_NAMES = CF_LIST_NAMES + tuple(LIST_NAMES[MONO_NAME] for _ in CF_EXTRA)
+CF_ALL_DEFAULTS = CF_DEFAULTS + tuple(M.DEFAULTS for M in CF_EXTRA)
+# each engine's place, in ENGN's order (none without MONOMACHINE in this build)
+CF_MONO = CF_TYPES.index(MONO_TYPE) if MONO_ENGINES else -1
+CF_MONO_PLACES = ((CF_MONO,) + tuple(range(len(CF_MACHINES), len(CF_ALL)))) if MONO_ENGINES else ()

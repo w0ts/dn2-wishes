@@ -280,6 +280,11 @@ static const char *const gt_patn[16] = {"16TH", "8TH", "4TH", "HALF", "OFF8", "O
 static const char *const mode5[5] = {"LP12", "LP24", "BP", "HP", "NTCH"};
 static const char *const gt_rate[8] = {"1/2", "1/4", "1/8", "1/8T", "1/16", "16T", "1/32", "1/64"};
 
+/* No jump table (2026-11-11, MONOMACHINE): GCC turned the kind tests below into one, a table of offsets inside the
+ * code; the build's ColdFire check (dnfw.patch.cbuild) reads the code by a linear sweep, which cannot tell such a
+ * table from instructions, and once the tables after it moved it read gt_patn's address as a scale-8 move (a
+ * misreading: the CPU never decodes it). Compares instead, so the code reads as what runs. */
+__attribute__((optimize("no-jump-tables")))
 static const char *unit_text_of(int kind, int curve, int k)
 {
     static char ub[8] __attribute__((section(".data")));

@@ -17,6 +17,7 @@ import pytest
 from dnfw.mods import ModError, check_compatible
 from dnfw.mods import platform, waverider
 from dnfw.waverider import coldfire as CF
+from dnfw.mnm import machines as MM_
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 STOCK_111 = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.12_dist.zip"  # the shipping build targets 1.12 (docs/os112-port.md)
@@ -133,8 +134,10 @@ def test_rows_5_to_12_of_the_name_table(applied):
     table = long_at(main, 0x400DC4A8)
     # v0.26: 6, 7 (and 14..) the Monomachine's machines (RESONATOR's and CZ's until v0.25)
     assert CF.MACHINE_NAMES[5] == ("Perc", "PRC") and CF.MACHINE_NAMES[13] == ("Slice", "SLC")
-    # the Monomachine's five back on 2026-11-11 (removed 2026-11-08, reserved meanwhile)
-    assert CF.MACHINE_NAMES[6] == ("SID 6581", "SID") and CF.MACHINE_NAMES[7] == ("DPRO Wave", "DPW")
+    # the Monomachine's five back on 2026-11-11 (removed 2026-11-08, reserved meanwhile), the same day one machine,
+    # MONOMACHINE, on 6 (its engine on page 1 H); 7, 14, 15, 16 reserved
+    assert CF.MACHINE_NAMES[6] == ("Monomachine", "MNM") and CF.MACHINE_NAMES[7] == MM_.REMOVED_NAMES
+    assert all(CF.MACHINE_NAMES[t] == MM_.REMOVED_NAMES for t in (7, 14, 15, 16))
     # ours in MACHINE SEL (the Monomachine's 6, 7, 14..16, SOPHIE 20, PLAITS 18, TB303 19, DRONE 21,
     # ANALOG2 22); BOUNCE (17) as upstream lists it (v0.47: hidden)
     from dnfw.mnm import machines as MM

@@ -248,15 +248,14 @@ def test_v026_the_monomachine_costs_cover_what_each_voice_takes():
     if not MROM.available():
         pytest.skip("needs the owner's Monomachine OS")
     rnd = random.Random(1)
-    for typ, k in PP.MNM_TYPES.items():
-        name = MM.NAMES[k]
+    for k, name in enumerate(MM.NAMES):     # each voice (2026-11-11: MONOMACHINE's engines by ENGN)
         worst = 0
         for knobs in [list(MM.DEFAULTS[name]), [127] * 8, [0] * 8] + [[rnd.randrange(128) for _ in range(8)]
                                                                      for _ in range(3)]:
             h = PL.Harness()
             h.words.update(dpro.bench_words(h.L.md.mnm))
             h.words[h.L.md.C["fill"]] = MDK.Z_N
-            h.set_mnm(typ, knobs)
+            h.set_mnm_voice(k, knobs)
             for b in range(6):
                 h.steps = 0
                 h.block(note=60 + 12 * (b % 3), trig=b == 0)
@@ -295,14 +294,13 @@ def test_v026_the_monomachine_machines_play_the_dn2s_note():
              "PLAITS": (64, 0, 64, 0, 0, 64, 0, 64),   # WS, linear shape, the least fold; FINE (2026-11-09)
                                                         # at its centre: 0 is -64 cents
              "TB303": (127, 0, 0, 64, 0, 0, 0, 64)}    # the filter open, no resonance or env mod: the saw
-    for typ, k in PP.MNM_TYPES.items():
-        name = MNM.NAMES[k]
+    for k, name in enumerate(MNM.NAMES):    # each voice (2026-11-11: MONOMACHINE's engines by ENGN)
         f = []
         for note in (60, 72):
             h = PL.Harness()
             h.words.update(dpro.bench_words(h.L.md.mnm))
             h.words[h.L.md.C["fill"]] = MDK.Z_N
-            h.set_mnm(typ, knobs[name])
+            h.set_mnm_voice(k, knobs[name])
             out = []
             for b in range(48):
                 out += h.block(note=float(note), trig=b == 0)

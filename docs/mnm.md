@@ -64,17 +64,40 @@ The golden runs load the same words (`dpro.digibank_reference`, the build run in
 
 ## On the DN2
 
-| machine | DN2 machine type | MACHINE SEL |
-|---|---|---|
-| SID 6581 | 6 | SID 6581 / SID |
-| DPRO-WAVE | 7 | DPRO Wave / DPW |
-| DPRO-DDRW | 14 | DPRO Ddrw / DDW |
-| DPRO-DENS | 15 | DPRO Dens / DNS |
-| VO-6 | 16 | VO-6 / VO6 |
+**One machine, MONOMACHINE (2026-11-11).** The User: *"i think one mono machine makes sense. and we
+should have uniformity about where we put the sub engine knob. so that it is logical and aligned with
+machinedrum"*. The five are the engines of one machine, MONOMACHINE, on type 6 (MACHINE SEL: MONOMACHINE,
+its keyboard icon; Monomachine / MNM):
 
-(`dnfw.mnm.machines.TYPES`: 6 and 7 were CZ's and RESONATOR's; 14.. follow the sample
-machines. The ColdFire's type range, names, MACHINE SEL list and group, its pages' kinds
-(is_wr: the type - 4) and the DSP's type lookup follow that one table.)
+| control | where | what |
+|---|---|---|
+| ENGN | page 1 H (PERC's eighth record, PD1 0..100) | the engine: SID, WAVE, DDRW, DENS, VO-6, the list popup with a tag beside each (SID CHIP, 32 WAVES, 2 DIGIBANK, 4-OSC CHORD, VOICE), as MACHINEDRUM's TYPE |
+| the engine's first seven | page 1 A..G (the records they always had) | as the table above |
+| the engine's TUNE | page 2 H (PERC's TYPE record, 0..127: every knob, where PD1 held 101) | as before |
+
+| former machine | its type until 2026-11-11 | now |
+|---|---|---|
+| SID 6581 | 6 | MONOMACHINE's first engine (type 6) |
+| DPRO-WAVE, DPRO-DDRW, DPRO-DENS, VO-6 | 7, 14, 15, 16 | engines 2..5; the types reserved (`RETIRED`), never reused |
+
+- **The pages follow ENGN**, as MACHINEDRUM's follow TYPE: the ColdFire's Monomachine tables have a place
+  for each engine (`dnfw.mnm.machines.CF_MONO_PLACES`: the type's own place is SID's, the others after the
+  types' places); `mnm_live` (generated, `dnfw.waverider.pages`) picks the place from ENGN's word for the
+  page, its list popups, the value readouts (`fmt.c`), FUNC + turn and the record names (`page.c`
+  wr_names: one set of names an engine).
+- **Changing the engine starts it as choosing it in MACHINE SEL did**: ENGN turned (the setter's
+  `smp_quant`) to another engine marks the track; the UI's poll (`rec.c` mono_poll) writes that engine's
+  start (`mnm_default`) to its other controls, ENGN as turned. MACHINE SEL to MONOMACHINE starts SID.
+- **On the DSP each engine is still its own PERC voice** (its index in PERC's machine index, its level
+  `MNM_LEVELS` and cost `MNM_COST`): PERC reads ENGN from the frame (`dnfw.perc.program.mono_engine`, the
+  choice the page shows) and adds it to the type's voice, as PERC's TYPE picks a Machinedrum machine; the
+  engine's eighth input (TUNE) is read from page 2 H. A new engine plays from the next note (its init), as a
+  new TYPE does. Each engine's output is bit-identical to its separate machine's for the same controls
+  (perc.live's model, every engine at its start and at random knobs, notes and trigs).
+
+(`dnfw.mnm.machines.TYPES`: a type per voice, MONOMACHINE's five all 6; 6 and 7 were CZ's and RESONATOR's,
+14.. follow the sample machines. The ColdFire's type range, names, MACHINE SEL list and group, its pages'
+kinds (is_wr: the type - 4) and the DSP's type lookup follow that one table.)
 
 - **The DSP budget.** A Monomachine voice never goes quiet (as on the Monomachine: it plays
   until the next note; the DN2's amp envelope shapes what is heard), and one costs as much

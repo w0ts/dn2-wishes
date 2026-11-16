@@ -1763,9 +1763,15 @@ def main() -> int:
             from dnfw.perc import machines as PMx   # noqa: PLC0415
             kit = 0x4210D08C
             snd0 = kit + 52
+            from dnfw.perc import live as PLx      # noqa: PLC0415
             st = ["wait:2", "png:stock"]
-            for ty in MMx.TYPES:
-                st += [f"poke:{snd0 + 0xDE:#x}:{ty:02x}", "wait:20", f"png:m{ty}"]
+            for k, ty in enumerate(MMx.TYPES):       # 2026-11-11: MONOMACHINE on each engine (ENGN, page 1 H)
+                st += [f"poke:{snd0 + 0xDE:#x}:{ty:02x}"]
+                if MMx.NAMES[k] in MMx.MONO_ENGINES:
+                    e = MMx.MONO_ENGINES.index(MMx.NAMES[k])
+                    w = PLx.knob_word(MMx.mono_knob(e), PMx.PARAMS[7][3], PMx.PARAMS[7][2])
+                    st += [f"poke:{snd0 + 0x14 + 2 * PMx.PARAMS[7][1]:#x}:{w:04x}"]
+                st += ["wait:20", f"png:m{k}"]
             wslot = PMx.PARAMS[7][1]             # SOPHIE's MODL: the eighth place (H, 2026-11-11)
             st += [f"poke:{snd0 + 0xDE:#x}:{MMx.TYPES[MMx.NAMES.index('SOPHIE')]:02x}",
                    f"poke:{snd0 + 0x14 + 2 * wslot:#x}:0000", "wait:4"]
@@ -1780,7 +1786,7 @@ def main() -> int:
                 if rc == 0 and js.exists():
                     r = json.loads(js.read_text())
                     shots = {n: pathlib.Path(r["screens"][n]).read_bytes() for n in r["screens"]}
-                    pages = [shots[f"m{ty}"] for ty in MMx.TYPES]
+                    pages = [shots[f"m{k}"] for k in range(len(MMx.TYPES))]
                     d0 = [c["d0"] for c in r["direct_calls"]]
                     lo, top = PMx.PARAMS[7][2], PMx.PARAMS[7][3]
                     n = len(MMx.MACHINES[MMx.NAMES.index("SOPHIE")].MNM.MODELS)
@@ -1926,6 +1932,8 @@ def main() -> int:
             w_on = _mnm_rep(wlo, wtop, n_modl, 1)
             w_off = _mnm_rep(wlo, wtop, n_modl, 0)
             dwave = MMf.TYPES[MMf.NAMES.index("SOPHIE")]
+            n_eng = len(MMf.MONO_ENGINES)                # 2026-11-11: MONOMACHINE's ENGN (page 1 H)
+            e_0, e_1 = _mnm_rep(wlo, wtop, n_eng, 0), _mnm_rep(wlo, wtop, n_eng, 1)
             q = next(r for r in SMf.QUANT if r[1] == SMf.PLAY_REC and "ONESHOT" in r[0])
             play = SMf.RECORDS[SMf.PLAY_REC][0]
             p_from, p_to = q[3][0], q[3][1]
@@ -1947,6 +1955,10 @@ def main() -> int:
                      ("SOPHIE's MODL, right: the next choice in one click", (dwave, wprs, w_off << 8, 1, 1, True, 0x0000), w_on << 8),
                      ("SOPHIE's MODL, left: back in one click", (dwave, wprs, w_on << 8, 1, -1, True, 0x7F00), w_off << 8),
                      ("ONESHOT's PLAY, right: the next mode in one click", (8, play, p_from << 8, 1, 1, True, 0x0000), p_to << 8),
+                     ("MONOMACHINE's ENGN, right: the next engine in one click",
+                      (MMf.MONO_TYPE, wprs, e_0 << 8, 1, 1, True, 0x0000), e_1 << 8),
+                     ("MONOMACHINE's ENGN, left: back in one click",
+                      (MMf.MONO_TYPE, wprs, e_1 << 8, 1, -1, True, 0x7F00), e_0 << 8),
                      ("no FUNC: as it is", (5, other, 0x2000, 0, 1, True, 0x2100), 0x2100),
                      ("a stale knob: as it is", (5, other, 0x2000, 1, 1, False, 0x2100), 0x2100),
                      ("a stock machine: as it is", (1, other, 0x2000, 1, 1, True, 0x2100), 0x2100),
@@ -2109,6 +2121,38 @@ def main() -> int:
             os_ = (f"wait:3,poke:{ty:#x}:08,poke:{sa:#x}:0500,wait:4,tap:2,wait:6,func-src,wait:20,down,wait:4,"
                    f"yes,wait:20,call:{cm:#x}:arg1@{cm:#x}:0:{sid}:arg4@{cm:#x}:arg5@{cm:#x},wait:10,types,"
                    + ",".join(f"mem:{snd0 + 20 + 2 * sl:#x}:2" for _r, sl, _lo, _t in PMo.PARAMS))
+            # 2026-11-11: MONOMACHINE's own start (its first engine's, ENGN on it), and an engine change's: ENGN
+            # turned by the setter (smp_quant, then its value written as the setter writes it) to the third engine
+            # gives that engine's start, ENGN as turned (rec.c mono_poll, from the UI's poll)
+            from dnfw.perc import program as PPo     # noqa: PLC0415
+            mono_slots = [sl for _r, sl, _lo, _t in PMo.PARAMS] + [PPo.MONO_TUNE_REC[1]]
+            e_slot, e_rid = PMo.PARAMS[7][1], PMo.PARAMS[7][0]
+            e2 = MMo.MONO_ENGINES[2]
+            e2_word = _mnm_rep(PMo.PARAMS[7][2], PMo.PARAMS[7][3], len(MMo.MONO_ENGINES), 2) << 8
+            mono_want = [PLo.mnm_slot_words(MMo.NAMES.index(n), MMo.DEFAULTS[n])
+                         for n in (MMo.MONO_ENGINES[0], e2)]
+            mono_want[1][e_slot] = e2_word
+            mono_want = [[w[sl] for sl in mono_slots] for w in mono_want]
+            mono_m = ",".join(f"mem:{snd0 + 20 + 2 * sl:#x}:2" for sl in mono_slots)
+            from dnfw.waverider import pages as WPo  # noqa: PLC0415
+            mono_first = MMo.CF_ALL[MMo.CF_MONO]
+            mono_recs = [next(r for r in WPo.MNM_RECS if r[1] == sl) for sl in mono_slots]
+
+            def mono_view(i, w):
+                """slot i's word as the page reads it on the first engine: a choice's index, else the word"""
+                _r, _sl, lo, top = mono_recs[i]
+                n = WPo._choices(mono_first).get(WPo.mnm_pnames(mono_first)[WPo.MNM_RECS.index(mono_recs[i])], 0)
+                if not n:
+                    return ("w", w)
+                v = min(max((w >> 8) - lo, 0), top)
+                k = (v * 254 + top) // (2 * top)
+                if n == "pch":
+                    return ("c", WPo._pch_names()[0][k])
+                n = n if isinstance(n, int) else len(n)
+                return ("c", (k * n) >> 7)
+            os_ += (f",call:{cm:#x}:arg1@{cm:#x}:0:{MMo.MONO_TYPE}:arg4@{cm:#x}:arg5@{cm:#x},wait:10,types,{mono_m},"
+                    f"call:{lay['smp_quant']:#x}:sound0:{e_slot}:{e2_word:#x}:{e_rid},"
+                    f"poke:{snd0 + 20 + 2 * e_slot:#x}:{e2_word:04x},wait:10,{mono_m}")
             ojs = work / "mnmdefaults.json"
             o_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
                      "--snapshot", snap, "--args-at", hex(cm), "--steps", os_, "--png-dir", work / "mnmdefaults",
@@ -2122,10 +2166,27 @@ def main() -> int:
                     types = m.get("types@0") or [None]
                     got = [int(m.get(f"{snd0 + 20 + 2 * sl:#x}", "0") or "0", 16) for _r, sl, _lo, _t in PMo.PARAMS]
                     facts = {"track 1 is SOPHIE": types[0] == sid, "its eight controls at SOPHIE's own start": got == want}
+                    # 2026-11-11: after SOPHIE's (types, eight reads), MONOMACHINE's commit (types, nine reads) and its
+                    # engine change (nine reads), in the order read
+                    vals = list(m.values())
+                    k0 = 1 + len(PMo.PARAMS)
+                    types1 = vals[k0] if len(vals) > k0 and isinstance(vals[k0], list) else [None]
+                    nine = len(mono_slots)
+                    mono_got = [[int(str(v or "0"), 16) for v in vals[k0 + 1 + nine * i:k0 + 1 + nine * (i + 1)]]
+                                for i in (0, 1)]
+                    facts["track 1 is MONOMACHINE"] = types1[0] == MMo.MONO_TYPE
+                    # (MACHINE SEL writes through the setter, whose smp_quant snaps a choice to the middle of its span:
+                    # a choice control is held to its choice, as the page reads it; every other word exactly)
+                    facts["MONOMACHINE starts on its first engine, at that engine's start (TUNE on page 2 H)"] = \
+                        [mono_view(j, w) for j, w in enumerate(mono_got[0])] == \
+                        [mono_view(j, w) for j, w in enumerate(mono_want[0])]
+                    facts[f"ENGN turned to {e2}: {e2}'s start, ENGN as turned"] = mono_got[1] == mono_want[1]
                     good = all(facts.values())
-                    why = f"{facts} got={[hex(g) for g in got]} want={[hex(w) for w in want]} types={types}"
-                return good, ("MACHINE SEL to SOPHIE: its eight controls at its own start (the factory snare)"
-                              if good else why)
+                    why = (f"{facts} got={[hex(g) for g in got]} want={[hex(w) for w in want]} types={types}"
+                           f" mono got={[[hex(g) for g in r] for r in mono_got]}"
+                           f" want={[[hex(w) for w in r] for r in mono_want]} types={types1}")
+                return good, ("MACHINE SEL to SOPHIE: its eight controls at its own start (the factory snare); to "
+                              "MONOMACHINE: its first engine's; ENGN turned: the new engine's start" if good else why)
             later("mnmdefaults", "Monomachine start values (ColdFire)", "Monomachine start values (ColdFire)", [o_cmd, sorted(EMU_ENV.items())], o_body)
 
         # 6p. v0.33: our overlays let go when the page under them goes (docs/freeze-hunt.md).

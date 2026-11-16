@@ -21,11 +21,11 @@ the instrument's own DSP and sitting in MACHINE SEL beside the stock ones:
   your WAVs sent over USB and kept on the +Drive.
 - **PERC, the Machinedrum**: the MD's TRX, EFM, GND and P-I machines (34 of them) from the
   Machinedrum's own firmware, with its track effects.
-- **The Monomachine, polyphonic**: SID 6581, DPRO WAVE, DPRO DDRW, DPRO DENS and VO-6,
-  from the Monomachine's own firmware, drawn as the Monomachine draws them, and SOPHIE
-  (this fork). The Monomachine played one note per track; here every note gets its own
-  voice, so they play chords. (The five were out of this fork from 2026-11-08 to make room,
-  and are back since 2026-11-11.)
+- **The Monomachine, polyphonic**: one machine, MONOMACHINE, whose engine (page 1 knob H)
+  is SID 6581, DPRO WAVE, DPRO DDRW, DPRO DENS or VO-6, from the Monomachine's own firmware,
+  drawn as the Monomachine draws them, and SOPHIE (this fork). The Monomachine played one
+  note per track; here every note gets its own voice, so they play chords. (The five were
+  out of this fork from 2026-11-08 to make room, and are back since 2026-11-11, as one machine.)
 
 Everything else on the instrument works as stock: the stock machines, the sequencer,
 projects, presets and kits.
@@ -76,12 +76,15 @@ TYPE is p-lockable.
 
 ### The Monomachine
 
-SID 6581, DPRO WAVE, DPRO DDRW, DPRO DENS and VO-6, each its own machine type, ported
-from the Monomachine's firmware (you supply its OS file). Their pages are drawn as the
-Monomachine's, choice knobs move one choice a few detents, and each is levelled to sit
-beside the stock machines. SOPHIE (`docs/sophie.md`) has the Monomachine-style page too.
-(This fork removed the five on 2026-11-08, their types reserved meanwhile, and brought them
-back on 2026-11-11 with the same types.)
+SID 6581, DPRO WAVE, DPRO DDRW, DPRO DENS and VO-6, ported from the Monomachine's firmware
+(you supply its OS file), are the engines of one machine, MONOMACHINE (type 6): page 1 knob H
+(ENGN, a list with a tag beside each engine) chooses the engine, as MACHINEDRUM's TYPE
+chooses its machine; the engine's own controls sit on A..G and its TUNE on page 2 H, and
+choosing an engine sets its controls to its own start. Their pages are drawn as the
+Monomachine's, choice knobs move one choice a few detents, and each engine is levelled to
+sit beside the stock machines. SOPHIE (`docs/sophie.md`) has the Monomachine-style page too.
+(This fork removed the five on 2026-11-08 and brought them back on 2026-11-11, the same day
+as one machine; their former types 7, 14, 15 and 16 stay reserved.)
 
 **Polyphonic.** The Monomachine was monophonic: six tracks, one note each. Here a
 Monomachine track is a Digitone II track, so each note takes its own voice from the DN2's

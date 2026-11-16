@@ -3988,7 +3988,7 @@ def mnm_words(k: int, knobs=None) -> dict:
     own defaults), on PERC's eight parameter records (as page.c's mnm_knob reads them)"""
     from dnfw.mnm import machines as MM
     knobs = MM.DEFAULTS[MM.NAMES[k]] if knobs is None else knobs
-    words = {slot: PL.knob_word(x, top, lo) for (_rid, slot, lo, top), x in zip(PM.PARAMS, knobs)}
+    words = PL.mnm_slot_words(k, knobs)          # 2026-11-11: MONOMACHINE's engines: ENGN on H, TUNE on page 2 H
     if MM.NAMES[k] == "DRONE":                   # 2026-11-11: q2 OCT at the start MACHINE SEL writes (octave 0;
         _rid, slot, lo, top = PM.FX_PARAMS[2]    # a page-2 word left 0 would be OCT -3)
         words[slot] = PL.knob_word(MM.MACHINES[k].DEFAULTS2[2], top, lo)
@@ -4008,7 +4008,7 @@ def step_mnm(init, sound, machines, blocks) -> dict:
     audible and bounded; an untriggered track silent; the DSP budget in track order. (Their
     pitch is test_perc_live's, on the same program in the model.)"""
     from dnfw.mnm import machines as MM
-    types = {k: typ for typ, k in PP.MNM_TYPES.items()}
+    types = dict(enumerate(MM.TYPES))           # each voice's type (2026-11-11: MONOMACHINE's engines all its own)
 
     def frames(k, note=0x3C00, trig=(1,), knobs=None, other=None):
         def fb(b):
@@ -4102,6 +4102,16 @@ def step_mnm(init, sound, machines, blocks) -> dict:
         return base_frame(sound, machines, t0=types[pk], overrides=mnm_words(pk, kn),
                           trigger=b % 2 == 1).to_bytes()
     runs["PLAITS_walk"] = _slim(run_blocks(init, plaits_walk, max(blocks, 2 * PLm.N_MODELS + 2)))
+    # 2026-11-11: MONOMACHINE (type 6) whose ENGN (page 1 H) turns to the next engine every three blocks, each at
+    # its own knobs (a block with no trig after each turn: the old engine plays on until the note), bit-exact as above
+    if MM.MONO_ENGINES:
+        n_eng = len(MM.MONO_ENGINES)
+
+        def mono_walk(b):
+            k = MM.MONO_FIRST + (b // 3) % n_eng
+            return base_frame(sound, machines, t0=MM.MONO_TYPE, overrides=mnm_words(k),
+                              trigger=b % 3 == 1).to_bytes()
+        runs["MONO_walk"] = _slim(run_blocks(init, mono_walk, max(blocks, 3 * n_eng + 2)))
     # the budget: SID on tracks 0..3 at once; those whose cost fits PP.MNM_BUDGET in track
     # order play, the rest are silent
     sid = MM.NAMES.index("SID 6581")
@@ -4171,6 +4181,9 @@ def step_mnm(init, sound, machines, blocks) -> dict:
          "instructions_per_block": {k: round(r.get("instructions", 0) / max(blocks, 1))
                                     for k, r in runs.items() if r["ok"]},
          "wall_s": {k: r.get("wall_s") for k, r in runs.items()},
+         # 2026-11-11: each run's largest buffer sample (the "above 4.0" check below names no run)
+         "buffer_max_abs": {k: round(max((abs(x) for blk in r["perc"] for v in blk.values() for x in v["out"]),
+                                         default=0.0), 4) for k, r in runs.items() if r["ok"]},
          "halts": {k: r.get("halt") for k, r in runs.items() if not r["ok"]}}
     checks = {
         "every run returns every block": ok_runs,

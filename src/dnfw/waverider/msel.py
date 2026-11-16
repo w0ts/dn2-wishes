@@ -9,16 +9,17 @@ type has a name (12 characters at most: two 61-pixel columns, the list's own 3 x
 from __future__ import annotations
 
 # the names, at most 12 characters (the User, 2026-11-11, mock-up E4: each of ours by what it is, "ANALOG everywhere";
-# "drone and tb303 are not monomachine!"; one MONOMACHINE entry, its engine chosen inside it, as MACHINEDRUM's: until
-# upstream-v048's host joins them, the five Monomachine ports stay their own entries, below). Elektron's machines and
-# the sample machines keep stock's names. PERC is the Machinedrum's machines (its own type 5)
+# "drone and tb303 are not monomachine!"; one MONOMACHINE entry, its engine chosen inside it, as MACHINEDRUM's: since
+# 2026-11-11 the five Monomachine ports are that one machine on type 6, OUR_NAMES below; 7, 14, 15, 16 are reserved,
+# never listed). Elektron's machines and the sample machines keep stock's names. PERC is the Machinedrum's machines
+# (its own type 5)
 MACHINE_NAMES = {0: "FM TONE", 1: "WAVETONE", 2: "FM DRUM", 3: "SWARMER", 4: "MIDI",
                  5: "MACHINEDRUM",
                  6: "SID 6581", 7: "DPRO-WAVE", 14: "DPRO-DDRW", 15: "DPRO-DENS", 16: "VO-6 VOICE",
                  8: "ONESHOT", 9: "WERP", 10: "STRETCH", 11: "REPITCH", 12: "GRID", 13: "SLICE", 17: "BOUNCE"}
 # our other Monomachine-style machines by their module's NAME (dnfw.mnm.machines), whatever type they get: SOPHIE is
-# Schwung Sophie, PLAITS Mutable's Plaits, TB303 Open303, DRONE and ANALOG2 Optimist's; MONOMACHINE the host
-# upstream-v048 builds for the five ports (listed once a module of that NAME is in)
+# Schwung Sophie, PLAITS Mutable's Plaits, TB303 Open303, DRONE and ANALOG2 Optimist's; MONOMACHINE the five ports
+# as one machine (2026-11-11, dnfw.mnm.machines MONO_NAME, on type 6: _ours)
 OUR_NAMES = {"SOPHIE": "SOPHIE", "PLAITS": "PLAITS", "TB303": "TB-303", "DRONE": "DRONE", "ANALOG2": "ANALOG",
              "MONOMACHINE": "MONOMACHINE"}
 FILTER_NAMES = {0: "MULTI-MODE", 1: "LOWPASS 4", 2: "EQUALIZER", 3: "COMB -", 4: "LEGACY LP/HP", 5: "COMB +",
@@ -57,7 +58,10 @@ OUR_ICONS = {
 def _ours() -> dict[int, str]:
     """type -> our module's NAME, for those of this build's Monomachine-style machines OUR_NAMES names"""
     from ..mnm import machines as MM
-    return {t: M.NAME for M, t in zip(MM.ALL_MODULES, MM.ALL_TYPE_SLOTS) if M.NAME in OUR_NAMES}
+    out = {t: M.NAME for M, t in zip(MM.ALL_MODULES, MM.ALL_TYPE_SLOTS) if M.NAME in OUR_NAMES}
+    if MM.MONO_ENGINES:                          # 2026-11-11: the five ports are one machine (dnfw.mnm.machines)
+        out[MM.MONO_TYPE] = MM.MONO_NAME
+    return out
 
 
 def machine_names() -> dict[int, str]:

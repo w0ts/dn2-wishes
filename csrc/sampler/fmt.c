@@ -189,6 +189,8 @@ static int func_kind(u8 *s, int slot, u32 id)
         return slot == PERC_PTCH_SLOT || slot == PERC_TYPE_SLOT ? F_KEEP : F_NONE;
     int mi = mnm_index(ty - 4);
     if (mi >= 0) {
+        mi = mnm_live(mi, *(volatile u16 *)(s + SOUND_VALUES + 2 * mnm_slot[MNM_MONO_J]));   /* 2026-11-11: MONOMACHINE's
+                                                                                               * engine's controls */
         for (int j = 0; j < MNM_J; j++)
             if (mnm_slot[j] == slot) {
                 if (MNM_TUNE_MONO && j == MNM_TUNE_J && mnm_labels[mi][j][0] == 'T' && mnm_labels[mi][j][1] == 'U')
@@ -221,6 +223,9 @@ int smp_quant(u8 *s, int slot, int value, u32 id)
         smp_samp_turned = *(volatile u32 *)0x4058F8D4u;    /* (as below, for every SAMP write) */
         return smp_samp_direct > 0 ? smp_samp_direct << 8 : value;
     }
+    extern int mono_raw;                        /* 2026-11-11: rec.c mono_poll writing an engine's start: as it is */
+    if (mono_raw)
+        return value;
     int fk = func_kind(s, slot, id);
     int old0 = *(volatile u16 *)(s + SOUND_VALUES + 2 * slot);
     if (fk == F_NONE)
@@ -271,8 +276,19 @@ int smp_quant(u8 *s, int slot, int value, u32 id)
         return (lo + (b * span + 7) / 8) << 8;
     }
     int mi = mnm_index((signed char)s[SOUND_TYPE] - 4);     /* v0.27: is_wr's kind */
-    if (mi >= 0)
-        return mnm_quant(mi, slot, *(volatile u16 *)(s + SOUND_VALUES + 2 * slot), value);
+    if (mi >= 0) {
+        /* 2026-11-11: MONOMACHINE: its engine's controls (ENGN, page 1 H); ENGN turned to another engine: that
+         * engine's start (rec.c mono_poll, after this write, outside the setter), as MACHINE SEL sets a machine's */
+        int w0 = *(volatile u16 *)(s + SOUND_VALUES + 2 * slot);
+        int ew = *(volatile u16 *)(s + SOUND_VALUES + 2 * mnm_slot[MNM_MONO_J]);
+        int r = mnm_quant(mnm_live(mi, ew), slot, w0, value);
+        if (MNM_MONO >= 0 && mi == MNM_MONO && slot == mnm_slot[MNM_MONO_J]
+            && mnm_mono_engine((r >> 8) & 0xFF) != mnm_mono_engine((w0 >> 8) & 0xFF)) {
+            extern void mono_engine_set(u8 *s, int e);
+            mono_engine_set(s, mnm_mono_engine((r >> 8) & 0xFF));
+        }
+        return r;
+    }
     int type = SMP_IDX((signed char)s[SOUND_TYPE] - 4);   /* v0.44: BOUNCE's row too */
     if (type < 0)
         return value;
@@ -577,7 +593,8 @@ void smp_formats(int kind)
         RECORD_FMT(fmt_ids[k]) = f;
     }
     {
-        int mi = mnm_index(kind);                   /* the Monomachine-style machines' controls in their units */
+        extern int wr_mnm_mi(int kind);             /* page.c: MONOMACHINE's engine's (2026-11-11) */
+        int mi = wr_mnm_mi(kind);                   /* the Monomachine-style machines' controls in their units */
         if (!mnm_saved) {
             for (int j = 0; j < MNM_J; j++)
                 mnm_stock[j] = RECORD_FMT(mnm_rid[j]);

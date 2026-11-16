@@ -337,16 +337,19 @@ def inputs(p: Prog, L: K.Layout, knobs: list[int]) -> None:
 
 
 def block(p: Prog, L: K.Layout, knobs: list[int], note: int, want: int, level: float = 1.0,
-          level_word: int | None = None) -> None:
+          level_word: int | None = None, after_advance=None) -> None:
     """One DN2 block (steps 1-4): KNOBS the scratch words of the eight knobs, Rnote nonzero
     for a note, Rwant the machine TYPE asks for (0..N-1). Output at I4 (advanced past the
-    block). Clobbers everything but I3."""
+    block). Clobbers everything but I3. AFTER_ADVANCE (2026-11-11): code run once the stream has
+    moved on (the machine VW['mach'] is the one this block plays), before the level is read."""
     p.ifz(note, "NE", lambda: (K.vws(p, "want", want), p.iconst(0, 1), K.vws(p, "trg", 0)))
     inputs(p, L, knobs)
     K.vw(p, 0, "pos")
     p.fconst(12, START)
     p.if_(0, "GE", 12, lambda: (advance(p, L), K.vw(p, 0, "pos"), p.fconst(12, 32.0),
                                   p.fop(0, 0, "-", 12), K.vws(p, "pos", 0)))
+    if after_advance is not None:
+        after_advance()
     # step 4: Catmull-Rom over B[i-1..i+2], i = trunc(pos), f = pos - i
     p.ld(0, L.C["mdb"])
     p.iconst(12, 4 * (K.B0 - 1))

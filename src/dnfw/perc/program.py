@@ -31,7 +31,26 @@ MACHINE_TYPE = 5
 # v0.26: the Monomachine's synth machines (docs/mnm.md), each its own machine type, in PERC's
 # voice: type -> index in dnfw.mnm.machines.MACHINES
 from ..mnm import machines as _mnm_types   # noqa: E402
-MNM_TYPES = {t: k for k, t in enumerate(_mnm_types.TYPES)}   # 6, 7 (CZ's and RESONATOR's until v0.25), 14..
+MNM_TYPES: dict[int, int] = {}            # 6, 7 (CZ's and RESONATOR's until v0.25), 14..
+for _k, _t in enumerate(_mnm_types.TYPES):   # 2026-11-11: MONOMACHINE's type -> its first engine's voice; ENGN
+    MNM_TYPES.setdefault(_t, _k)             # (page 1 H) adds the engine (mono_engine)
+# 2026-11-11: MONOMACHINE's engine, from page 1 H's record (PERC's eighth, M.PARAMS[7]) as the page reads the choice:
+# knob = (v 254 + top) / (2 top), engine = (knob n) >> 7 (md_page.c mnm_k, mnm_choice_of): the least v of each
+# engine past the first
+MONO_ENGN_REC = M.PARAMS[_mnm_types.MONO_ENGINE_K]
+
+
+def _mono_thresholds() -> tuple[int, ...]:
+    _rid, _slot, lo, top = MONO_ENGN_REC
+    assert lo == 0                               # mono_engine compares the word >> 8 itself
+    n = len(_mnm_types.MONO_ENGINES)
+    e_of = [(((v * 254 + top) // (2 * top)) * n) >> 7 for v in range(top + 1)]
+    return tuple(e_of.index(e) for e in range(1, n))
+
+
+MONO_THRESHOLDS = _mono_thresholds() if _mnm_types.MONO_ENGINES else ()
+# the engine's TUNE: page 2 H, PERC's TYPE record (0..127), read into p7 (the engine's eighth) for MONOMACHINE
+MONO_TUNE_REC = M.TYPE_REC + (0, 127)
 MNM_LEVEL = 0.25                         # a Monomachine machine's full scale on a DN2 track
 # v0.27: each machine's own level, by name (owner: MNM-1 was quiet); a machine without one plays
 # at MD_LEVEL (SOPHIE). 0.25 put SID's default sound at a peak of 0.046 on its track's buffer, DPRO
@@ -148,6 +167,18 @@ def raw_type(p: Prog, d: int) -> None:
     half(p, d, 148, 10)
 
 
+def mono_engine(p: Prog, d: int, s: int, k146: int) -> None:
+    """2026-11-11: Rd = MONOMACHINE's engine 0..n-1 (ENGN, page 1 H) for the slot whose 146 t is in Rk146, the choice
+    the page shows (MONO_THRESHOLDS). Rs the record's value (word >> 8). Clobbers R0, R1, R12, I1."""
+    _rid, slot, _lo, _top = MONO_ENGN_REC
+    half(p, s, M.frame_offset(slot), k146)
+    p.lsh(s, s, -8)
+    p.iconst(d, 0)
+    for v in MONO_THRESHOLDS:
+        p.iconst(12, v)
+        p.if_(s, "GE", 12, lambda: (p.iconst(12, 1), p.iop(d, 12, "+", d)), kind="i")
+
+
 def mnm_ages(p: Prog, L: M.Layout) -> None:
     """v0.29: every slot's key and Monomachine cost for this block (MNM_KEYS_OFF), and the
     slots in key order (ORDER_OFF). Clobbers R0-R14, I1."""
@@ -178,6 +209,30 @@ def mnm_ages(p: Prog, L: M.Layout) -> None:
         for typ in (MACHINE_TYPE, *SMx.TYPES):      # v0.44: 8..13 and BOUNCE's 17
             p.iconst(12, typ)
             p.if_(2, "EQ", 12, lambda: p.iconst(14, 1), kind="i")
+        if MONO_THRESHOLDS:                    # 2026-11-11: MONOMACHINE's cost is its engine's
+
+            def mono_cost():
+                p.ld(8, U_WORD)
+                t146(p, 11, 8)
+                mono_engine(p, 6, 7, 11)
+                for e, name in enumerate(MNM.MONO_ENGINES[1:], start=1):
+                    p.iconst(12, e)
+                    p.if_(6, "EQ", 12, lambda c=MNM_COST[name]: p.iconst(4, c), kind="i")
+                # ... or the engine the voice still plays (ENGN turned, no note yet), whichever costs more
+                p.ld(8, U_WORD)
+                p.lsh(12, 8, 10)
+                p.iconst(11, L.md.state + 4 * MDK.VW["mach"])
+                p.iop(12, 11, "+", 12)
+                p.seti(1, 12)
+                p.ldi(6, 0, 1)
+                for e, name in enumerate(MNM.MONO_ENGINES):
+                    def more(c=MNM_COST[name]):
+                        p.iconst(12, c)
+                        p.if_(4, "LT", 12, lambda: p.iconst(4, c), kind="i")
+                    p.iconst(12, MDV.N + MNM.MONO_FIRST + e)
+                    p.if_(6, "EQ", 12, more, kind="i")
+            p.iconst(12, MNM.MONO_TYPE)
+            p.if_(2, "EQ", 12, mono_cost, kind="i")
         p.sti(MNM_COSTS_OFF // 4, 5, 4)
         p.iconst(4, 0)                         # 2026-11-09: the slot's start bound (MNM_START)
         for typ, k in MNM_TYPES.items():
@@ -292,6 +347,19 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
         p.iconst(12, typ)
         p.if_(2, "EQ", 12, lambda k=k: p.iconst(0, k + 1), kind="i")
     p.st(C["mnm"], 0)
+    if MONO_THRESHOLDS:
+        # 2026-11-11: MONOMACHINE: its engine (ENGN, page 1 H) picks the engine's voice, as PERC's TYPE picks a
+        # Machinedrum machine: everything after (its level, cost, voice, a new note's init) is that engine's own
+        def mono():
+            p.ld(9, C["t"])
+            t146(p, 10, 9)
+            mono_engine(p, 6, 7, 10)
+            p.ld(0, C["mnm"])
+            p.ipass(12, 6)
+            p.iop(0, 12, "+", 0)
+            p.st(C["mnm"], 0)
+        p.iconst(12, _mnm_types.MONO_TYPE)
+        p.if_(2, "EQ", 12, mono, kind="i")
     p.ld(9, C["t"], "t")
     p.lsh(12, 9, 7)
     p.iconst(11, L.state)
@@ -337,6 +405,18 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
         p.st(C[f"p{k}" if k < 8 else f"q{k - 8}" if k < 15 else f"r{k - 15}"], 5)
     for k, (_rid, slot, lo, top) in enumerate(M.PARAMS):
         param(k, slot, lo, top)
+    if MONO_THRESHOLDS:
+        # 2026-11-11: MONOMACHINE's engine reads its eighth (TUNE) where it always did (p7), from page 2 H: page 1 H
+        # is ENGN
+        first = _mnm_types.MONO_FIRST + 1
+        last = _mnm_types.MONO_FIRST + len(_mnm_types.MONO_ENGINES)
+        p.ld(5, C["mnm"])
+        p.iconst(6, 0)
+        p.iconst(12, first)
+        p.if_(5, "GE", 12, lambda: (p.iconst(12, last), p.if_(5, "LE", 12, lambda: p.iconst(6, 1), kind="i")),
+              kind="i")
+        _rid, slot, lo, top = MONO_TUNE_REC
+        p.ifz(6, "NE", lambda: param(7, slot, lo, top))
 
     def fx_params():                          # 2026-11-10 (poly16): only PERC's voices read them (fx)
         for k, (_rid, slot, lo, top) in enumerate(M.FX_PARAMS, start=len(M.PARAMS)):
@@ -458,10 +538,25 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
     p.ld(0, C["mnm"])
     p.ifz(0, "EQ", md_rest)
 
+    def mono_level():
+        # 2026-11-11: an engine plays at its own level: ENGN turned with no note, the voice plays the old engine on
+        # until the next note (as a new TYPE), at that engine's level (the runner: DENS at VO-6's 16.5 went past 4.0)
+        # (a MONOMACHINE track only: C['mnm'] one of its engines)
+        def by_mach():
+            MDK.vw(p, 0, "mach")
+            for e, name in enumerate(_mnm_types.MONO_ENGINES):
+                p.iconst(12, MDV.N + _mnm_types.MONO_FIRST + e)
+                p.if_(0, "EQ", 12, lambda lev=MNM_LEVELS[name]: (p.fconst(1, lev), p.st(C["lev"], 1)), kind="i")
+        p.ld(5, C["mnm"])
+        p.iconst(12, _mnm_types.MONO_FIRST + 1)
+        p.if_(5, "GE", 12, lambda: (p.iconst(12, _mnm_types.MONO_FIRST + len(_mnm_types.MONO_ENGINES)),
+                                    p.if_(5, "LE", 12, by_mach, kind="i")), kind="i")
+
     def render():
         p.ld(2, C["trig"])
         p.ld(5, C["type"])
-        MDV.block(p, L.md, [C[f"p{k}"] for k in range(8)], 2, 5, level_word=C["lev"])
+        MDV.block(p, L.md, [C[f"p{k}"] for k in range(8)], 2, 5, level_word=C["lev"],
+                  after_advance=mono_level if MONO_THRESHOLDS else None)
 
     def silence():                            # past the budget: this block is silent
         p.ld(0, C["buf"])

@@ -997,6 +997,54 @@ u32 smp_machine_commit(u32 model, u32 track, u32 type, u32 a, u32 b)
     return r;
 }
 
+/* 2026-11-11 (the User: one MONOMACHINE, its engine on page 1 H as MACHINEDRUM's TYPE): ENGN turned to another
+ * engine (fmt.c smp_quant, from inside the setter's write) starts that engine as choosing it in MACHINE SEL did: its
+ * controls at its own start (mnm_default), ENGN as turned. Written from the UI's poll (page.c, mono_poll), not inside
+ * the setter; only on a track of the kit (a write into another sound is left) and only while that track's sound is
+ * still MONOMACHINE on that engine. */
+static int mono_pend_t __attribute__((section(".data"))) = -1;
+static int mono_pend_e __attribute__((section(".data"))) = 0;
+/* while mono_poll writes: the setter's smp_quant leaves the words as written (its detents would drop a choice that
+ * moves by a few steps: one turn in four counts) */
+int mono_raw __attribute__((section(".data"))) = 0;
+
+void mono_engine_set(u8 *s, int e)
+{
+    if (!KIT || e < 0 || e >= MNM_MONO_N)
+        return;
+    for (int t = 0; t < 16; t++)
+        if ((u32)s == KIT + 52u + 1163u * (u32)t) {
+            mono_pend_t = t;
+            mono_pend_e = e;
+            return;
+        }
+}
+
+void mono_poll(void)
+{
+    int t = mono_pend_t;
+    if (t < 0)
+        return;
+    mono_pend_t = -1;
+    if (MNM_MONO < 0 || !KIT || SOUND_TYPE(t) != MNM_MONO_TYPE)
+        return;
+    int w = *(volatile unsigned short *)(KIT + 52u + 1163u * (u32)t + 0x14u + 2u * mnm_slot[MNM_MONO_J]);
+    if (mnm_mono_engine((w >> 8) & 0xFF) != mono_pend_e)
+        return;
+    int mi = mnm_mono_place[mono_pend_e];
+    u32 owner = UI_OWNER();
+    for (int j = 0; owner && j < MNM_J; j++) {
+        if (j == MNM_MONO_J || mnm_default[mi][j] == 0xFFFFu)
+            continue;
+        u32 ps = PARAM_SET(owner, mnm_rid[j], (u32)t);
+        if (ps) {
+            mono_raw = 1;
+            SET_VALUE(ps, mnm_rid[j], (u32)mnm_default[mi][j], (u32)t, 0, 0, 1);
+            mono_raw = 0;
+        }
+    }
+}
+
 int smp_samp_of(int track)
 {
     if (track < 0 || track > 15 || !KIT)

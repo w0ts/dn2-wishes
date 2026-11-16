@@ -160,10 +160,30 @@ static const char *stock_long[WR_NAMED] __attribute__((section(".data")));
 static const char *stock_short[WR_NAMED] __attribute__((section(".data")));
 static int names_on __attribute__((section(".data"))) = -1;
 
+/* 2026-11-11: MONOMACHINE's engine on the active track (ENGN, page 1 H: the word in its sound, as perc_type reads
+ * TYPE's), 0 on any other machine */
+static int wr_mono_engine(int kind)
+{
+    u8 t = UI_TRACK;
+    unsigned char *kit = KIT_POINTER;
+    if (MNM_MONO < 0 || mnm_index(kind) != MNM_MONO || t > 15 || !kit)
+        return 0;
+    return mnm_mono_engine(*(volatile unsigned short *)(kit + 52u + 1163u * t + 0x14u + 2u * mnm_slot[MNM_MONO_J]) >> 8);
+}
+
+/* the active track's Monomachine place (KIND as is_wr answers it): MONOMACHINE's engine's (fmt.c smp_formats);
+ * -1 for any other kind */
+int wr_mnm_mi(int kind)
+{
+    int mi = mnm_index(kind);
+    return mi >= 0 && mi == MNM_MONO ? mnm_mono_place[wr_mono_engine(kind)] : mi;
+}
+
 static void wr_names(void)
 {
     int on = wr_active();
-    int key = on == 1 ? 16 + perc_type() : on;   /* PERC: one set of names a machine */
+    int eng = on > 1 ? wr_mono_engine(on) : 0;     /* 2026-11-11: MONOMACHINE: one set of names an engine */
+    int key = on == 1 ? 16 + perc_type() : on + 64 * eng;   /* PERC: one set of names a machine */
     if (key == names_on)
         return;
     extern void smp_formats(int kind);
@@ -174,8 +194,8 @@ static void wr_names(void)
             stock_long[k] = NAME_LONG(id);
             stock_short[k] = NAME_SHORT(id);
         }
-        const char *l = on ? wr_named_long[on - 1][k] : 0;
-        const char *sh = on ? wr_named_short[on - 1][k] : 0;
+        const char *l = on ? (eng ? wr_mono_long[eng - 1][k] : wr_named_long[on - 1][k]) : 0;
+        const char *sh = on ? (eng ? wr_mono_short[eng - 1][k] : wr_named_short[on - 1][k]) : 0;
         if (on == 1)
             for (int j = 0; j < 8; j++)
                 if (perc_param_ids[j] == id) {
@@ -383,6 +403,7 @@ int wr_poll(void *screen)
     smp_boot();
     jmp_poll();                                 /* DIRECT JUMP's setting, read and written (csrc/jump) */
     rec_poll();
+    { extern void mono_poll(void); mono_poll(); }   /* 2026-11-11: MONOMACHINE's engine turned: its start (rec.c) */
     { extern void hold_poll(void); hold_poll(); }   /* DRONE's HOLD latch (csrc/hold) */
     { extern void dt_poll(void); dt_poll(); }       /* the test channel's keys (csrc/devtest, a test build) */
     wr_names();
@@ -705,6 +726,10 @@ void wr_page_draw(void *view, void *canvas)
     int kind = wr_active();
     int mi = mnm_index(kind);                   /* v0.26: a Monomachine machine's: one page */
     int mnm = mi >= 0;
+    if (mnm && mi == MNM_MONO) {                /* 2026-11-11: MONOMACHINE: its engine's page (ENGN, as the page */
+        u8 flag;                                /* draws it), as PERC's follows TYPE */
+        mi = mnm_live(mi, GET_VALUE(view, mnm_rid[MNM_MONO_J], &flag));
+    }
     int smp = SMP_IDX(kind) >= 0;   /* a sample machine's (v0.44: BOUNCE's kind 13 too) */
     if (page < 0 || page >= (smp ? 2 : mnm ? mnm_npages[mi] : WR_PAGES))   /* 2026-11-10: DRONE, ANALOG2: 2 */
         page = 0;
