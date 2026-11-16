@@ -344,12 +344,9 @@ EXACT = False
 
 
 def _coef(p: Prog, d: int, h: int, l: int) -> None:
-    """Fd = the coefficient whose 12-bit pieces (floats) are at I1 + h, l. Clobbers F12, F13."""
+    """Fd = the coefficient at I1 + h: _pieces stores it whole, as the float its 12-bit pieces made (h 4096 + l,
+    exact in a float for a 24-bit word: FLOAT of the word itself), once when it changes instead of each sample."""
     p.ldi(d, h, 1)
-    p.fconst(12, 4096.0)
-    p.fop(d, d, "*", 12)
-    p.ldi(13, l, 1)
-    p.fop(d, d, "+", 13)
 
 
 def _word_f(p: Prog, d: int, r: int) -> None:
@@ -649,21 +646,16 @@ def _coefs_body(p: Prog, L: K.Layout) -> None:
 
 def _pieces(p: Prog, k: int, r: int, exact: bool = False) -> None:
     """S[k], S[k + 1] = the coefficient word Rr as its filter reads it. EXACT (the 56300's filters, _term):
-    Rr 2, Rr (perf, 2026-11-10). Else (v0.51's float filters, _coef): its 12-bit pieces, the high one
-    signed, as floats. Clobbers R12-R14."""
+    Rr 2, Rr (perf, 2026-11-10). Else (v0.51's float filters, _coef): S[k] = the word as a float (what its
+    12-bit float pieces summed to, exactly), S[k + 1] unused. Clobbers R12-R14."""
     if EXACT or exact:
         p.lsh(13, r, 1)
         ss(p, k, 13)
         ss(p, k + 1, r)
         return
-    p.ash(13, r, -12)
-    p.iconst(12, 4095)
-    p.iop(14, r, "AND", 12)
-    p.iconst(12, 0)
-    p.float_(13, 13, 12)
-    p.float_(14, 14, 12)
+    p.iconst(12, 0)                            # (h 4096 + l: the word itself, exactly; _coef reads it whole)
+    p.float_(13, r, 12)
     ss(p, k, 13)
-    ss(p, k + 1, 14)
 
 
 def set_hp1(p: Prog, L: K.Layout, off: int, exact: bool = False) -> None:
