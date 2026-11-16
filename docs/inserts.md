@@ -300,16 +300,26 @@ machines' code and PERC's; its state after it to `0x200bfc00`). A reverb or a de
 its tail with the voice (a stolen slot starts again) and cost once a voice, so FDN8 and XDLY run once a
 **track**, on the block the routing makes of it:
 
-- **The hook.** The engine sums each voice slot's stereo block into the block of the track the slot plays
-  (`0x1c1f1e`, the routing: `0x258f68 + 0x100 t`, L 32 floats then R at `+ 0x80`, each voice x 14.125;
-  docs/link-research.md §5, §7), then calls the output stage with `CJUMP 0x1c244d (DB)` at sw `0x1c307b`
-  (`04181c004d24`, byte-checked on stock 1.12). **The build changes only that call's target**, to
-  `wr_inbus`, as `wr_inpost`'s: it saves R0..R15, I0..I4, I12 and ASTAT, runs each track's bus inserts in
-  place (slot 1, then slot 2), restores them and JUMPs to `0x1c244d`.
-- **Heard where.** On the main mix and on Overbridge's track outputs (both come out of `0x1c244d`). **Not
-  in the send FX**: the sends took their taps from the voice blocks before (an insert reverb's tail is not
-  sent to the send reverb). A tail goes on after its notes, and after the track is muted (the routing's
-  ramps are on its input).
+- **The hook.** The routing (`0x1c1f1e`, called at sw `0x1c305d`) sums each voice slot's stereo block into
+  the block of the track the slot plays (`0x258f68 + 0x100 t`, L 32 floats then R at `+ 0x80`, each voice x
+  14.125; docs/link-research.md §5, §7; its loop ends at sw `0x1c1fec`), then sums the tracks' blocks into the
+  main bus (`0x25bb68`, from sw `0x1c2038`; measured in the runner, the routing's masks 0), adds the send FX's
+  returns and runs the master chain (`CJUMP 0xb8541d` at sw `0x1c215c`, then `0x1c6664`, `0x1cdc30`,
+  `0xb82728`, each twice). **The build replaces the routing's first instruction after its per-track loop**
+  (sw `0x1c1fef`, `R2 = DM(0x257980)`, `021025008079`, byte-checked on stock 1.12) with `JUMP wr_inbus`: it
+  saves R0..R15, I0..I4, I12 and ASTAT, runs each track's bus inserts in place (slot 1, then slot 2),
+  restores them, does `R2 = DM(0x257980)` and JUMPs back to sw `0x1c1ff2`. Nothing branches to either
+  address (the routing's 48 branches read with selmap).
+- **Heard where.** On the main mix, through the master chain as the track is, and on Overbridge's track
+  outputs (the output stage `0x1c244d` reads the same blocks). **Not in the send FX**: the sends took their
+  taps from the voice blocks before (an insert reverb's tail is not sent to the send reverb). A tail goes on
+  after its notes, and after the track is muted (the routing's ramps are on its input).
+- **2026-11-11, the User: "xdelay and fdn8 still dont work as insert".** Until then the pass was the target of
+  the engine's call of the output stage (sw `0x1c307b`), after the routing had summed the main bus from the
+  dry blocks: remoteui measured on the unit the track's Overbridge stream (SPI records) carrying FDN8's tail
+  at ~200x the dry level, the main mix only the dry release. The runner's new step 3k3 (`mainmix`,
+  `scripts/sharc_mainmix_step.py`) reproduced it on that build (the main bus equal to the blocks before the
+  pass, bit for bit, FDN8 and XDLY at MIX 127) and holds the main bus to the blocks after it.
 - **The engines are the send FX's own code.** FDN8's and XDLY's programs have a MODE word: the bus pass
   copies the send FX's words aside, copies an instance's words in (FDN8: 105 words and its 49-word variant
   table; XDLY: 35 words), sets MODE 1 and enters `wr_fdn8` / `wr_xdly` as a leaf call; they run one block

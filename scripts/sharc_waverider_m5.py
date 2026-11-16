@@ -536,7 +536,7 @@ def main(argv=None):
     p.add_argument("--frame-be", help="a frame as the ColdFire holds it at 0x80005e60 (16-bit BE)")
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
-    p.add_argument("--steps", "decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,mainrec,recwhole,pvmix,fdn8,xdly,inserts,insall,a2f,inspost,insbus,tdm,twin,stock,mnm,frame", "decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,flexlevel,mainrec,recwhole,pvmix,fdn8,xdly,inserts,tdm,stock,mnm,frame")   # v0.27: shft, gran removed; v0.45: ping removed   # voice: PERC
+    p.add_argument("--steps", default="decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,flexlevel,mainrec,recwhole,pvmix,fdn8,xdly,inserts,insall,a2f,inspost,insbus,mainmix,tdm,twin,stock,mnm,frame")   # v0.27: shft, gran removed; v0.45: ping removed   # voice: PERC
     p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
@@ -774,6 +774,11 @@ def main(argv=None):
             bus_step = importlib.import_module("sharc_insbus_step")
             results["3k_insbus"] = bus_step.run(sys.modules[__name__], snap, m2mach, m5, sound, machines)
             show(results["3k_insbus"])
+        if "mainmix" in steps:
+            print("\n-- step 3k3: where the main mix is made, against the tracks' bus blocks --")
+            mm_step = importlib.import_module("sharc_mainmix_step")
+            results["3k3_mainmix"] = mm_step.run(sys.modules[__name__], snap, m2mach, m5, sound, machines)
+            show(results["3k3_mainmix"])
         if "insdl" in steps:
             print("\n-- step 3k2: the insert guard's deadline on a moving clock (2026-11-11) --")
             dl_step = importlib.import_module("sharc_insdl_step")

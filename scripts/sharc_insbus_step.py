@@ -1,15 +1,15 @@
 """The SHARC runner's insbus step (docs/inserts.md "On the track's bus"): real blocks of the build, PERC
-voices sounding, the engine's call of the output stage (sw 0x1c307b) landing in wr_inbus
-(dnfw.waverider.dsp.INSBUS_SW), which JUMPs on to 0x1c244d (dnfw.inserts.bus.OUT_SW). Each track's bus
-block (design.BUS_BLOCKS + 0x100 t) captured at both entries.
+voices sounding, the routing's JUMP after its per-track loop (sw 0x1c1fef, 2026-11-11) landing in wr_inbus
+(dnfw.waverider.dsp.INSBUS_SW), which does the instruction it replaced and JUMPs back to sw 0x1c1ff2
+(dnfw.inserts.bus.RESUME_SW). Each track's bus block (design.BUS_BLOCKS + 0x100 t) captured at both.
 
 **The test's bus blocks.** The routing (0x1c1f1e) sums the voices' stereo blocks, which the emulator writes
 elsewhere (sharc_inspost_step's docstring), so in the runner the track blocks hold no voice. This step puts
 its own sound in them (seeded noise, a burst then silence) at wr_inbus's entry, as the routing would have,
 and the unpacked records (design.TABLE) the pre pass would have left.
 
-1. Every insert OFF: every track's block at 0x1c244d's entry is the block at the pass's entry, and every
-   register the engine passed (R0..R15, I0..I4, I12) is back as it came.
+1. Every insert OFF: every track's block back in the routing is the block at the pass's entry, and every
+   register (R0..R15 but R2, I0..I4, I12) is back as it came; R2 is DM(0x257980), the instruction replaced.
 2. FDN8 and XDLY in both slots of several tracks (bus_test.rows_at's script: half wet, wet only, FDN8 then
    XDLY on one track, a FULL slot, an XDLY instance moved to another track): every block every track's
    block as dnfw.inserts.busref's, bit for bit; the tracks with no bus insert untouched; the send FX's own
@@ -31,7 +31,7 @@ from dnfw.inserts import design as D
 from dnfw.waverider import dsp
 from dnfw.xdly import program as XP
 
-KEEP = [f"R{k}" for k in range(16)] + [f"I{i}" for i in B.SAVE_I]
+KEEP = [f"R{k}" for k in range(16) if k != 2] + [f"I{i}" for i in B.SAVE_I]   # R2: the replaced instruction's
 
 
 def bf(w) -> np.float32:
@@ -116,13 +116,15 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
             if "in" in cur and "out" not in cur:
                 cur["out"] = blocks_of(r.state)
                 cur["regs_out"] = regs(r)
+                cur["r2_ok"] = (getattr(r.state.uregs.get(fx.UREG_CODES["R2"]), "value", None)
+                                == (m2.word(r.state, 0x257980) or 0))
                 cur["send_out"] = send_words(r.state)
                 caps.append(dict(cur))
 
         state = M5.init_on(snap, m2mach, m5img, warm=True)
         for b in range(n):
             out = M5.run_blocks(state, lambda _b, b=b: frames(b), 1,
-                                extra_hooks={dsp.INSBUS_SW: at_bus, B.OUT_SW: at_out})
+                                extra_hooks={dsp.INSBUS_SW: at_bus, B.RESUME_SW: at_out})
             if not out.get("ok"):
                 return caps, {"halt": str(out.get("halt")), "block": b}
             state = out["state"]
@@ -130,11 +132,11 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
 
     # 1. all OFF
     caps, info = blocks(lambda b: bytes(8 * D.RECORDS), 12)
-    checks["every bus insert OFF: every track's block at the output stage's entry is the block at the "
+    checks["every bus insert OFF: every track's block back in the routing is the block at the "
            "pass's entry (12 blocks)"] = bool(caps) and all(c["out"] == c["in"] for c in caps)
-    checks["every bus insert OFF: R0..R15, I0..I4, I12 at the output stage's entry as the engine passed "
-           "them"] = bool(caps) and all(c["regs_out"] == c["regs_in"] and None not in c["regs_in"].values()
-                                        for c in caps)
+    checks["every bus insert OFF: R0..R15 (but R2), I0..I4, I12 back in the routing as they came, R2 = "
+           "DM(0x257980) (the instruction the JUMP replaced)"] = bool(caps) and all(
+        c["regs_out"] == c["regs_in"] and None not in c["regs_in"].values() and c["r2_ok"] for c in caps)
     numbers["all OFF"] = info
 
     # 2. FDN8 and XDLY, two slots, instances moving
@@ -151,13 +153,13 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
             first_bad = first_bad if first_bad is not None else b
         for t in (3, 4, 5, 7, 15):
             bare_same &= c["out"][0][t] == c["in"][0][t] and c["out"][1][t] == c["in"][1][t]
-        regs_back &= c["regs_out"] == c["regs_in"]
+        regs_back &= c["regs_out"] == c["regs_in"] and c["r2_ok"]
         send_same &= c["send_out"] == c["send_in"]
         changed += sum(1 for t in (0, 1, 2) for j in range(32) if c["out"][0][t][j] != c["in"][0][t][j])
     checks["FDN8, XDLY: every track's block after the pass as dnfw.inserts.busref's (70 blocks; two slots, "
            "FDN8 then XDLY on one track, a FULL slot, an XDLY instance moved to another track)"] = exact
     checks["FDN8, XDLY: the tracks with no bus insert (or a FULL slot) untouched"] = bare_same
-    checks["FDN8, XDLY: every register the engine passed back at the output stage's entry"] = regs_back
+    checks["FDN8, XDLY: every register back in the routing as it came (R2 = DM(0x257980))"] = regs_back
     checks["FDN8, XDLY: the send FX's own words (FDN8's, XDLY's) as they were"] = send_same
     checks["FDN8, XDLY: they change the sound (not a pass-through)"] = changed > 1000
     numbers["FDN8, XDLY: first mismatch (block)"] = first_bad
@@ -187,11 +189,11 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
             for t in range(16):
                 for j in range(64):
                     m2.poke(r.state, D.BUS_BLOCKS + 0x100 * t + 4 * j, fb(np.float32(0.1 * ((j % 7) - 3))))
-            how = fx.run(r, 20_000_000, fx.Fixups(), stop_at=[B.OUT_SW])
+            how = fx.run(r, 20_000_000, fx.Fixups(), stop_at=[B.RESUME_SW])
             res = (how[0], how[2])
             if how[0] != "stop":
                 break
         cost[name] = res
     numbers["the pass alone: instructions a block, the last call (stop, count)"] = cost
-    checks["the pass alone runs to the output stage's entry in every case"] = all(v[0] == "stop" for v in cost.values())
+    checks["the pass alone runs back into the routing in every case"] = all(v[0] == "stop" for v in cost.values())
     return {"ok": all(checks.values()), "checks": checks, "numbers": numbers}

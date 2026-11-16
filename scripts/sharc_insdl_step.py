@@ -103,7 +103,7 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
             tap["bus_out"] = cycles(r)
             tap["skips_out"] = m2.word(r.state, G.INS_SKIPS)
 
-        hooks = {dsp.PERC_SW: at_perc, m3.DISPATCH: at_dispatch, dsp.INSBUS_SW: at_bus, B.OUT_SW: at_out}
+        hooks = {dsp.PERC_SW: at_perc, m3.DISPATCH: at_dispatch, dsp.INSBUS_SW: at_bus, B.RESUME_SW: at_out}
         hooks.update({x: clock for x in sites})
 
         def frame(b):

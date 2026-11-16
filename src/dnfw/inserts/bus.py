@@ -3,14 +3,22 @@ SHARC assembly (insbus.asm) and run in Python as its exact model, held bit for b
 dnfw.inserts.busref (2026-11-10, the User: FDN8 and XDLY as inserts, two slots a track).
 
 **Where it runs.** The engine (sw 0x1c2712) renders the voices (0x1c8ef1), calls the FX sends (0x1c1738:
-wr_inpost first), sums each voice slot's stereo block into its track's block, the routing 0x1c1f1e
-(design.BUS_BLOCKS + 0x100 t, L then R at + 0x80, the voices x 14.125), then calls the output stage with
-`CJUMP 0x1c244d (DB)` at sw 0x1c307b (dnfw.waverider.dsp.OUT_SITE_SW). The build changes only that call's
-target, to wr_inbus (dnfw.waverider.dsp.INSBUS_SW): it saves every register it uses, runs the bus inserts
-of each track in place on its block (slot 1 before slot 2), restores everything and JUMPs to 0x1c244d,
-which then runs as if the engine had called it. So a bus insert is heard on the main mix and on
-Overbridge's track outputs; the FX sends took their taps before (docs/inserts.md "On the track's bus").
-Unlike the voice inserts it runs once a track, whatever the voices: a tail outlives its notes.
+wr_inpost first), then the routing 0x1c1f1e: it sums each voice slot's stereo block into its track's block
+(design.BUS_BLOCKS + 0x100 t, L then R at + 0x80, the voices x 14.125; its loop ends at sw 0x1c1fec), then
+sums the tracks' blocks into the main bus (0x25bb68, from sw 0x1c2038), adds the send FX's returns and runs
+the master chain; the output stage (0x1c244d, called at sw 0x1c307b) then sends each track's block to
+Overbridge. The build replaces the routing's first instruction after its per-track loop (sw 0x1c1fef,
+`R2 = DM(0x257980)`, dnfw.waverider.dsp.ROUTE_SITE_SW) with `JUMP wr_inbus`: it saves every register it
+uses, runs the bus inserts of each track in place on its block (slot 1 before slot 2), restores everything,
+does the instruction it replaced and JUMPs back to sw 0x1c1ff2. So a bus insert is on the main mix (and
+through the master chain, as the track is) and on Overbridge's track outputs; the FX sends took their taps
+before (docs/inserts.md "On the track's bus"). Unlike the voice inserts it runs once a track, whatever the
+voices: a tail outlives its notes.
+
+**2026-11-11, the User: "xdelay and fdn8 still dont work as insert".** Until then the pass ran at the output
+stage's call (sw 0x1c307b), after the routing had summed the main bus from the dry blocks: the unit's
+Overbridge stream of the track carried the insert (remoteui's SPI records), the main mix did not. The
+runner's mainmix step (scripts/sharc_mainmix_step.py) holds the main bus to the blocks after this pass.
 
 **The engines are the send FX's own code** (dnfw.fdn8.program, dnfw.xdly.program): an instance's words
 (DYN_WORDS, and FDN8's active variant table) live here, are swapped in for the send FX's (saved first,
@@ -63,7 +71,9 @@ FD_L1_BYTES = 4 * FD_WORDS
 FD_STORE = FD_L1
 assert FD_L1 >= 0x2E4044 and FD_L1 + D.FDN8_INSTANCES * FD_L1_BYTES <= 0x2E5400
 assert END <= D.BUS_STATE_END, f"the bus pass's state runs past its room: {END:#x}"
-OUT_SW = 0x1C244D                                 # the output stage, the call's stock target
+SITE_SW = 0x1C1FEF                                # the routing, after its per-track loop: JUMP wr_inbus here
+DISPLACED = "R2 = DM(0x257980);"                  # .. in place of this (stock's, 48 bits), done on the way back
+RESUME_SW = 0x1C1FF2                              # the routing's next instruction: the main bus is summed after
 G_IN = 1 / 14.125                                 # the routing's gain on a voice (docs/link-research.md §7)
 G_OUT = 14.125
 
@@ -401,7 +411,8 @@ def program(prefix: str = "ib") -> str:
     body(p)
     G.ins_end(p, last=True)                      # 2026-11-11: its end time too (the guard's REST_OUT)
     restore(p)
-    p.jump_abs("", OUT_SW, "the output stage, entered as the engine called it")
+    p.e(DISPLACED, "the routing's instruction the JUMP took the place of")
+    p.jump_abs("", RESUME_SW, "back into the routing: it sums the tracks' blocks into the main bus next")
     p.emit_subs()
     p.raw(".wr_inbus..end:")
     p.raw("      .type wr_inbus.,STT_FUNC;")

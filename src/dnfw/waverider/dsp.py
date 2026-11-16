@@ -167,8 +167,10 @@ POST_STATE_DM = 0x2E3A40                                     # L1 too (was L2 0x
 SENDS_SITE_SW = 0x1C3054                     # the engine: CJUMP 0x1c1738 (DB), then its two pushes
 SENDS_SITE_STOCK = bytes.fromhex("04181c003817")
 # 2026-11-10: the bus inserts (docs/inserts.md "On the track's bus", dnfw.inserts.bus): FDN8 and XDLY per
-# track on the routing's per-track blocks. The engine's call of the output stage (sw 0x1c307b, after the
-# routing 0x1c1f1e) gets wr_inbus as its target; wr_inbus JUMPs on to 0x1c244d. Its code in L2 in the
+# track on the routing's per-track blocks. 2026-11-11: the routing's first instruction after its per-track
+# loop (sw 0x1c1fef) becomes JUMP wr_inbus, which does that instruction and JUMPs back to sw 0x1c1ff2, so
+# the main bus is summed from the blocks after the inserts (until then the engine's call of the output
+# stage, sw 0x1c307b, had wr_inbus as its target: the main mix never heard them). Its code in the
 # 16 KB between the sample machines' (to 0x200bc000) and PERC's (0x200c0000); its state after it (the
 # instances' stores, not loaded); each instance's DDR in dnfw.inserts.design (FDN8_RING_DDR,
 # XDLY_LINES_DDR), not loaded either (a fresh instance clears, or never reads, what it has not written)
@@ -176,8 +178,9 @@ INSBUS_L2_LOAD = 0x200BC000
 INSBUS_L2_SPAN = 0x1000                      # (0xc00 until 2026-11-11: the unrolled copy loops, insbus.asm 3,154 B)
 INSBUS_SW = 0xB80000 + (INSBUS_L2_LOAD - 0x20000000) // 2    # 0xbde000
 INSBUS_STATE_L2 = INSBUS_L2_LOAD + INSBUS_L2_SPAN            # 0x200bd000
-OUT_SITE_SW = 0x1C307B                       # the engine: CJUMP 0x1c244d (DB), then its two pushes
-OUT_SITE_STOCK = bytes.fromhex("04181c004d24")
+ROUTE_SITE_SW = 0x1C1FEF                     # the routing, after its per-track loop: R2 = DM(0x257980)
+ROUTE_SITE_STOCK = bytes.fromhex("021025008079")
+ROUTE_RESUME_SW = 0x1C1FF2
 # 2026-11-10: the L2 code spans are loaded as the code and 128 bytes of zeros, not padded to the span
 # (each span's zeros counted in the 1 MiB DSP upload); what lies between is loaded with nothing. 128:
 # the hardware rule BRANCH-12 (scripts/gate_hwrules.py) wants 12 valid 48-bit instructions (36 parcels,
@@ -357,7 +360,7 @@ def objects() -> dict[str, bytes]:
     return {name: sharc_object.load_bytes(bytes.fromhex(spec[name]["object_parcels_be"]))
             for name in ("perc", "smp", "entry_jump", "idle_load", "idle_jump", "block_count",
                          "entry_mark", "emark_jump", "lookup_ptr", "ping", "trackbuf",
-                         "pvmix", "pvmix_jump", "fdn8", "xdly", "inserts", "inspost", "insbus", "a2f")
+                         "pvmix", "pvmix_jump", "fdn8", "xdly", "inserts", "inspost", "insbus", "insbus_jump", "a2f")
             if name in spec}
 
 
@@ -484,14 +487,6 @@ def sends_cjump() -> bytes:
     if POST_SW >> 24:
         raise DspError("wr_inpost is beyond a 24-bit address")
     return SENDS_SITE_STOCK[:2] + struct.pack("<HH", POST_SW >> 16, POST_SW & 0xFFFF)
-
-
-def out_cjump() -> bytes:
-    """the engine's CJUMP at OUT_SITE_SW with wr_inbus as its target: the same instruction (type 8a
-    CJUMP (DB), parcels 0x1804, then the 24-bit address), only the address changed"""
-    if INSBUS_SW >> 24:
-        raise DspError("wr_inbus is beyond a 24-bit address")
-    return OUT_SITE_STOCK[:2] + struct.pack("<HH", INSBUS_SW >> 16, INSBUS_SW & 0xFFFF)
 
 
 def reverb_cjump() -> bytes:
@@ -646,6 +641,7 @@ def l2_spans() -> list[tuple[str, int, bytes]]:
     out.append(("insbus.asm (wr_inbus), in L2", INSBUS_L2_LOAD, code + bytes(L2_TAIL)))
     from ..inserts import bus as ins_bus
     assert ins_bus.STATE == INSBUS_STATE_L2 and ins_bus.END <= PERC_L2_LOAD
+    assert (ins_bus.SITE_SW, ins_bus.RESUME_SW) == (ROUTE_SITE_SW, ROUTE_RESUME_SW)
     assert SMP_L2_LOAD + SMP_L2_SPAN <= INSBUS_L2_LOAD
     assert (_ins().FDN8_SW, _ins().XDLY_SW, _ins().BUS_STATE) == (FDN8_SW, XDLY_SW, INSBUS_STATE_L2)
     out.append(("the bus inserts' head: each instance's owner (zeros), the engines' I/O descriptor",
@@ -746,10 +742,10 @@ def placements() -> list[dict]:
                      "(the post inserts, which JUMP on to the sends)",
              "load_address": f"{sw_to_load(SENDS_SITE_SW):#010x}", "bytes": len(SENDS_SITE_STOCK),
              "stock": SENDS_SITE_STOCK.hex(), "new": sends_cjump().hex()},
-            {"what": f"patch: the engine's call of the output stage at sw {OUT_SITE_SW:#x} -> target {INSBUS_SW:#x} "
-                     "(wr_inbus, then 0x1c244d)",
-             "load_address": f"{sw_to_load(OUT_SITE_SW):#010x}", "bytes": len(OUT_SITE_STOCK),
-             "stock": OUT_SITE_STOCK.hex(), "new": out_cjump().hex()}]
+            {"what": f"patch: the routing after its per-track loop at sw {ROUTE_SITE_SW:#x} -> JUMP {INSBUS_SW:#x} "
+                     f"(wr_inbus, which does the instruction it replaced and JUMPs back to {ROUTE_RESUME_SW:#x})",
+             "load_address": f"{sw_to_load(ROUTE_SITE_SW):#010x}", "bytes": len(ROUTE_SITE_STOCK),
+             "stock": ROUTE_SITE_STOCK.hex(), "new": obj["insbus_jump"].hex()}]
     return out
 
 
@@ -905,8 +901,10 @@ def section7(stock: bytes) -> bytes:
         raise DspError("sw 0x1c1c58 is not the stock `CALL 0xb8482c (DB)`")
     if bootstream.read_span(stock, sw_to_load(SENDS_SITE_SW), len(SENDS_SITE_STOCK)) != SENDS_SITE_STOCK:
         raise DspError("sw 0x1c3054 is not the stock `CJUMP 0x1c1738 (DB)`")
-    if bootstream.read_span(stock, sw_to_load(OUT_SITE_SW), len(OUT_SITE_STOCK)) != OUT_SITE_STOCK:
-        raise DspError("sw 0x1c307b is not the stock `CJUMP 0x1c244d (DB)`")
+    if bootstream.read_span(stock, sw_to_load(ROUTE_SITE_SW), len(ROUTE_SITE_STOCK)) != ROUTE_SITE_STOCK:
+        raise DspError("sw 0x1c1fef is not the stock `R2 = DM(0x257980)`")
+    if len(obj["insbus_jump"]) != len(ROUTE_SITE_STOCK):
+        raise DspError(f"the bus pass's JUMP is {len(obj['insbus_jump'])} bytes, not {len(ROUTE_SITE_STOCK)}")
     if len(obj["emark_jump"]) != len(CALL_SITE_STOCK):
         raise DspError(f"the entry-mark JUMP is {len(obj['emark_jump'])} bytes, not {len(CALL_SITE_STOCK)}")
     lookup = struct.unpack("<8I", bootstream.read_span(stock, dm_to_load(LOOKUP_DM), 32))
@@ -933,7 +931,7 @@ def section7(stock: bytes) -> bytes:
     bootstream.write_span(out, sw_to_load(REVERB_SITE_SW), reverb_cjump())
     bootstream.write_span(out, sw_to_load(DELAY_SITE_SW), delay_call())
     bootstream.write_span(out, sw_to_load(SENDS_SITE_SW), sends_cjump())
-    bootstream.write_span(out, sw_to_load(OUT_SITE_SW), out_cjump())
+    bootstream.write_span(out, sw_to_load(ROUTE_SITE_SW), obj["insbus_jump"])
     result = drop_twin(bytes(out))            # 2026-11-10: entry_mark.asm copies A over B
     walked = bootstream.walk(result)
     if not walked.complete or walked.stopped_at != len(result):

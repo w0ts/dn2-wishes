@@ -52,7 +52,8 @@ def ranges() -> list[tuple[int, int, str]]:
     for name, sw in (("the entry JUMP", dsp.ENTRY_SW), ("the machine lookup's base", dsp.LOOKUP_SITE_SW),
                      ("the idle loop's back edge", dsp.IDLE_SITE_SW), ("the handler's call", dsp.CALL_SITE_SW),
                      ("the driver's call of the mix", dsp.PVMIX_SITE_SW),
-                     ("the engine's call of the output stage (wr_inbus)", dsp.OUT_SITE_SW)):
+                     ("the routing's JUMP to the bus inserts (wr_inbus)", dsp.ROUTE_SITE_SW),
+                     ("the routing's instruction wr_inbus returns to", dsp.ROUTE_RESUME_SW)):
         out.append((sw - 48, sw + 48, f"round {name}"))
     return out
 
