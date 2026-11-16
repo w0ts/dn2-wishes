@@ -417,6 +417,10 @@ def main() -> int:
         put32(lay["rec_overlay"], 0)
         put32(lay["smp_overlay_dirty"], 1)
         type_put(T, BOUNCE)
+    # the v0.52 merge: ours keeps v0.47's Monomachine TUNE off (csrc/sampler/fmt.c MNM_TUNE_MONO 0, the User
+    # 2026-11-10: "TUNE as in b6"; SOPHIE/PLAITS/TB303 span +-24 semitones): the checks follow the build's switch
+    _fmt = (pathlib.Path(__file__).resolve().parents[1] / "csrc/sampler/fmt.c").read_text()
+    TUNE_MONO = "#define MNM_TUNE_MONO 0" not in _fmt
     # v0.47: the Monomachine's TUNE (knob H, record 240): its header text a signed knob
     # (-64..+63, 0 in tune), not stock's percentage; FUNC + turn steps by semitones (32)
     if "smp_quant" in lay:
@@ -429,8 +433,13 @@ def main() -> int:
             machine.write(SENTINEL + 0x100, bytes(16))
             call(f_t, v << 8, SENTINEL + 0x100)
             tt.append(machine.read(SENTINEL + 0x100, 8).split(b"\0")[0].decode("latin-1"))
-        check("v0.47: the Monomachine's TUNE reads -64..+63, 0 in tune (not a percentage)",
-              f_t != stock_t and tt == ["-64", "-32", "0", "+31", "+63"], f"{tt}")
+        if not TUNE_MONO:                                    # ours: the User's ruling (fmt.c MNM_TUNE_MONO 0)
+            check("ours (MNM_TUNE_MONO 0, the User 2026-11-10: TUNE as in b6; the engine on page 1 H, TUNE on page 2 "
+                  "H): record 240 on the Monomachine's kind names its engines, not v0.47's signed TUNE",
+                  tt[0] == "SID" and "-64" not in tt and "+63" not in tt, f"{tt}")
+        else:
+            check("v0.47: the Monomachine's TUNE reads -64..+63, 0 in tune (not a percentage)",
+                  f_t != stock_t and tt == ["-64", "-32", "0", "+31", "+63"], f"{tt}")
         call(lay["smp_formats"], 1)                          # PERC (record 240 is its PD1)
         f_p = machine.long(REC240 + 0x34)
         call(lay["smp_formats"], 0)
@@ -461,14 +470,16 @@ def main() -> int:
         for _ in range(5):
             v = func_turn(-1, v)
             down.append(kn(v))
-        check("v0.47: FUNC + turn on the Monomachine's TUNE steps by semitones (+1 semitone is the knob "
-              "+33 or +31: the record has no +32)", up == [33, 63, 63] and down == [31, 0, -32, -64, -64],
-              f"up {up}, down {down}")
+        if TUNE_MONO:                                        # (off in ours: no semitone steps to test)
+            check("v0.47: FUNC + turn on the Monomachine's TUNE steps by semitones (+1 semitone is the knob "
+                  "+33 or +31: the record has no +32)", up == [33, 63, 63] and down == [31, 0, -32, -64, -64],
+                  f"up {up}, down {down}")
         put16(snd + 0x14 + 2 * TSLOT, 50 << 8)
         put32(lay["smp_knob_d"], 1)
         put32(lay["smp_knob_at"], machine.long(FRAMES))
         plain = call(lay["smp_quant"], snd, TSLOT, 51 << 8, 240)[0] & 0xFFFF
-        check("v0.47: without FUNC, TUNE turns as before (the value as written)", plain == 51 << 8, f"{plain:#x}")
+        if TUNE_MONO:
+            check("v0.47: without FUNC, TUNE turns as before (the value as written)", plain == 51 << 8, f"{plain:#x}")
     ok = all(c["ok"] for c in report["checks"].values())
     report["ok"] = ok
     if a.json:
