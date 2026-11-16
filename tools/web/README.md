@@ -1,6 +1,6 @@
-# DN2 Sample Import (browser)
+# Wishes sample import (browser)
 
-`index.html` is the whole tool: one page, no server, no packages. It does what
+`index.html` (+ `wishes.css`, the look it shares with the builder) is the whole tool: one page, no server, no packages. It does what
 `tools/dn2samples.py send` does, with a window: pick the Digitone II's MIDI ports, drop or
 browse WAVs, see which slot each goes to and how much memory is used, sent and left, and
 send them over USB (SysEx, sample link 4; firmware v0.22 or later).
@@ -44,4 +44,5 @@ cleared file; do not flash" and shows both hashes.
 - **Publish:** `.github/workflows/wishes-pages.yml`, manual only; it runs
   `web_bundle.py --check-site wishes` and stops unless every listed file is cleared.
 - **Try it locally:** serve a folder holding these four files and `wishes/` over http.
+- Both pages carry the same line at the top: the builder, the sample import, help (`help.html`, when the site has it) and the repository.
 - `test/test_wishes_builder.py`: the refuse-unless-cleared rule (bundler, site check, page).

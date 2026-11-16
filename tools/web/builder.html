@@ -46,12 +46,18 @@ details.parts summary { cursor: pointer; color: var(--fg); font-size: var(--fs-2
 #log:empty { display: none; }
 .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--s3); border-top-color: var(--accent); border-radius: 50%; animation: s 1s linear infinite; vertical-align: -2px; }
 @keyframes s { to { transform: rotate(360deg); } }
+nav.top { display: flex; flex-wrap: wrap; gap: var(--sp-1); align-items: center; margin: 0 0 var(--sp-3); }
+nav.top a { display: inline-flex; align-items: center; min-height: 26px; padding: 2px 10px; background: var(--s2); color: var(--fg); text-decoration: none; text-transform: lowercase; }
+nav.top a:hover { background: var(--s3); }
+nav.top a[aria-current=page] { background: var(--s3); box-shadow: inset 0 -3px var(--accent); }
+nav.top .spacer { flex: 1; }
 @media (max-width: 560px) { .bar { grid-template-columns: 1fr; } .bar .fig { grid-column: 1; } .card dl { grid-template-columns: 1fr; } }
 </style>
 <script src="wishes-verdict.js"></script>
 </head>
 <body>
 <main>
+  <nav class="top" aria-label="Wishes pages"><a href="./" aria-current="page">builder</a><a href="samples.html">sample import</a><a href="help.html">help</a><span class="spacer"></span><a href="https://github.com/w0ts/dn2-wishes">github.com/w0ts/dn2-wishes</a></nav>
   <h1>WISHES</h1>
   <p class="sub">A Digitone II mod, built here in this page from your own copies of Elektron's OS files. Nothing is uploaded anywhere. The page lets you save only a file that is byte for byte one the project's gate cleared. <a id="helpLink" href="help.html">How to reach the hidden functions</a> <span id="src" class="mono"></span></p>
   <p class="note unoff"><b>Unofficial.</b> Not made, endorsed or supported by Elektron. Wishes is a fork of <a href="https://github.com/De-Pattern/dn2mk2-firmware">De-Pattern's dn2mk2-firmware</a>, with extra machines and effects that are not in upstream's releases. For upstream's own cleared builds use <a href="https://de-pattern.github.io/dn2mk2/patcher.html">the dn2mk2 patcher</a>.</p>

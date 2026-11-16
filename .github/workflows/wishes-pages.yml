@@ -1,9 +1,10 @@
-# The Wishes builder page on GitHub Pages of w0ts/dn2-wishes (https://w0ts.github.io/dn2-wishes/builder.html).
+# The Wishes builder page on GitHub Pages of w0ts/dn2-wishes (https://w0ts.github.io/dn2-wishes/, also builder.html).
 #
 # MANUAL ONLY (workflow_dispatch): someone starts it from the Actions tab. Nothing here builds firmware or
 # reads Elektron's files: the page builds in the user's browser from their own. What it publishes is
 # wishes/ on the branch it runs on (scripts/web_bundle.py --wishes writes it locally: wishes.json, one
-# code zip per cleared preset, the published gate records), plus the page's own files.
+# code zip per cleared preset, the published gate records), plus the page's own files, and the sample
+# import page beside it (tools/web/index.html published as samples.html, with its manifest and icons).
 #
 # It refuses to publish unless every listed file has a gate record that clears it and every zip is the
 # one listed (scripts/web_bundle.py --check-site). An --uncleared-test bundle ("gate": null) never passes.
@@ -40,11 +41,17 @@ jobs:
         run: |
           set -eu
           mkdir _site
-          cp tools/web/builder.html tools/web/builder-worker.js tools/web/wishes-verdict.js tools/web/wishes.css _site/
+          cp tools/web/builder-worker.js tools/web/wishes-verdict.js tools/web/wishes.css _site/
+          # the front page is the builder; the sample import is samples.html (sources keep their names)
+          cp tools/web/builder.html _site/index.html
+          cp tools/web/builder.html _site/builder.html
+          cp tools/web/index.html _site/samples.html
+          cp tools/web/manifest.webmanifest _site/
+          mkdir _site/icons
+          cp tools/web/icons/dn2-import-180.png tools/web/icons/dn2-import-192.png tools/web/icons/dn2-import-512.png _site/icons/
           if [ -f tools/web/help.html ]; then cp tools/web/help.html _site/; fi
           cp LICENSE THIRD-PARTY.md _site/
           cp -R wishes _site/wishes
-          cp _site/builder.html _site/index.html
       - uses: actions/configure-pages@v5
         with:
           enablement: true
