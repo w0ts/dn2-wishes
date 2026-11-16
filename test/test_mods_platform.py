@@ -11,9 +11,9 @@ from dnfw.patch import area
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 BASE = platform.BASE
-STOCK_SYX = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip"
+STOCK_SYX = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.12_dist.zip"  # the shipping build targets 1.12 (docs/os112-port.md)
 
-pytestmark = pytest.mark.skipif(not STOCK_SYX.exists(), reason="no stock 1.11 image")
+pytestmark = pytest.mark.skipif(not STOCK_SYX.exists(), reason="no stock 1.12 image")
 
 
 @pytest.fixture(scope="module")
