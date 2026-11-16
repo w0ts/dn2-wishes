@@ -91,13 +91,17 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
            "DIOD -> OTA, MS20 -> LADR, cutoffs and modes moved, trigs)"] = exact
     checks["filter machines: they change the sound (not a pass-through)"] = changed > 500
     # 2026-11-10: ONE_VOICE (dnfw.a2f.program): a block filters one voice, the newest note's; the others pass dry
-    # 2026-11-11 (perf): ONE_VOICE off: every slot that sounds on a filter machine is filtered (the engine keeps
-    # 14-16 slots sounding here: a silent input and zero states are skipped, dnfw.a2f.program._quiet)
+    # 2026-11-11 (perf): ONE_VOICE off: every slot that sounds on a filter machine is filtered (a silent input and
+    # zero states are skipped, dnfw.a2f.program._quiet). 2026-11-12: slots 0..2 carry the filter types; the other
+    # slots read their own (0, stock) since the pass reads each slot's frame data, not its track's (the route words
+    # are 0 here, so every slot "plays track 0": until then they all took slot 0's SVF and were filtered too)
+    def _sounds(c, s):
+        return any(w & 0x7FFFFFFF for w in c["in"][s])
     checks["filter machines: " + ("at most one voice is filtered in a block, and one is (ONE_VOICE: the newest note's)"
-                                 if AP.ONE_VOICE else "every sounding voice of the three tracks is filtered (at least 3 slots a block)")] = (
+                                 if AP.ONE_VOICE else "every sounding voice of the three slots is filtered, no other slot")] = (
         bool(caps) and all((sum(1 for s in range(16) if c["out"][s] != c["in"][s]) == 1 if AP.ONE_VOICE
-                            else sum(1 for s in range(16) if c["out"][s] != c["in"][s]) >= 3) or (b < 2)
-                           for b, c in enumerate(caps)))
+                            else all((c["out"][s] != c["in"][s]) == (s < 3 and _sounds(c, s)) for s in range(16)))
+                           or (b < 2) for b, c in enumerate(caps)))
     nfil = [sum(1 for s in range(16) if c["out"][s] != c["in"][s]) for c in caps]
     numbers["filter machines: slots filtered a block (min, max, from block 2)"] = (min(nfil[2:]), max(nfil[2:])) if len(nfil) > 2 else None
     numbers["filter machines: first block with a mismatch, its words"] = next(

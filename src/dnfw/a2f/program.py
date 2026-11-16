@@ -12,20 +12,20 @@ the stock filter is skipped for these types (the unpack maps ColdFire types past
 registers freely (R0-R15, I0-I4, I12; M6 = 1 and M14 = 1 as the chain leaves them).
 
 **Per voice slot** s (the 16 buffers are slots, not tracks): the track it plays (the s16 map at ROUTE +
-2 s; past 15: none), that track's ColdFire filter type (the frame's 180 + 2 t); 7..11 and built: the
+2 s; past 15: none), the slot's ColdFire filter type (the frame's 180 + 2 s); 7..11 and built: the
 slot's state (16 words at STATE + 64 s; all zero, the last cutoffs "none", when its model or track
-changed), the envelope (a trig of the track starts its attack), then filter 1 and filter 2 in series,
+changed), the envelope (a trig of the slot starts its attack), then filter 1 and filter 2 in series,
 each over the slot's 32 floats in two halves with the model's code (dnfw.a2f.models.half). Any other
 type: the slot's model tag is cleared (so it starts afresh when it comes back) and its buffer left.
 
-**The page** (dnfw.waverider.frame.RECORD_FIELDS offsets, floats in the track record):
+**The page** (dnfw.waverider.frame.RECORD_FIELDS offsets, floats in the slot's record):
 page 1  ATK (+0x1f0) DEC (+0x1f4) FRQ2 (+0x1f8) RES2 (+0x1fc) / FREQ (+0x1cc) RES (+0x1d0)
         MODE (+0x1c8: LP12 LP24 BP HP NOTCH) ENV (+0x204, 0.5 = none, +-6 octaves)
 page 2  MOD2 (+0x1ec: 5 choices) . . KEY.T (+0x208) / BASE WDTH BW.RT RSET (stock's, untouched).
 A choice from a float x: min(4, trunc(clamp(x, 0, 1) x 5)).
 
 **The cutoffs** in CUT units (0..127, 0.856 semitones each): filter 1 FREQ x 128, filter 2 FRQ2 x 127,
-both + KEY.T x (note - 60) semitones (the note cell 0x254b14 + 4 t, as PING reads it) + ENV's depth x
+both + KEY.T x (note - 60) semitones (the note cell 0x254b14 + 4 s, as PING reads it) + ENV's depth x
 the envelope, clamped to 0..127. Each filter's cutoff moves smoothly: the last block's end, this
 block's middle (the envelope after the first half), its end; the SVF's coefficients ramp per sample
 between them, the models' are set at each half's end (Optimist's a2_filter / a2m_block, with the
@@ -174,9 +174,10 @@ def _fresh(p: Prog, model_plus1: int) -> None:
 
 
 def _controls(p: Prog, X: M.Ctx) -> None:
-    """the track's records -> the two filters' words, kmod, dmod, the envelope's step and coef"""
-    p.ld(0, C["tr"])
-    p.lsh(1, 0, 9)                               # record: RECORDS + 0x234 t
+    """the slot's record -> the two filters' words, kmod, dmod, the envelope's step and coef (2026-11-12: the
+    records and the note cells are per voice slot, as PERC reads them; they were read at the slot's track)"""
+    p.ld(0, C["s"])
+    p.lsh(1, 0, 9)                               # record: RECORDS + 0x234 s
     p.lsh(2, 0, 5)
     p.iconst(8, 0)
     p.iop(8, 8, "+", 1)
@@ -208,7 +209,7 @@ def _controls(p: Prog, X: M.Ctx) -> None:
     p.st(C["dmod"], 5)                           # (ENV - 0.5) x 6 octaves x 2, in units
     p.ldi(5, R_KEY // 4, 4)
     _clamp(p, 5, 0.0, KEY_MAX)
-    p.ld(0, C["tr"])                             # the note, validated as PING does it
+    p.ld(0, C["s"])                              # the slot's note, validated as PING does it
     p.lsh(1, 0, 2)
     p.iconst(12, NOTES)
     p.iop(1, 12, "+", 1)
@@ -247,10 +248,11 @@ def _controls(p: Prog, X: M.Ctx) -> None:
 
 
 def _envelope(p: Prog) -> None:
-    """the trig, then the level after each half (lvlA, lvlB); I2: the slot"""
+    """the trig, then the level after each half (lvlA, lvlB); I2: the slot. 2026-11-12: the slot's own trig bit
+    (frame +34 is per voice slot); bit `track` made a note on slot 8 restart every T9 voice's envelope (clicks)"""
     p.ld(0, TRIGW)
     p.lsh(0, 0, -16)
-    p.ld(2, C["tr"])
+    p.ld(2, C["s"])
     p.iconst(1, 1)
     lshr(p, 1, 1, 2)
     p.iop(0, 0, "AND", 1)
@@ -434,7 +436,7 @@ def _is_a2(p: Prog, X: M.Ctx, sname: str, trname: str) -> None:
     p.iconst(12, 15)
 
     def plays():
-        _half16(p, 4, FTYPE, trname)
+        _half16(p, 4, FTYPE, sname)              # 2026-11-12: the slot's own (the frame is per voice slot)
         p.iconst(12, TYPE0)
         p.iop(4, 4, "-", 12)
         for m in X.models:
@@ -465,7 +467,7 @@ def _pick(p: Prog, X: M.Ctx) -> None:
                 p.iop(8, 8, "+", 9)
                 p.st(C["first"], 8)
             p.ifz(0, "EQ", set_first)
-            p.ld(8, C["ptr"])                    # its track's trig bit (frame +34, bit t)
+            p.ld(8, C["ps"])                     # its trig bit (frame +34, bit s: per voice slot)
             p.iconst(9, 16)
             p.iop(8, 8, "+", 9)
             p.iconst(7, 0)
@@ -513,7 +515,7 @@ def _slot(p: Prog, X: M.Ctx) -> None:
     p.iconst(12, 15)
 
     def plays():
-        _half16(p, 4, FTYPE, "tr")
+        _half16(p, 4, FTYPE, "s")                # 2026-11-12: the slot's own (the frame is per voice slot)
         p.iconst(12, TYPE0)
         p.iop(4, 4, "-", 12)                     # the model
         for m in X.models:
