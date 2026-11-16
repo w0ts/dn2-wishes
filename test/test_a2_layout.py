@@ -4,7 +4,7 @@ keep their values); every other machine as before."""
 
 from __future__ import annotations
 
-from dnfw.mnm import analog2 as A2
+from dnfw.engines.analog2 import analog2 as A2
 from dnfw.waverider import pages as P
 
 M = next(m for m in P._mnm.CF_MACHINES if m.NAME == "ANALOG2")

@@ -195,7 +195,7 @@ def test_ddr_spans_are_clear_of_the_stock_image_and_the_engine():
     assert dsp.MD_DELAY_DDR + len(ddr[2][2]) <= dsp.FDN8_RING_DDR
     assert dsp.FDN8_RING_DDR + 0x80000 <= 0x82500000                         # (FDN8 LONG's 512 KB too)
     assert not any(ddr[4][2]) and 0x82500000 + len(ddr[4][2]) <= 0x82510000
-    from dnfw.mnm import plk                                              # PLAITS' per-voice DDR
+    from dnfw.engines.plaits import plk                                              # PLAITS' per-voice DDR
     assert not any(ddr[5][2]) and 0x82510000 + len(ddr[5][2]) <= plk.BIG_DDR <= dsp.SMP_POOL_DDR
     assert not any(ddr[1][2]) and not any(ddr[2][2])      # the MD's tables (the DSP fills them), P-I's lines
     assert dsp.MD_TABLES_DDR + len(ddr[1][2]) <= dsp.MD_DELAY_DDR
@@ -214,7 +214,7 @@ def test_ddr_spans_are_clear_of_the_stock_image_and_the_engine():
     from dnfw.mnm import machines as MMx
     if "ANALOG2" in MMx.NAMES:
         import struct as _st
-        from dnfw.mnm import analog2 as A2
+        from dnfw.engines.analog2 import analog2 as A2
         words = A2.table_words()
         n = 4 * len(words)
         assert bytes(scratch[A2.TABLES_OFF:A2.TABLES_OFF + n]) == _st.pack(f"<{len(words)}f", *words)

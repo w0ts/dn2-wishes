@@ -70,7 +70,7 @@ static void rvt_text(int v, char *buf)
 }
 
 /* 2026-11-11 (the User: no bare 0..127): while TYPE is FDN8 or LONG the page's six knobs' value texts are the
- * FDN8 insert's units (csrc/waverider/md_page.c mu_ins, dnfw.mnm.units INS_UNITS: the same engine and knob / 127):
+ * FDN8 insert's units (csrc/waverider/md_page.c mu_ins, dnfw.engines.units INS_UNITS: the same engine and knob / 127):
  * PRE ms, SIZE %, DAMP %, MOD 0..200 %, HPF / LPF Hz. Ours stay installed from the first poll on and ask, each
  * call, which TYPE the page shows (rvt_seen, as rvt_poll does); STOCK's text is stock's formatter's, at its fixed
  * 1.12 address (read from the records 123..128 of stock 1.12). Not a pointer saved at run time: measured in the

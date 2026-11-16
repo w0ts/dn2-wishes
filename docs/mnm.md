@@ -143,7 +143,7 @@ p-locks, LFO destinations and SAVE/LOAD work as for any record.
   defaults to 0 (LEV2 0x6400, DEC 0x7f00, MAST and FINE 0x4000, measured in the 1.11 and 1.12 tables), so the
   OFF has to be GLTY's. A track whose TYPE word was set by something else before reads RATE or TIME.
 - **MACHINE SEL** starts it at GLTY OFF, GLID 54 (Optimist's SLIDE_T, ~50 ms).
-- **Legato, as DRONE's** (`dnfw.mnm.a2glide`): a note glides only when its trig comes while the slot's gate is
+- **Legato, as DRONE's** (`dnfw.engines.analog2.a2glide`): a note glides only when its trig comes while the slot's gate is
   still open (no note-off since the last note); a separate note jumps. Only the oscillators glide; KTR keys the
   filter from the note itself, as Optimist's ANALOG 2 does. A note that glides does not restart the phases at
   DRFT 0 (Optimist's LEGATO plays it on the sounding voice).
@@ -206,14 +206,14 @@ exactly the Monomachine's, at 60 dB signal-to-error or better (DPRO-WAVE 63.8..9
 ## JUNO (2026-11-12): the Juno-106 voice, machine type 23
 
 Optimist's JUNO engine (fm-106 / KR-106, GPL-3.0-only: THIRD-PARTY.md) as a Monomachine-style machine on PERC's
-voice, `dnfw.mnm.juno`; a voice a note, as many as the DSP budget (`perc.program.MNM_COST`) lets start.
+voice, `dnfw.engines.juno.juno`; a voice a note, as many as the DSP budget (`perc.program.MNM_COST`) lets start.
 
 - **Page 1:** WAVE (OFF SAW PULS BOTH: the Juno's two buttons), PW (50..95 %), SUB, NOIS | CUT, RES, KEY (key
   tracking around C4), HPF (BOOST FLAT 236 754 Hz).
 - **Page 2:** ENV (the VCF envelope's depth, -127..+127 about knob 64: negative inverts it), ATK (1.5 ms .. 3 s),
   DEC, SUS, REL (1.5 ms .. 12 s), PWM (MAN; ENV: the width follows the envelope), RNGE (16' 8' 4'). The envelope
   drives the VCF only; the DN2's AMP page shapes the level, its LFOs move the knobs (PW, CUT: the Juno's LFO).
-- **The ladder** is ANALOG 2's OTA core (`dnfw.a2f.models.ladder_core`, one subroutine for both machines, PERC's
+- **The ladder** is ANALOG 2's OTA core (`dnfw.engines.analog2.filters.models.ladder_core`, one subroutine for both machines, PERC's
   room) on the Juno's own coefficients once every 16 samples: the cutoff DAC routine (CUT, ENV, KEY), its RC slew,
   KR-106's measured cutoff curve pulled to the resonance's peak, the resonance's k. The core's Pade saturation
   stands for fm-106's BA662 table: a drive by RES and a makeup gain fitted on the host against Optimist's voice

@@ -102,7 +102,7 @@ PERC_TABLES_DDR = 0x81216000                 # dnfw.perc.machines.tables_bytes
 # merge of SHFT's sine into it, 26 of its words one ulp apart.
 PERC_EXP2_DM = 0x2E0640                      # .. 0x2E0E44
 STOCK_SINE_DM, STOCK_SINE_N = 0x25D980, 257
-# 2026-11-12 (perf, opt-synths; the arbiter's claim): TB303's constants table (dnfw.mnm.tb303_sched KTAB_AT, 128
+# 2026-11-12 (perf, opt-synths; the arbiter's claim): TB303's constants table (dnfw.engines.tb303.tb303_sched KTAB_AT, 128
 # words) after the Monomachine render scratch's real end (0x2E5400 + core.RENDER_BYTES 3,280 = 0x2E60D0)
 TB303_KTAB_DM = 0x2E6100                     # .. 0x2E6300
 # the Machinedrum machines (v0.17, docs/md.md): their tables (the sine, which the DSP fills
@@ -172,9 +172,9 @@ POST_L2_LOAD = 0x200AFC00                    # 2026-11-12 (the guard's hold; the
 POST_L2_SPAN = 0x1C00                        # the code (4,078 B since 2026-11-11, the unrolled loops; 0x1000 before; the L2 from 0x200b1800 to the sample machines' is unused)
 POST_SW = 0xB80000 + (POST_L2_LOAD - 0x20000000) // 2        # 0xbd8000
 # 2026-11-09: DRONE's BEAT side blocks at 0x200b1800 (dnfw.inserts.post.SIDE_L2, 0x900 B); the A2 filter
-# machines' pass (dnfw.a2f.program): its code, then its state
+# machines' pass (dnfw.engines.analog2.filters.program): its code, then its state
 A2F_L2_LOAD = 0x200B2400
-A2F_L2_SPAN = 0x3400                          # the code; then the state (dnfw.a2f.program.STATE)
+A2F_L2_SPAN = 0x3400                          # the code; then the state (dnfw.engines.analog2.filters.program.STATE)
 A2F_STATE_DM = REGION[0]                      # 2026-11-11 (perf): the state in L1, the free 2 KB at the region's start
                                               # (was L2 0x200b5800: every word an L2 access, 4 cycles)
 A2F_SW = 0xB80000 + (A2F_L2_LOAD - 0x20000000) // 2
@@ -472,7 +472,7 @@ def _a2f_state_span(obj) -> tuple[str, int, bytes]:
     perf: they were in L2), else free since v0.11 (Waverider's reader and osc 2; zeros)"""
     if "a2f" not in obj:
         return ("free since v0.11 (Waverider's reader and osc 2; zeros)", REGION[0], b"")
-    from ..a2f import program as a2f_program
+    from ..engines.analog2.filters import program as a2f_program
     st = a2f_program.state_bytes()
     assert a2f_program.STATE == A2F_STATE_DM and len(st) <= 0x800 and A2F_STATE_DM + 0x800 <= STATE_DM
     return ("the A2 filters' state and mix tables (L1)", A2F_STATE_DM, st)
@@ -525,7 +525,7 @@ def _raw_spans() -> list[tuple[str, int, bytes]]:
         ("the stock track buffers in L1 (zeros; 256 B extra block, then 16 x 128 B)", TRACKAUX_DM,
          bytes(TRACKAUX_BYTES + TRACKBUF_BYTES)),
         *_ins_state_spans(),
-        ("TB303's constants (KTAB, 2026-11-12: dnfw.mnm.tb303_sched)", TB303_KTAB_DM, _tb303_ktab()),
+        ("TB303's constants (KTAB, 2026-11-12: dnfw.engines.tb303.tb303_sched)", TB303_KTAB_DM, _tb303_ktab()),
         ("FDN8 state: its words, the LFOs' phases, the stock buffers' chunk table", FDN8_STATE_DM, _fdn8_state()),
         ("XDLY state: its words (zeros)", XDLY_STATE_DM, _xdly_state()),
         ("Machinedrum / Monomachine voices: 16 slots x 1 KB (zeros; L2 until 2026-11-10)", MD_STATE_DM,
@@ -543,7 +543,7 @@ def _perc_exp2() -> bytes:
 
 def _tb303_ktab() -> bytes:
     import struct
-    from ..mnm import tb303_sched as TBS
+    from ..engines.tb303 import tb303_sched as TBS
     from ..perc import live as PL
     assert TBS.KTAB_AT == TB303_KTAB_DM
     words = TBS.ktab_words(PL.layout().md.mnm)
@@ -794,14 +794,14 @@ def l2_spans() -> list[tuple[str, int, bytes]]:
     # guard's hold, perc.guard.ins_gate; the pre pass's, the moved slot 2s', the bus instances'), zeros
     out.append(("the inserts' aux words: AUTO, the guard's hold (zeros), in L2", _ins().AUTO_L2,
                 bytes(_ins().QUIET_END - _ins().AUTO_L2)))      # (and the per-voice quiet marks, design.QUIET_L2)
-    if "a2f" in obj:                             # 2026-11-09: the A2 filter machines' pass (dnfw.a2f)
-        from ..a2f import program as a2f_program
+    if "a2f" in obj:                             # 2026-11-09: the A2 filter machines' pass (dnfw.engines.analog2.filters)
+        from ..engines.analog2.filters import program as a2f_program
         code = obj["a2f"]
         assert a2f_program.STATE == A2F_STATE_DM and A2F_STATE_DM + 0x800 <= STATE_DM
         if A2F_L2_SPAN - len(code) < 64:
             raise DspError(f"a2f.asm ({len(code)} bytes) leaves fewer than 64 bytes of its L2 span")
         out.append(("a2f.asm (wr_a2f), in L2", A2F_L2_LOAD, code + bytes(A2F_L2_SPAN - len(code))))
-    if ins_post._beat_built():                   # 2026-11-09: DRONE's BEAT side blocks (dnfw.mnm.drone)
+    if ins_post._beat_built():                   # 2026-11-09: DRONE's BEAT side blocks (dnfw.engines.drone.drone)
         assert ins_post.SIDE_L2 + ins_post.SIDE_BYTES <= A2F_L2_LOAD
         out.append(("DRONE's BEAT side blocks: 16 slots x 36 words (zeros)", ins_post.SIDE_L2,
                     bytes(ins_post.SIDE_BYTES)))
@@ -810,11 +810,11 @@ def l2_spans() -> list[tuple[str, int, bytes]]:
 
 def _mnm_scratch() -> bytes:
     """the Monomachine L2 scratch: zeros, but for ANALOG2's filter mix tables at its TABLES_OFF
-    (2026-11-09; dnfw.mnm.analog2.ctx: nothing writes there at run time)"""
+    (2026-11-09; dnfw.engines.analog2.analog2.ctx: nothing writes there at run time)"""
     raw = bytearray(MNM_SCRATCH_BYTES)
     from ..mnm import machines as _mm
     if "ANALOG2" in _mm.NAMES or "JUNO" in _mm.NAMES:        # 2026-11-12: JUNO's ladder reads them too
-        from ..mnm import analog2 as A2
+        from ..engines.analog2 import analog2 as A2
         from ..perc import program as _pp
         words = A2.table_words()
         assert A2.TABLES_OFF >= _pp.BOUNDS_OFF + 4 * 16 and A2.TABLES_OFF + 4 * len(words) <= MNM_SCRATCH_BYTES
@@ -1029,7 +1029,8 @@ def _finish(out: bytearray) -> bytes:
 def regions() -> list[tuple[str, int, int, str]]:
     """(what, lo, hi, container: "" for a top-level area) of every L1 / L2 / DDR area of ours, byte addresses"""
     from ..inserts import bus as ins_bus, design as ins_d
-    from ..mnm import analog2 as A2, plk
+    from ..engines.analog2 import analog2 as A2
+    from ..engines.plaits import plk
     from ..perc import machines as PM, program as PP
     from ..sampler import machines as SM, program as SP
     mdc = _md_core()

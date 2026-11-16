@@ -131,7 +131,7 @@ class Layout:
         for name, n in PL_TABLES:
             self.PL[name] = t
             t += 4 * n
-        self.JU = t                                 # 2026-11-12: JUNO's tables (dnfw.mnm.juno), after PLAITS's
+        self.JU = t                                 # 2026-11-12: JUNO's tables (dnfw.engines.juno.juno), after PLAITS's
         self.TABLES_END = t + 4 * JU_WORDS
         assert self.TABLES_END <= self.DIGI, "the tables run into the Digibank stand-in"
 

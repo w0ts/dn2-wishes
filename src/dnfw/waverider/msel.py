@@ -117,7 +117,7 @@ def machine_rows() -> list[int]:
 
 
 def filter_rows() -> list[int]:
-    from ..a2f import coldfire as F
+    from ..engines.analog2.filters import coldfire as F
     return list(F.LIST_NEW)
 
 

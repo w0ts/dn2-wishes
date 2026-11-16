@@ -9,7 +9,7 @@ This page is that mapping, one row per stock 1.12 record, and how each was found
 - Built only with `DN2_STOCK_UNITS` set (not empty, not `0`) when the code is generated (`scripts/gen_waverider_code.py`,
   `dnfw.waverider.pages.stock_units_on`). Without it the generated header and the C are exactly as before: the build of
   this commit without the option has the same sha256 as the build before it (3637b7b3…, measured 2026-11-11).
-- `dnfw.mnm.units.STOCK_UNITS`: record -> kind, curve, stock 1.12's formatter at that record. `md_page.c` `stu_*`:
+- `dnfw.engines.units.STOCK_UNITS`: record -> kind, curve, stock 1.12's formatter at that record. `md_page.c` `stu_*`:
   `stu_poll` (every UI loop) puts ours on each listed record whose formatter is still stock's own, so a record another
   part of ours holds (our machines', FDN8's, XDLY's, the A2 filters') is left to it; the machines' records (200..300)
   read ours only on a stock machine's track. Cost: USB image +606 B, C chunk +2,256 B (phase 1).
@@ -85,7 +85,7 @@ How: SHARC runner, stock 1.12 section 7 (scripts/stock_units_measure.py env --pa
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | value | 0 | 1.875 | 9.194 | 24.087 | 48.215 | 82.95 | 129.5 | 189.018 | 262.467 | 338.926 | 455.063 | 576.203 | 713.776 | 850.34 | 1501.5 | 9009.01 | 30303 |
 
-Every knob is in `src/dnfw/mnm/stock_measured.json`; the page reads that knob's own value.
+Every knob is in `src/dnfw/engines/stock_measured.json`; the page reads that knob's own value.
 
 ### amp_decay (records 64): ms
 
@@ -97,7 +97,7 @@ How: SHARC runner, stock 1.12 (stock_units_measure.py env --param dec --sus 0): 
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | value | 0 | 39.314 | 192.855 | 505.797 | 1012.28 | 1742.17 | 2719.2 | 3972.6 | 5514.27 | 7118.94 | 9546.41 | 12031.4 | 14962.1 | 17901.2 | 21842.1 | 25930.3 | INF |
 
-Every knob is in `src/dnfw/mnm/stock_measured.json`; the page reads that knob's own value.
+Every knob is in `src/dnfw/engines/stock_measured.json`; the page reads that knob's own value.
 
 ## Every record
 

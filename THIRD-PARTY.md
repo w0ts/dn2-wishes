@@ -75,7 +75,7 @@ test against the DN2, never as fact about it.
 <https://github.com/mestela/schwung-sophie> — Matt Estela and digisophie contributors.
 
 The SOPHIE machine's synthesis (`src/dsp/sophie.c`'s voice: carrier, modulators, envelopes,
-feedback, noise, the models and the crusher), ported to the DSL in `src/dnfw/mnm/sophie.py`
+feedback, noise, the models and the crusher), ported to the DSL in `src/dnfw/engines/sophie/sophie.py`
 (`docs/sophie.md` says what was left out).
 
 > Copyright (c) 2026 Matt Estela
@@ -89,7 +89,7 @@ Open303 by Robin Schmidt (`src/dsp/open303/`, MIT), with jc303's Devilfish exten
 The TB303 machine's voice: Open303's getSample (the oscillator's two shapes, the TB-303 ladder,
 the envelopes, the filters, the 4x oversampling and the elliptic decimation filter) and its note
 handling, as Schwung 303's plugin.cpp configures it with the Devilfish modifications off and no
-drive, ported to the DSL in `src/dnfw/mnm/tb303.py` (`docs/tb303.md` says what changed).
+drive, ported to the DSL in `src/dnfw/engines/tb303/tb303.py` (`docs/tb303.md` says what changed).
 Schwung 303 is GPL-3.0-only; dn2mk2 is AGPL-3.0, which GPL-3.0 section 13 allows combining.
 
 > schwung-303 -- TB-303 emulator for Schwung. Copyright (C) 2026 Charles Vestal and contributors.
@@ -115,10 +115,10 @@ Schwung 303 is GPL-3.0-only; dn2mk2 is AGPL-3.0, which GPL-3.0 section 13 allows
 The PLAITS machine's two engines, WAVESHAPING and GRANULAR FORMANT
 (`plaits/dsp/engine/waveshaping_engine.cc`, `grain_engine.cc`, `dsp/oscillator/oscillator.h`,
 `grainlet_oscillator.h`; stmlib's poly-BLEP, parameter interpolator, one-pole filter), ported to
-the DSL in `src/dnfw/mnm/plaits.py` (`docs/plaits.md` says what was left out); its tables are
+the DSL in `src/dnfw/engines/plaits/plaits.py` (`docs/plaits.md` says what was left out); its tables are
 rebuilt from `plaits/resources/lookup_tables.py`'s formulas.
 
-2026-11-09: eleven more of its engines, each in `src/dnfw/mnm/plaits_<name>.py` (`plk.py` their
+2026-11-09: eleven more of its engines, each in `src/dnfw/engines/plaits/plaits_<name>.py` (`plk.py` their
 common ground): VIRTUAL ANALOG, FM, ADDITIVE, SWARM, NOISE, PARTICLE, STRING, MODAL, BASS DRUM,
 SNARE DRUM, HI-HAT (`plaits/dsp/engine/*_engine.cc` and the oscillators, noise sources, drums,
 physical models, diffuser and downsampler they use; stmlib's Random, SVF, polyblep, delay line).
@@ -147,12 +147,12 @@ The User's own synth firmware (`~/GitHub/optimist`, GPL-3.0-only), ported to the
 44.1 kHz; what changed is in each module's docstring). GPL-3.0-only code combined with this
 AGPL-3.0 work, as GPL-3.0 section 13 allows; each module keeps its SPDX line and this credit.
 
-- **DRONE** (`src/dnfw/mnm/drone.py`): firmware/src/engines/drone/eng_drone.c, drone_mem.h and
+- **DRONE** (`src/dnfw/engines/drone/drone.py`): firmware/src/engines/drone/eng_drone.c, drone_mem.h and
   voice.c's glide; the network after Caravel 0.3.3's DRONE by bonszaimusic
   (<https://github.com/bonszaimusic/caravel>, firmware/src/eng_drone.c, GPL-3.0-only).
-- **ANALOG 2's filters** (`src/dnfw/a2f/`): firmware/src/engines/analog/a2_models.c and the SVF of
+- **ANALOG 2's filters** (`src/dnfw/engines/analog2/filters/`): firmware/src/engines/analog/a2_models.c and the SVF of
   eng_analog2.c (eng_analog.c: Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments).
-- **JUNO** (`src/dnfw/mnm/juno.py`, its tables `src/dnfw/mnm/juno_data.py`): firmware/src/engines/juno/
+- **JUNO** (`src/dnfw/engines/juno/juno.py`, its tables `src/dnfw/engines/juno/juno_data.py`): firmware/src/engines/juno/
   (eng_juno.c, juno_dsp.h, juno_tables.h), itself fm-106 by PatttF (<https://github.com/PatttF/fm-106> at
   `be74757`, GPL-3.0-only), a fixed-point port of Ultramaster KR-106 by Kayrock Screenprinting
   (<https://github.com/kayrockscreenprinting/ultramaster_kr106>, GPL-3.0; its commits are Karl LaRocca's). Neither

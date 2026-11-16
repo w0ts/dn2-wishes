@@ -61,11 +61,11 @@ def table_words(L: M.Layout) -> dict[int, int]:
             d = data()
             for k in range(len(d) // 4):
                 out[at + 4 * k] = struct.unpack_from("<I", d, 4 * k)[0]
-    # 2026-11-12 (perf): TB303's constants table (dnfw.mnm.tb303_sched.ktab_words; its collection emits the
+    # 2026-11-12 (perf): TB303's constants table (dnfw.engines.tb303.tb303_sched.ktab_words; its collection emits the
     # half once, which reads this function for the exp2 table: not the constants again)
-    from ..mnm import tb303 as TB
+    from ..engines.tb303 import tb303 as TB
     if TB.VSCHED and not _FILLING:
-        from ..mnm import tb303_sched as TBS
+        from ..engines.tb303 import tb303_sched as TBS
         _FILLING.append(1)
         try:
             for k, w in enumerate(TBS.ktab_words(L.md.mnm)):

@@ -1,5 +1,5 @@
 """Stock records' units, a build option (2026-11-11, the User: proper values everywhere, "gate it with a compile
-option at first"): DN2_STOCK_UNITS at generation adds dnfw.mnm.units STOCK_UNITS to the header and the formatters
+option at first"): DN2_STOCK_UNITS at generation adds dnfw.engines.units STOCK_UNITS to the header and the formatters
 in csrc/waverider/md_page.c (stu_*). Without it the header is exactly as before (so the code is), with it each
 listed record answers its unit, and the stock formatter it replaces is stock 1.12's own at that record."""
 
@@ -13,7 +13,7 @@ import subprocess
 
 import pytest
 
-from dnfw.mnm import units as MU
+from dnfw.engines import units as MU
 from dnfw.waverider import pages as WP
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent

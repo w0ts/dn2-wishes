@@ -387,7 +387,8 @@ def est(v) -> float:
 def cases():
     """(name, family, setup(h)): SETUP puts the harness's track on the engine"""
     from dnfw.md import voice as MDV
-    from dnfw.mnm import machines as MM, plaits as PLT
+    from dnfw.mnm import machines as MM
+    from dnfw.engines.plaits import plaits as PLT
     from dnfw.perc import live as PL
     md = MDV.MM.MACHINES
 
@@ -422,7 +423,8 @@ def cases():
 
 
 def _sophie_models():
-    from dnfw.mnm import machines as MM, sophie as SO
+    from dnfw.mnm import machines as MM
+    from dnfw.engines.sophie import sophie as SO
     from dnfw.perc import machines as PMx
     from dnfw.waverider import pages as PG
     M = MM.MACHINES[MM.NAMES.index("SOPHIE")]
@@ -430,7 +432,8 @@ def _sophie_models():
 
 
 def _analog2_filters():
-    from dnfw.mnm import machines as MM, analog2 as A2
+    from dnfw.mnm import machines as MM
+    from dnfw.engines.analog2 import analog2 as A2
     from dnfw.perc import machines as PMx
     from dnfw.waverider import pages as PG
     M = MM.MACHINES[MM.NAMES.index("ANALOG2")]
@@ -457,7 +460,7 @@ def plaits_word(mi: int) -> tuple[int, int]:
     """(frame slot, word) of PLAITS' MODL record choosing model MI as the DSP reads it (dnfw.mnm.core.knob:
     trunc(v / top x 128), then x N >> 7): the record value in the middle of MI's range. (plaits.knob_of(MI) through
     live.knob_word can land on the model below: ADD's knob 40 has no value on a 0..100 record, and plays FM)"""
-    from dnfw.mnm import plaits as PLT
+    from dnfw.engines.plaits import plaits as PLT
     from dnfw.perc import machines as PMx
     _rid, slot, lo, top = PMx.PARAMS[PLT.MODL_K]
     vs = [v for v in range(top + 1) if PLT.model_of(int(v / top * 128)) == mi]

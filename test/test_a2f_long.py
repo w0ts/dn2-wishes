@@ -1,4 +1,4 @@
-"""The A2 filter machines held for 3 s (4,500 blocks) in the pass's model (dnfw.a2f.live, the program the
+"""The A2 filter machines held for 3 s (4,500 blocks) in the pass's model (dnfw.engines.analog2.filters.live, the program the
 SHARC runs bit for bit): every model stays finite and audible to the end (2026-11-10: the User reported the
 filters stopping after about a second; the runner's steps only run tens of blocks)."""
 
@@ -9,9 +9,9 @@ import struct
 
 import pytest
 
-from dnfw.a2f import design as DS
-from dnfw.a2f import live as AL
-from dnfw.a2f import program as P
+from dnfw.engines.analog2.filters import design as DS
+from dnfw.engines.analog2.filters import live as AL
+from dnfw.engines.analog2.filters import program as P
 
 BLOCKS = 4500
 THRESHOLD = 0.01

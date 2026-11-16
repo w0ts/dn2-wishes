@@ -20,7 +20,13 @@ F = note x 2048 / 12 + TUNE x 683 / 128 (TUNE 64: in tune), 0..0x5800; A = 2^(F 
 from __future__ import annotations
 
 from . import core as C
-from . import analog2, ddrw, dens, drone, juno, plaits, sid, sophie, tb303, vo6, wave
+from ..engines.analog2 import analog2
+from . import ddrw, dens, sid, vo6, wave
+from ..engines.drone import drone
+from ..engines.juno import juno
+from ..engines.plaits import plaits
+from ..engines.sophie import sophie
+from ..engines.tb303 import tb303
 from ..md import core as K
 from ..perc.dsl import Prog
 from ..builder import selection as _sel

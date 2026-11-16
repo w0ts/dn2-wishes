@@ -142,7 +142,7 @@ CUM_OFF = 0x2FC0
 assert CUM_OFF + 4 * 16 <= MNM_KEYS_OFF
 # 2026-11-12 (velocity, the User: "like Sophie, and our other synths too"): each slot's attenuation 1 - vel/127,
 # latched at its trig (vel_latch), applied at the output guard; 0 (full level) until a velocity arrives. After
-# ANALOG 2's mix tables (dnfw.mnm.analog2.TABLES_OFF, 106 words)
+# ANALOG 2's mix tables (dnfw.engines.analog2.analog2.TABLES_OFF, 106 words)
 VEL_OFF = 0x3400
 # 2026-11-10 (poly16, the User: 16 PLAITS voices on every engine): 30,000, not MNM_COST's 60,000: a
 # note's start costs about a steady block now (the heaviest engine's ~25,000 on the memory clock),
@@ -703,9 +703,9 @@ OUT_LIMIT = 8.0                                # v0.33: our voices' samples, at 
 
 def plaits_level(p: Prog, L: M.Layout) -> None:
     """2026-11-12: a PLAITS voice's level by its model (PLAITS_LEVEL_DB), the model as the engine chooses it from
-    MODL (p7): its knob trunc(p7 x 127 + 0.5) (dnfw.md.voice.inputs), x N >> 7 (dnfw.mnm.plaits.dsp_model).
+    MODL (p7): its knob trunc(p7 x 127 + 0.5) (dnfw.md.voice.inputs), x N >> 7 (dnfw.engines.plaits.plaits.dsp_model).
     Once a block, nothing a sample. Clobbers R1, R5, R12 (R0, the machine, kept)."""
-    from ..mnm import plaits as PLT
+    from ..engines.plaits import plaits as PLT
     C = L.C
     p.ld(5, C[f"p{PLT.MODL_K}"])
     p.fconst(12, 127.0)

@@ -1,6 +1,6 @@
 """The send FX pages' values in units (2026-11-11, the User: no bare 0..127): while the Reverb page's TYPE is
 FDN8 / LONG and the Delay page's XDLY, their knobs' value texts are the FDN8 / XDLY inserts' (csrc/fdn8/ui.c
-rvu, csrc/xdly/ui.c dlu -> md_page.c mu_ins, dnfw.mnm.units INS_UNITS): the same engines read the same knob
+rvu, csrc/xdly/ui.c dlu -> md_page.c mu_ins, dnfw.engines.units INS_UNITS): the same engines read the same knob
 scales, so each record must sit on the insert knob that drives the same engine parameter. The sample machines'
 LEV reads the gain LEV / LEV_UNITY in percent (csrc/sampler/fmt.c f_lev)."""
 
@@ -10,7 +10,7 @@ import pathlib
 import re
 
 from dnfw.inserts import bus as IB
-from dnfw.mnm import units as MU
+from dnfw.engines import units as MU
 from dnfw.sampler import machines as SM
 from dnfw.xdly import design as XD
 from dnfw.fdn8 import design as FD

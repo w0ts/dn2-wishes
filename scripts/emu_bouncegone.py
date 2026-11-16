@@ -392,7 +392,7 @@ def main() -> int:
         # TUNE's place follows SOPHIE's TUNE_K (2026-11-11: TUNE on G, the engine MODL on H): its PERC record and slot
         import re as _re                                    # noqa: PLC0415
         from dnfw.perc.machines import PARAMS as _PP       # noqa: PLC0415
-        _src = (HERE.parent / "src/dnfw/mnm/sophie.py").read_text()
+        _src = (HERE.parent / "src/dnfw/engines/sophie/sophie.py").read_text()
         TREC, TSLOT = _PP[int(_re.search(r"^TUNE_K, MODL_K = (\d+), \d+", _src, _re.M).group(1))][:2]
 
         def turn(d, v, func):

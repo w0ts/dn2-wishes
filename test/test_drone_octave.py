@@ -1,11 +1,11 @@
 """DRONE's OCT (2026-11-11, the User: "drone: we need an octave knob"): page 2's third place (q2, the EQF
-record, 0..100), -3..+3 octaves as trunc(7 q2) - 3 on the DSP (dnfw.mnm.drone._target), seven named
+record, 0..100), -3..+3 octaves as trunc(7 q2) - 3 on the DSP (dnfw.engines.drone.drone._target), seven named
 choices on the ColdFire (md_page.c: page 2 computes the choice as the DSP does). A project saved before
 OCT existed holds the record's start (DEFAULTS2's 0.5) and must play at octave 0."""
 
 from __future__ import annotations
 
-from dnfw.mnm import drone as D
+from dnfw.engines.drone import drone as D
 from dnfw.mnm import machines as MM
 from dnfw.perc import live as PL
 from dnfw.waverider import pages as WP
@@ -18,7 +18,7 @@ def _rec():
 
 
 def _dsp_octave(v: int) -> int:
-    """the DSP's octave for the record value V (dnfw.mnm.drone._target on q2 = v / top)"""
+    """the DSP's octave for the record value V (dnfw.engines.drone.drone._target on q2 = v / top)"""
     _rid, _slot, lo, top = _rec()
     q = min(max(v - lo, 0), top) / top
     return min(int(7.0 * q), 6) - 3

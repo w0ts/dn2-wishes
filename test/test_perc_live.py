@@ -282,7 +282,7 @@ def test_v026_the_monomachine_machines_play_the_dn2s_note():
     octave over it, within 3 %"""
     from dnfw.md import core as MDK
     from dnfw.mnm import dpro, machines as MNM
-    from dnfw.mnm import plaits as PLT
+    from dnfw.engines.plaits import plaits as PLT
     from dnfw.mnm import rom as MROM
     if not MROM.available():
         pytest.skip("needs the owner's Monomachine OS")

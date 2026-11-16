@@ -122,4 +122,4 @@ def test_moved_order_is_slot_order():
 def test_layout():
     from dnfw.inserts import bus as B
     assert B.MV_END <= D.BUS_STATE_END
-    assert D.MV_RING_DDR + D.MV_INSTANCES * 4 * D.TP_RING <= 0x82600000     # dnfw.mnm.plk.BIG_DDR
+    assert D.MV_RING_DDR + D.MV_INSTANCES * 4 * D.TP_RING <= 0x82600000     # dnfw.engines.plaits.plk.BIG_DDR

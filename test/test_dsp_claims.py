@@ -24,7 +24,7 @@ L2 = (dsp.L2_IMAGE_END, dsp.L2_NOCACHE)           # L2 above the stock image, be
 # dnfw.waverider.dsp, "dnfw.waverider.dsp.NAME" (that constant only); spans: dsp.py may load a span starting here
 CLAIMS = [
     # L1 block 1, REGION
-    ("a2f state", 0x2DD600, 0x2DDE00, ("dnfw.a2f.program", "dnfw.waverider.dsp.A2F_STATE_DM"), True),
+    ("a2f state", 0x2DD600, 0x2DDE00, ("dnfw.engines.analog2.filters.program", "dnfw.waverider.dsp.A2F_STATE_DM"), True),
     ("save area, PERC scratch, guard, idle", 0x2DDE00, 0x2DE180,
      ("dnfw.perc.program", "dnfw.perc.guard", "dnfw.waverider.dsp.STATE_DM", "dnfw.waverider.dsp.PERC_SCRATCH_DM",
       "dnfw.waverider.dsp.IDLE_STATE_DM", "dnfw.waverider.dsp.TWIN_FLAG_DM"), True),
@@ -61,7 +61,7 @@ CLAIMS = [
     ("the Monomachine render scratch (opt-inserts: IN transient in the post pass)", 0x2E5400, 0x2E6100,
      ("dnfw.waverider.dsp.MNM_RENDER_DM", "dnfw.inserts.post", "dnfw.inserts.bus", "dnfw.sampler.program"), False),   # post.LINE, bus.UNIT_L1, the circular-buffer probe's PROBE_BUF (read only)
     ("TB303's constants table KTAB (opt-synths, 2026-11-12)", 0x2E6100, 0x2E6300,
-     ("dnfw.mnm.tb303_sched", "dnfw.waverider.dsp.TB303_KTAB_DM"), True),
+     ("dnfw.engines.tb303.tb303_sched", "dnfw.waverider.dsp.TB303_KTAB_DM"), True),
     ("FDN8 state", 0x2E6400, 0x2E6E00, ("dnfw.fdn8.program", "dnfw.waverider.dsp.FDN8_STATE_DM"), True),
     ("XDLY state", 0x2E6E00, 0x2E7000, ("dnfw.xdly.program", "dnfw.waverider.dsp.XDLY_STATE_DM"), True),
     ("Machinedrum / Monomachine voice slots", 0x2E7000, 0x2EB000, ("dnfw.waverider.dsp.MD_STATE_DM",), True),
@@ -85,8 +85,8 @@ CLAIMS = [
     ("inspost.asm", 0x200AFC00, 0x200B1800, ("dnfw.waverider.dsp.POST_L2_LOAD",), True),
     # DRONE's BEAT and ANALOG 2's WDTH write the slot's side block (one machine a slot at a time)
     ("the side blocks (DRONE's BEAT, ANALOG 2's WDTH)", 0x200B1800, 0x200B2100,
-     ("dnfw.inserts.post", "dnfw.mnm.drone", "dnfw.mnm.analog2"), True),
-    ("a2f.asm", 0x200B2400, 0x200B5800, ("dnfw.a2f.program", "dnfw.waverider.dsp.A2F_L2_LOAD"), True),
+     ("dnfw.inserts.post", "dnfw.engines.drone.drone", "dnfw.engines.analog2.analog2"), True),
+    ("a2f.asm", 0x200B2400, 0x200B5800, ("dnfw.engines.analog2.filters.program", "dnfw.waverider.dsp.A2F_L2_LOAD"), True),
     ("smp.asm and pvmix", 0x200B6000, 0x200BC000,
      ("dnfw.waverider.dsp.SMP_L2_LOAD", "dnfw.waverider.dsp.PVMIX_L2_LOAD"), True),
     ("insbus.asm", 0x200BC000, 0x200BD180, ("dnfw.waverider.dsp.INSBUS_L2_LOAD",), True),

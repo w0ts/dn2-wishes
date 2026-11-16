@@ -269,7 +269,7 @@ static int mnm_k_shown(void *view, int mi, int j)
 }
 
 /* 2026-11-10 (the User: no parameter of ours shows a bare 0..127): a control's value in its unit, at most
- * four characters (the cell's label): dnfw.mnm.units, the curve through 17 points 8 knobs apart (the last
+ * four characters (the cell's label): dnfw.engines.units, the curve through 17 points 8 knobs apart (the last
  * one at 127). Hz: NNHz, then 0.1k .. 9.9k, NNk; ms: NNms, then 0.1s .. 9.9s, NNs; hundredths of a Hz
  * (BEAT): .NNH, N.NH, then Hz as above; cents NNc, N.Nc; percent NN%, signed +NN%; semitones +1.5, +12 */
 static int ucat(char *b, int n, int v)                  /* v >= 0, up to 3 digits */
@@ -470,7 +470,7 @@ const char *mu_ins(int type, int knob, int k)
 
 #if DN2_STOCK_UNITS
 /* 2026-11-11 (the User: proper values on stock pages too, a build option at first): stock records' value texts
- * in their units (dnfw.mnm.units STOCK_UNITS). stu_poll (page.c wr_poll, every loop) puts ours on each listed
+ * in their units (dnfw.engines.units STOCK_UNITS). stu_poll (page.c wr_poll, every loop) puts ours on each listed
  * record whose formatter is stock's own (stu_stock: stock 1.12's address), so a record another part of ours
  * holds (a machine's, FDN8's) is left to it, and one handed back to stock's later gets ours again. The machines'
  * own records (STU_MACHINE_LO..HI) carry these texts only on a stock machine's track; on ours stock's text. */

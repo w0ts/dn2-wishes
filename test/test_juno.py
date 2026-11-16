@@ -1,6 +1,6 @@
-"""JUNO (machine type 23, dnfw.mnm.juno) in the model (the program the SHARC runs bit for bit): its tables, its
+"""JUNO (machine type 23, dnfw.engines.juno.juno) in the model (the program the SHARC runs bit for bit): its tables, its
 place in the registry and on the pages, every WAVE x HPF choice finite and audible, its pitch, the VCF envelope's
-release; and ANALOG2 unchanged by the ladder core JUNO shares (2026-11-12: dnfw.a2f.models.ladder_core)."""
+release; and ANALOG2 unchanged by the ladder core JUNO shares (2026-11-12: dnfw.engines.analog2.filters.models.ladder_core)."""
 
 from __future__ import annotations
 
@@ -10,12 +10,12 @@ import math
 import pytest
 
 from dnfw.md import core as MDK
-from dnfw.mnm import analog2 as A2
-from dnfw.mnm import juno as J
-from dnfw.mnm import juno_data as JD
+from dnfw.engines.analog2 import analog2 as A2
+from dnfw.engines.juno import juno as J
+from dnfw.engines.juno import juno_data as JD
 from dnfw.mnm import machines as MM
 from dnfw.mnm import tables as T
-from dnfw.mnm import units as U
+from dnfw.engines import units as U
 from dnfw.perc import live as PL
 from dnfw.perc import machines as PM
 from dnfw.perc import program as PP

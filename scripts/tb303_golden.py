@@ -6,7 +6,11 @@ REF when not identical. Needs the firmware paths (DT2_SECTIONS ..) and PYTHONPAT
 import hashlib, json, os, random, struct, sys
 from dnfw.perc import live as PL, program as PP, machines as PM, dsl
 from dnfw.md import core as MDK
-from dnfw.mnm import machines as MM, analog2 as A2, drone as DR, tb303 as TB, sophie as SO
+from dnfw.mnm import machines as MM
+from dnfw.engines.analog2 import analog2 as A2
+from dnfw.engines.drone import drone as DR
+from dnfw.engines.tb303 import tb303 as TB
+from dnfw.engines.sophie import sophie as SO
 
 MODS = {"ANALOG2": A2, "DRONE": DR, "TB303": TB, "SOPHIE": SO}
 TYP = {MM.NAMES[k]: t for t, k in PP.MNM_TYPES.items()}

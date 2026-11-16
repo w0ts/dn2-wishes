@@ -684,7 +684,7 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     # the C page renderer first (the assembly calls it), at C_LOAD
     from .. import slides as SL
     from .. import modversion                   # v0.39: the mod's version (VERSION), shown at the browser's top
-    from ..a2f import pages as flt_pages        # 2026-11-10: the A2 filter machines' FLTR names
+    from ..engines.analog2.filters import pages as flt_pages        # 2026-11-10: the A2 filter machines' FLTR names
     from .. import load as _load                  # 2026-11-12: the DSP load budget's cost table (csrc/load)
     cimage, csyms, cbss = compile_c(pages.c_header() + _msel.c_header() + _eng.c_header() + _load.c_header() + flt_pages.c_header() + SL.c_header(stock)
                                     + modversion.c_define(),
@@ -1280,8 +1280,8 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     layout["mnm_fmts"] = csyms["mnm_fmts"]
     # v0.45: PING removed (owner, 2026-11-08). 2026-11-10: its mechanism (the FLTR list, names, LOAD
     # bound, slot_to_id, descriptor, curve) composed again for the A2 filter machines 7..11 only
-    # (dnfw.a2f.coldfire), in what was PING's chunk; none built: all stock, as v0.45
-    from ..a2f import coldfire as flt_cf
+    # (dnfw.engines.analog2.filters.coldfire), in what was PING's chunk; none built: all stock, as v0.45
+    from ..engines.analog2.filters import coldfire as flt_cf
     # 2026-11-11: every function of the C chunk by name, for the CPU profiler's symbolizer (tools/dn2tools
     # profile.py); the image does not change with it
     c_text = {n: a for n, a in sorted(csyms.items(), key=lambda kv: (kv[1], kv[0]))

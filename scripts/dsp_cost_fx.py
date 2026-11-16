@@ -96,7 +96,7 @@ def noise(rnd):
 
 def a2f() -> dict:
     import test_a2f_slots as T
-    from dnfw.a2f import design as DS, live as AL, program as AP
+    from dnfw.engines.analog2.filters import design as DS, live as AL, program as AP
     gate(AP, "run")
     out = {}
 

@@ -1,4 +1,4 @@
-"""ANALOG 2's page 3: GLID, GLTY, DRONE's mono legato glide (dnfw.mnm.a2glide, 2026-11-11).
+"""ANALOG 2's page 3: GLID, GLTY, DRONE's mono legato glide (dnfw.engines.analog2.a2glide, 2026-11-11).
 
 The records: page 3 sits on WaveTone records no machine of ours used; GLTY's (TYPE) stock default 0 is OFF, so a
 track saved before plays as before. The ColdFire's choice is the DSP's. The glide, played through the DSP program's
@@ -8,7 +8,8 @@ between the notes; a separate note (a note-off between) jumps; GLID 0 jumps.
 
 import pytest
 
-from dnfw.mnm import a2glide as G, analog2 as A2, core as MC, machines as MM
+from dnfw.engines.analog2 import a2glide as G, analog2 as A2
+from dnfw.mnm import core as MC, machines as MM
 from dnfw.perc import live as PL, machines as PM, program as PP
 from dnfw.waverider import pages as WP
 
@@ -132,7 +133,7 @@ def test_glid_curve_is_optimists_up_to_a_second_then_reaches_five_minutes():
 
 
 def test_the_readout_reads_every_knob_exactly():
-    from dnfw.mnm import units as MU
+    from dnfw.engines import units as MU
     for top in MU.GLID_TOPS:
         t = MU.glid_table(top)
         assert len(t) == 128 and t[-1] == 10000 + 3000   # 5 minutes, in tenths of a second

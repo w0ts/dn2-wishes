@@ -2761,7 +2761,7 @@ def tdm_tx(p: Prog, L: Layout) -> None:
             p.stpost(4, 6)
         p.loop_r(11, 16, slot_cost)
         _loop_done(p, K, 40)
-        from ..a2f import program as A2         # lazy: a2f.program imports the layers above
+        from ..engines.analog2.filters import program as A2         # lazy: a2f.program imports the layers above
         p.iconst(12, 0xFFFF)
         p.ld(6, A2.C["nfil"])
         p.iop(6, 6, "AND", 12)

@@ -85,7 +85,7 @@ def _chunks() -> list[tuple[int, bytes, str]]:
     if "c_chunk" in SPEC:
         out.append((SPEC["c_chunk"]["load"], bytes.fromhex(SPEC["c_chunk"]["code"]),
                     "our machines' page renderer (csrc/waverider/page.c)"))
-    if "flt_chunk" in SPEC:                      # 2026-11-10: the A2 filter machines (dnfw.a2f.coldfire)
+    if "flt_chunk" in SPEC:                      # 2026-11-10: the A2 filter machines (dnfw.engines.analog2.filters.coldfire)
         out.append((SPEC["flt_chunk"]["load"], bytes.fromhex(SPEC["flt_chunk"]["code"]),
                     "the A2 filter machines' FLTR-list shims, list and names"))
     if "machines_chunk" in SPEC:

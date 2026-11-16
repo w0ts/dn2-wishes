@@ -1,7 +1,7 @@
-"""The SHARC runner's A2 filter machines step (dnfw.a2f, filter types 7..11): real blocks of the build
+"""The SHARC runner's A2 filter machines step (dnfw.engines.analog2.filters, filter types 7..11): real blocks of the build
 (sw 0x1c2712 and the chain), tracks 1..3 PERC voices retriggered, each on one of the filter machines
 (FREQ, RES, MODE, FRQ2, RES2, MOD2, the envelope and key tracking set in the frame's sound fields);
-at the pass's entry (dnfw.waverider.dsp.A2F_SW) the pass's run-mode model (dnfw.a2f.live.run) runs on
+at the pass's entry (dnfw.waverider.dsp.A2F_SW) the pass's run-mode model (dnfw.engines.analog2.filters.live.run) runs on
 the DSP's own memory, and at PING's entry (where the pass hands on) every word the model wrote must be
 the DSP's, bit for bit (the slot buffers and the pass's state; its scratch words may differ).
 
@@ -13,8 +13,8 @@ the DSP's, bit for bit (the slot buffers and the pass's state; its scratch words
 
 from __future__ import annotations
 
-from dnfw.a2f import live as AL
-from dnfw.a2f import program as AP
+from dnfw.engines.analog2.filters import live as AL
+from dnfw.engines.analog2.filters import program as AP
 from dnfw.perc.dsl import Mem
 from dnfw.waverider import dsp
 from dnfw.waverider import frame as FR
@@ -87,12 +87,12 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
     caps, info = blocks(28)
     exact = bool(caps) and all(not c.get("bad") for c in caps)
     changed = sum(1 for c in caps for s in range(16) for j in range(32) if c["out"][s][j] != c["in"][s][j])
-    checks["filter machines: every word the pass wrote is dnfw.a2f.live's, bit for bit (28 blocks: SVF, "
+    checks["filter machines: every word the pass wrote is dnfw.engines.analog2.filters.live's, bit for bit (28 blocks: SVF, "
            "DIOD -> OTA, MS20 -> LADR, cutoffs and modes moved, trigs)"] = exact
     checks["filter machines: they change the sound (not a pass-through)"] = changed > 500
-    # 2026-11-10: ONE_VOICE (dnfw.a2f.program): a block filters one voice, the newest note's; the others pass dry
+    # 2026-11-10: ONE_VOICE (dnfw.engines.analog2.filters.program): a block filters one voice, the newest note's; the others pass dry
     # 2026-11-11 (perf): ONE_VOICE off: every slot that sounds on a filter machine is filtered (a silent input and
-    # zero states are skipped, dnfw.a2f.program._quiet). 2026-11-12: slots 0..2 carry the filter types; the other
+    # zero states are skipped, dnfw.engines.analog2.filters.program._quiet). 2026-11-12: slots 0..2 carry the filter types; the other
     # slots read their own (0, stock) since the pass reads each slot's frame data, not its track's (the route words
     # are 0 here, so every slot "plays track 0": until then they all took slot 0's SVF and were filtered too)
     def _sounds(c, s):

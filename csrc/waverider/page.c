@@ -217,7 +217,7 @@ static void wr_names(void)
 
 #if FLT_SETS
 static void px(void *c, int x, int y);
-/* 2026-11-10: the A2 filter machines (src/dnfw/a2f/pages.py; PING's mechanism, removed in v0.45): while
+/* 2026-11-10: the A2 filter machines (src/dnfw/engines/analog2/filters/pages.py; PING's mechanism, removed in v0.45): while
  * the active track's filter is one of them (types 7..11, the byte at sound+0xDF), Multi-Mode's and the
  * filter envelope's records whose meaning they change carry their names; the stock pointers go back
  * when it is not. The same mechanism as wr_names, on records it does not touch. */
@@ -226,7 +226,7 @@ static const char *flt_stock_short[FLT_NAMED] __attribute__((section(".data")));
 static int flt_on __attribute__((section(".data"))) = -2;   /* -2: not yet run */
 
 /* the same records' formatters (the header's value as a knob turns, the SYN-held cells): in Hz, ms, %, the modes'
- * names (csrc/waverider/md_page.c mu_flt, dnfw.mnm.units FLT_UNITS); stock's go back with the names */
+ * names (csrc/waverider/md_page.c mu_flt, dnfw.engines.units FLT_UNITS); stock's go back with the names */
 extern const char *mu_flt(int w, int k);
 static const unsigned short flt_fmt_ids[] = FLT_UNIT_IDS;
 #define NFFMT ((int)(sizeof flt_fmt_ids / sizeof flt_fmt_ids[0]))

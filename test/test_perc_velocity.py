@@ -20,7 +20,7 @@ BLOCKS = 12
 def _voice(kind: str, t: int = 3) -> PL.Harness:
     h = PL.Harness(t)
     if kind == "ANALOG2":                          # its mix tables, as the coordinator loads them (analog2.ctx)
-        from dnfw.mnm import analog2 as A2
+        from dnfw.engines.analog2 import analog2 as A2
         from dnfw.perc.dsl import bits
         for k, w in enumerate(A2.table_words()):
             h.mem.put(h.L.md.mnm.scratch + A2.TABLES_OFF + 4 * k, bits(w) if isinstance(w, float) else w)

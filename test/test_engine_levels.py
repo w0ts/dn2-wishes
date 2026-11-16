@@ -76,7 +76,7 @@ def test_an_engine_already_in_its_band_keeps_its_level():
 
 def _plaits(model: str, blocks: int = 10) -> list[float]:
     from dnfw.mnm import machines as MM
-    from dnfw.mnm import plaits as PLT
+    from dnfw.engines.plaits import plaits as PLT
     from dnfw.perc import live as PL
     h = PL.Harness(2)
     knobs = list(MM.DEFAULTS["PLAITS"])

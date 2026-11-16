@@ -10,7 +10,7 @@ import pytest
 
 from dnfw.inserts import bus as ins_bus
 from dnfw.inserts import design as ins_d
-from dnfw.mnm import plk
+from dnfw.engines.plaits import plk
 from dnfw.waverider import dsp
 
 

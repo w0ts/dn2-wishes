@@ -295,7 +295,8 @@ def _show(row) -> None:
 
 def engines(R, warm, sound, machines, counts, only):
     from dnfw.md import voice as MDV
-    from dnfw.mnm import machines as MM, plaits as PLT
+    from dnfw.mnm import machines as MM
+    from dnfw.engines.plaits import plaits as PLT
     from dnfw.sampler import machines as SM
     cases = []
     for k, M in enumerate(MDV.MM.MACHINES):

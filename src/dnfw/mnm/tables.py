@@ -6,8 +6,8 @@ First, with one of the Monomachine's own machines in this build (SID 6581, DPRO-
 VO-6: removed 2026-11-08, back 2026-11-11), their tables from the User's Monomachine OS
 (dnfw.mnm.rom.packed_words, as at 28eb110's parent); then PLAITS's, built here from formulas.
 
-PLAITS (dnfw.mnm.plaits): WS's five shapes (5 x 257) and the fold (516), Plaits'
-resources/lookup_tables.py formulas (MIT, THIRD-PARTY.md); 2026-11-09, FM's (dnfw.mnm.plaits_fm):
+PLAITS (dnfw.engines.plaits.plaits): WS's five shapes (5 x 257) and the fold (516), Plaits'
+resources/lookup_tables.py formulas (MIT, THIRD-PARTY.md); 2026-11-09, FM's (dnfw.engines.plaits.plaits_fm):
 lut_fm_frequency_quantizer / 64 (130) and the 4x downsampler's FIR (7).
 """
 
@@ -17,7 +17,7 @@ import math
 
 # (name, words) in Layout's order (dnfw.mnm.core.Layout.PL)
 PL_TABLES = (("ws", 5 * 257), ("fold", 516), ("fm", 130 + 7))
-# 2026-11-12: JUNO's (dnfw.mnm.juno) after PLAITS's (dnfw.mnm.core.Layout.JU): KR-106's cutoff curve (G1Q / 32768),
+# 2026-11-12: JUNO's (dnfw.engines.juno.juno) after PLAITS's (dnfw.mnm.core.Layout.JU): KR-106's cutoff curve (G1Q / 32768),
 # by RES 0..127 k / 8, the peak pull / 2, the fitted drive D and 1 / D / 8, by SUB and NOIS their levels (each scaled
 # into +-1 for its Q23 word)
 T_G1Q, T_K8, T_PULL2, T_D, T_ID8, T_SUB, T_NZ4 = 0, 1025, 1025 + 128, 1025 + 256, 1025 + 384, 1025 + 512, 1025 + 640
@@ -59,7 +59,7 @@ def _fold() -> list[float]:
 
 
 def _fm() -> list[float]:
-    """FM's table (dnfw.mnm.plaits_fm.table, kept here: this module is a leaf): lookup_tables.py's
+    """FM's table (dnfw.engines.plaits.plaits_fm.table, kept here: this module is a leaf): lookup_tables.py's
     fm_frequency_quantizer (its ratios, three points each, the widest gaps halved to 128, two
     more) / 64, then the 4x downsampler's FIR as f0 f1 f2 f3 f2 f1 f0."""
     r = [0.5, 0.5 * 2 ** (16 / 1200.0), math.sqrt(2) / 2, math.pi / 4, 1.0, 2 ** (16 / 1200.0),
@@ -125,7 +125,7 @@ def juno_drive(res: int) -> float:
 
 def juno_values() -> list[float]:
     """JUNO's tables as the DSP reads them (floats; zpack carries each as a Q23 word)"""
-    from . import juno_data as JD
+    from ..engines.juno import juno_data as JD
     out = [g / 32768.0 for g in JD.G1Q]
     out += [k / 4096.0 / 8.0 for k in JD.RES_K]
     out += [v / 4096.0 / 2.0 for v in JD.PEAK_PULL]

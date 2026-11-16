@@ -1,5 +1,5 @@
 """The Monomachine-style machines' value readout (csrc/waverider/md_page.c mnm_unit_text, tables from
-dnfw.mnm.units): 2026-11-10, the User: no parameter of ours may show a bare 0..127. Every control of DRONE and
+dnfw.engines.units): 2026-11-10, the User: no parameter of ours may show a bare 0..127. Every control of DRONE and
 ANALOG 2 that is not an empty place, a named choice or the semitone widget has a unit; the C formatter,
 compiled natively on the generated tables, fits the cell's four characters for every knob and ends in a
 unit mark."""
@@ -69,7 +69,7 @@ def test_the_formatter_fits_four_characters(tmp_path):
             seen.add((int(mi), int(j)))
     for ty in range(1, 13):                         # every insert type: its knobs and the MIX have a unit
         from dnfw.inserts import design as ID
-        from dnfw.mnm import units as MU
+        from dnfw.engines import units as MU
         for kn in MU.INS_UNITS[MU.INS_TYPES[ty]]:
             assert (ty, kn) in ins_seen, (ID.NAMES[ty], kn)
         assert (ty, 7) in ins_seen

@@ -7,7 +7,7 @@ SOPHIE machine on OS 1.12. Overtone publishes no source for it (its patcher ship
 so this port is from Sophie's C; Overtone's README gave the design it shares: the knob names,
 the seven models with KICK, no filter of its own (the track's filter does that).
 
-`src/dnfw/mnm/sophie.py`, in the DSL (`dnfw.perc.dsl`): one program for the SHARC code and
+`src/dnfw/engines/sophie/sophie.py`, in the DSL (`dnfw.perc.dsl`): one program for the SHARC code and
 its run-mode model, in PERC's voice like the Monomachine machines (`docs/mnm.md`).
 
 ## The page

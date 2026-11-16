@@ -128,7 +128,7 @@ def type_of(word: int) -> int:
 # v0.26: the Monomachine's machines (types 6, 7: docs/mnm.md), one page each, on PERC's
 # eight records (PARAM_IDS), named per machine while such a track is active
 from ..mnm import machines as _mnm
-from ..mnm import plaits as _mnm_plaits
+from ..engines.plaits import plaits as _mnm_plaits
 MNM_LONG = {"TUNE": "Tune", "---": "Unused",
             "ENGN": "Engine",                   # 2026-11-11: MONOMACHINE's (page 1 H)
             # SOPHIE (docs/sophie.md)
@@ -235,9 +235,9 @@ MNM_CHOICES = {
     "JUNO": {"WAVE": ("OFF", "SAW", "PULS", "BOTH"), "HPF": ("BOOS", "FLAT", "236", "754"), "PWM": ("MAN", "ENV"),
              "RNGE": ("16'", "8'", "4'")},
     "DRONE": {"TOPO": ("PAIR", "CHN", "RING"), "GLTY": ("RATE", "TIME"), "HOLD": ("OFF", "ON"),
-              # 2026-11-11, the User: an octave knob, -3..+3 (dnfw.mnm.drone q2), in its unit
+              # 2026-11-11, the User: an octave knob, -3..+3 (dnfw.engines.drone.drone q2), in its unit
               "OCT": ("-3oc", "-2oc", "-1oc", "0oct", "+1oc", "+2oc", "+3oc")},
-    "PLAITS": {"MODL": _mnm_plaits.MODELS, "TUNE": 49, "FINE": 128},   # TUNE, FINE: steps (MW_SEMIS, MW_CENTS)      # 2026-11-09: every engine ported (dnfw.mnm.plaits)
+    "PLAITS": {"MODL": _mnm_plaits.MODELS, "TUNE": 49, "FINE": 128},   # TUNE, FINE: steps (MW_SEMIS, MW_CENTS)      # 2026-11-09: every engine ported (dnfw.engines.plaits.plaits)
     # 2026-11-11: MONOMACHINE's engine (page 1 H), the list popup's names (dnfw.mnm.machines MONO_CHOICES)
     _mnm.MONO_NAME: {_mnm.MONO_ENGN: tuple(_mnm.MONO_CHOICES[n] for n in _mnm.MONO_ENGINES)},
 }
@@ -274,7 +274,7 @@ MNM_PAGE = PARAM_IDS
 # 2026-11-09: a machine with PNAMES2 (DRONE, ANALOG 2) has a second page on PERC's page-2 records (the
 # Machinedrum's track-FX records and TYPE, which PERC applies only to its own machines): 16 controls
 MNM_PAGE2 = (*FX_IDS, TYPE_ID)
-from ..mnm import units as _mnm_units
+from ..engines import units as _mnm_units
 # 2026-11-11: a machine with PNAMES3 (ANALOG 2's GLID, GLTY) has a third page on eight WaveTone records no
 # machine of ours uses (their stock ranges and defaults: dnfw.perc.machines.P3_RECS): 24 controls
 MNM_PAGE3 = tuple(r for r, _slot, _lo, _top in _perc.P3_RECS)
@@ -480,7 +480,7 @@ def mnm_c_header() -> str:
         f"#define MNM_RETIRED(mi, j, c) {mnm_retired()}",
         "enum { MW_KNOB, MW_EMPTY, MW_GRID, MW_SLIDE, MW_VU, MW_SWITCH, MW_SEMIS, MW_CENTS };",
         f"static const unsigned char mnm_widget[MNM_N][MNM_J] = {{{arr([[MNM_WIDGET.get(_ck(M, sh), 1 if sh == '---' or sh in MNM_UNPORTED else 0) for sh in mnm_pnames(M)] for M in _mnm.CF_ALL])}}};",
-        # 2026-11-10: the value readout's units (dnfw.mnm.units): kind (bit 7: 0 reads OFF), curve, the curves
+        # 2026-11-10: the value readout's units (dnfw.engines.units): kind (bit 7: 0 reads OFF), curve, the curves
         "enum { MU_RAW, MU_PCT, MU_SPCT, MU_HZ, MU_HZ100, MU_MS, MU_C10, MU_C, MU_DB, MU_OCT, MU_PATN, MU_RATE, MU_PCTC, MU_MODE, MU_MS10, MU_VOIC, MU_GLID, MU_ST10, MU_JUNO, MU_ONOFF };",
         f"static const unsigned char mnm_unit[MNM_N][MNM_J] = {{{arr(_UNITS[0])}}};",
         f"static const unsigned char mnm_unit_curve[MNM_N][MNM_J] = {{{arr(_UNITS[1])}}};",

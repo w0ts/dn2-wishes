@@ -10,7 +10,7 @@ import struct
 import pytest
 
 from dnfw.md import core as MDK
-from dnfw.mnm import analog2 as A2
+from dnfw.engines.analog2 import analog2 as A2
 from dnfw.mnm import machines as MM
 from dnfw.perc import live as PL
 from dnfw.perc import machines as PM

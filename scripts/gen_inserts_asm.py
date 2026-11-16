@@ -38,7 +38,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--no-resolve", action="store_true")
     a = ap.parse_args(argv)
-    from dnfw.a2f import design as AD, program as AP     # 2026-11-10: wr_ins -> wr_a2f -> PING
+    from dnfw.engines.analog2.filters import design as AD, program as AP     # 2026-11-10: wr_ins -> wr_a2f -> PING
     jobs = [(P.program(dsp.A2F_SW if AD.BUILT_MODELS else dsp.PING_SW), dsp.INS_SW, OUT),
             (POST.program(), dsp.POST_SW, OUT_POST), (BUS.program(), dsp.INSBUS_SW, OUT_BUS),
             (JSEND.program(), dsp.JSEND_SW, OUT_JSEND)]

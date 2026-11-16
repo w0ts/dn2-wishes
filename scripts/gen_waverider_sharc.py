@@ -72,8 +72,8 @@ def one_jump(line: str, at_sw: int, work: pathlib.Path) -> dict:
 
 
 def _a2f_built() -> bool:
-    """the A2 filter machines' pass is in this build (dnfw.a2f.design, the builder's choice)"""
-    return bool(importlib.import_module("dnfw.a2f.design").BUILT_MODELS)
+    """the A2 filter machines' pass is in this build (dnfw.engines.analog2.filters.design, the builder's choice)"""
+    return bool(importlib.import_module("dnfw.engines.analog2.filters.design").BUILT_MODELS)
 
 
 def main(argv=None) -> int:
@@ -154,7 +154,7 @@ def main(argv=None) -> int:
             "insbus": {k: v for k, v in insbus.items() if k != "instruction_offsets"},
             "insbus_jump": bjump,
             "jsend": {k: v for k, v in jsend.items() if k != "instruction_offsets"}}
-    if a2f is not None:                                  # 2026-11-09: the A2 filter machines' pass (dnfw.a2f)
+    if a2f is not None:                                  # 2026-11-09: the A2 filter machines' pass (dnfw.engines.analog2.filters)
         spec["a2f"] = {k: v for k, v in a2f.items() if k != "instruction_offsets"}
     dsp.CODE.write_text(json.dumps(spec, indent=2) + "\n", encoding="utf-8", newline="\n")
     print(f"wrote {dsp.CODE.relative_to(ROOT)}: perc {len(perc['object_parcels_be']) // 2} B, "

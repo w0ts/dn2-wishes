@@ -49,7 +49,7 @@ LINE_WORDS = 48
 assert D.POST_RING_STRIDE == (1 << 12) + (1 << 4)       # run(): i << 12 + i << 4
 
 
-# 2026-11-09: DRONE's BEAT (dnfw.mnm.drone): the side of its two ears, per voice slot, written by the
+# 2026-11-09: DRONE's BEAT (dnfw.engines.drone.drone): the side of its two ears, per voice slot, written by the
 # machine before the chain (pre-amp) and mixed here after the pan, scaled by what the chain did to the mid
 SIDE_L2 = 0x200B1800             # slot t's block at SIDE_L2 + SIDE_STRIDE t (dnfw.waverider.dsp)
 SIDE_STRIDE = 0x90               # 36 words: 0..31 the side, 32 sum |mid| pre-amp, 33 flag (1.0), 34 last gain

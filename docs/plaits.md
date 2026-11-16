@@ -8,7 +8,7 @@ github.com/pichenettes/eurorack `plaits/`, MIT; THIRD-PARTY.md): **WS** (wavesha
 **GRAIN was removed on 2026-11-09** (the User: DSP room for the CHOR and WIDE inserts): see
 *GRAN removed*; what is written about it below is its history.
 
-`src/dnfw/mnm/plaits.py`, in the DSL (`dnfw.perc.dsl`): one program for the SHARC code and its
+`src/dnfw/engines/plaits/plaits.py`, in the DSL (`dnfw.perc.dsl`): one program for the SHARC code and its
 run-mode model, in PERC's voice like the Monomachine machines (`docs/mnm.md`).
 
 ## The page
@@ -93,9 +93,9 @@ cleared to flash. Unverified on hardware: the sound, the DSP time on the unit, t
 
 ## The other engines (2026-11-09)
 
-Each further engine is its own module, `src/dnfw/mnm/plaits_<name>.py` (`MODEL`, `init`, `half`),
+Each further engine is its own module, `src/dnfw/engines/plaits/plaits_<name>.py` (`MODEL`, `init`, `half`),
 listed in `plaits.ENGINES`; MODL's choices are `plaits.MODELS` (the page reads them), the knob
-picks one as knob x N >> 7. Their common ground is `src/dnfw/mnm/plk.py`:
+picks one as knob x N >> 7. Their common ground is `src/dnfw/engines/plaits/plk.py`:
 
 - **The model's own words.** The note (`S_NOTE`, TUNE added), the model last rendered (`S_LAST`),
   the trigger (`S_TRIG`), the voice's random generator (`S_RNG`), then 48 union words. A model is

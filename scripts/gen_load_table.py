@@ -44,10 +44,11 @@ def fx() -> dict[str, dict]:
 
 
 def table(eng: dict, fxr: dict) -> dict:
-    from dnfw.a2f import design as A2D
+    from dnfw.engines.analog2.filters import design as A2D
     from dnfw.inserts import design as ID
     from dnfw.md import voice as MDV
-    from dnfw.mnm import machines as MM, plaits as PLT
+    from dnfw.mnm import machines as MM
+    from dnfw.engines.plaits import plaits as PLT
     from dnfw.sampler import machines as SM
     from dnfw.waverider import pages as PG
 

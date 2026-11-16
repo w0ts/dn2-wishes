@@ -40,7 +40,8 @@ BUF = 0x00300000                               # the harness's track buffers (L1
 def engines() -> list[tuple[str, object]]:
     """(name, setup(h, t)): puts slot T's frame words on the engine at its defaults"""
     from dnfw.md import voice as MDV
-    from dnfw.mnm import machines as MM, plaits as PLT
+    from dnfw.mnm import machines as MM
+    from dnfw.engines.plaits import plaits as PLT
     from dnfw.perc import live as PL, machines as PMx
     import dsp_cost as DC
     out = []

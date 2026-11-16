@@ -80,8 +80,8 @@ def main() -> int:
         # 2026-11-11: the C chunk's functions by address (the CPU profiler's symbolizer, tools/dn2tools)
         "c_text_symbols": built.get("c_text_symbols", {}),
     }
-    if "flt_chunk" in built:                     # 2026-11-10: the A2 filter machines' FLTR list (dnfw.a2f.coldfire)
-        from dnfw.a2f import coldfire as FC      # noqa: PLC0415
+    if "flt_chunk" in built:                     # 2026-11-10: the A2 filter machines' FLTR list (dnfw.engines.analog2.filters.coldfire)
+        from dnfw.engines.analog2.filters import coldfire as FC      # noqa: PLC0415
         code["flt_chunk"] = {"load": built["flt_chunk"]["load"], "code": built["flt_chunk"]["code"].hex()}
         code["guards"] += [{"va": va, "bytes": want, "what": why} for va, want, why in FC.GUARDS]
     text = (json.dumps(code, indent=1) + "\n").encode()

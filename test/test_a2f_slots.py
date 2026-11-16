@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import math
 
-from dnfw.a2f import design as DS
-from dnfw.a2f import live as AL
-from dnfw.a2f import program as P
+from dnfw.engines.analog2.filters import design as DS
+from dnfw.engines.analog2.filters import live as AL
+from dnfw.engines.analog2.filters import program as P
 
 TRACK = 8                                       # T9
 LADR = DS.TYPES.index("LADR") if "LADR" in DS.TYPES else 8

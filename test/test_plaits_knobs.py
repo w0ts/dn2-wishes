@@ -4,7 +4,7 @@ value played FM)."""
 
 from __future__ import annotations
 
-from dnfw.mnm import plaits as PLT
+from dnfw.engines.plaits import plaits as PLT
 from dnfw.perc import live as PL
 from dnfw.perc import machines as PM
 

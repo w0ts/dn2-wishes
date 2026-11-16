@@ -452,7 +452,7 @@ def _ins_tail_ok() -> bool:
     """inserts.asm's last JUMP: to the A2 filter machines' pass when it is built (2026-11-09), which
     JUMPs on to PING; else straight to PING"""
     ins = (SHARC / "inserts.asm").read_text(encoding="utf-8")
-    from dnfw.a2f import design as AD                    # the build's choice, not a file left over
+    from dnfw.engines.analog2.filters import design as AD                    # the build's choice, not a file left over
     a2f = SHARC / "a2f.asm"
     if not AD.BUILT_MODELS:
         return re.findall(r"JUMP (0x[0-9a-f]+);\s*// ping.asm's wr_ping", ins) == [f"{dsp.PING_SW:#x}"]
@@ -793,7 +793,7 @@ def main(argv=None):
             gc.collect()
             show(results["3i2_insall"])
 
-        if "a2f" in steps and importlib.import_module("dnfw.a2f.design").BUILT_MODELS:
+        if "a2f" in steps and importlib.import_module("dnfw.engines.analog2.filters.design").BUILT_MODELS:
             print("\nstep 3k: the A2 filter machines (filter types 7..11)")
             a2f_step = importlib.import_module("sharc_a2f_step")
             results["3k_a2f"] = a2f_step.run(sys.modules[__name__], snap, m2mach, m5, sound, machines)
@@ -1562,7 +1562,8 @@ def step_poly16(init, sound, machines, blocks=20) -> dict:
     voice must sound in every block, the guard must skip none, our voices done by 0.8 of the
     frame, everything finite. DNFW_POLY16_ONLY=VA,FM narrows the engines; DNFW_POLY16_N the voices."""
     from dnfw.perc import guard as G
-    from dnfw.mnm import machines as MMx, plaits as PLT
+    from dnfw.mnm import machines as MMx
+    from dnfw.engines.plaits import plaits as PLT
     P = 666_667
     N = int(os.environ.get("DNFW_POLY16_N", "16"))
     sites = set(_after_emuclk("perc")) | set(_after_emuclk("smp"))
@@ -1766,7 +1767,7 @@ def step_notestart(init, sound, machines) -> dict:
     note's block. -> numbers only (ok: every run ran)."""
     from dnfw.perc import guard as G
     from dnfw.mnm import machines as MMx
-    from dnfw.mnm import plaits as PLT
+    from dnfw.engines.plaits import plaits as PLT
     P = 666_667
     sites = set(_after_emuclk("perc")) | set(_after_emuclk("smp"))
     counts, undo_counts = _count_memory()
@@ -1935,11 +1936,11 @@ def step_rotate(init, sound, machines, names=("PLAITS", "PLAITS:PART", "SOPHIE",
             typ = MMx.TYPES[k]
             knobs = None
             if eng:                                  # PLAITS at one MODL engine
-                from dnfw.mnm import plaits as PLT
+                from dnfw.engines.plaits import plaits as PLT
                 knobs = list(MMx.DEFAULTS[base_name])
                 knobs[PLT.MODL_K] = PLT.knob_of(PLT.MODELS.index(eng))
             words = mnm_words(k, knobs)
-            # PART / STRG defer their DDR clear (dnfw.mnm.plk): four / two blocks silent on a voice
+            # PART / STRG defer their DDR clear (dnfw.engines.plaits.plk): four / two blocks silent on a voice
             # starting the engine
             late = 1 + {"PART": 4, "STRG": 2}.get(eng, 0)
             for gate in ("finite", "inf"):
@@ -4190,7 +4191,7 @@ def step_mnm(init, sound, machines, blocks) -> dict:
     # 2026-11-09: every PLAITS model (MODL's choices past WS, which the default runs), triggered at
     # block 1 and again at block 4, its HARM/TIMB/MORP off-centre; and a track whose MODL changes
     # every two blocks through the models (each entry runs the model's init), bit-exact as above
-    from dnfw.mnm import plaits as PLm
+    from dnfw.engines.plaits import plaits as PLm
     pk = MM.NAMES.index("PLAITS")
     for ix in range(1, PLm.N_MODELS):
         kn = [40, 90, 100, 0, 0, 0, 64, PLm.knob_of(ix)]                 # TUNE G, MODL H (2026-11-11)
