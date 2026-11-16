@@ -298,28 +298,36 @@ def half(p: Prog, L) -> None:
         p.fconst(12, 0.499)
         p.fop(4, 4, "MIN", 12)                   # mode_frequency
         _tan_fast(p, 5, 4)
-        p.sti(MG, 1, 5)
+        p.sti(2 * MG, 1, 5)
         p.fop(6, 4, "*", 8)
         K.addk(p, 6, 6, 1.0)
         recip(p, 6, 6)                           # r = 1 / (1 + f q)
         _h(p, 7, 6, 5)
-        p.sti(MH, 1, 7)
+        p.sti(2 * MH, 1, 7)
         p.fop(6, 6, "+", 5)
-        p.sti(MRG, 1, 6)
+        p.sti(2 * MRG, 1, 6)
         p.fop(4, 4, "+", 4)
         p.fconst(12, 1.0)
         p.fop(4, 12, "-", 4)                     # 1 - 2 f
         p.ldpost(5, 5)
         p.fop(5, 5, "*", 4)
-        p.sti(MA, 1, 5)
+        p.sti(2 * MA, 1, 5)
         p.fop(2, 2, "+", 3)                      # stretch += stiffness; stiffness *= k
         _soften(p, 3)
         p.fop(1, 1, "+", 10)                     # harmonic += f0
         p.fop(8, 8, "*", 9)                      # q *= q_loss
-        p.geti(0, 1)                             # the next mode's coefficients
-        p.iconst(12, 4 * MW)
-        p.iop(0, 12, "+", 0)
+        # the next mode's coefficients: a pair's two modes interleave (2026-11-12, simd: PEy reads the word after
+        # PEx's), so one word on after an even mode, the next pair's first word after an odd one
+        p.geti(0, 1)
+        p.iconst(12, 4)
+        p.iop(13, 0, "AND", 12)                  # 4 after an odd mode (YB 8-byte aligned), else 0
+        p.lsh(5, 13, 4)
+        p.lsh(6, 13, 1)
+        p.iop(13, 5, "-", 6)                     # 56 or 0
+        p.iop(0, 13, "+", 0)
+        p.iop(0, 12, "+", 0)                     # + 4
         p.seti(1, 0)
+    assert L.YB % 8 == 0
     p.loop(L.W["n5"], N_MODES, coefs)
     K.sv(p, U_HM, 1)
     K.sv(p, U_SF, 2)
@@ -332,16 +340,18 @@ def half(p: Prog, L) -> None:
 
 # 2026-11-10 (poly16, the User: 16 voices on every engine): the half mode by mode, not sample by
 # sample. The excitation's 16 samples first (a row in L1, L.XB: SID's phases' room, free since SID
-# went); then each batch of 4 modes, each mode's states and coefficients in registers through the
-# 16 samples (3 DDR words read and 2 written a mode a half, not 7 a sample), its gain x bp added into
-# the batch's row (L1), each batch then added into the half's samples at I4: every sample's sums in
-# Plaits' order, so the output is the same, bit for bit.
-X_ROW = 0                                        # L.XB + 4 x: the excitation's 16 samples
-B_ROW = 16                                       # the batch's 16 sums
+# went); then the modes, each mode's states and coefficients in registers through the 16 samples.
+# 2026-11-12 (simd): two modes at once, mode m on PEx and m + 1 on PEy (Prog.simd): their states are
+# neighbours in the slot already, their coefficients interleave (coefs), the excitation's row holds each
+# sample twice (one for each PE) and each mode writes its 16 outputs into its own column of the O rows.
+# Each batch of 4 modes is then summed in Plaits' order, ((((0 + o0) + o1) + o2) + o3), and added into
+# the half's samples at I4: every value the same operation on the same operands, bit for bit as before.
+X_ROW = 0                                        # L.XB + 4 x: the excitation's 16 samples, each twice
+O_ROW = 32                                       # the batch's outputs: [2 x sample + lane] a pair, 2 pairs
 
 
 def _render(p: Prog, L) -> None:
-    xr, br = L.XB + 4 * X_ROW, L.XB + 4 * B_ROW
+    xr, orow = L.XB + 4 * X_ROW, L.XB + 4 * O_ROW
     # the excitation's low-pass (ResonatorSvf<1>), 16 samples into the X row; the impulse once
     K.ld(p, 2, U_ES1)
     K.ld(p, 3, U_ES2)
@@ -357,6 +367,7 @@ def _render(p: Prog, L) -> None:
     def exc():
         _res_svf(p, 1, 2, 3, 4, 5, 6)
         p.par(("op", 1, 0, "+", 0), ("st", 1, 11))    # the input after the impulse: 0 (F0's 0 + 0)
+        p.stpost(1, 11)                                # (twice: PEx's and PEy's)
     p.loop_r(15, K.HALF, exc)
     K.sv(p, U_ES1, 2)
     K.sv(p, U_ES2, 3)
@@ -372,75 +383,99 @@ def _render(p: Prog, L) -> None:
     p.iop(0, 12, "+", 0)
     p.seti(0, 0)                                 # I0: the modes' S1 in the slot (S2 S2_OFF on)
 
+    def pair():
+        p.ld(9, L.W["bs"])                       # this pair's coefficients
+        p.seti(5, 9)
+        p.iconst(12, L.YB)                       # its column of the O rows: the batch's first pair or second
+        p.iop(13, 9, "-", 12)
+        p.iconst(12, 4 * 2 * MW)
+        p.iop(13, 13, "AND", 12)
+        p.lsh(13, 13, 1)
+        p.iconst(12, orow)
+        p.iop(13, 12, "+", 13)
+        p.seti(2, 13)
+        p.iconst(12, 4 * 2 * MW)
+        p.iop(9, 12, "+", 9)
+        p.st(L.W["bs"], 9)
+        p.iconst(13, xr)
+        p.seti(1, 13)
+        p.simd(lambda: _pair_simd(p))
+        p.geti(13, 0)                            # the next pair's states
+        p.iconst(12, 8)
+        p.iop(13, 12, "+", 13)
+        p.seti(0, 13)
+
     def batch():
-        p.iconst(0, br)
-        p.seti(5, 0)
-        p.fconst(0, 0.0)
-        for k in range(K.HALF):
-            p.stpost(5, 0)
-
-        def mode():
-            # 2026-11-12 (plaits-opt): the 16 samples' operations as before (poly16's order, below), placed by
-            # dnfw.perc.msched into multifunction instructions (a multiply beside an add) with the loads and
-            # stores on them: about 9 instructions a sample, not 12. Registers: F0 g, F1 gain, F2 rg, F3 h
-            # (the multiplier's groups), F7 s1, F12 s2, F14 t, F8 x / u, F4 u2 / hp, F9 g hp, F15 bp / o,
-            # F6 bp (a second add of the same operands, for the multiplies), F10 gb, F11 the batch's sum,
-            # F13 lp. Every value the same operation on the same operands: the output is bit for bit as before.
-            p.ld(9, L.W["bs"])                  # this mode's coefficients
-            p.seti(1, 9)
-            p.ldi(0, MG, 1)
-            p.ldi(2, MRG, 1)
-            p.ldi(3, MH, 1)
-            p.ldi(1, MA, 1)
-            p.iconst(12, 4 * MW)
-            p.iop(9, 12, "+", 9)
-            p.st(L.W["bs"], 9)
-            p.ldi(7, 0, 0)                       # s1
-            p.ldi(12, S2_OFF, 0)                 # s2
-            p.iconst(13, xr)
-            p.seti(1, 13)
-            p.iconst(13, br)
-            p.seti(2, 13)                        # (I2: a compute's move goes through I0..I3)
-            p.fop(14, 2, "*", 7)                 # t = rg s1
-            ops = []
-            for k in range(K.HALF):
-                ops += [("mov", "ld", ("F8",), (), "I1"),                       # x
-                        ("alu", "-", ("F8",), ("F8", "F14"), None),            # u = x - t
-                        ("alu", "-", ("F4",), ("F8", "F12"), None),            # - s2
-                        ("mul", "*", ("F4",), ("F3", "F4"), None),             # hp
-                        ("mul", "*", ("F9",), ("F0", "F4"), None),             # g hp
-                        ("alu", "+", ("F15",), ("F9", "F7"), None),            # bp
-                        ("alu", "+", ("F6",), ("F9", "F7"), None),             # bp (for the multiplies)
-                        ("alu", "+", ("F7",), ("F9", "F15"), None),            # s1
-                        ("mul", "*", ("F15",), ("F1", "F6"), None),            # o = gain bp
-                        ("mul", "*", ("F10",), ("F0", "F6"), None),            # gb = g bp
-                        ("mov", "ldk", ("F11",), (), ("I2", 0)),               # the batch's sum
-                        ("alu", "+", ("F11",), ("F11", "F15"), None),          # B += o
-                        ("mov", "st", (), ("F11",), "I2"),                     # B out
-                        ("alu", "+", ("F13",), ("F10", "F12"), None),          # lp = gb + s2
-                        ("alu", "+", ("F12",), ("F10", "F13"), None),          # s2
-                        ("mul", "*", ("F14",), ("F2", "F7"), None)]            # the next t = rg s1
-            MS.emit(p, ops)
-            p.sti(S2_OFF, 0, 12)
-            p.stpost(0, 7)                       # the next mode's
-        p.loop(L.W["inner"], BATCH, mode)
-        p.iconst(0, br)
-        p.seti(5, 0)
-        p.geti(0, 4)
-        p.seti(1, 0)
-
-        def add4():                              # out += the batch's sum
-            for k in range(4):
-                p.ldpost(1, 5)
-                p.ldi(0, 0, 1)
-                p.fop(0, 0, "+", 1)
-                p.stpost(1, 0)
-        p.loop_r(15, K.HALF // 4, add4)
+        p.loop(L.W["inner"], BATCH // 2, pair)
+        _batch_sum(p, orow)
     p.loop(L.W["n4"], N_MODES // BATCH, batch)
     p.geti(0, 4)                                 # I4 past the half, as before
     p.iconst(12, 4 * K.HALF)
     p.iop(0, 12, "+", 0)
     p.seti(4, 0)
+
+
+def _pair_simd(p: Prog) -> None:
+    """Modes m (PEx) and m + 1 (PEy) through the half (in SIMD): I5 their coefficients, I0 their S1, I1 the
+    excitation's row, I2 their column of the O rows. The 16 samples' operations as plaits-opt's (2026-11-12),
+    placed by dnfw.perc.msched into multifunction instructions with the loads and stores on them; the batch's
+    sum is no longer among them (_batch_sum). Registers: F0 g, F1 gain, F2 rg, F3 h (the multiplier's groups),
+    F7 s1, F12 s2, F14 t, F8 x / u, F4 u2 / hp, F9 g hp, F15 bp / o, F6 bp (a second add of the same operands,
+    for the multiplies), F10 gb, F13 lp."""
+    p.ldi(0, 2 * MG, 5)
+    p.ldi(2, 2 * MRG, 5)
+    p.ldi(3, 2 * MH, 5)
+    p.ldi(1, 2 * MA, 5)
+    p.ldi(7, 0, 0)                               # s1
+    p.ldi(12, S2_OFF, 0)                         # s2
+    p.fop(14, 2, "*", 7)                         # t = rg s1
+    ops = []
+    for k in range(K.HALF):
+        ops += [("mov", "ldk", ("F8",), (), ("I1", 2 * k)),              # x
+                ("alu", "-", ("F8",), ("F8", "F14"), None),            # u = x - t
+                ("alu", "-", ("F4",), ("F8", "F12"), None),            # - s2
+                ("mul", "*", ("F4",), ("F3", "F4"), None),             # hp
+                ("mul", "*", ("F9",), ("F0", "F4"), None),             # g hp
+                ("alu", "+", ("F15",), ("F9", "F7"), None),            # bp
+                ("alu", "+", ("F6",), ("F9", "F7"), None),             # bp (for the multiplies)
+                ("alu", "+", ("F7",), ("F9", "F15"), None),            # s1
+                ("mul", "*", ("F15",), ("F1", "F6"), None),            # o = gain bp
+                ("mul", "*", ("F10",), ("F0", "F6"), None),            # gb = g bp
+                ("mov", "stk", (), ("F15",), ("I2", 2 * k)),             # o out
+                ("alu", "+", ("F13",), ("F10", "F12"), None),          # lp = gb + s2
+                ("alu", "+", ("F12",), ("F10", "F13"), None),          # s2
+                ("mul", "*", ("F14",), ("F2", "F7"), None)]            # the next t = rg s1
+    MS.emit(p, ops)
+    p.sti(S2_OFF, 0, 12)
+    p.sti(0, 0, 7)
+
+
+def _batch_sum(p: Prog, orow: int) -> None:
+    """The half's samples at I4 += the batch's 4 modes' outputs, summed in Plaits' order (the batch's sum from
+    0, then each mode's, then into the sample). I1 the O rows (biased 32 words: offsets -32..31), I2 the
+    samples; F15 0. Samples alternate between two sets of registers so one's moves ride on the other's adds."""
+    p.iconst(13, orow + 4 * 32)
+    p.seti(1, 13)
+    p.geti(13, 4)
+    p.seti(2, 13)
+    p.fconst(15, 0.0)
+    ops = []
+    for s in range(K.HALF):
+        b = 4 * (s % 2)
+        o = [f"F{b + j}" for j in range(4)]
+        acc, out = f"F{8 + 2 * (s % 2)}", f"F{9 + 2 * (s % 2)}"
+        ops += [("mov", "ldk", (o[0],), (), ("I1", 2 * s - 32)),
+                ("mov", "ldk", (o[1],), (), ("I1", 2 * s - 31)),
+                ("mov", "ldk", (o[2],), (), ("I1", 2 * s)),
+                ("mov", "ldk", (o[3],), (), ("I1", 2 * s + 1)),
+                ("mov", "ldk", (out,), (), ("I2", s)),
+                ("alu", "+", (acc,), ("F15", o[0]), None),
+                ("alu", "+", (acc,), (acc, o[1]), None),
+                ("alu", "+", (acc,), (acc, o[2]), None),
+                ("alu", "+", (acc,), (acc, o[3]), None),
+                ("alu", "+", (out,), (out, acc), None),
+                ("mov", "stk", (), (out,), ("I2", s))]
+    MS.emit(p, ops)
 
 
 def _res_svf(p: Prog, x: int, s1: int, s2: int, g: int, rg: int, h: int) -> None:

@@ -88,6 +88,32 @@ class Mem:
 # held), and the runner's model checks fail.
 POISON = 0x7FBADBAD
 
+# 2026-11-12 (simd): what a SIMD region (Prog.simd) may not hold. Control flow (a conditional JUMP in SIMD takes
+# both PEs' conditions), an index or loop register written (from PEx alone), a constant load (`Rn = data32`:
+# whether it reaches Sn is inferred from the firmware, not cited from the PRM; the runner's G2), a mode write.
+SIMD_REFUSE = re.compile(r"JUMP|CALL|RTS|LCNTR|\bDO\b|^[IMLB]\d+ =|^[RF]\d+ = -?(0x)?[0-9]|MODE")
+SIMD_ON, SIMD_OFF = "BIT SET MODE1 0x200000;", "BIT CLR MODE1 0x200000;"     # MODE1.PEYEN (bit 21)
+
+
+class _LaneMem:
+    """simd()'s run mode: one lane's view of the memory, every word OFF bytes on (PEy: the next
+    word, the SIMD companion of a normal-word move), with what it read and wrote."""
+
+    def __init__(self, mem: Mem, off: int):
+        self.mem, self.off = mem, off
+        self.reads: set[int] = set()
+        self.writes: set[int] = set()
+
+    def get(self, a: int) -> int:
+        a = (a + self.off) & 0xFFFFFFFF
+        self.reads.add(a)
+        return self.mem.get(a)
+
+    def put(self, a: int, v: int) -> None:
+        a = (a + self.off) & 0xFFFFFFFF
+        self.writes.add(a)
+        self.mem.put(a, v)
+
 
 class Prog:
     def __init__(self, mode: str = "emit", mem: Mem | None = None, prefix: str = "pk"):
@@ -117,6 +143,9 @@ class Prog:
         self._last_mv: tuple | None = None
         self._seq = 0
         self.loop0_subs: dict[str, list[str]] = {}   # subroutine -> the loop0 sites that call it
+        self.s = [POISON] * 16            # 2026-11-12 (simd): PEy's S0..S15, run mode
+        self._simd = False                # inside simd()'s body
+        self._trace: list[str] | None = None    # run mode, inside simd(): the instructions run
 
     # -- emit helpers -------------------------------------------------------------------
     @property
@@ -130,6 +159,10 @@ class Prog:
         self._mg = None
         self._last_mv, self._mv = self._mv, None
         self._seq += 1
+        if self._simd:
+            assert not SIMD_REFUSE.search(text), f"not in a SIMD region (simd()): {text}"
+            if self._trace is not None:
+                self._trace.append(text)
         if not self.run:
             self._forget(text)
             line = f"      {text}"
@@ -239,12 +272,14 @@ class Prog:
             self.known.clear()
 
     def place(self, name: str) -> None:
+        self._no_simd()
         self._mg = self._mv = None
         if not self.run:
             self.known.clear()                 # control can arrive here from elsewhere
             self.lines += [f".GLOBAL {name}.;", f"{name}.:"]
 
     def jump(self, cond: str, target: str) -> None:
+        self._no_simd()
         self._mg = self._mv = None
         if not self.run:
             self.known.clear()
@@ -252,6 +287,7 @@ class Prog:
             self.lines.append(f"      {pre}JUMP 0x0;".ljust(40) + f"// -> {target}.")
 
     def jump_abs(self, cond: str, addr: int, note: str) -> None:
+        self._no_simd()
         self._mg = self._mv = None
         if not self.run:
             self.known.clear()
@@ -279,6 +315,7 @@ class Prog:
         """Rd = the 32-bit V. Emit mode leaves the load out when Rd is known to hold V
         already (v0.24: the DSP's 1 MiB upload buffer); run mode loads it either way,
         which changes nothing then, so the model is the same program."""
+        assert not self._simd, "no constant load in a SIMD region (simd(): it may not reach Sd)"
         if self.run:
             self.steps += 1
             self._mg = None
@@ -708,6 +745,69 @@ class Prog:
                 self.r[load[0]] = load[1]
 
     # -- structured control flow ------------------------------------------------------
+    # -- SIMD (2026-11-12, engine-layout; the User: "SIMD oh yes!") ---------------------
+    def simd(self, body) -> None:
+        """BODY in SIMD mode (MODE1.PEYEN): each instruction runs on PEx (R0..R15) and PEy (S0..S15) at once,
+        and each memory move into or out of an R register moves PEy's S register from the next word (Ia + 1,
+        a normal word). The same operations on each lane: each lane's floats are the scalar program's, bit for
+        bit.
+
+        BODY is straight-line code: no jump, loop, call, constant load (load constants before, and give PEy
+        its own through memory), I/M/L/B register write or mode write (SIMD_REFUSE). Run mode runs BODY on
+        PEx, then again on PEy from the same I registers, with the S registers and the memory a word on, and
+        holds it to what the core does in one pass: both lanes the same instructions (no branch on data), the
+        I registers the same after, and neither lane touching a word the other wrote. PEy's S registers start
+        each region as POISON (a NaN): a lane that reads one it did not load gives a different output, which
+        the model tests see. The NOP after each MODE1 write: its effect latency (conservative: the stock's
+        own sequence is not checked).
+
+        Cost: one step an instruction for both lanes, plus the four of the switch."""
+        assert not self._simd, "a SIMD region in a SIMD region"
+        self.e(SIMD_ON)
+        self.e("NOP;")
+        if not self.run:
+            self._simd = True
+            body()
+            self._simd = False
+        else:
+            self._simd_run(body)
+        self._simd = False
+        self.e(SIMD_OFF)
+        self.e("NOP;")
+
+    def _no_simd(self) -> None:
+        assert not self._simd, "no control flow in a SIMD region (simd())"
+
+    def _simd_run(self, body) -> None:
+        start = (self._alu, self._mg, self._mv, self._last_mv, self._seq, self.steps)
+        i0, mem = list(self.i), self.mem
+
+        def lane(off: int):
+            self._alu, self._mg, self._mv, self._last_mv, self._seq, self.steps = start
+            self.i = list(i0)
+            self.mem = _LaneMem(mem, off)
+            self._trace = []
+            self._simd = True
+            try:
+                body()
+            finally:
+                self._simd = False
+            out = (self.mem, self._trace, list(self.i))
+            self._trace, self.mem = None, mem
+            return out
+
+        mx, tx, ix = lane(0)
+        end = (self._alu, self._mg, self._mv, self._last_mv, self._seq, self.steps)
+        rx, self.r = self.r, [POISON] * 16
+        my, ty, iy = lane(4)
+        self.s, self.r = self.r, rx
+        self._alu, self._mg, self._mv, self._last_mv, self._seq, self.steps = end
+        self.i = ix
+        assert tx == ty, "SIMD lanes ran different instructions (a branch on data in a SIMD region)"
+        assert ix == iy, "SIMD lanes left the I registers different"
+        clash = mx.writes & (my.reads | my.writes) | my.writes & mx.reads
+        assert not clash, f"SIMD lanes share words: {sorted(hex(a) for a in clash)[:4]}"
+
     def _cmp(self, a: int, b: int, kind: str) -> int:
         if kind == "f":
             x, y = self.F(a), self.F(b)
@@ -730,6 +830,7 @@ class Prog:
         self._branch(test, cond, then, else_)
 
     def _branch(self, test, cond, then, else_) -> None:
+        self._no_simd()
         if self.run:
             if test():
                 then()
@@ -751,6 +852,7 @@ class Prog:
     def loop(self, counter: int, n_from: int, body, one: int = 12) -> None:
         """for (counter = n_from; counter; counter--) body(). COUNTER is a scratch word
         address (the body may use every register). ONE: a register body() leaves free."""
+        self._no_simd()
         self.iconst(0, n_from)
         self.st(counter, 0)
         top = self.label("loop")
@@ -777,6 +879,7 @@ class Prog:
         fewer (the load and the store of the counter). BODY must not use R0, nor may a subroutine it calls
         (emit mode: no R0 / F0 in its lines, and emit_subs checks the subroutines it jumps to; run mode: R0
         unchanged by it); a body that does keeps loop()."""
+        self._no_simd()
         site = sys._getframe(1)
         where = f"@{site.f_code.co_filename}:{site.f_lineno}"
         if self.run:
@@ -808,6 +911,7 @@ class Prog:
         PRM's VISA rule, gate_hwrules.py) its last 11 instructions all 48-bit encodings, that is each with a
         memory move or a condition (a plain compute is a 32-bit one): the caller adds a harmless move. R<cnt>
         keeps N (LCNTR is loaded from it). The end label sits on the body's last instruction."""
+        self._no_simd()
         assert n_from >= 2
         self.iconst(cnt, n_from)
         if self.run:
@@ -833,6 +937,7 @@ class Prog:
         """v0.42: loop() with the count in register COUNTER (no scratch word: two L2 accesses
         an iteration fewer). BODY must leave COUNTER alone (ONE it may use). N_FROM None: the
         count is in COUNTER already, and is not 0."""
+        self._no_simd()
         if n_from is not None:
             self.iconst(counter, n_from)
         elif self.run:
@@ -860,6 +965,7 @@ class Prog:
         the return address - 1 in I12, and the copy ends `JUMP (M14, I12)` (M14 is 1, an
         ABI constant), not delayed. Clobbers R12 and I12 (saved and restored around the
         whole program); BODY must not call."""
+        self._no_simd()
         assert not self.in_sub, f"{name}: subroutines are leaves"
         if self.run:
             self.in_sub = True

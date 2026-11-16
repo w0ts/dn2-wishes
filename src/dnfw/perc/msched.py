@@ -8,6 +8,7 @@ An operation is (kind, op, writes, reads, ireg):
     ("mov", "ld", (d,), (), i)                                Fd = DM(Ii, M6), Ii one word on
     ("mov", "ldk", (d,), (), (i, k))                          Fd = DM(k, Ii)
     ("mov", "st", (), (s,), i)                                DM(Ii, M6) = Fs, Ii one word on
+    ("mov", "stk", (), (s,), (i, k))                          DM(k, Ii) = Fs (2026-11-12, simd)
 Registers are "F0".."F15". Each value is computed exactly as written: the schedule only reorders within what the
 dependencies allow (a read after the write it needs, a write after every earlier read of the register (the same
 instruction is fine: the core reads every operand before it writes), writes in program order, the moves through
@@ -104,7 +105,7 @@ def schedule(ops: list) -> list[list[int]]:
             o = ops[m]
             if o[1] in ("ld", "ldk") and set(o[2]) & (ws | rs):
                 continue
-            if o[1] == "st" and set(o[3]) & ws:
+            if o[1] in ("st", "stk") and set(o[3]) & ws:
                 continue
             if pick and _ireg_num(o) not in (0, 1, 2, 3):
                 continue
@@ -146,6 +147,8 @@ def emit(p, ops: list) -> int:
                 parts.append(("ld", _n(m[2][0]), _ireg_num(m)))
             elif m[1] == "ldk":
                 parts.append(("ldk", _n(m[2][0]), m[4][1], _ireg_num(m)))
+            elif m[1] == "stk":
+                parts.append(("stk", m[4][1], _ireg_num(m), _n(m[3][0])))
             else:
                 parts.append(("st", _ireg_num(m), _n(m[3][0])))
         if len(parts) == 1 and parts[0][0] == "op":
@@ -155,6 +158,8 @@ def emit(p, ops: list) -> int:
             p.ldpost(parts[0][1], parts[0][2])
         elif len(parts) == 1 and parts[0][0] == "ldk":
             p.ldi(parts[0][1], parts[0][2], parts[0][3])
+        elif len(parts) == 1 and parts[0][0] == "stk":
+            p.sti(parts[0][1], parts[0][2], parts[0][3])
         elif len(parts) == 1 and parts[0][0] == "st":
             p.stpost(parts[0][1], parts[0][2])
         else:
