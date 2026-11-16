@@ -386,17 +386,21 @@ def main() -> int:
               all(v == stock_t or v in units for v in texts.values()) and stock_t not in units,
               ", ".join(f"{k} {v:#x}" + (" (unit)" if v in units else "") for k, v in texts.items())
               + f"; stock {stock_t:#x}")
-        snd = SENTINEL + 0x200                               # a sound: type SOPHIE (20), TUNE (slot 29) in tune
+        snd = SENTINEL + 0x200                               # a sound: type SOPHIE (20), its TUNE in tune
         machine.write(snd, bytes(0x100))
         machine.write(snd + 0xDE, bytes([20]))
-        TSLOT = 29
+        # TUNE's place follows SOPHIE's TUNE_K (2026-11-11: TUNE on G, the engine MODL on H): its PERC record and slot
+        import re as _re                                    # noqa: PLC0415
+        from dnfw.perc.machines import PARAMS as _PP       # noqa: PLC0415
+        _src = (HERE.parent / "src/dnfw/mnm/sophie.py").read_text()
+        TREC, TSLOT = _PP[int(_re.search(r"^TUNE_K, MODL_K = (\d+), \d+", _src, _re.M).group(1))][:2]
 
         def turn(d, v, func):
             put16(snd + 0x14 + 2 * TSLOT, v)
             put32(lay["smp_func_held"], 1 if func else 0)
             put32(lay["smp_knob_d"], d & 0xFFFFFFFF)
             put32(lay["smp_knob_at"], machine.long(FRAMES))
-            r = call(lay["smp_quant"], snd, TSLOT, (v + (0x100 if d > 0 else -0x100)) & 0xFFFF, 240)[0] & 0xFFFF
+            r = call(lay["smp_quant"], snd, TSLOT, (v + (0x100 if d > 0 else -0x100)) & 0xFFFF, TREC)[0] & 0xFFFF
             put32(lay["smp_func_held"], 0)
             return r
         got = {(d, f): turn(d, 50 << 8, f) for d in (1, -1) for f in (False, True)}

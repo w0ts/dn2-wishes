@@ -33,7 +33,8 @@ MODELS = ("FUSE", "STAK", "SPLT", "SHRD", "PIPE", "BOOM", "KICK")
 FUSE, STAK, SPLT, SHRD, PIPE, BOOM, KICK = range(7)
 # Sophie's factory snare-ish start: decay 0.24 s, color 52, metal 76, feedback 18, sweep 28,
 # crush 30 (pad 3), FUSE, in tune
-DEFAULTS = (61, 66, 97, 23, 82, 38, 64, 0)
+DEFAULTS = (61, 66, 97, 23, 82, 38, 64, 9)   # MODL 9: the middle of FUSE's knobs, where fmt.c's quantiser stores the
+                                             # first engine (mnm_rep); 0 was stored as 7 on record 240 (2026-11-11)
 
 SR = 44100.0
 TAU = 2.0 * math.pi
