@@ -320,7 +320,8 @@ GRAN_STATE_DM, GRAN_STATE_STRIDE = SHFT_STATE_DM + 16 * SHFT_STATE_STRIDE, 128  
 # DDRW 6,800, docs/dsp-cost.md), and an L1 access costs no more than its instruction. The
 # bookkeeping (keys, costs, the voice order, rests, strikes) stays at MNM_SCRATCH_L2.
 MNM_RENDER_DM = 0x2E5400
-MNM_RENDER_BYTES = 0x1000                                    # to 0x2e6400 (core.RENDER_BYTES used)
+MNM_RENDER_BYTES = 0xD00                                     # to 0x2e6100 (core.RENDER_BYTES 0xcd0 used): TB303's KTAB
+                                                             # follows (2026-11-12; 0x1000 to 0x2e6400 before)
 GRAN_TABLES_DDR = 0x81214000
 GRAN_BUF_DDR, GRAN_BUF_STRIDE = 0x81400000, 0x20000
 # v0.26: RESONATOR and CZ are gone (their types are the Monomachine machines', in PERC's

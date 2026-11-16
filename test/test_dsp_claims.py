@@ -55,8 +55,10 @@ CLAIMS = [
                                                  "dnfw.waverider.dsp.INS_STATE_DM"), True),
     ("the stereo inserts' state", 0x2E3A40, 0x2E4050, ("dnfw.inserts.post", "dnfw.waverider.dsp.POST_STATE_DM"), True),
     ("the bus FDN8 instances' stores (run time)", 0x2E4050, 0x2E53D0, ("dnfw.inserts.bus",), False),
-    ("the Monomachine render scratch (opt-inserts: IN transient in the post pass)", 0x2E5400, 0x2E6400,
+    ("the Monomachine render scratch (opt-inserts: IN transient in the post pass)", 0x2E5400, 0x2E6100,
      ("dnfw.waverider.dsp.MNM_RENDER_DM", "dnfw.inserts.post", "dnfw.inserts.bus", "dnfw.sampler.program"), False),   # post.LINE, bus.UNIT_L1, the circular-buffer probe's PROBE_BUF (read only)
+    ("TB303's constants table KTAB (opt-synths, 2026-11-12)", 0x2E6100, 0x2E6300,
+     ("dnfw.mnm.tb303_sched", "dnfw.waverider.dsp.TB303_KTAB_DM"), True),
     ("FDN8 state", 0x2E6400, 0x2E6E00, ("dnfw.fdn8.program", "dnfw.waverider.dsp.FDN8_STATE_DM"), True),
     ("XDLY state", 0x2E6E00, 0x2E7000, ("dnfw.xdly.program", "dnfw.waverider.dsp.XDLY_STATE_DM"), True),
     ("Machinedrum / Monomachine voice slots", 0x2E7000, 0x2EB000, ("dnfw.waverider.dsp.MD_STATE_DM",), True),
@@ -149,7 +151,7 @@ def test_real_extents_fit_their_claims():
     assert post.SCRATCH + post.SCRATCH_BYTES <= 0x2E4050
     assert dsp.SMP_DEC_DM + 16 * 48 <= 0x2E0080
     assert dsp.MD_STATE_DM + 16 * 1024 <= 0x2EB000
-    assert dsp.MNM_RENDER_DM + dsp.MNM_RENDER_BYTES <= 0x2E6400
+    assert dsp.MNM_RENDER_DM + dsp.MNM_RENDER_BYTES <= 0x2E6100   # (TB303's KTAB from 0x2E6100)
     if hasattr(dsp, "FX_DM"):                      # opt-stock's block (dnfw.waverider.stockfx)
         assert 0x20098400 <= dsp.FX_DM and dsp.FX_DM + dsp.FX_BYTES <= 0x2009B400
 
