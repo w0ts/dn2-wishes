@@ -525,13 +525,11 @@ def region_b(p: Prog, L: C.Layout) -> dict:
         st(T.S_Y4, y4)
         out = g.mul(y4, ld(T.T_G))
         return g.dbl(out)
-    f = [pre(0), pre(1)]
-    st(T.T_Y0, ladder(f[0]))
-    f.append(pre(2))
-    st(T.T_Y0 + 1, ladder(f[1]))
-    f.append(pre(3))
-    st(T.T_Y0 + 2, ladder(f[2]))
-    st(T.T_Y0 + 3, ladder(f[3]))
+    f = [pre(0)]                                 # T.OS phases (DN2_TB303_2X: two), each pre one ahead of its ladder
+    for j in range(T.OS):
+        if j + 1 < T.OS:
+            f.append(pre(j + 1))
+        st(T.T_Y0 + j, ladder(f[j]))
     if SPLIT_B:
         g.emit("B1")
         g = Gen(p, L)
@@ -560,7 +558,7 @@ def region_b(p: Prog, L: C.Layout) -> dict:
         st(s0w, s0)
         st(s1w, s1)
     g.scope()
-    y = ld(T.T_Y0 + 3)
+    y = ld(T.T_Y0 + T.OS - 1)
     y = g.onepole(y, T.AP, T.S_APX, T.S_APY)
     y = g.onepole(y, T.HP2, T.S_H2X, T.S_H2Y)
     y = g.biquad(y, T.NOTCH, T.S_NX1, T.S_NX2, T.S_NY1, T.S_NY2)
