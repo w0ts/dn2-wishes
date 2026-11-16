@@ -281,3 +281,29 @@ All 49 machines, base -> now (est cycles a block, one voice, steady):
 | PLT-SD | 12,015 | 12,015 | +0.0 % |
 | PLT-HH | 8,557 | 8,557 | +0.0 % |
 | TB303 | 44,597 | 39,176 | -12.2 % |
+
+## 2026-11-11 (session budget-table): the post inserts (CHOR, WIDE) and the bus pass
+
+Branch `claude/speed-chor-fc81b2`, from 81113ac3. Every change here is bit-exact (output word for word as the
+unmodified pass: `postref` / `busref`, the pass models' tests, and the same tests with garbage in every word the
+pass must not assume zero: scratch, wet buffers, the rings, the FDN8 stores). Cost = the DSL's run-mode steps
+(merged moves not counted; jumps counted) + 0.9 x (4 L2 + 10 DDR), 16 voice slots, one insert slot, steady
+(scratch: `pc.py` post pass, `pb.py` bus pass; the old tree is `git archive 81113ac3`).
+
+| change | before -> after (est cycles a block) |
+|---|---|
+| CHOR voice loop and mix loop in registers: the delay, step, gains, ring base, mask and position stay in R0..R15, 4 samples a pass, the wet l / r and the neighbours' moves ride on the computes, the ring written through I4 post-modified (the write place is a multiple of 32 from a fresh slot, so only the block's last word wraps, its address set apart) | 1 voice 63,509 -> 42,485, 4 voices 165,877 -> 110,005 |
+| CHOR: a mirror word before each 4 KB ring (stride 4,104 B: the mirror, the ring, 4 spare), refreshed from the ring's last word at the start of each block; a read's second tap is `DM(-1, I2)`, no second address | 4 voices 110,005 -> 102,245 (17 instructions a sample-voice, was 58) |
+| CHOR: the wet buffers zeroed 16 words a pass | 4 voices 102,245 -> 101,349 |
+| WIDE in two passes (mid, side x WDTH x 2, the ring write; then the read and the two one-poles) | 16 slots 46,293 -> 33,237 |
+| FDN8 bus instances' stores (8 x 156 words) in L1 0x2e4050..0x2e53d0 (the 5 KB free after the post pass's state), the swap copies 8 words a pass | one FDN8 bus instance 32,350 -> 30,671 (L2 stores freed: 8 KB of the bus pass's L2 state) |
+
+CHOR with 4 voices (the dearest knob setting) and 16 slots: 165.9k -> 101.3k (-39 %), both insert slots 332k -> 203k.
+What is left of it: 17 instructions a sample-voice (2,048 of them: 35k), 2 DDR reads a sample-voice (41k est, the rings
+are 128 KB, no room in L1 / L2), the mix loop 7.3k, per-slot set-up (records, exp2, sines) about 12k.
+Tried on paper and dropped: reading y1 from the previous sample's y0 (needs a branch, nets ~4 cycles a sample), a 40-word
+window of the ring copied into L1 per voice-block (DDR 2.0 -> 1.25 a sample but the copy costs about what it saves),
+caching the derived knob values per record (CHOR 1.6k, WIDE 4.8k a block).
+
+The empty passes' idle tax (all records OFF), measured on this tree: post 48 steps, bus 164 (its L2 save area), pre 21
+(flags from 9f692b8c): the ~25k of the budget table's "idle taxes" were gone before this session.

@@ -155,7 +155,7 @@ INS_STATE_DM = 0x2E3000                                      # 2026-11-11 (perf)
 # in DDR. The engine's call of the FX sends (sw 0x1c3054) gets wr_inpost as its target; wr_inpost JUMPs on
 # to the sends.
 POST_L2_LOAD = 0x200B0000
-POST_L2_SPAN = 0x1000                        # the code; then the state (dnfw.inserts.post.STATE)
+POST_L2_SPAN = 0x1800                        # the code (4,078 B since 2026-11-11, the unrolled loops; 0x1000 before; the L2 from 0x200b1800 to the sample machines' is unused)
 POST_SW = 0xB80000 + (POST_L2_LOAD - 0x20000000) // 2        # 0xbd8000
 # 2026-11-09: DRONE's BEAT side blocks at 0x200b1800 (dnfw.inserts.post.SIDE_L2, 0x900 B); the A2 filter
 # machines' pass (dnfw.a2f.program): its code, then its state
@@ -174,9 +174,9 @@ SENDS_SITE_STOCK = bytes.fromhex("04181c003817")
 # instances' stores, not loaded); each instance's DDR in dnfw.inserts.design (FDN8_RING_DDR,
 # XDLY_LINES_DDR), not loaded either (a fresh instance clears, or never reads, what it has not written)
 INSBUS_L2_LOAD = 0x200BC000
-INSBUS_L2_SPAN = 0xC00
+INSBUS_L2_SPAN = 0x1000                      # (0xc00 until 2026-11-11: the unrolled copy loops, insbus.asm 3,154 B)
 INSBUS_SW = 0xB80000 + (INSBUS_L2_LOAD - 0x20000000) // 2    # 0xbde000
-INSBUS_STATE_L2 = INSBUS_L2_LOAD + INSBUS_L2_SPAN            # 0x200bcc00
+INSBUS_STATE_L2 = INSBUS_L2_LOAD + INSBUS_L2_SPAN            # 0x200bd000
 OUT_SITE_SW = 0x1C307B                       # the engine: CJUMP 0x1c244d (DB), then its two pushes
 OUT_SITE_STOCK = bytes.fromhex("04181c004d24")
 # 2026-11-10: the L2 code spans are loaded as the code and 128 bytes of zeros, not padded to the span

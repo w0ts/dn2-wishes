@@ -252,13 +252,23 @@ def xround_i(p: Prog, d: int, a: int, b: int) -> None:
     p.iop(d, 13, "+", 3)
 
 
+_CEN = [0]          # (perf, 2026-11-11) the state word I0 points at (S0 + _CEN) while a pair runs
+
+
 def ld(p: Prog, d: int, k: int, ix: int = 3) -> None:
-    """Rd = state word k, through I3 (the slot) or I1 (a pair's base, C['b'])."""
-    p.ldi(d, K.S0 + k, ix)
+    """Rd = state word k, through I3 (the slot) or I1 (a pair's base, C['b']); IX 0: through I0, which
+    pair() points at state word _CEN (a compute's move reaches -32..31 words, S0 + k through I3 / I1 not)."""
+    if ix == 0:
+        p.ldi(d, k - _CEN[0], 0)
+    else:
+        p.ldi(d, K.S0 + k, ix)
 
 
 def st(p: Prog, k: int, r: int, ix: int = 3) -> None:
-    p.sti(K.S0 + k, ix, r)
+    if ix == 0:
+        p.sti(k - _CEN[0], 0, r)
+    else:
+        p.sti(K.S0 + k, ix, r)
 
 
 def rebase(p: Prog, L: K.Layout, ix: int) -> None:
@@ -324,8 +334,18 @@ def pair(p: Prog, L: K.Layout, o: dict, ix: int = 3) -> None:
                           ramp decaying by rdec (EFM-BD); mfrq: the ratio's halves
       fixed mode (P, incm, f2): the block's f, inc_m (two words) and 2f's halves
       mod                 MOD's halves
-    Leaves R8 = f. Clobbers R1-R3, R5-R15, I1."""
+    Leaves R8 = f. Clobbers R1-R3, R5-R15, I1, I0 (perf, 2026-11-11: I0 = the pair's state words, centred, when
+    they span at most 64 words: every access then folds into a compute, and no rebase after a table read)."""
     rebase(p, L, ix)
+    ks = [v + d for key, v in o.items() if key not in ("menv_shared",) and isinstance(v, int) for d in (0, 1)]
+    lo, hi = min(ks), max(ks)
+    if hi - lo <= 63:
+        p.geti(13, 1 if ix == 1 else 3)
+        p.iconst(12, p.ioff(1 if ix == 1 else 3, 4 * (K.S0 + lo + 32)))     # (I3 is biased: shrink)
+        p.iop(13, 12, "+", 13)
+        p.seti(0, 13, "I0 = the pair's state word lo + 32")
+        _CEN[0] = lo + 32
+        ix = 0
     if "ramp" in o:
         ld(p, 7, o["ramp"], ix)
         ld(p, 5, o["Ph"], ix)
@@ -1232,50 +1252,54 @@ class EFMCY:
         split_w(p, 5, o["dec"])
         hp_coefs(p, 13, o["hpe"], o["hpd"])
 
-        def op():
-            cy_base(p, L)
-            p.ldi(11, K.S0 + o["mph"], 1)      # the modulator's offset
-            p.ldi(3, 6, 1)
+        # (perf, 2026-11-11) the four operators unrolled, I0 = slot state word 16 (S0 + 16): every state word is
+        # then DM(k - 16, I0), the host words DM(1 + j / 6 + j, I3), all within a compute's move (-32..31); no
+        # operator base in C['b'] to reload after each table read, no loop
+        def op(j):
+            def ldw(d, k):
+                p.ldi(d, k - 16, 0)
+
+            def stw(k, r):
+                p.sti(k - 16, 0, r)
+            ldw(11, o["mph"] + j)              # the modulator's offset
+            p.ldi(3, 6 + j, 3)
             p.iop(13, 11, "+", 3)
             p.iconst(12, 0x7FFF)
             p.iop(13, 13, "AND", 12)
-            p.sti(K.S0 + o["mph"], 1, 13)
+            stw(o["mph"] + j, 13)
             sine_i(p, L, 7, 4, 11)
-            s(p, 5, o["w10"])
+            ldw(5, o["w10"])
             xround_i(p, 7, 5, 7)               # round(MOD * sine)
-            s(p, 5, o["env2"])
+            ldw(5, o["env2"])
             xround_i(p, 7, 5, 7)               # * the mod env (rounded)
-            cy_base(p, L)
-            p.ldi(11, K.S0 + o["fb"], 1)
+            ldw(11, o["fb"] + j)
             p.iop(7, 11, "+", 7)               # b = fb + mod
-            p.ldi(11, K.S0 + o["cph"], 1)
+            ldw(11, o["cph"] + j)
             p.iop(2, 11, "+", 7)
             p.iconst(12, 0x7FFF)
             p.iop(2, 2, "AND", 12)
-            p.ldi(3, 1, 1)
+            p.ldi(3, 1 + j, 3)
             p.iop(13, 11, "+", 3)              # phase + inc
-            p.sti(K.S0 + o["cph"], 1, 13)
+            stw(o["cph"] + j, 13)
             sine_i(p, L, 7, 4, 2)
-            s(p, 11, o["sum"])
+            ldw(11, o["sum"])
             p.iop(11, 11, "+", 7)
-            ss(p, o["sum"], 11)
-            s(p, 5, o["w12"])
+            stw(o["sum"], 11)
+            ldw(5, o["w12"])
             xround_i(p, 7, 5, 7)               # fb = round(FB * sine)
-            cy_base(p, L)
-            p.sti(K.S0 + o["fb"], 1, 7)
-            p.ld(13, L.C["b"])
-            p.iconst(12, 4)
-            p.iop(13, 12, "+", 13)
-            p.st(L.C["b"], 13)
+            stw(o["fb"] + j, 7)
 
         def one():
             zero(p, o["sum"])
-            p.ld(13, L.C["mdb"])
-            p.st(L.C["b"], 13)
+            p.geti(13, 3)
+            p.iconst(12, p.ioff(3, 4 * (K.S0 + 16)))                       # (I3 is biased: shrink)
+            p.iop(13, 12, "+", 13)
+            p.seti(0, 13, "I0 = slot state word 16")
             s(p, 11, o["menv"])
             p.lsh(11, 11, 1)
             ss(p, o["env2"], 11)
-            p.loop(L.C["n2"], 4, op)
+            for j in range(4):
+                op(j)
             edec(p, o["menv"], o["mdec"])
             s(p, 7, o["sum"])
             p.ash(7, 7, -2)                    # the mix

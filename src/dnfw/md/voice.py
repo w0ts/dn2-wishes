@@ -280,7 +280,7 @@ def advance(p: Prog, L: K.Layout) -> None:
         p.iop(1, 12, "+", 1)
         p.seti(5, 1)
         p.fconst(6, 0.0)
-        p.loop(L.C["n1"], 32, lambda: p.stpost(5, 6))
+        p.loop0(32, lambda: p.stpost(5, 6))
 
     def sound():
         _each(p, L, "render")

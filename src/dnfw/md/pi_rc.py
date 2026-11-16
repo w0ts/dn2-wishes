@@ -449,7 +449,7 @@ class _Cym:
             p.lsh(6, 2, 8)
             p.stpost(5, 6)                    # x1
             p.ipass(2, 4)                     # x1 = a1
-        p.loop(L.C["n1"], 17 if cls.KIND == "HH" else 16, step)
+        p.loop0(17 if cls.KIND == "HH" else 16, step)
         ss(p, NF1, 2)
         ss(p, NF2, 1)
         if cls.KIND != "HH":
@@ -579,7 +579,7 @@ class _Cym:
             p.ld(4, L.C["d"])
             p.fop(10, 10, "*", 4)
             p.ipass(9, 11)
-        p.loop(L.C["n1"], 32, one)
+        p.loop0(32, one)
         if k == "HH":                           # the last noise word kicks the envelope
             p.iconst(12, 0x79999A << 8)
             p.if_(9, "GE", 12, lambda: (p.fconst(12, 0x333333 * Q), p.fop(10, 10, "+", 12),
@@ -633,7 +633,7 @@ class _Cym:
             p.stpost(2, 9)
             p.fpass(6, 7)
             p.fpass(7, 9)
-        p.loop(L.C["n1"], 32, one)
+        p.loop0(32, one)
         ss(p, sa, 5)
         ss(p, s30, 6)
         ss(p, s31, 7)
@@ -770,7 +770,7 @@ class _Cym:
             p.ldi(4, 0, 2)
             p.fop(4, 4, "*", 11)
             p.stpost(2, 4)
-            p.loop(L.C["n1"], 31, one)
+            p.loop0(31, one)
             s(p, 0, G50)
             p.lsh(1, 1, 5)
             p.ipass(13, 0)
@@ -1037,7 +1037,7 @@ class _Cym:
             p.fconst(12, -1.0)
             p.fop(1, 1, "MAX", 12)
             p.stpost(5, 1)
-        p.loop(C["n1"], 32, one)
+        p.loop0(32, one)
 
     @staticmethod
     def _click_fill(p: Prog, L: K.Layout, nc: int) -> None:
@@ -1049,8 +1049,8 @@ class _Cym:
         p.float_(3, 12, 12)
         p.iconst(12, -23)
         p.float_(1, 1, 12)
-        p.loop(L.C["n1"], nc, lambda: p.stpost(2, 1))
-        p.loop(L.C["n1"], 32 - nc, lambda: p.stpost(2, 3))
+        p.loop0(nc, lambda: p.stpost(2, 1))
+        p.loop0(32 - nc, lambda: p.stpost(2, 3))
 
     @classmethod
     def _click_float(cls, p: Prog, L: K.Layout, cv: int, nc: int) -> None:
@@ -1121,7 +1121,7 @@ class _Cym:
         _xb(p, L, 0, 0x60)
         p.seti(2, 0)
         p.iconst(1, 0)
-        p.loop(C["n1"], 64, lambda: p.stpost(2, 1))
+        p.loop0(64, lambda: p.stpost(2, 1))
         p.ld(0, C["e"])
 
         def build():

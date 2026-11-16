@@ -58,7 +58,7 @@ assert PACK_OFFSET + 4 * PACK_WORDS == 0x1000 and RECORDS * FIELDS * 7 == 32 * P
 # the bus pass's L2 (dnfw.waverider.dsp.INSBUS_L2_LOAD: the 16 KB between the sample machines' code,
 # which ends at 0x200bc000, and PERC's at 0x200c0000; clear of ports3's 0x200b1800..0x200b6000): its
 # code, then its state
-BUS_STATE = 0x200BCC00                            # (dnfw.waverider.dsp.INSBUS_STATE_L2)
+BUS_STATE = 0x200BD000                            # (dnfw.waverider.dsp.INSBUS_STATE_L2)
 BUS_STATE_END = 0x200C0000                        # PERC's code starts here (dnfw.waverider.dsp.PERC_L2_LOAD)
 # the unpacked records, then the last change word: in the pre pass's state (loaded with zeros). 2026-11-11 (perf):
 # L1 (0x2e3000 + 0x600; was L2 0x200AFA00, 4 cycles an access): the pre and post passes' state and scratch are in
@@ -218,7 +218,8 @@ STEREO = 0x257EE8
 STEREO_STRIDE = 0x100
 STEREO_R = 0x80
 POST_RING = 1024                                  # samples a voice slot (21.3 ms), CHOR's or WIDE's
-POST_RING_DDR = 0x82510000                        # 16 x 4 KB (after TAPE's rings; zeros at power-on)
+POST_RING_DDR = 0x82510000                        # 32 x (4 KB + 8), after TAPE's rings (post.py: a mirror word, then the ring)
+POST_RING_STRIDE = 4 * POST_RING + 8              # perf 2026-11-11: CHOR's second tap of a read at the ring's first word
 
 # WIDE: K1 WDTH, K2 TIME, K3 BASS, K4 TONE. Mid and side; the side times 2 WDTH, plus the mid delayed by
 # TIME (0.5 .. 20 ms), high-passed at BASS (40 .. 640 Hz: the lows stay mono) and TONE'd, times WDTH.

@@ -97,12 +97,27 @@ def _pm():
     return PM
 
 
+# perf, 2026-11-11: while a half runs, I0 = the slot's state word 32 (I3 + 4 (S0 + 32)): the machine's state
+# words 0..63 are then DM(k - 32, I0), an offset a compute's move can carry (-32..31), where DM(S0 + k, I3) (64..)
+# cannot. I0 is not used elsewhere in the voice (PERC saves it). Only the emit-time flag below decides.
+_I0 = [False]
+S_MID = 32
+
+
 def _ld(p: Prog, d: int, k: int) -> None:
-    C.st(p, d, k)
+    if _I0[0]:
+        assert -32 <= k - S_MID < 32
+        p.ldi(d, k - S_MID, 0)
+    else:
+        C.st(p, d, k)
 
 
 def _sv(p: Prog, k: int, s: int) -> None:
-    C.sts(p, k, s)
+    if _I0[0]:
+        assert -32 <= k - S_MID < 32
+        p.sti(k - S_MID, 0, s)
+    else:
+        C.sts(p, k, s)
 
 
 def _mulk(p: Prog, d: int, a: int, x: float, t: int = 12) -> None:
@@ -682,6 +697,14 @@ def half(p: Prog, L: C.Layout) -> None:
             p.stpost(4, 8)
 
     def run():
-        _params(p, L)
-        p.loop(L.W["n4"], 16, lambda: _sample(p, L))
+        p.geti(8, 3)
+        p.iconst(9, p.ioff(3, 4 * (C.K.S0 + S_MID)))                       # (I3 is biased: shrink)
+        p.iop(8, 8, "+", 9)
+        p.seti(0, 8, "I0 = the slot's state word 32")
+        _I0[0] = True
+        try:
+            _params(p, L)
+            p.loop(L.W["n4"], 16, lambda: _sample(p, L))
+        finally:
+            _I0[0] = False
     p.if_(0, "EQ", 1, zeros, run, kind="i")

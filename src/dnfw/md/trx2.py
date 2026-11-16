@@ -1504,7 +1504,7 @@ class TRXMA:
                       lambda: p.if_(4, "EQ", 1, lambda: p.ifz(3, "EQ", flip), kind="i"), kind="i")
             p.ifz(1, "NE", track, idle)
             p.stpost(5, 8)
-        p.loop(C["n1"], 32, bead)
+        p.loop0(32, bead)
         _clamp(p, 1)
         ss(p, 3, 1)
         ss(p, 2, 2)
@@ -1800,7 +1800,7 @@ class TRXS2:
                 p.sti(0, 1, 4)
                 p.iconst(12, 4)
                 p.iop(1, 12, "+", 1)
-            p.loop(C["n1"], 32, gate)
+            p.loop0(32, gate)
             # 64..79: mixed in, each into a pair
             p.ld(1, C["mdb"])
             iaddk(p, 1, 1, 4 * K.OUT0)
@@ -1817,8 +1817,8 @@ class TRXS2:
                 p.sti(1, 1, 4)
                 p.iconst(12, 8)
                 p.iop(1, 12, "+", 1)
-            p.loop(C["n1"], 16, mix)
-            p.loop(C["n1"], 16, lambda: fibw(p, 6, 7, 4))    # 80..95
+            p.loop0(16, mix)
+            p.loop0(16, lambda: fibw(p, 6, 7, 4))    # 80..95
             s(p, 0, 6)
             s(p, 1, 7)
             ss(p, 6, 1)

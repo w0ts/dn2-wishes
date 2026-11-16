@@ -217,62 +217,116 @@ def wide(p: Prog) -> None:
     p.fconst(1, 1.0)
     p.fop(0, 1, "-", 0)
     p.st(C["ct"], 0)
+    # perf (2026-11-11): two passes over the block. First m, the side times WDTH x 2 into WL, WR (L1 scratch)
+    # and m into the ring (post-modified through I4; the write place is a multiple of 32 from a fresh slot
+    # on, so only the last word can wrap: its address is R10's). Then the ring read (all writes are in:
+    # a read is TIME >= 24 back, the ring holds 1024), the two one-poles and the mix.
+    p.ld(9, C["s0"])                             # wp
+    if p.run:
+        assert p.r[9] % 32 == 0, "WIDE: the write place moves 32 a block from 0"
+    p.ld(13, C["rb"])
+    p.iconst(12, 1)
+    p.iop(8, 12, "+", 9)
+    p.iconst(12, MASK)
+    p.iop(8, 8, "AND", 12)
+    p.lsh(8, 8, 2)
+    p.iop(8, 13, "+", 8)
+    p.seti(4, 8)                                 # the first word
+    p.iconst(12, D.BLOCK)
+    p.iop(10, 12, "+", 9)
+    p.iconst(12, MASK)
+    p.iop(10, 10, "AND", 12)
+    p.st(C["s0"], 10)                            # wp + 32
+    p.lsh(10, 10, 2)
+    p.iop(10, 13, "+", 10)                       # the last word's
+    p.iconst(12, 1)
+    p.iop(15, 12, "+", 9)
+    p.lsh(15, 15, 2)
+    p.ld(8, C["dl"])
+    p.lsh(8, 8, 2)
+    p.iop(15, 15, "-", 8)                        # t = 4 (wp + 1 - TIME): the first read, unmasked
     p.ld(4, C["lp"])
     p.seti(0, 4)
     p.ld(4, C["rp"])
     p.seti(1, 4)
+    p.iconst(4, WL)
+    p.seti(2, 4)
+    p.iconst(4, WR)
+    p.seti(3, 4)
+    p.fconst(0, 0.5)
+    p.ld(1, C["wg"])
+    p.ldpost(8, 0)
+    p.ldpost(9, 1)
 
-    def one():
-        p.ldi(5, 0, 0)                           # l
-        p.ldi(6, 0, 1)                           # r
-        p.fop(7, 5, "+", 6)
-        p.fconst(1, 0.5)
-        p.fop(7, 7, "*", 1)                      # m
-        p.fop(8, 5, "-", 6)
-        p.fop(8, 8, "*", 1)                      # sd
-        p.ld(9, C["s0"])
-        p.iconst(12, 1)
-        p.iop(9, 9, "+", 12)
-        p.iconst(12, MASK)
-        p.iop(9, 9, "AND", 12)
-        p.st(C["s0"], 9)                         # wp
-        p.ipass(10, 9)
-        ring_at(p, 10, 12)
-        p.sti(0, 4, 7)
-        p.ld(10, C["dl"])
-        p.iop(10, 9, "-", 10)
-        ring_at(p, 10, 12)
-        p.ldi(0, 0, 4)                           # d
-        p.ld(1, C["s1"])
-        p.fop(2, 0, "-", 1)
-        p.ld(3, C["ab"])
-        p.fop(2, 2, "*", 3)
-        p.fop(1, 1, "+", 2)
-        p.st(C["s1"], 1)                         # lb
-        p.fop(2, 0, "-", 1)                      # h
-        p.ld(1, C["s2"])
-        p.fop(2, 2, "-", 1)
-        p.ld(3, C["ct"])
-        p.fop(2, 2, "*", 3)
-        p.fop(1, 1, "+", 2)
-        p.st(C["s2"], 1)                         # lt
-        p.ld(3, C["wg"])
-        p.fop(2, 8, "*", 3)
-        p.ld(3, C["p1"])
-        p.fop(4, 1, "*", 3)
-        p.fop(2, 2, "+", 4)                      # s'
-        p.fop(3, 7, "+", 2)                      # lo
-        p.fop(4, 7, "-", 2)                      # ro
-        p.ld(0, C["p0"])
-        p.fop(3, 3, "-", 5)
+    def first(last: bool = False):
+        p.fop(2, 8, "+", 9)
+        p.fop(2, 2, "*", 0)                      # m
+        if last:
+            p.seti(4, 10)
+        p.stpost(4, 2)                           # the ring
+        p.stpost(2, 2)
+        p.fop(3, 8, "-", 9)
         p.fop(3, 3, "*", 0)
-        p.fop(3, 5, "+", 3)
-        p.stpost(0, 3)
-        p.fop(4, 4, "-", 6)
-        p.fop(4, 4, "*", 0)
-        p.fop(4, 6, "+", 4)
-        p.stpost(1, 4)
-    p.loop_r(11, D.BLOCK, one)
+        p.ldpost(8, 0)                           # the next sample's l, r
+        p.fop(3, 3, "*", 1)                      # the side x WDTH x 2
+        p.ldpost(9, 1)
+        p.stpost(3, 3)
+
+    def four():
+        for _ in range(4):
+            first()
+    p.loop_r(11, D.BLOCK // 4 - 1, four)
+    for k in range(4):
+        first(k == 3)
+    p.ld(4, C["lp"])
+    p.seti(0, 4)
+    p.ld(4, C["rp"])
+    p.seti(1, 4)
+    p.iconst(4, WL)
+    p.seti(2, 4)
+    p.iconst(4, WR)
+    p.seti(3, 4)
+    p.ld(0, C["p0"])                             # R0 MIX, R3 ab, R4 ct, R5 WDTH, R6 lb, R7 lt, R10 4,
+    p.ld(3, C["ab"])                             # R13 the ring's base, R14 4 MASK, R15 t
+    p.ld(4, C["ct"])
+    p.ld(5, C["p1"])
+    p.ld(6, C["s1"])
+    p.ld(7, C["s2"])
+    p.iconst(10, 4)
+    p.iconst(14, 4 * MASK)
+
+    def second():
+        p.iop(8, 15, "AND", 14)
+        p.iop(8, 8, "+", 13)
+        p.seti(4, 8)
+        p.ldi(8, 0, 4)                           # d
+        p.iop(15, 15, "+", 10)
+        p.fop(9, 8, "-", 6)
+        p.fop(9, 9, "*", 3)
+        p.fop(6, 6, "+", 9)                      # lb
+        p.fop(8, 8, "-", 6)                      # h
+        p.fop(8, 8, "-", 7)
+        p.fop(8, 8, "*", 4)
+        p.fop(7, 7, "+", 8)                      # lt
+        p.fop(9, 7, "*", 5)
+        p.ldpost(1, 3)                           # the side x WDTH x 2
+        p.fop(1, 1, "+", 9)                      # s'
+        p.ldpost(2, 2)                           # m
+        p.fop(8, 2, "+", 1)                      # lo
+        p.fop(9, 2, "-", 1)                      # ro
+        p.ldi(12, 0, 0)                          # l
+        p.fop(8, 8, "-", 12)
+        p.fop(8, 8, "*", 0)
+        p.fop(8, 12, "+", 8)
+        p.ldi(12, 0, 1)                          # r
+        p.stpost(0, 8)
+        p.fop(9, 9, "-", 12)
+        p.fop(9, 9, "*", 0)
+        p.fop(9, 12, "+", 9)
+        p.stpost(1, 9)
+    p.loop_r(11, D.BLOCK, second)
+    p.st(C["s1"], 6)
+    p.st(C["s2"], 7)
 
 
 def chor_params(p: Prog) -> None:
@@ -361,41 +415,49 @@ def chor_voice(p: Prog) -> None:
     p.iconst(4, WR)
     p.seti(1, 4)
 
+    # perf (2026-11-11): the whole inner loop in registers, 4 samples a pass: R0 d, R1 step, R2 gl, R3 gr,
+    # R4 0, R5 0xffc, R6 the ring's base, R7 4, R15 pos in bytes; R8, R9, R12, R13, R14 temporaries; I0 / I1 the
+    # wet words, I2 the ring read (the compute's memory move may take I0..I3 only)
+    p.ld(0, C["d"])
+    p.ld(1, C["step"])
+    p.ld(2, C["gl"])
+    p.ld(3, C["gr"])
+    p.iconst(4, 0)
+    p.iconst(5, 4 * MASK)
+    p.ld(6, C["rb"])
+    p.iconst(7, 4)
+    p.ld(15, C["pos"])
+    p.lsh(15, 15, 2)
+
     def one():
-        p.ld(0, C["d"])
-        p.ld(1, C["step"])
-        p.fop(0, 0, "+", 1)
-        p.st(C["d"], 0)
-        p.trunc(5, 0)                            # i
-        p.iconst(1, 0)
-        p.float_(1, 5, 1)
-        p.fop(6, 0, "-", 1)                      # fr
-        p.ld(7, C["pos"])
-        p.iop(8, 7, "-", 5)
-        ring_at(p, 8, 12)
-        p.ldi(2, 0, 4)                           # y0
-        p.iop(8, 7, "-", 5)
-        p.iconst(12, 1)
-        p.iop(8, 8, "-", 12)
-        ring_at(p, 8, 12)
-        p.ldi(3, 0, 4)                           # y1
-        p.fop(3, 3, "-", 2)
-        p.fop(3, 3, "*", 6)
-        p.fop(2, 2, "+", 3)                      # y
-        p.ldi(3, 0, 0)
-        p.ld(1, C["gl"])
-        p.fop(4, 2, "*", 1)
-        p.fop(3, 3, "+", 4)
-        p.stpost(0, 3)
-        p.ldi(3, 0, 1)
-        p.ld(1, C["gr"])
-        p.fop(4, 2, "*", 1)
-        p.fop(3, 3, "+", 4)
-        p.stpost(1, 3)
-        p.iconst(12, 1)
-        p.iop(7, 12, "+", 7)
-        p.st(C["pos"], 7)
-    p.loop_r(11, D.BLOCK, one)
+        p.fop(0, 0, "+", 1)                      # d
+        p.trunc(8, 0)                            # i
+        p.lsh(9, 8, 2)
+        p.iop(9, 15, "-", 9)                     # t = 4 (pos - i)
+        p.iop(13, 9, "AND", 5)
+        p.iop(13, 13, "+", 6)
+        p.seti(2, 13)
+        p.ldi(14, 0, 2)                          # y0
+        p.float_(12, 8, 4)
+        p.ldi(13, -1, 2)                         # y1: the word before (the ring's mirror at its first)
+        p.fop(12, 0, "-", 12)                    # fr
+        p.iop(15, 15, "+", 7)                    # pos
+        p.fop(13, 13, "-", 14)
+        p.fop(13, 13, "*", 12)
+        p.fop(13, 14, "+", 13)                   # y
+        p.ldi(9, 0, 0)                           # wet l
+        p.fop(8, 13, "*", 2)
+        p.ldi(14, 0, 1)                          # wet r
+        p.fop(9, 9, "+", 8)
+        p.stpost(0, 9)
+        p.fop(8, 13, "*", 3)
+        p.fop(14, 14, "+", 8)
+        p.stpost(1, 14)
+
+    def four():
+        for _ in range(4):
+            one()
+    p.loop_r(11, D.BLOCK // 4, four)
     p.ld(0, C["v"])
     p.iconst(12, 1)
     p.iop(0, 12, "+", 0)
@@ -406,14 +468,21 @@ def chor(p: Prog) -> None:
     """CHOR (postref.PostRef.chor); p0 MIX, p1 DPTH, p2 RATE, p3 DLY, p4 VOIC, p5 WDTH, p6 FDBK;
     s0 the phase, s1 wp"""
     chor_params(p)
+    p.ld(8, C["rb"])                             # the word before the ring = its last (the second tap of
+    p.iconst(12, 4 * MASK)                       # a read at the ring's first word)
+    p.iop(9, 8, "+", 12)
+    p.seti(2, 9)
+    p.ldi(9, 0, 2)
+    p.seti(2, 8)
+    p.sti(-1, 2, 9)
     p.iconst(4, WL)
     p.seti(0, 4)
     p.fconst(0, 0.0)
 
-    def zero():
-        p.stpost(0, 0)
-        p.stpost(0, 0)
-    p.loop_r(11, D.BLOCK, zero)
+    def zero():                                  # WL, WR are one run of 64 words
+        for _ in range(16):
+            p.stpost(0, 0)
+    p.loop_r(11, 2 * D.BLOCK // 16, zero)
     p.iconst(0, 0)
     p.st(C["v"], 0)
     p.ld(10, C["nv"])
@@ -427,37 +496,65 @@ def chor(p: Prog) -> None:
     p.iconst(4, WR)
     p.seti(3, 4)
 
-    def one():
-        p.ldi(5, 0, 0)                           # l
-        p.ldi(6, 0, 1)                           # r
+    # perf (2026-11-11): the block's ring writes go through I4 one word on each (the write place is a
+    # multiple of 32 from a fresh slot on, +32 a block: only the block's last word can wrap, so its
+    # address is set apart, R10), R0 MIX, R1 0.5, R4 FDBK; the next sample's four inputs are loaded in
+    # this one's compute instructions
+    p.ld(9, C["s1"])                             # wp
+    if p.run:
+        assert p.r[9] % 32 == 0, "CHOR: the write place moves 32 a block from 0"
+    p.ld(13, C["rb"])
+    p.iconst(12, 1)
+    p.iop(8, 12, "+", 9)
+    p.iconst(12, MASK)
+    p.iop(8, 8, "AND", 12)
+    p.lsh(8, 8, 2)
+    p.iop(8, 13, "+", 8)
+    p.seti(4, 8)                                 # the first word
+    p.iconst(12, D.BLOCK)
+    p.iop(10, 12, "+", 9)
+    p.iconst(12, MASK)
+    p.iop(10, 10, "AND", 12)
+    p.st(C["s1"], 10)                            # wp + 32
+    p.lsh(10, 10, 2)
+    p.iop(10, 13, "+", 10)                       # the last word's
+    p.ld(0, C["p0"])
+    p.fconst(1, 0.5)
+    p.ld(4, C["fb"])
+    p.ldi(5, 0, 0)
+    p.ldi(6, 0, 1)
+    p.ldpost(2, 2)
+    p.ldpost(3, 3)
+
+    def sample(last: bool = False):
         p.fop(7, 5, "+", 6)
-        p.fconst(1, 0.5)
         p.fop(7, 7, "*", 1)                      # x
-        p.ldpost(2, 2)                           # wet l
-        p.ldpost(3, 3)                           # wet r
-        p.fop(4, 2, "+", 3)
-        p.fop(4, 4, "*", 1)
-        p.ld(0, C["fb"])
-        p.fop(4, 4, "*", 0)
-        p.fop(7, 7, "+", 4)
-        p.ld(9, C["s1"])
-        p.iconst(12, 1)
-        p.iop(9, 9, "+", 12)
-        p.iconst(12, MASK)
-        p.iop(9, 9, "AND", 12)
-        p.st(C["s1"], 9)
-        ring_at(p, 9, 12)
-        p.sti(0, 4, 7)
-        p.ld(0, C["p0"])
-        p.fop(4, 2, "-", 5)
-        p.fop(4, 4, "*", 0)
-        p.fop(4, 5, "+", 4)
-        p.stpost(0, 4)
-        p.fop(4, 3, "-", 6)
-        p.fop(4, 4, "*", 0)
-        p.fop(4, 6, "+", 4)
-        p.stpost(1, 4)
-    p.loop_r(11, D.BLOCK, one)
+        p.fop(8, 2, "+", 3)
+        p.fop(8, 8, "*", 1)
+        p.fop(8, 8, "*", 4)
+        p.fop(7, 7, "+", 8)
+        if last:
+            p.seti(4, 10)
+        p.stpost(4, 7)                           # the ring
+        p.fop(8, 2, "-", 5)
+        p.ldpost(2, 2)                           # the next sample's wet l, r, l, r
+        p.fop(8, 8, "*", 0)
+        p.fop(8, 5, "+", 8)
+        p.stpost(0, 8)
+        p.fop(9, 3, "-", 6)
+        p.fop(9, 9, "*", 0)
+        p.ldpost(3, 3)
+        p.fop(9, 6, "+", 9)
+        p.ldi(5, 0, 0)
+        p.ldi(6, 1, 1)
+        p.stpost(1, 9)
+
+    def four():
+        for _ in range(4):
+            sample()
+    p.loop_r(11, D.BLOCK // 4 - 1, four)
+    for k in range(4):
+        sample(k == 3)
 
 
 def slot(p: Prog) -> None:
@@ -490,9 +587,11 @@ def run(p: Prog) -> None:
     p.iconst(12, STATE)
     p.iop(2, 12, "+", 1)
     p.st(C["sa"], 2)
-    p.lsh(1, 0, 12)                              # 4 KB a voice slot and insert slot
-    p.iconst(12, D.POST_RING_DDR)
-    p.iop(1, 12, "+", 1)
+    p.lsh(8, 0, 12)                              # RING_STRIDE (4 KB + 8) a voice slot and insert slot
+    p.lsh(9, 0, 3)
+    p.iop(8, 8, "+", 9)
+    p.iconst(12, D.POST_RING_DDR + 4)            # the word before the ring is CHOR's mirror of its last
+    p.iop(1, 12, "+", 8)
     p.st(C["rb"], 1)
     p.ld(0, C["t"])
     p.lsh(1, 0, 8)                               # the voice slot's stereo block

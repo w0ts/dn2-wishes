@@ -381,7 +381,7 @@ class PIML:
         p.float_(1, 1, 12)
         p.stpost(5, 1)
         p.fconst(1, 0.0)
-        p.loop(C["n2"], 31, lambda: p.stpost(5, 1))
+        p.loop0(31, lambda: p.stpost(5, 1))
         for i in range(8):
             s(p, 5, M.COEF + 3 * i)
             s(p, 6, M.COEF + 3 * i + 1)
@@ -413,7 +413,7 @@ class PIML:
                 K.sat(p, 14)
                 p.stpost(2, 14)
                 K.sat(p, 10)                            # x1 takes it through the limiter
-            p.loop(C["n2"], 32, mode)
+            p.loop0(32, mode)
             # stored as the firmware stores it: A1 through the limiter, A0 as it is
             floor23(p, 11, 8, 13, 14)
             p.fop(13, 8, "-", 11)                       # A0
@@ -441,7 +441,7 @@ class PIML:
             p.fop(6, 6, "*", 5)
             floor23(p, 6, 6, 13, 14)
             p.stpost(2, 6)
-        p.loop(C["n2"], 32, out)
+        p.loop0(32, out)
 
 
 MACHINES = (PIML,)

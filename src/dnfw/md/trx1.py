@@ -379,7 +379,7 @@ class TRXBD:
             p.fop(4, 4, "*", 5)
             for _ in range(3):
                 p.stpost(5, 4)
-        p.loop(C["n2"], 11, nz)
+        p.loop0(11, nz)
 
         def click(_n=None):
             s(p, 6, M.CLK)

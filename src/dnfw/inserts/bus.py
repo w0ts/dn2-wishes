@@ -54,8 +54,14 @@ C = {n: SCRATCH + 4 * k for k, n in enumerate(_NAMES)}
 FD_SEND = (SCRATCH + 4 * len(_NAMES) + FD_STRIDE - 1) // FD_STRIDE * FD_STRIDE   # the send FX's words,
 XD_SEND = FD_SEND + FD_STRIDE                                                     # while instances run
 XD_STORE = XD_SEND + XD_STRIDE
-FD_STORE = (XD_STORE + D.XDLY_INSTANCES * XD_STRIDE + FD_STRIDE - 1) // FD_STRIDE * FD_STRIDE
-END = FD_STORE + D.FDN8_INSTANCES * FD_STRIDE
+END = XD_STORE + D.XDLY_INSTANCES * XD_STRIDE
+# perf (2026-11-11): the FDN8 instances' stores in L1 (every block copies an instance's words in and out: 2
+# L2 accesses a word), in the 5 KB free after the post pass's state (post.py ends at 0x2e4044; MNM_RENDER_DM
+# starts at 0x2e5400), 156 words an instance, no gaps
+FD_L1 = 0x2E4050
+FD_L1_BYTES = 4 * FD_WORDS
+FD_STORE = FD_L1
+assert FD_L1 >= 0x2E4044 and FD_L1 + D.FDN8_INSTANCES * FD_L1_BYTES <= 0x2E5400
 assert END <= D.BUS_STATE_END, f"the bus pass's state runs past its room: {END:#x}"
 OUT_SW = 0x1C244D                                 # the output stage, the call's stock target
 G_IN = 1 / 14.125                                 # the routing's gain on a voice (docs/link-research.md §7)
@@ -99,13 +105,24 @@ def copy(p: Prog, dst: int | str, src: int | str, n: int) -> None:
     def one():
         p.ldpost(0, 0)
         p.stpost(1, 0)
-    p.loop_r(11, n, one)
+
+    def eight():                                 # perf (2026-11-11): 8 words a pass (the loop's 3 instructions shared)
+        for _ in range(8):
+            one()
+    if n >= 8:
+        p.loop_r(11, n // 8, eight)
+    for _ in range(n % 8):
+        one()
 
 
 def store_area(p: Prog, name: str, base: int, stride: int) -> None:
-    """C[name] = BASE + C['inst'] x STRIDE (a power of two). Clobbers R0, R12"""
+    """C[name] = BASE + C['inst'] x STRIDE. Clobbers R0, R12"""
     p.ld(0, C["inst"])
-    p.lsh(0, 0, stride.bit_length() - 1)
+    if stride & (stride - 1):
+        p.iconst(12, stride)
+        p.mul_ssi(0, 0, 12)
+    else:
+        p.lsh(0, 0, stride.bit_length() - 1)
     p.iconst(12, base)
     p.iop(0, 12, "+", 0)
     p.st(C[name], 0)
@@ -243,7 +260,7 @@ def unit_fdn8(p: Prog) -> None:
             p.iconst(0, 1)
             p.st(C["fds"], 0)
         p.ifz(0, "EQ", keep_send)
-        store_area(p, "own", FD_STORE, FD_STRIDE)
+        store_area(p, "own", FD_STORE, FD_L1_BYTES)
         copy(p, FP.STATE, "own", FP.DYN_WORDS)
         p.ld(0, C["own"])
         p.iconst(12, 4 * FP.DYN_WORDS)

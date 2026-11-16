@@ -39,6 +39,7 @@ TOP = K.TOP
 # scratch arrays (words from the scratch base: the delay area's word 1536)
 SCRW = 1536
 E, N, X40, X60, X80, XA0, XC0, COEF = 0, 32, 64, 96, 128, 160, 192, 224
+MID = X40 + 16                                     # (the res loop's I0)
 
 
 def q24(p: Prog, d: int, a: int) -> None:
@@ -96,7 +97,7 @@ def _each(p: Prog, L: K.Layout, body) -> None:
     def one():
         body()
         p.ldpost(12, 5)
-    p.loop(L.C["n1"], 32, one)
+    p.loop0(32, one)
 
 
 def _line(p: Prog, L: K.Layout, j: int, pos: int, tap: int | None, ri: int, rb: int) -> None:
@@ -455,7 +456,7 @@ class _PI:
             q24(p, 7, 5)
             p.stpost(5, 7)
             p.ipass(5, 6)
-        p.loop(C["n1"], 16, noise)
+        p.loop0(16, noise)
         ss(p, 34, 6)
         ss(p, 35, 4)
         p.st(C["d"], 4)
@@ -723,8 +724,10 @@ class _PI:
             p.ldi(4, 0, 2)
             p.ldi(5, 1, 2)
 
+            # (perf, 2026-11-11) I0 at X40 word k + 16 (a compute's move reaches -32..31 words; I5's offsets
+            # X40, X60 cannot, nor can its post-modify): X60 is +16, X40 -16, the step moves I0 one word on
             def res():
-                p.ldi(6, X60, 5)
+                p.ldi(6, X60 - MID, 0)
                 p.fpass(7, 4)
                 sat_r(7)
                 p.fop(11, 5, "*", 8)
@@ -734,11 +737,14 @@ class _PI:
                 p.fop(11, 10, "*", 6)
                 p.fop(4, 4, "+", 11)
                 p.fpass(5, 7)
-                p.ldi(6, X40, 5)
+                p.ldi(6, X40 - MID, 0)
+                p.ldpost(12, 0)
                 p.fop(6, 6, "+", 4)
                 sat_r(6)
-                p.sti(X40, 5, 6)
-            _each(p, L, res)
+                p.sti(X40 - MID - 1, 0, 6)
+            _scr(p, L, 15, MID)
+            p.seti(0, 15)
+            p.loop0(32, res)
             sat_r(4)
             p.sti(0, 2, 4)
             p.sti(1, 2, 5)
@@ -756,7 +762,7 @@ class _PI:
         def out():
             p.ldpost(4, 5)
             p.stpost(2, 4)
-        p.loop(C["n1"], 32, out)
+        p.loop0(32, out)
 
 
 class PISD(_PI):

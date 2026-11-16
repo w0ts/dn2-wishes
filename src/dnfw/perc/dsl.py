@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import math
 import re
+import sys
 import struct
 
 
@@ -111,6 +112,7 @@ class Prog:
         self._mv: tuple | None = None
         self._last_mv: tuple | None = None
         self._seq = 0
+        self.loop0_subs: dict[str, list[str]] = {}   # subroutine -> the loop0 sites that call it
 
     # -- emit helpers -------------------------------------------------------------------
     @property
@@ -725,6 +727,36 @@ class Prog:
         self.st(counter, 0)
         self.jump("NE", top)
 
+    def loop0(self, n_from: int, body, one: int = 12) -> None:
+        """perf, 2026-11-11: loop() with the count in R0 instead of a scratch word: the same registers
+        afterwards as loop() leaves (R0 = 0, ONE = 1), two L2 accesses and two instructions an iteration
+        fewer (the load and the store of the counter). BODY must not use R0, nor may a subroutine it calls
+        (emit mode: no R0 / F0 in its lines, and emit_subs checks the subroutines it jumps to; run mode: R0
+        unchanged by it); a body that does keeps loop()."""
+        site = sys._getframe(1)
+        where = f"@{site.f_code.co_filename}:{site.f_lineno}"
+        if self.run:
+            def checked_run():
+                before = self.r[0]
+                body()
+                assert self.r[0] == before, f"loop0: the body changed R0 {where}"
+            return self.loop_r(0, n_from, checked_run, one)
+        pat = re.compile(r"\b[RF]0\b")
+
+        def checked():
+            at = len(self.lines)
+            body()
+            subs = set()
+            for ln in self.lines[at:]:
+                text = ln.split("//")[0]
+                assert not pat.search(text), f"loop0: the body uses R0: {ln.strip()} {where}"
+                m = re.search(r"_sub_(\w+)", text)
+                if m:
+                    subs.add(m.group(1))
+            for name in subs:
+                self.loop0_subs.setdefault(name, []).append(where)
+        return self.loop_r(0, n_from, checked, one)
+
     def loop_r(self, counter: int, n_from: int | None, body, one: int = 12) -> None:
         """v0.42: loop() with the count in register COUNTER (no scratch word: two L2 accesses
         an iteration fewer). BODY must leave COUNTER alone (ONE it may use). N_FROM None: the
@@ -782,8 +814,12 @@ class Prog:
         for name, body in list(self.subs.items()):
             self.place(f"wr_{self.prefix}_sub_{name}")
             self.in_sub = True
+            at = len(self.lines)
             body()
             self.in_sub = False
+            for ln in self.lines[at:]:
+                assert not (name in self.loop0_subs and re.search(r"\b[RF]0\b", ln.split("//")[0])), \
+                    f"loop0: subroutine {name} uses R0: {ln.strip()} (called from {self.loop0_subs[name]})"
             # not delayed: the delayed form, JUMP (M14, I12) (DB), is the compiler's
             # function return, and the SHARC runner holds that form to its call stack
             self.e("JUMP (M14, I12);")
