@@ -41,6 +41,12 @@ def load() -> dict:
     return json.loads(TABLE.read_text())
 
 
+def _guard_floor() -> int:
+    """the DSP's frame guard expects a voice at max(1.5 x its last cost, FLOOR) at its turn (dnfw.perc.guard.around)"""
+    from ..perc import guard
+    return guard.FLOOR
+
+
 def c_header(t: dict | None = None) -> str:
     """the ColdFire's tables, u16 cycles (every cost < 65,536): load_md[TYPE], load_mnm[MNM machine] (its defaults),
     the choice tables by choice index (PLAITS MODL, SOPHIE MODL, ANALOG 2 FLT2, MONOMACHINE ENGN), the sample
@@ -72,6 +78,8 @@ def c_header(t: dict | None = None) -> str:
              f"#define LOAD_AVAIL {t['avail']}u",
              f"#define LOAD_VOICES {VOICES}",
              f"#define LOAD_TAIL {TAIL}u                 /* a released voice still sounding: the DSP's slot cost / 16 over this */",
+             # 2026-11-13: the DSP guard's least expected cost of a voice (dnfw.perc.guard.FLOOR): the budget keeps it free
+             f"#define LOAD_GUARD_FLOOR {_guard_floor()}u",
              f"#define LOAD_MD_N {len(t['md'])}",
              f"#define LOAD_TYPE_SLOT {PMx.TYPE_REC[1]}   /* MACHINEDRUM's TYPE: its frame slot (0..127, x N >> 7) */",
              f"#define LOAD_MI_PLAITS {mi('PLAITS')}",

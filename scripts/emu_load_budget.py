@@ -395,10 +395,11 @@ def main() -> int:
     got, ref, same = twin(e, sym, tails(None), 11, 90)
     check("11 no room reported: LOAD_AVAIL decides, the light tails fit: stock's result", got == ref and same,
           f"{got:#06x} / {ref:#06x}")
-    # 12: table 6,000 fits a 25,000 room (6,000 x 1.5 + 6,000 = 15,000); the track measured 15,000 does not (28,500):
-    # it steals (each slot's own last cost 9,000: over LOAD_TAIL, so sounding)
+    # 12: the room asked (load.c room_asked: need x 1.5 + FLOOR - one + 6,000): table 6,000 asks 69,000, the track's
+    # measured 15,000 asks 73,500; a 71,000 room: the table's would fit, the measure steals (each slot's own last
+    # cost 9,000: over LOAD_TAIL, so sounding)
     snap = e.save(SPANS)
-    k = tails(25000, measured=9000, table=6000, meas=15000)()
+    k = tails(71000, measured=9000, table=6000, meas=15000)()
     snd = k.sounding
     t0 = e.r32(sym["load_tails"])
     got = k.play(11, 90, True)

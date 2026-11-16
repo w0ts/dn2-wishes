@@ -71,6 +71,16 @@ extern volatile u32 smp_periods;                /* link.c: the periods (audio IS
 #define ROOM_FRESH   150u                       /* a room older than 0.1 s is not trusted: LOAD_AVAIL instead */
 #define ROOM_MARGIN  6000u                      /* cycles kept free besides a note's half again (its note block costs
                                                  * ~1.4 x its steady blocks: JUNO 15,000 / 10,700 on the unit) */
+
+/* 2026-11-13 (the coupled proof: the budget stole, the guard still skipped): the room a note of NEED (N voices of ONE)
+ * asks of the DSP's bus-pass room. The guard admits a voice at its turn only if max(1.5 x its last cost,
+ * LOAD_GUARD_FLOOR) still fits before its limit, so the room left after every voice must keep LOAD_GUARD_FLOOR less a
+ * voice's own cost free for the last one; then the note itself, half again for its note block, and a margin. */
+static int room_asked(u32 need, u32 one)
+{
+    u32 floor_part = LOAD_GUARD_FLOOR > one ? LOAD_GUARD_FLOOR - one : 0u;
+    return (int)(need + need / 2u + floor_part + ROOM_MARGIN);
+}
 extern u8 ins_sel[16][2];                       /* ins.c: each track's two insert types */
 extern int rvt_state, dlt_state;                /* fdn8/ui.c, xdly/ui.c: 1 when the send is FDN8 / XDLY */
 extern int fxp_chorus_type(void);               /* fxpage/fxp.c: 1 when the chorus send is JUNO */
@@ -99,6 +109,7 @@ static u32 hid_pool __attribute__((section(".data"))) = 0;    /* the free slots 
 static u32 hid_mask __attribute__((section(".data"))) = 0;
 static int hid_t __attribute__((section(".data"))) = -1;
 static u32 need_now __attribute__((section(".data"))) = 0;
+static u32 one_now __attribute__((section(".data"))) = 0;
 static u32 sum_now __attribute__((section(".data"))) = 0;
 static u16 cost_was[16] __attribute__((section(".data"))) = {0};
 static u16 voice_was[16] __attribute__((section(".data"))) = {0};
@@ -261,13 +272,13 @@ static int room_now(int *room)
 }
 
 /* the note fits: by the DSP's room while reported (2026-11-13), else by LOAD_AVAIL */
-static int fits_now(u32 sum, u32 need)
+static int fits_now(u32 sum, u32 need, u32 one)
 {
     int room;
     if (room_now(&room)) {
         load_by_room++;
         load_last_free = room;
-        return (int)(need + need / 2u + ROOM_MARGIN) <= room;
+        return room_asked(need, one) <= room;
     }
     load_last_free = (int)LOAD_AVAIL - (int)sum;
     return sum + need <= LOAD_AVAIL;
@@ -298,7 +309,7 @@ void load_pre(const u32 *a)
     load_checks++;
     load_last_sum = sum;
     load_last_need = one * (u32)n;
-    if (fits_now(sum, one * (u32)n)) {
+    if (fits_now(sum, one * (u32)n, one)) {
         load_pend += one * (u32)n;              /* (the DSP's next packet will show it) */
         return;
     }
@@ -319,6 +330,7 @@ void load_pre(const u32 *a)
         load_tails++;
     load_over++;
     need_now = one * (u32)n;
+    one_now = one;
     sum_now = sum;
     hid_t = t;
     hid_pool = LIVE_POOL & ~keep;
@@ -345,7 +357,7 @@ void load_post(u32 taken, u8 *fp)
         }
     int room, by_room = room_now(&room);
     u32 now = TICK;
-    while (by_room ? (int)(need_now + need_now / 2u + ROOM_MARGIN) > room + (int)freed
+    while (by_room ? room_asked(need_now, one_now) > room + (int)freed
                    : sum + need_now > LOAD_AVAIL) {   /* a heavy note: the next oldest held voices released */
         int best = -1;
         u32 at = 0;

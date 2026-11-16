@@ -45,7 +45,7 @@ def test_stock_tracks_and_the_setting_leave_stocks_allocation_alone():
     pre = re.search(r"void load_pre\(.*?\n}\n", LOAD_C, re.S).group(0)
     assert "if (load_off || a[2] != 1u || a[0] > 15u)" in pre          # off, a note-off, no track: nothing
     assert "if (!one)" in pre                                          # a stock machine's or MIDI's note: nothing
-    assert pre.index("if (fits_now(sum, one * (u32)n))") < pre.index("LIVE_POOL &= keep;")
+    assert pre.index("if (fits_now(sum, one * (u32)n, one))") < pre.index("LIVE_POOL &= keep;")
 
 
 def test_release_tails_are_stolen_first_and_the_dsp_room_decides():
@@ -77,3 +77,11 @@ def test_the_table_is_generated_and_fits_the_coldfires_words():
         assert t[k] and all(0 < v < 65536 for v in t[k] if v), k
     assert len(t["md"]) == 34 and len(t["plaits"]) == 13 and len(t["sophie"]) == 7 and len(t["a2flt"]) == 25
     assert t["send"]["FDN8"] > t["send"]["XDLY"] > 0
+
+
+def test_the_room_asked_keeps_the_guards_floor_free():
+    # 2026-11-13 (the coupled proof): the guard expects a voice at max(1.5 x its cost, FLOOR) at its turn
+    from dnfw.perc import guard as G
+    assert f"#define LOAD_GUARD_FLOOR {G.FLOOR}u" in LD.c_header(LD.load())
+    asked = re.search(r"static int room_asked\(.*?\n}\n", LOAD_C, re.S).group(0)
+    assert "LOAD_GUARD_FLOOR - one" in asked and "need + need / 2u + floor_part + ROOM_MARGIN" in asked
