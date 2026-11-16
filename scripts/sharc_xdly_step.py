@@ -5,6 +5,9 @@ return at 0x1c1c5f, run on the stock section 7 and on the build, block after blo
    register at the return and every word written are the stock image's, but XDLY's own state
    words; the stock delay's writes in its DDR state stay inside its sample area (which XDLY's
    lines use, and the switch clears) or are its control words below / above it (counted).
+   800 blocks, past the stock delay's first repeat at these settings (block 698: its length ramps after
+   the knob moves, 18,744 to ~26,150 samples and back toward ~21,400): the test hears a real repeat,
+   not single stray words, and quiet before it (STOCK_BLOCKS, REPEAT_FROM, QUIET_FROM).
 2. TYPE = XDLY: each block's output is dnfw.xdly.ref's, bit for bit, over noise, an impulse,
    loud input into FDBK 127 (the knee), knob moves (the times bend); the lines' written words are
    the reference's; every register the bus left is back at the return; the instructions per
@@ -37,6 +40,15 @@ ALIAS = 0x28000000
 # wrote came back NaN (it reads the pair before it writes it); XDLY's calls keep the marker (it writes every word)
 STOCK_FILL = 0
 REGS = {f"R{k}": (0x01010101 * (k + 3)) & 0xFFFFFFFF for k in range(16)}
+# the stock part runs past the stock delay's time (2026-11-15, opt-host, main: the 40-block test could not hear it;
+# the input stops at block 31; measured on G16: the first repeat's words at block 698, 64 of 64 from block 700, one
+# stray word per block before). "Heard" means a repeat: from REPEAT_FROM on, at least REPEAT_WORDS finite nonzero
+# words and REPEAT_FULL blocks with at least half a block heard (a runner that writes one stray word per block, as
+# g14h does, fails it). Before the repeat, from block
+# QUIET_FROM (the input stopped at block 31) to REPEAT_FROM, every block is quiet: fewer than QUIET_WORDS words heard
+# (main 2026-11-15: g14f's constant 21 words per block from block 0, before any input, is not a delay)
+STOCK_BLOCKS, REPEAT_FROM, REPEAT_WORDS, REPEAT_FULL = 800, 690, 200, 8
+QUIET_FROM, QUIET_WORDS = 40, 8
 
 
 def alias(a: int) -> int:
@@ -164,12 +176,12 @@ def ddr(a: int) -> int:
 
 def run(M5, snap, m2mach, m5img, stock_img) -> dict:
     checks, numbers = {}, {}
-    seq = script()
-    n_stock = 40
+    n_stock = STOCK_BLOCKS
+    seq = script(n_stock=n_stock)
     # 1. TYPE = stock: build vs stock image
     rs, rb = M5.init_on(snap, m2mach, stock_img), M5.init_on(snap, m2mach, m5img)
     same_out = same_regs = no_stray = ok = True
-    outside, stray, cost_stock, heard_stock = set(), set(), [], F32.Ear()
+    outside, stray, cost_stock, heard_stock, per_block = set(), set(), [], F32.Ear(), []
     for b in range(n_stock):
         tw, inl, inr, par = seq[b]
         rs, hs, os_, _, ws = call(M5, rs, tw, inl, inr, par, fill=STOCK_FILL)
@@ -185,13 +197,28 @@ def run(M5, snap, m2mach, m5img, stock_img) -> dict:
         no_stray &= not s
         cost_stock.append((hs[2], hb[2]))
         heard_stock.hear(os_[0] + os_[1])
+        per_block.append(F32.Ear().hear(os_[0] + os_[1]).n)
         for a in ws:
             o = ddr(a) - XD.STOCK_STATE
             if 0 <= o < 0x800000 and not (XD.STOCK_AREA[0] <= o < XD.STOCK_AREA[1]):
                 outside.add(o)
     checks["TYPE stock: both images make the call and come back to the bus"] = ok
-    checks["TYPE stock: every output word as the stock delay's (40 blocks: noise, an impulse, knobs moved)"] = same_out
-    checks["TYPE stock: the stock delay is heard in the test (not a run of zeros), finite"] = heard_stock.ok(200)
+    rep = per_block[REPEAT_FROM:]
+    full = sum(1 for n in rep if n >= 16)
+    checks[f"TYPE stock: every output word as the stock delay's ({n_stock} blocks: noise, an impulse, knobs moved)"] = \
+        same_out
+    checks[f"TYPE stock: the stock delay's repeat is heard (from block {REPEAT_FROM}: over {REPEAT_WORDS} words, "
+           f"{REPEAT_FULL}+ blocks at least half heard), finite"] = \
+        sum(rep) > REPEAT_WORDS and full >= REPEAT_FULL and heard_stock.bad == 0
+    quiet = per_block[QUIET_FROM:REPEAT_FROM]
+    checks[f"TYPE stock: quiet before the repeat (blocks {QUIET_FROM}-{REPEAT_FROM - 1}: under {QUIET_WORDS} words "
+           f"heard in each)"] = all(n < QUIET_WORDS for n in quiet)
+    numbers["stock delay: words heard in the repeat window, blocks at least half heard"] = (sum(rep), full)
+    numbers["stock delay: before the repeat: most words heard in a block, blocks not quiet"] = (
+        max(quiet), sum(1 for n in quiet if n >= QUIET_WORDS))
+    numbers["stock delay: words heard per block (blocks 0-39; from REPEAT_FROM)"] = (per_block[:40], rep)
+    numbers["stock delay: first block from 40 with at least half a block heard"] = next(
+        (b for b in range(40, n_stock) if per_block[b] >= 16), None)
     checks["TYPE stock: every register at the return as stock's"] = same_regs
     checks["TYPE stock: every word written as stock's, but XDLY's own state words"] = no_stray
     numbers["stock: instructions per block (stock image, build): min, max"] = (
