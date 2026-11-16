@@ -79,15 +79,19 @@ static void shift(u32 at, s32 by)
 {
     u32 k;
 
+    if (!by)                            /* 2026-11-14: wish_carry passes 0 when it carried nothing; no walk */
+        return;
     if (by > 0)
         for (k = wish_n; k-- > at;) {
             KEYS[k + (u32)by] = KEYS[k];
             SLOTS[k + (u32)by] = SLOTS[k];
+            WISH_SHIFT_MOVED();
         }
     else
         for (k = at; k < wish_n; k++) {
             KEYS[k - (u32)-by] = KEYS[k];
             SLOTS[k - (u32)-by] = SLOTS[k];
+            WISH_SHIFT_MOVED();
         }
 }
 

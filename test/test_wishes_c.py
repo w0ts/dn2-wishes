@@ -43,6 +43,7 @@ int smp_er_lock = 0;
 volatile u32 ins_wr_head = 0;
 unsigned host_ready = 1, host_sectors = 0x800000, host_frames = 0;
 unsigned host_reads = 0, host_writes = 0, host_fail = 0;
+u32 host_shift_moves = 0;
 static u8 disk[59392u * 512u];
 int host_blk_read(unsigned s, unsigned n, void *p)
 {
@@ -404,6 +405,22 @@ def test_a_block_holding_hundreds_of_records_carries_every_one(w):
     w.wish_on_memcpy(base + 0x1000000, base, SOUND * 300)
     assert all(get(w, base + 0x1000000 + SOUND * k, 1) == k.to_bytes(2, "big") for k in range(300))
     assert u32(w, "wish_full") == 0 and u32(w, "wish_n") == 600
+
+
+def test_a_copy_between_untracked_blocks_leaves_the_index_unwalked(w):
+    """2026-11-14 (the preset-transfer freeze study): wish_carry called shift(i, 0) on every stock memcpy of a
+    sound or more, walking the index from i to wish_n for nothing. A copy that carries and clears nothing must
+    leave the index as it was and move no key."""
+    base = 0x43000000
+    for k in range(300):
+        assert put(w, base + SOUND * k, 1, k.to_bytes(2, "big")) == 0
+    keys = (ctypes.c_uint32 * 300).in_dll(w, "wish_host_area")      # KEYS: the area's first u32s
+    before = [keys[k] for k in range(300)]
+    ctypes.c_uint32.in_dll(w, "host_shift_moves").value = 0
+    w.wish_on_memcpy(0x41000000, 0x40000000, 0x10000)      # both blocks below every tracked sound
+    assert u32(w, "host_shift_moves") == 0
+    assert [keys[k] for k in range(300)] == before and u32(w, "wish_n") == 300
+    assert all(get(w, base + SOUND * k, 1) == k.to_bytes(2, "big") for k in range(300))
 
 
 def test_a_copy_inside_one_block_moves_overlapping_sounds_whole(w):

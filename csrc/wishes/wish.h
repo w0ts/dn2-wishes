@@ -40,9 +40,14 @@ typedef int s32;
  * power-on, so table.c's wish_init sets up what it reads before the first entry is made. */
 #ifdef WISH_HOST                                                        /* test/test_wishes.py */
 extern u8 wish_host_area[];
+extern u32 host_shift_moves;                                            /* keys table.c's shift() moved */
 #define WISH_AREA wish_host_area
+#define WISH_SHIFT_MOVED() (host_shift_moves++)
 #elif !defined(WISH_AREA)
 #error "WISH_AREA: dnfw.waverider.pages.WISH_RAM, passed by cpage.compile_page"
+#endif
+#ifndef WISH_SHIFT_MOVED
+#define WISH_SHIFT_MOVED() ((void)0)                                    /* counted on the host only */
 #endif
 #define WISH_AT(o) ((u8 *)(WISH_AREA) + (o))
 #define WISH_O_KEYS   0u                                                /* u32[WISH_N], ascending */
