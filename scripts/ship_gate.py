@@ -153,6 +153,14 @@ sys.path.insert(0, str(HERE))
 import gate_cache                                          # noqa: E402
 
 MAIN_BASE = 0x40000400
+
+
+def has_bootscreen(sec3: bytes) -> bool:
+    """this MAIN OS section's intro jumps to the boot screen's stamp (dnfw.mods.bootscreen.apply's JMP), i.e. the build
+    carries the start-up animation; a NOBOOT build keeps stock's intro"""
+    from dnfw.mods import bootscreen as BS      # noqa: PLC0415
+    o = BS.SPEC["intro_va"] - BS.BASE
+    return sec3[o:o + 2] == b"\x4e\xf9" and int.from_bytes(sec3[o + 2:o + 6], "big") == BS.SPEC["stamp"]
 # CODE chunks that hold only data, reached through a pointer and never jumped to.
 # Each is listed by name, on purpose: a chunk is assumed to execute unless it is here.
 DATA_ONLY: dict[int, str] = {       # (Waverider's wave-display bytes were one, until v0.11)
@@ -675,7 +683,11 @@ def main() -> int:
         # v0.37: the build plays the start-up animation (dnfw.bootanim): every frame the stamp
         # shows during the boot, checked bit for bit against his (s!Rwa²'s), all of them shown
         from dnfw.mods import waverider as Wb   # noqa: PLC0415
-        anim = hasattr(Wb, "_boot")
+        # 2026-11-13 (main: the 1.12 gate's blind spots): only when THIS image carries the boot screen, i.e. its intro
+        # jumps to the stamp (dnfw.mods.bootscreen.SPEC, this layer's addresses). A NOBOOT build (every 1.12 build:
+        # stock's intro, no stamp) has no animation to check: from reset it is held to the boot alone, as stock is
+        anim = hasattr(Wb, "_boot") and has_bootscreen(sec3)
+        noboot = hasattr(Wb, "_boot") and not anim
         if anim:
             boot_cmd.append("--aniz")
 
@@ -685,7 +697,8 @@ def main() -> int:
             if anim:
                 good = good and ", 0 not his" in out
             return good, ("booted and drew its UI, no fault" + ("; the start-up animation's first frame, "
-                          "his" if anim else "") if good else out[-800:])
+                          "his" if anim else "; a NOBOOT image (stock's intro): no animation" if noboot else "")
+                          if good else out[-800:])
         later("boot", "boot from reset", "boot from reset", [boot_cmd], boot_body)
 
         # 5b. v0.37: the start-up animation, every frame. From reset the intro stops after its
@@ -704,6 +717,9 @@ def main() -> int:
                 return good, (f"all {n_anim} frames, each his, in order, to the intro's end; the panel showed "
                               f"each, the version label over the last only" if good else out[-800:])
             later("aniz", "start-up animation, every frame", "start-up animation", [aniz_cmd], aniz_body)
+        elif noboot:                             # (the step stays in the list: it says why nothing ran)
+            later("aniz", "start-up animation, every frame", "start-up animation", [],
+                  lambda tdir: (True, "a NOBOOT image: its intro is stock's (no jump to the stamp), no animation to check"))
 
         # 6. engine + LOAD/SAVE
         # PERC (5), the Monomachine's (6, 7, v0.26: 14..) and the sample machines (8..13,
