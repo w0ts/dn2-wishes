@@ -348,9 +348,9 @@ def run(name, cmd, log_dir, env=None, cwd=ROOT, trace=None):
     out, _ = proc.communicate()
     LIVE.remove(proc)
     (log_dir / f"{name}.log").write_text(out)
-    trap = [ln for ln in out.splitlines() if ln.startswith("LOWTRAP FAIL")]
-    if trap:                                    # v0.46: a wild read fails the step it ran in
-        LOWTRAP.setdefault(threading.get_ident(), []).append(f"{name}: {trap[0][:600]}")
+    trap = [ln for ln in out.splitlines() if ln.startswith(("LOWTRAP FAIL", "CODEGUARD FAIL"))]
+    if trap:                                    # v0.46: a wild read fails the step it ran in (remoteui-6: and
+        LOWTRAP.setdefault(threading.get_ident(), []).append(f"{name}: {trap[0][:600]}")   # a code write)
     print(f"    rc {proc.returncode}, {round(time.time() - t)} s, log {log_dir / (name + '.log')}",
           flush=True)
     return proc.returncode, out
@@ -463,7 +463,8 @@ def main() -> int:
         ok, detail = body(tdir)
         wild = LOWTRAP.pop(threading.get_ident(), None)
         if wild:                                # v0.46: whatever the step found, a wild read fails it
-            ok, detail = False, "a read below 0x40000000 by our code (the v0.44 freeze's kind): " + "; ".join(wild)
+            ok, detail = False, ("a read below 0x40000000 by our code (the v0.44 freeze's kind), or a write into "
+                                 "the C chunk's code or rodata (emulib/codeguard.py): " + "; ".join(wild))
         if ok:
             # v0.38: this script's own inputs are the same in a full run and an --only run: the
             # whole setup runs in both, and nothing after it may import a module of ours
@@ -670,7 +671,7 @@ def main() -> int:
             boot_cmd.append("--aniz")
 
         def boot_body(tdir):
-            rc, out = run("boot_check", boot_cmd, logs, trace=tdir)
+            rc, out = run("boot_check", boot_cmd, logs, env={"DNFW_CODEGUARD": "1"}, trace=tdir)   # remoteui-6
             good = rc == 0 and "booted and drew its UI" in out
             if anim:
                 good = good and ", 0 not his" in out
@@ -740,7 +741,8 @@ def main() -> int:
         snap = ROOT.parent / "digikit/out/snapshots/dn2-1.11/ui800M-v014.snap"
         EMU_ENV = {"DT2_MAIN_IMG": str(pathlib.Path(os.environ["DT2_SECTIONS"]) / "section_3_MAIN_OS.bin"),
                    "DNFW_EMU_FLAGS": '{"weakptr": false}',
-                   "DNFW_LOWTRAP": "1"}   # v0.46: every emulator step traps wild reads (emulib/lowtrap.py)
+                   "DNFW_LOWTRAP": "1",   # v0.46: every emulator step traps wild reads (emulib/lowtrap.py)
+                   "DNFW_CODEGUARD": "1"}   # remoteui-6: ... and writes into the C chunk's code (emulib/codeguard.py)
         if "smp_tdm_sent" in lay:
             syms = work / "link16_syms.json"
             syms.write_text(json.dumps({k: v for k, v in lay.items() if k.startswith("smp_")}))

@@ -3,6 +3,9 @@ smoke. All read only except `switch` (a whitelisted RAM word, bounded by the fir
 
 from __future__ import annotations
 
+import pathlib
+
+from .. import buildid
 from .. import protocol as P
 from ..channel import TestChannel
 from ..unit import NoTestChannel, StatusError
@@ -50,6 +53,27 @@ def smoke(ch: TestChannel, quiet: bool) -> int:
     return 0 if ok else 1
 
 
+def identity(ch: TestChannel, a) -> int:
+    """remoteui-6: the mod's version and the code's CRC; with --file, whether the unit runs that file"""
+    try:
+        ident = ch.identity()
+    except TimeoutError as e:
+        print(f"identity: {e}")
+        return 1
+    if ident is None:
+        print("identity: none (a build before remoteui-6 does not report one)")
+        return 1 if a.file else 0
+    ms = ident.ticks / 132_000.0                 # DMA timer 0: 132.002 MHz on the unit (profiler, 2026-11-11)
+    print(f"mod version {ident.mod_version or '?'}; code CRC-32 {ident.crc:08x} over {ident.code_lo:#010x} "
+          f"+{ident.code_len:,} B (computed in {ident.ticks:,} timer ticks, ~{ms:.2f} ms, longest slice "
+          f"{ident.slice_max:,})")
+    if not a.file:
+        return 0
+    ok, line = buildid.match(ident, pathlib.Path(a.file))
+    print(line)
+    return 0 if ok else 1
+
+
 def main(a) -> int:
     unit = open_unit(a)
     ch = TestChannel(unit)
@@ -61,6 +85,7 @@ def main(a) -> int:
             caps = [n for n in P.CAPS if i.has(n)]
             print(f"{i.label}: test channel protocol {i.proto}, OS {i.os}, screen {i.width}x{i.height}, "
                   f"panel tick {i.ticks_per_s}/s\ncapabilities: {', '.join(caps)}")
+            return identity(ch, a)
         elif cmd == "switches":
             for s in ch.switches():
                 print(f"{s.index} {s.name:8s} = {s.value:5d}   ({s.min}..{s.max}, default {s.default})")

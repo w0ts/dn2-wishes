@@ -54,9 +54,11 @@ LINKER_SCRIPT = """\
 SECTIONS
 {{
   . = 0x{base:08x};
+  __image_start = .;
   .text : {{ KEEP(*(.text.entry)) *(.text .text.*) }}
   __text_end = .;
   .rodata : ALIGN(4) {{ *(.rodata .rodata.*) }}
+  __rodata_end = .;
   .data : ALIGN(4) {{ __data_start = .; *(.data .data.*) }}
   . = ALIGN(4);
   __image_end = .;

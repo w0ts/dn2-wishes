@@ -51,7 +51,7 @@ HELLO → `u16 link protocol (7)`, then the link's numbers. TLM → the 32-word 
 
 ### 33 BUILDINFO
 
-args: none → data (36 bytes; 37 with the USBCFG capability):
+args: none → data (36 bytes; 37 with the USBCFG capability; 66 from remoteui-6, whose extra fields name the build):
 
 | offset | type | |
 |---|---|---|
@@ -65,6 +65,18 @@ args: none → data (36 bytes; 37 with the USBCFG capability):
 | 16 | 16 bytes | build label, NUL padded (`remoteui-1`) |
 | 32 | u32 | the panel tick's rate the firmware measured (ticks a second; 1000 until the audio runs) |
 | 36 | u8 | REMOTE CONTROL in USB CONFIG: 1 ON, 0 OFF (USBCFG only) |
+| 37 | 8 bytes | remoteui-6: the mod's version (`VERSION`, e.g. `0.48`), NUL padded |
+| 45 | u32 | remoteui-6: the start of the range the CRC covers (the C chunk's load address) |
+| 49 | u32 | remoteui-6: its length: the C chunk's code and rodata (`__image_start` .. `__rodata_end`) |
+| 53 | u32 | remoteui-6: CRC-32 (zlib's) of that range as the unit holds it; 0 until ready |
+| 57 | u8 | remoteui-6: 1 = the CRC is ready. The first BUILDINFO asks for it; the UI task computes it 4 KB a pass |
+| 58 | u32 | remoteui-6: DMA timer 0 ticks (132 MHz) the CRC has taken so far, interrupts that preempted it included |
+| 62 | u32 | remoteui-6: the longest of its slices, in the same ticks |
+
+The range is never written at run time: every emulator step of the gate watches it (`scripts/emulib/codeguard.py`),
+so the CRC names the ColdFire code running. `dn2test info --file BUILD.syx` (or the build's `waverider_code.json`)
+says whether it is that build's. It covers our C chunk only: a build that differs only in its DSP program, its
+assembly chunks or its stock edits has the same CRC (the mod's version and the label tell those apart, if bumped).
 
 ### 34 SWITCH
 

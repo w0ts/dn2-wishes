@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import random
 import struct
+import zlib
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -28,6 +29,8 @@ from .screen import H, W, from_rows
 SWITCHES = [("HOLD", 0, 1, 1), ("LABELS", 0, 1, 1), ("ARMTIME", 30, 1800, 300)]
 PAGES = {1: "TRIG", 2: "SRC", 3: "FLTR", 4: "AMP", 5: "FX", 6: "MOD"}
 LIST_PAGE = 100
+# remoteui-6, the build's identity (devtest.c id_step): the code the simulator 'runs', at the C chunk's address
+SIM_CODE_LO, SIM_CODE, SIM_VERSION = 0x46AC0000, bytes(range(256)) * 4, b"0.48"
 
 # PROFILE's model (prof.c): DMA timer 0 at 132 MHz, 1,500 audio frames a second, a 65,536-sample ring
 BUS_HZ, CAP = 132_000_000, 65536
@@ -66,6 +69,7 @@ class ChannelSim:
     prof: dict = field(default_factory=lambda: {"state": 0, "source": 0, "why": 0, "rate": 0, "t0": 0.0, "t1": 0.0,
                                                 "samples": [], "starts": 0})
     profile_mix: tuple = PROFILE_MIX
+    id_asked_at: float | None = None                           # the first BUILDINFO; the CRC is ready 0.2 s later
 
     # --- time ---------------------------------------------------------------------------------
     def tick(self) -> int:
@@ -198,8 +202,13 @@ class ChannelSim:
             self.counters[1] += 1
             return P.OFF, b""
         if cmd == P.BUILDINFO:
+            if self.id_asked_at is None:
+                self.id_asked_at = self.clock()
+            ready = self.clock() - self.id_asked_at >= 0.2
+            crc = zlib.crc32(SIM_CODE) if ready else 0
             return P.OK, (b"DTB1" + struct.pack(">HBBIBBBB", 1, 0x01, 0x12, 0x1FFF, len(SWITCHES), 128, 64, 8)
-                          + b"sim".ljust(16, b"\0") + struct.pack(">IB", 1000, self.remote))
+                          + b"sim".ljust(16, b"\0") + struct.pack(">IB", 1000, self.remote) + SIM_VERSION.ljust(8, b"\0")
+                          + struct.pack(">IIIBII", SIM_CODE_LO, len(SIM_CODE), crc, ready, 26_400, 3_300))
         if cmd == P.SWITCH:
             k = a[1] if len(a) > 1 else 0xFF
             if sub == 0 and k < len(SWITCHES):

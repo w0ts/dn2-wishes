@@ -81,13 +81,13 @@ def stock_path():
     return os.path.join(os.environ["DT2_SECTIONS"], "section_3_MAIN_OS.bin")
 
 
-def run(image_path, limit, frame_at, entries=(), aniz=None):
-    """Boot from reset. -> (instructions, frames, the fault or None, reached).
+def run(image_path, limit, frame_at, entries=(), aniz=None, guard=False):
+    """Boot from reset. -> (instructions, frames, the fault or None, reached, the code guard's failure or None).
 
     `entries` are the build's own routines. Whether they ran is as much a part
     of the result as whether it crashed: see `coverage` below.
     """
-    holder, state = {}, {"frames": 0, "fault": None}
+    holder, state = {}, {"frames": 0, "fault": None, "guard": None}
     reached = {name: 0 for name, _ in entries}
 
     def pre_start(m):
@@ -134,7 +134,10 @@ def run(image_path, limit, frame_at, entries=(), aniz=None):
     # machine state, 1.7x faster; the instruction count of a stop is not kept
     m, st, stop = quickboot.run(str(SYX), open(image_path, "rb").read(), limit=limit,
                                 machine_out=holder, pre_start=pre_start)
-    return st["n"], state["frames"], state["fault"], reached
+    if guard and os.environ.get("DNFW_CODEGUARD") == "1":   # remoteui-6: the C chunk's code as built
+        from emulib import codeguard                         # noqa: PLC0415
+        state["guard"] = codeguard.after_boot(m.uc)
+    return st["n"], state["frames"], state["fault"], reached, state["guard"]
 
 
 def control(limit, frame_at, refresh=False):
@@ -153,7 +156,7 @@ def control(limit, frame_at, refresh=False):
         print(f"  the emulator changed since this control was measured "
               f"({row.get('emulator')} -> {now}); re-measuring it")
     started = time.time()
-    ran, frames, fault, _ = run(stock_path(), limit, frame_at)
+    ran, frames, fault, _, _ = run(stock_path(), limit, frame_at)
     row = {"ran": ran, "frames": frames, "fault": fault, "limit": limit,
            "seconds": round(time.time() - started, 1), "emulator": now}
     CACHE.parent.mkdir(parents=True, exist_ok=True)
@@ -219,7 +222,7 @@ def main() -> int:
         # the intro's timers do not run on (stock too stops at one frame), so here the first
         # frame is checked, and scripts/emu_aniz_check.py checks every frame from `boot400M`
         args.limit = max(args.limit, ANIZ_LIMIT)
-    ran, frames, fault, reached = run(args.image, args.limit, frame_at, entries, aniz)
+    ran, frames, fault, reached, guard = run(args.image, args.limit, frame_at, entries, aniz, guard=True)
     print(f"  {os.path.basename(os.path.dirname(args.image))}: {frames} frame(s) in "
           f"{ran:,} instruction(s), {round(time.time() - started, 1)}s\n")
 
@@ -232,6 +235,9 @@ def main() -> int:
             print(f"    a2@(2) = {rec[2]:#04x}   a2@(4) = "
                   f"{int.from_bytes(rec[4:8], 'big'):#010x}")
         print("\n  DO NOT FLASH.")
+        return 1
+    if guard:                                                # remoteui-6 (emulib/codeguard.py)
+        print(f"{guard}\n\n  DO NOT FLASH.")
         return 1
     if not frames:
         print(f"  NO UI: it never faulted and never composed a frame, while stock composed "

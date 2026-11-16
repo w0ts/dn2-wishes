@@ -1216,6 +1216,9 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     # checks [C_LOAD, c_text_end) as code
     layout["c_load"] = pages.C_LOAD
     layout["c_text_end"] = csyms["__text_end"]
+    # remoteui-6: the end of its rodata; [C_LOAD, c_rodata_end) is never written at run time (every emulator
+    # step watches it, scripts/emulib/codeguard.py), the range the test channel's identity CRC covers
+    layout["c_rodata_end"] = csyms["__rodata_end"]
     for name in ("smp_hi", "smp_walk", "smp_booted", "smp_cmds", "smp_tdm_sent", "smp_tdm_heard",
                  "smp_retries", "smp_saved", "smp_boot", "smp_save_recording", "smp_save_mark", "smp_load", "smp_lstate",
                  "rec_overlay", "rec_src", "rec_dest", "smp_ram", "rec_phase", "trim_slot",

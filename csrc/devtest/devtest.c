@@ -36,6 +36,7 @@
  * The two buffers are never touched: SCREEN reads the normal image, STATE says whether the glass is
  * inverted. Nothing is saved: a reboot starts disarmed and upright; the auto-disarm turns it back. */
 #include "devtest.h"
+#include "wr_gen.h"                              /* MOD_VERSION (dnfw.modversion) */
 
 #define D __attribute__((section(".data")))
 #define NOJT __attribute__((optimize("no-jump-tables")))
@@ -105,7 +106,28 @@
 #define TR_RESET 8
 #define TR_TORN 9
 
-static const char build_label[16] = "remoteui-5";
+static const char build_label[16] = "remoteui-6";
+#ifdef MOD_VERSION
+static const char mod_version[8] = MOD_VERSION;  /* VERSION (dnfw.modversion), e.g. "0.48" */
+#else
+static const char mod_version[8] = "";
+#endif
+
+/* the build's identity (BUILDINFO, remoteui-6): a CRC-32 (zlib's) of this chunk's code and rodata,
+ * [__image_start, __rodata_end), bytes nothing writes at run time (every emulator step of the gate watches
+ * them: scripts/emulib/codeguard.py), so it names the code running; `dn2test info --file X.syx` computes it
+ * from a file's chunk. The first BUILDINFO asks for it, dt_poll computes it ID_SLICE bytes a UI pass (one pass
+ * over the whole range would hold the MIDI task), and until it is done the reply says so. Its cost is timed on
+ * DMA timer 0 (free running, the meter's clock; interrupts that preempt a slice are counted in it). */
+extern const u8 __image_start[], __rodata_end[];
+static const u32 crc_nib[16] = {
+    0x00000000u, 0x1DB71064u, 0x3B6E20C8u, 0x26D930ACu, 0x76DC4190u, 0x6B6B51F4u, 0x4DB26158u, 0x5005713Cu,
+    0xEDB88320u, 0xF00F9344u, 0xD6D6A3E8u, 0xCB61B38Cu, 0x9B64C2B0u, 0x86D3D2D4u, 0xA00AE278u, 0xBDBDF21Cu};
+#define ID_SLICE 4096u
+#define DTCN0 (*(volatile u32 *)0xFC07000Cu)
+enum { ID_NONE, ID_ASKED, ID_RUNNING, ID_READY };
+static volatile u32 id_state D = ID_NONE, id_crc D = 0, id_ticks D = 0, id_slice_max D = 0;
+static u32 id_at D = 0, id_run D = 0;
 static const u8 wire6[6] = {1, 0, 4, 5, 6, 7};   /* codes 49..54 (LEVEL, VOICE, ARP, PLUS, STACK, MINUS): channel 6's bits */
 
 /* keys that may go down while FUNC is held, unless armed for destructive use: the page keys (TRIG..MOD),
@@ -168,6 +190,37 @@ static u32 clock_now(void)                       /* the unwrapped tick now (eith
     u32 m = mono + ((TICK - mono_tick) & TICK_MASK);
     irq_restore(sr);
     return m;
+}
+
+static void id_step(void)                        /* dt_poll: one slice of the identity's CRC */
+{
+    if (id_state == ID_ASKED) {
+        id_at = 0;
+        id_run = 0xFFFFFFFFu;
+        id_state = ID_RUNNING;
+    }
+    if (id_state != ID_RUNNING)
+        return;
+    u32 t = DTCN0;
+    const u8 *p = __image_start + id_at, *e = __rodata_end;
+    if ((u32)(e - p) > ID_SLICE)
+        e = p + ID_SLICE;
+    u32 c = id_run;
+    while (p < e) {
+        c ^= *p++;
+        c = (c >> 4) ^ crc_nib[c & 15u];
+        c = (c >> 4) ^ crc_nib[c & 15u];
+    }
+    id_run = c;
+    id_at = (u32)(p - __image_start);
+    t = DTCN0 - t;
+    id_ticks += t;
+    if (t > id_slice_max)
+        id_slice_max = t;
+    if (p >= __rodata_end) {
+        id_crc = ~c;
+        id_state = ID_READY;                     /* after the CRC: both volatile, so in this order */
+    }
 }
 
 static void clock_step(void)                     /* dt_poll, every UI pass */
@@ -355,6 +408,7 @@ NOJT int dt_poll(void)
 {
     extern int smp_dsp_load(void);
     clock_step();
+    id_step();
     u32 now = mono, f = FRAMES;
     if (f - cal_f >= 1500u * 4u) {               /* the tick's rate against the audio frames, every 4 s */
         if (cal_f && now - cal_t < 2000000u && f - cal_f < 1500u * 60u) {   /* not after a long gap (overflow) */
@@ -541,6 +595,17 @@ NOJT u32 dt_rx(u32 cmd, const u8 *rq, u32 n, u8 *rp, u32 r, u8 *st)
             rp[r++] = (u8)build_label[k];
         put32(rp + r, tps); r += 4;
         rp[r++] = set_remote;                    /* REMOTE CONTROL in USB CONFIG: 1 ON, 0 OFF */
+        for (u32 k = 0; k < 8; k++)              /* remoteui-6: the identity */
+            rp[r++] = (u8)mod_version[k];
+        if (id_state == ID_NONE)
+            id_state = ID_ASKED;
+        u32 s = id_state;
+        put32(rp + r, (u32)__image_start); r += 4;
+        put32(rp + r, (u32)(__rodata_end - __image_start)); r += 4;
+        put32(rp + r, s == ID_READY ? id_crc : 0u); r += 4;
+        rp[r++] = (u8)(s == ID_READY);
+        put32(rp + r, id_ticks); r += 4;
+        put32(rp + r, id_slice_max); r += 4;
     } else if (cmd == 34) {                      /* SWITCH: 0 INFO k, 1 GET all, 2 SET k u32 */
         u32 k = n >= 5 ? rq[4] : 0xFFu;
         if (sub == 0 && k < DT_SW_N) {

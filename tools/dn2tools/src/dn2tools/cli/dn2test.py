@@ -11,6 +11,7 @@
     dn2test --peak --label skipsON --out peak/  peaks and wake-ups; then --peak-compare ON.csv OFF.csv
     dn2test --peak --switch-ab HOLD             the same, run twice on one build: switch HOLD at 1 then at 0
     dn2test --bench --label night9 --out bench/ cycles per frame per machine / FX (CSV + md); then --compare A.csv B.csv
+    dn2test info [--file X.syx]                 the build on the unit; --file: is it this one
     dn2test info | switches | counters | trace | state | peek ADDR [LEN] | smoke | switch NAME VALUE
     dn2test profile --seconds 20 --label idle --out prof/ [--stock-dis F] [--ours J]   the CPU profiler (PROFILE)
     dn2test profile --compare prof/idle.json prof/busy.json                              per function, A vs B
@@ -116,6 +117,7 @@ def main(argv=None) -> int:
     ap.add_argument("--project", default=str(DATA / "project.json"), help="the project description (JSON, docs/device-tests.md)")
     ap.add_argument("--only", default="", help="comma separated scenario names")
     ap.add_argument("--out", default="device-test-report")
+    ap.add_argument("--file", default=None, metavar="X.syx", help="info: does the unit run this build? (a .syx / .zip, or its waverider_code.json)")
     ap.add_argument("--dry-run", "--sim", dest="dry_run", action="store_true", help="the simulator, in process, in virtual time")
     ap.add_argument("--quiet", action="store_true", help="no per-command cost lines")
     ap.add_argument("--serve-fake", action="store_true", help="serve the simulator on virtual MIDI ports")

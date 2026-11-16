@@ -56,6 +56,9 @@ class Machine:
         if os.environ.get("DNFW_LOWTRAP") == "1":   # v0.46: the wild-read trap (emulib/lowtrap.py)
             from emulib.lowtrap import install
             install(self.uc)
+        if os.environ.get("DNFW_CODEGUARD") == "1":   # remoteui-6: the C chunk's code stays (emulib/codeguard.py)
+            from emulib import codeguard
+            codeguard.install(self.uc)
 
     def _bitrev_shim(self):
         """v0.34 (docs/timing-model.md): BITREV Dn (0x00C0..0x00C7, ColdFire ISA_C) is not

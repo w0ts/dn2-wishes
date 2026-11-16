@@ -388,3 +388,67 @@ def test_the_default_port_name_finds_both_usb_modes():
     from dn2tools.unit import find_port
     for name in ("Digitone Audio+MIDI Elektron Digitone II", "Digitone OB Elektron Digitone II"):
         assert find_port(["IAC Driver Bus 1", name], "Elektron Digitone II") == name
+
+
+# --- remoteui-6: the build's identity ---------------------------------------------------------------
+
+def test_buildinfo_identity_waits_for_the_crc():
+    import zlib
+
+    from dn2tools import sim_channel as SC
+    ch = chan()
+    first = ch.info()
+    assert first.identity is not None and not first.identity.ready and first.identity.crc == 0
+    ident = ch.identity()
+    assert ident.ready and ident.mod_version == "0.48"
+    assert (ident.code_lo, ident.code_len, ident.crc) == (SC.SIM_CODE_LO, len(SC.SIM_CODE), zlib.crc32(SC.SIM_CODE))
+
+
+def test_buildinfo_before_remoteui6_has_no_identity():
+    old = b"DTB1" + struct.pack(">HBBIBBBB", 1, 0x01, 0x12, 0x7FF, 3, 128, 64, 8) + b"remoteui-5".ljust(16, b"\0") \
+        + struct.pack(">I", 119)
+    i = P.parse_buildinfo(old)
+    assert i.label == "remoteui-5" and i.identity is None
+
+
+def test_identity_matches_a_code_json(tmp_path):
+    import json
+    import zlib
+
+    from dn2tools import buildid
+    code = bytes(range(200)) + b"data written at run time"
+    f = tmp_path / "waverider_code.json"
+    f.write_text(json.dumps({"c_chunk": {"load": 0x46AC0000, "code": code.hex()}}))
+    ident = P.BuildId("0.48", 0x46AC0000, 200, zlib.crc32(code[:200]), True, 0, 0)
+    ok, line = buildid.match(ident, f)
+    assert ok and line.startswith("MATCH")
+    ok, line = buildid.match(P.BuildId("0.48", 0x46AC0000, 200, 0x12345678, True, 0, 0), f)
+    assert not ok and "NO MATCH" in line
+    ok, line = buildid.match(P.BuildId("0.48", 0x46AD0000, 200, 0, True, 0, 0), f)
+    assert not ok and "has no code" in line
+
+
+def test_the_firmware_crc_table_is_zlibs():
+    """devtest.c id_step's nibble table, read from the source, gives zlib's CRC-32"""
+    import zlib
+    src = DEVTEST.read_text()
+    body = re.search(r"crc_nib\[16\] = \{(.*?)\};", src, re.S).group(1)
+    tab = [int(x, 16) for x in re.findall(r"0x([0-9A-Fa-f]{8})u", body)]
+    assert len(tab) == 16
+    data = bytes((k * 151 + 7) & 0xFF for k in range(3000))
+    c = 0xFFFFFFFF
+    for b in data:                               # the firmware's loop, byte for byte
+        c ^= b
+        c = (c >> 4) ^ tab[c & 15]
+        c = (c >> 4) ^ tab[c & 15]
+    assert c ^ 0xFFFFFFFF == zlib.crc32(data)
+
+
+def test_the_buildinfo_reply_layout_matches_the_firmware():
+    """the C writes 36 + 1 (REMOTE) + 8 + 4 + 4 + 4 + 1 + 4 + 4 = 66 bytes, the layout parse_buildinfo reads"""
+    src = DEVTEST.read_text()
+    block = src[src.index("put32(rp + r, tps); r += 4;"):src.index("} else if (cmd == 34)")]
+    assert re.findall(r"put32\(rp \+ r, ([^;]+?)\); r \+= 4;", block)[1:] == [
+        "(u32)__image_start", "(u32)(__rodata_end - __image_start)", "s == ID_READY ? id_crc : 0u", "id_ticks",
+        "id_slice_max"]
+    assert "for (u32 k = 0; k < 8; k++)" in block and "rp[r++] = (u8)(s == ID_READY);" in block

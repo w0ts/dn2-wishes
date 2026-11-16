@@ -33,6 +33,21 @@ class TestChannel:
                 raise NoTestChannel(f"test channel protocol {self._info.proto}: this dn2tools speaks 1; update it")
         return self._info
 
+    def identity(self, timeout_s: float = 5.0) -> P.BuildId | None:
+        """remoteui-6: the build's identity, asked for and waited on until the unit has its CRC (it computes it
+        in slices after the first ask: a fraction of a second, not measured on the unit yet). None from an
+        older build; TimeoutError if the CRC is not ready in TIMEOUT_S."""
+        waited = 0.0
+        while True:
+            i = P.parse_buildinfo(self.unit.call(P.BUILDINFO))
+            if i.identity is None or i.identity.ready:
+                return i.identity
+            if waited >= timeout_s:
+                raise TimeoutError(f"the unit's build CRC was not ready in {timeout_s} s "
+                                   f"({i.identity.ticks} timer ticks spent so far)")
+            self.unit.wait(0.1)
+            waited += 0.1
+
     def require(self, cap: str) -> None:
         if not self.info().has(cap):
             raise NoTestChannel(f"the build on the unit ({self.info().label}) has no {cap}: flash a newer test build")

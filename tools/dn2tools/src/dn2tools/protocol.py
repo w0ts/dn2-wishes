@@ -209,9 +209,25 @@ class BuildInfo:
     label: str
     ticks_per_s: int
     remote: bool | None = None       # REMOTE CONTROL in USB CONFIG (the USBCFG capability); None: a build before it
+    identity: BuildId | None = None             # remoteui-6 and later; None from an older build
 
     def has(self, name: str) -> bool:
         return bool(self.caps >> CAPS[name] & 1)
+
+
+@dataclass(frozen=True)
+class BuildId:
+    """remoteui-6: the build's identity (csrc/devtest/devtest.c id_step): the mod's VERSION, and a CRC-32 (zlib's)
+    of the C chunk's code and rodata, [code_lo, code_lo + code_len), computed by the unit after the first
+    BUILDINFO asks; `crc` is meaningful only once `ready`. `ticks`: DMA timer 0 ticks the CRC took so far
+    (132 MHz measured, preemption included), `slice_max` the longest of its slices."""
+    mod_version: str
+    code_lo: int
+    code_len: int
+    crc: int
+    ready: bool
+    ticks: int
+    slice_max: int
 
 
 def parse_buildinfo(d: bytes) -> BuildInfo:
@@ -223,7 +239,12 @@ def parse_buildinfo(d: bytes) -> BuildInfo:
     label = d[16:32].split(b"\0")[0].decode("ascii", "replace")
     tps, = struct.unpack(">I", d[32:36])
     remote = bool(d[36]) if len(d) > 36 else None
-    return BuildInfo(proto, os, caps, d[12], d[13], d[14], d[15], label, tps, remote)
+    ident = None
+    if len(d) >= 66:                            # remoteui-6: the identity after the remote byte
+        lo, n, crc = struct.unpack(">III", d[45:57])
+        ticks, smax = struct.unpack(">II", d[58:66])
+        ident = BuildId(d[37:45].split(b"\0")[0].decode("ascii", "replace"), lo, n, crc, bool(d[57]), ticks, smax)
+    return BuildInfo(proto, os, caps, d[12], d[13], d[14], d[15], label, tps, remote, ident)
 
 
 @dataclass(frozen=True)

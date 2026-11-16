@@ -58,6 +58,7 @@ and the code addresses on the stack: the persistence check. The selection test
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import os
 import pathlib
@@ -2448,7 +2449,7 @@ def main() -> int:
                 st, co, tr = dt_call(DP.STATE), dt_call(DP.COUNTERS, DP.args_counters()), dt_call(DP.TRACE, DP.args_trace(0))
                 bi = dt_call(DP.BUILDINFO)
                 dt_results.setdefault("states", {})[parts[2]] = {
-                    "buildinfo": None if bi is None or bi.status else DP.parse_buildinfo(bi.data).__dict__,
+                    "buildinfo": None if bi is None or bi.status else dataclasses.asdict(DP.parse_buildinfo(bi.data)),   # remoteui-6: nested
                     "state": None if st is None or st.status else {k: v for k, v in DP.parse_state(st.data).__dict__.items()},
                     "counters": None if co is None or co.status else DP.parse_counters(co.data),
                     "trace": None if tr is None or tr.status else [e.__dict__ for e in DP.parse_trace(tr.data)[2]]}
