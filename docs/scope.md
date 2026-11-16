@@ -14,8 +14,14 @@ Stock's AMP page has one page. [AMP] on it now steps between two pages:
 The title line says "AMP (2/2)" / "AMP (1/2)" on each switch. FUNC + [AMP], and [AMP] from any other page, work as on stock.
 NO, or any page key, closes the scope (as the INSERT pages do, docs/inserts.md).
 
-While the scope is up, any encoder sets the time across the screen: 2, 4, 8, 17, 33 or 67 ms
-(100 points, every 1st..32nd sample at 48 kHz). The bottom-right label shows the time.
+While the scope is up, any encoder but G sets the time across the screen: 2, 4, 8, 17, 33 or 67 ms
+(100 points, every 1st..32nd sample at 48 kHz). The bottom-right label (H) shows the time.
+
+**Vertical zoom** (2026-11-11, the User: "the oscilo should also have a vertical zoom"): encoder G sets the gain,
+x1 x2 x4 x8 x16 or AUTO, its label at G. AUTO takes the largest of those gains that keeps the 100 shown samples
+inside the strip, and its label says which ("Ax4"); a sample of exactly half scale stays at Ax1 (x2 would pass full
+scale by one step). A sample past the strip is drawn on its top or bottom row. The gain and the time are the page's
+own, the same for every track, and not saved (a way of looking, not part of a sound); the gain starts at x1.
 The trace starts at the newest rising zero crossing, so a steady sound stands still; it redraws 25 times a second.
 
 ## What it shows

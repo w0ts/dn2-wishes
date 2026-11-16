@@ -16,7 +16,12 @@
  * smp_tdm (csrc/sampler/link.c, the audio ISR's hook, 1,500 a second) calls scope_tap while the page is up:
  * every Dth sample of the track (L+R)/2, the top 16 of its 24 bits, into a ring of 256. The page draws
  * 100 of them from the newest rising zero crossing that leaves 100 after it (else the newest 100), 25 times
- * a second. Any encoder sets the time span (D 1..32: 2..67 ms across).
+ * a second. Any encoder but G sets the time span (D 1..32: 2..67 ms across).
+ *
+ * 2026-11-11 (the User): "the oscilo should also have a vertical zoom". Encoder G sets the trace's gain: x1 x2 x4 x8
+ * x16, or AUTO (the largest of those that keeps the 100 shown samples inside the strip; its label says the gain it
+ * took, "Ax4"). A sample past the strip is drawn on its top or bottom row. The gain and the span are the page's own,
+ * for every track, and not saved: a way of looking, not part of a sound.
  */
 typedef unsigned int u32;
 typedef unsigned short u16;
@@ -48,10 +53,15 @@ typedef int s32;
 
 static const u8 DEC[ZOOMS] = {1, 2, 4, 8, 16, 32};
 static const char *const SPAN[ZOOMS] = {"2ms", "4ms", "8ms", "17ms", "33ms", "67ms"};   /* 100 x D / 48 kHz */
+#define GAINS      5                            /* x1 .. x16, then AUTO */
+#define K_GAIN     7                            /* encoder G: the gain (its label at G, the span's at H) */
+static const char *const GAIN_TEXT[GAINS + 1] = {"x1", "x2", "x4", "x8", "x16", "AUTO"};
+static const char *const AUTO_TEXT[GAINS] = {"Ax1", "Ax2", "Ax4", "Ax8", "Ax16"};
 
 int scope_up __attribute__((section(".data"))) = 0;
 u32 scope_taps __attribute__((section(".data"))) = 0;   /* blocks tapped (the checks read it) */
 static int zoom __attribute__((section(".data"))) = 2;
+static int gain __attribute__((section(".data"))) = 0;      /* x1; GAINS is AUTO */
 s16 scope_ring[RING] __attribute__((section(".data")));
 u32 scope_pos __attribute__((section(".data"))) = 0;
 static u32 phase __attribute__((section(".data"))) = 0;
@@ -137,9 +147,15 @@ int scope_pop(u8 *it)
         return 0;
     }
     if (scope_up && it[0] == IT_KNOB && code >= 1 && code <= 8) {
-        int z = zoom + ((s8)it[8] > 0 ? 1 : (s8)it[8] < 0 ? -1 : 0);
-        zoom = z < 0 ? 0 : z >= ZOOMS ? ZOOMS - 1 : z;
-        phase = 0;
+        int step = (s8)it[8] > 0 ? 1 : (s8)it[8] < 0 ? -1 : 0;
+        if (code == K_GAIN) {
+            int g = gain + step;
+            gain = g < 0 ? 0 : g > GAINS ? GAINS : g;
+        } else {
+            int z = zoom + step;
+            zoom = z < 0 ? 0 : z >= ZOOMS ? ZOOMS - 1 : z;
+            phase = 0;
+        }
         smp_overlay_dirty = 1;
         return 1;
     }
@@ -168,9 +184,9 @@ static void fill(void *c, int x0, int y0, int x1, int y1, int on)
 #define MID  31
 #define HALF 20
 
-static int ypix(s16 v)
+static int ypix(s16 v, int g)                   /* g: the gain, 1..16 */
 {
-    int y = MID + (int)v * HALF / 32768;
+    int y = MID + (int)v * g * HALF / 32768;
     return y < MID - HALF ? MID - HALF : y > MID + HALF ? MID + HALF : y;
 }
 
@@ -188,16 +204,27 @@ void scope_draw(void *c)
             start = i;
             break;
         }
+    int g = 1 << (gain < GAINS ? gain : 0), peak = 0;
+    if (gain == GAINS) {                        /* AUTO: the largest gain the shown samples fit */
+        for (int x = 0; x < SHOWN; x++) {
+            int a = snap[start + x] < 0 ? -snap[start + x] : snap[start + x];
+            peak = a > peak ? a : peak;
+        }
+        for (g = 16; g > 1 && peak * g > 32767; g >>= 1)
+            ;
+    }
     fill(c, 18, 0, 127, 53, 0);                 /* from x 18: stock's envelope picture starts at x 21 */
     for (int x = 0; x < SHOWN; x += 4)
         SET_PIXEL(c, X0 + x, MID, 1);           /* the zero line, dotted */
-    int last = ypix(snap[start]);
+    int last = ypix(snap[start], g);
     for (int x = 0; x < SHOWN; x++) {
-        int y = ypix(snap[start + x]), lo = y < last ? y : last, hi = y < last ? last : y;
+        int y = ypix(snap[start + x], g), lo = y < last ? y : last, hi = y < last ? last : y;
         for (int v = lo; v <= hi; v++)          /* each column joined to the one before */
             SET_PIXEL(c, X0 + x, v, 1);
         last = y;
     }
+    wg_label(c, 6, gain == GAINS ? AUTO_TEXT[g == 16 ? 4 : g == 8 ? 3 : g == 4 ? 2 : g == 2 ? 1 : 0]
+                                 : GAIN_TEXT[gain]);
     wg_label(c, 7, SPAN[zoom]);
     PAGE_DOTS(0, c, 2, 1, 7);
 }
