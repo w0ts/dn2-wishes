@@ -49,7 +49,8 @@ typedef unsigned long mx_addr;          /* an address: 32 bits here, the host's 
 #define MX_TOP 0x7F00                   /* the evaluator's clamp (0x40137da2) */
 #define MX_DEP_TOP 0x7FFE              /* DEP's top (records 83, 93, 103): a route's depth, as stock's */
 #define MX_NONE 0x4000u                 /* a depth that adds nothing */
-#define MX_MAGIC 0x4D583034u            /* 'MX04' */
+#define MX_MAGIC (0x4D580000u | (u32)sizeof(struct mx_state))   /* 'MX' and the state's size: MX_RAM is not cleared at
+                                         * power-on and outlives a flash, so a build whose layout differs lays it out anew */
 #define ENV_FULL 0x7FFFFFFF
 #define ENV_REST 0x100                  /* a fall this close to 0 is over */
 #define HOLD_GATE 0xFFFFFFFFu           /* HOLD 127: until the note-off */

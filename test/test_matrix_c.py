@@ -44,6 +44,9 @@ u32 host_mx_live(u32 t) { return mx_host_state.live[t]; }
 u32 host_mx_compiles(void) { return mx_host_state.compiles; }
 u32 host_scratch_sum(void) { u32 s = 0; for (u32 k = 0; k < 16 * 101; k++) s += mx_host_state.scratch[k]; return s; }
 void host_mx_reset(void) { memset(&mx_host_state, 0, sizeof mx_host_state); }
+void host_mx_stale(void) { memset(&mx_host_state, 0xAB, sizeof mx_host_state); mx_host_state.magic = 0x4D583034u; }
+u32 host_mx_magic(void) { return mx_host_state.magic; }
+u32 host_mx_size(void) { return sizeof mx_host_state; }
 s32 host_env(u32 v, u32 j) { return mx_host_state.env_out[30u * v + j]; }
 u32 host_stage(u32 v, u32 j) { return mx_host_state.env[v][j].stage; }
 long host_env_src(u32 j) { return (long)((char *)&mx_host_state.env_out[j] - (char *)mx_host_lfo); }
@@ -66,7 +69,8 @@ def lib(tmp_path_factory):
     if r.returncode:
         pytest.fail(r.stderr)
     L = ctypes.CDLL(str(out))
-    for name in ("mx_lay", "host_mx_sound", "host_mx_live", "host_mx_compiles", "host_scratch_sum", "host_stage"):
+    for name in ("mx_lay", "host_mx_sound", "host_mx_live", "host_mx_compiles", "host_scratch_sum", "host_stage",
+                 "host_mx_magic", "host_mx_size"):
         getattr(L, name).restype = ctypes.c_uint32
     L.host_env.restype = ctypes.c_int32
     L.host_env_src.restype = ctypes.c_long
@@ -269,6 +273,20 @@ def test_frame_before_the_first_pass_does_nothing(m):
     m.mx_eval(ctypes.addressof(rows))
     assert all(cell(rows, v, 67) == 0x3000 for v in range(16))
 
+
+
+def test_a_state_left_by_another_layout_is_never_trusted(m):
+    """MX_RAM outlives a flash: 'MX04' with another build's layout (garbage tables) must not reach a cell; the
+    first UI pass lays it out anew (MX_MAGIC carries the state's size)"""
+    lfo = {(v, l): 0x7FFFFFFF for v in range(16) for l in range(3)}
+    rows, _ = frame_setup(m, lfo, {})
+    m.host_mx_stale()
+    m.mx_eval(ctypes.addressof(rows))
+    assert all(cell(rows, v, s) == 0x3000 for v in range(16) for s in range(25, 101))
+    m.mx_poll()
+    assert m.host_mx_magic() == 0x4D580000 | m.host_mx_size()
+    m.mx_eval(ctypes.addressof(rows))
+    assert all(cell(rows, v, s) == 0x3000 for v in range(16) for s in range(25, 101))
 
 # --- the envelopes: the clone of stock's AMP envelope ---------------------------------------------
 def tables():
