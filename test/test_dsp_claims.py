@@ -59,7 +59,10 @@ CLAIMS = [
     ("XDLY state", 0x2E6E00, 0x2E7000, ("dnfw.xdly.program", "dnfw.waverider.dsp.XDLY_STATE_DM"), True),
     ("Machinedrum / Monomachine voice slots", 0x2E7000, 0x2EB000, ("dnfw.waverider.dsp.MD_STATE_DM",), True),
     # L2 above the stock image
-    ("opt-stock: the send FX' hot state", 0x20098400, 0x2009B400, ("dnfw.waverider.dsp", "dnfw.fx"), True),
+    # opt-stock: the stock delay's control words and the chorus's state, moved from DDR 0x80459130 (5,532 B, FX_L2;
+    # CHORUS_L2 inside it); the rest of the allotment reserved for the reverb's hot words
+    ("opt-stock: the send FX' hot state", 0x20098400, 0x2009B400,
+     ("dnfw.waverider.dsp", "dnfw.waverider.stockfx", "dnfw.fx"), True),
     ("perc-layout 2a: PERC's event-only code", 0x2009B400, 0x200A0000, ("dnfw.waverider.dsp", "dnfw.perc"), True),
     ("opt-samples", 0x200A0000, 0x200A1800, ("dnfw.sampler", "dnfw.waverider.dsp"), True),
     ("juno-chorus: jsend.asm", 0x200A1800, 0x200A2800, ("dnfw.waverider.dsp", "dnfw.inserts"), True),
@@ -145,6 +148,8 @@ def test_real_extents_fit_their_claims():
     assert dsp.SMP_DEC_DM + 16 * 48 <= 0x2E0080
     assert dsp.MD_STATE_DM + 16 * 1024 <= 0x2EB000
     assert dsp.MNM_RENDER_DM + dsp.MNM_RENDER_BYTES <= 0x2E6400
+    if hasattr(dsp, "FX_DM"):                      # opt-stock's block (dnfw.waverider.stockfx)
+        assert 0x20098400 <= dsp.FX_DM and dsp.FX_DM + dsp.FX_BYTES <= 0x2009B400
 
 
 @pytest.mark.parametrize("addr,module,name", _constants())

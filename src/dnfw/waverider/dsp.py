@@ -1021,6 +1021,8 @@ def regions() -> list[tuple[str, int, int, str]]:
     # L2: the loaded code and state, then the run-time areas
     for what, at, payload in l2_spans():
         area(what, at, len(payload))
+    if "FX_DM" in globals():                     # (fx_spans(stock): built in section7 from stock's initial words)
+        area("the stock delay's control words and chorus's state (opt-stock, dnfw.waverider.stockfx)", FX_DM, FX_BYTES)
     area("the bus inserts' scratch and stores (inserts.bus HEAD_END..MV_STATE)", ins_bus.HEAD_END,
          ins_bus.MV_STATE - ins_bus.HEAD_END)
     scr = "Monomachine scratch and the voice order, in L2 (zeros; v0.32; ANALOG2's mix tables)"
