@@ -96,8 +96,9 @@ def test_lib_c_is_the_model():
     link = (ROOT / "csrc/sampler/link.c").read_text()
     assert re.search(r"#define PROTO (\d+)", link).group(1) == "7"
     assert "cmd == 30 || cmd == 31" in link
-    # (LIST's reply, 132 bytes, fits the reply buffer: it ran on into rq before v0.40)
-    assert "static u8 rp[132]" in link
+    # (LIST's reply, 132 bytes, fits the reply buffer: it ran on into rq before v0.40; 2026-11-11 the buffer is
+    # 160, the test channel's, devtest.c)
+    assert int(re.search(r"static u8 rp\[(\d+)\]", link).group(1)) >= 132
 
 
 def test_v043_folders_past_63_and_their_parents():

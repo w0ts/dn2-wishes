@@ -87,9 +87,16 @@ def test_is_deterministic_and_walks(stock7, built):
 def test_every_added_span_is_in_block_1s_free_tail_and_outside_every_stock_block(stock7):
     # Milestone 5c: M5's L1 block 2 silenced the instrument (docs/waverider-dsp-silence.md)
     stock_blocks = [b for b in bootstream.walk(stock7).blocks if b.count]
+    # 2026-11-14 (the arbiter): the startup's DM cache is 16 KB, 0x2ec000..0x2effff (size code 0, decoded in
+    # docs/waverider-dsp-silence.md, "The startup cache configuration"; 0x2e8000 was a 32 KB margin). The routine
+    # that sets it (sw 0xb8b93a..0xb8b9b2) is held to the bytes that decode, so any other size fails here
+    lo_, hi_ = dsp.l2_sw_to_load(0xB8B93A), dsp.l2_sw_to_load(0xB8B9B3)
+    assert hashlib.sha256(bootstream.read_span(stock7, lo_, hi_ - lo_)).hexdigest() == \
+        "d90ef9fafc38c6f551c21bf56134263bbc352f0a856caab277f823fe13bbdfaf"
+    assert bootstream.read_span(dsp.section7(stock7), lo_, hi_ - lo_) == bootstream.read_span(stock7, lo_, hi_ - lo_)
     for what, at, payload in dsp.spans():
         lo, hi = at - dsp.LOAD_ALIAS, at - dsp.LOAD_ALIAS + len(payload)
-        assert 0x2DD52C <= lo and hi <= 0x2E8000, what          # above stock, below a 32 KB DM cache
+        assert 0x2DD52C <= lo and hi <= dsp.DM_CACHE_16K, what  # above stock, below the startup's 16 KB DM cache
         assert not (0x300000 <= lo < 0x320000), what            # nothing left in block 2
         for b in stock_blocks:
             assert not (b.target < at + len(payload) and at < b.target + b.count), what
@@ -133,41 +140,50 @@ def test_the_five_patches_and_nothing_else_in_the_stock_blocks(stock7, built):
         == bytes.fromhex("800f0400")
     # the per-type setup table is not touched
     assert bootstream.read_span(built, 0x8052DB90, 24) == bootstream.read_span(stock7, 0x8052DB90, 24)
-    # every stock block's payload differs from stock only at the two patches
-    final = bootstream.walk(stock7).final
-    head = built[:final.offset]
-    diff = [k for k in range(final.offset) if head[k] != stock7[k]]
-    entry_off = bootstream.spans(stock7, dsp.sw_to_load(dsp.ENTRY_SW), 8)[0][0]
-    look_off = bootstream.spans(stock7, dsp.sw_to_load(dsp.LOOKUP_SITE_SW), 6)[0][0]
-    idle_off = bootstream.spans(stock7, dsp.l2_sw_to_load(dsp.IDLE_SITE_SW), 6)[0][0]
-    call_off = bootstream.spans(stock7, dsp.sw_to_load(dsp.CALL_SITE_SW), 6)[0][0]
+    # (every stock block's loaded bytes are checked at the end)
     # v0.25: the driver's call of 0x1c9d3f becomes JUMP wr_pvmix (its two delay slots stay)
     pv = dsp.sw_to_load(dsp.PVMIX_SITE_SW)
     assert bootstream.read_span(stock7, pv, 18) == dsp.PVMIX_SITE_STOCK
     assert bootstream.read_span(built, pv, 18) == dsp.objects()["pvmix_jump"] + dsp.PVMIX_SITE_STOCK[6:]
-    pv_off = bootstream.spans(stock7, pv, 6)[0][0]
     # FDN8 and XDLY: the FX bus's reverb CJUMP and delay CALL, each with only its target changed
     rv, dl = dsp.sw_to_load(dsp.REVERB_SITE_SW), dsp.sw_to_load(dsp.DELAY_SITE_SW)
     assert bootstream.read_span(stock7, rv, 6) == dsp.REVERB_SITE_STOCK
     assert bootstream.read_span(built, rv, 6) == dsp.reverb_cjump()
     assert bootstream.read_span(stock7, dl, 6) == dsp.DELAY_SITE_STOCK
     assert bootstream.read_span(built, dl, 6) == dsp.delay_call()
-    rv_off, dl_off = bootstream.spans(stock7, rv, 6)[0][0], bootstream.spans(stock7, dl, 6)[0][0]
     # CHOR/WIDE (b6): the engine's CJUMP to the FX sends, its target wr_inpost
     sn = dsp.sw_to_load(dsp.SENDS_SITE_SW)
     assert bootstream.read_span(stock7, sn, 6) == dsp.SENDS_SITE_STOCK
     assert bootstream.read_span(built, sn, 6) == dsp.sends_cjump()
-    sn_off = bootstream.spans(stock7, sn, 6)[0][0]
     # the chorus send's TYPE JUNO (2026-11-12): the FX bus's CALL of the stock chorus, its target wr_jsend
     ch = dsp.sw_to_load(dsp.CHORUS_SITE_SW)
     assert bootstream.read_span(stock7, ch, 6) == dsp.CHORUS_SITE_STOCK
     assert bootstream.read_span(built, ch, 6) == dsp.chorus_call()
-    ch_off = bootstream.spans(stock7, ch, 6)[0][0]
-    allowed = (set(range(entry_off, entry_off + 8)) | set(range(look_off, look_off + 6))
-               | set(range(idle_off, idle_off + 6)) | set(range(call_off, call_off + 6))
-               | set(range(pv_off, pv_off + 6)) | set(range(rv_off, rv_off + 6)) | set(range(dl_off, dl_off + 6))
-               | set(range(sn_off, sn_off + 6)) | set(range(ch_off, ch_off + 6)))
-    assert diff and set(diff) <= allowed
+    # insmain (2026-11-11): the routing's read after its per-track loop becomes JUMP wr_inbus
+    ro = dsp.sw_to_load(dsp.ROUTE_SITE_SW)
+    assert bootstream.read_span(stock7, ro, 6) == dsp.ROUTE_SITE_STOCK
+    # 2026-11-14 (the 1.12 gate): compared by the address each byte loads to, the blocks applied in order, not by
+    # offset in the stream: shrink turns the twin table B's block into a fill (dsp.TWIN_B, filled from TWIN_A at
+    # run time by entry_mark.asm), so the stream is shorter and every byte after B moved. The stock blocks' loaded
+    # bytes differ only at the patches and in B
+    sites = ((dsp.sw_to_load(dsp.ENTRY_SW), 8), (dsp.sw_to_load(dsp.LOOKUP_SITE_SW), 6), (site, 6), (call, 6),
+             (pv, 6), (rv, 6), (dl, 6), (sn, 6), (ch, 6), (ro, 6), (dsp.TWIN_B, dsp.TWIN_BYTES))
+    allowed = set().union(*(range(a, a + n) for a, n in sites))
+    s_img, b_img = _loaded(stock7), _loaded(built)
+    changed = [a for a, v in s_img.items() if b_img.get(a) != v]
+    assert changed and set(changed) <= allowed, sorted(set(changed) - allowed)[:8]
+
+
+def _loaded(stream: bytes) -> dict[int, int]:
+    """the bytes STREAM's blocks load, address -> byte, applied in order (a fill as zeros; the closing DDR fill
+    of several MB, the same in stock and in every build, left out)"""
+    mem: dict[int, int] = {}
+    for b in bootstream.walk(stream).blocks:
+        if b.has_payload:
+            mem.update(zip(range(b.target, b.target + b.count), stream[b.offset + 16:b.offset + 16 + b.count]))
+        elif b.flags & bootstream.FLAG_FILL and 0 < b.count < 1 << 22:
+            mem.update(dict.fromkeys(range(b.target, b.target + b.count), 0))
+    return mem
 
 
 def test_ddr_spans_are_clear_of_the_stock_image_and_the_engine():
@@ -406,8 +422,16 @@ def test_the_entry_mark_does_the_displaced_load_and_returns_to_the_call():
     assert be[offs[-1]:].hex() == "063e001c9fbc"                    # JUMP 0x1c9fbc, the cjump
     assert sharc_object.load_bytes(be[offs[-2]:offs[-1]]) == dsp.CALL_SITE_STOCK  # r4 = 0x268438, as stock
     src = [ln.split("//", 1)[0].strip() for ln in (SHARC / "entry_mark.asm").read_text().splitlines()]
-    assert {c for c in src if c.startswith("DM(")} == {"DM(0x2de138) = R9;", "DM(0x2de13c) = R9;"}
-    assert dsp.IDLE_STATE_DM + dsp.IDLE_STATE_BYTES >= 0x2DE140
+    # 2026-11-10 (shrink): and, the first time through, the twin tables' copy (A over B, dsp.TWIN_*): its flag
+    # TWIN at dsp.TWIN_FLAG_DM, R10, I0 and I1 saved in the three words after it, and the copy's store through I1
+    tw = dsp.TWIN_FLAG_DM
+    assert {c for c in src if c.startswith("DM(")} == {
+        "DM(0x2de138) = R9;", "DM(0x2de13c) = R9;", f"DM({tw:#x}) = R10;", f"DM({tw + 4:#x}) = R10;",
+        f"DM({tw + 8:#x}) = I0;", f"DM({tw + 12:#x}) = I1;", "DM(I1, M6) = R9;"}
+    assert dsp.IDLE_STATE_DM + dsp.IDLE_STATE_BYTES >= 0x2DE140 == tw
+    # those words in the state block's tail, below PERC's state; the copy's I1 starts at B, its count B's words
+    assert dsp.STATE_DM <= tw and tw + 16 <= dsp.STATE_DM + dsp.STATE_BYTES <= dsp.PERC_STATE_DM
+    assert f"R9 = {dsp.TWIN_B:#x};" in src and f"R10 = {dsp.TWIN_BYTES // 4:#x};" in src
 
 
 def _code_lines(name):
@@ -436,7 +460,8 @@ def test_smp_hands_on_to_the_inserts_and_writes_only_saved_registers():
 def test_inserts_hand_on_to_ping_and_write_only_saved_registers():
     import re
     lines = _code_lines("inserts")
-    assert f"JUMP {dsp.PING_SW:#x};" in lines
+    # 2026-11-10 (the A2 filters): the inserts hand on to A2F (wr_a2f), which hands on to PING's shared tail
+    assert f"JUMP {dsp.A2F_SW:#x};" in lines and f"JUMP {dsp.PING_SW:#x};" in _code_lines("a2f")
     for ln in lines:
         m = re.match(r"(I|M|L|B)(\d+) =", ln)
         if m:
@@ -482,7 +507,12 @@ def test_perc_saves_what_ping_restores_and_hands_on_to_resonator():
             # v0.17: I3 (a slot's Machinedrum words) and I5 (a machine's output), both saved
             # (v0.24: and I0, the P-I machines', saved with the rest)
             assert f"{m.group(1)}{m.group(2)}" in ("I0", "I1", "I2", "I3", "I4", "I5", "I12"), ln
-    assert not any(re.search(r"\bCALL\b|\bDO\b|\bRTS\b", ln) for ln in lines)
+    # 2026-11-12 (day2, opt-md: PI-BD and PI-ML): eleven hardware loops, the firmware's own form (12a_ureg,
+    # docs/dsp-perf.md), which scripts/gate_hwrules.py holds to the PRM's loop rules; on the unit 2026-11-14
+    # (r5, 16 MACHINEDRUM notes: every note sounds, guard 0). Those only: any other DO, CALL or RTS still fails
+    loops = [ln for ln in lines if re.search(r"\bDO\b", ln)]
+    assert len(loops) == 11 and all(re.fullmatch(r"LCNTR = R\d+, DO wr_pk_hwend_\d+\. UNTIL LCE;", ln) for ln in loops), loops
+    assert not any(re.search(r"\bCALL\b|\bRTS\b", ln) for ln in lines)
 
 
 def test_no_source_is_left_with_its_branch_targets_unresolved():

@@ -283,6 +283,9 @@ def test_v026_the_monomachine_machines_play_the_dn2s_note():
     from dnfw.md import core as MDK
     from dnfw.mnm import dpro, machines as MNM
     from dnfw.engines.plaits import plaits as PLT
+    from dnfw.engines.analog2 import analog2 as A2
+    from dnfw.engines.drone import drone as DR
+    from dnfw.engines.juno import juno as J
     from dnfw.mnm import rom as MROM
     if not MROM.available():
         pytest.skip("needs the owner's Monomachine OS")
@@ -297,14 +300,25 @@ def test_v026_the_monomachine_machines_play_the_dn2s_note():
              "PLAITS": (64, 0, 64, 0, 0, 64, 64, PLT.knob_of(PLT.MODELS.index("WS"))),   # WS, linear shape, the
                                                         # least fold; FINE (2026-11-09) at its centre: 0 is -64 cents;
                                                         # TUNE G, MODL H (2026-11-11: plaits.MODL_K)
-             "TB303": (127, 0, 0, 64, 0, 0, 0, 64)}    # the filter open, no resonance or env mod: the saw
+             "TB303": (127, 0, 0, 64, 0, 0, 0, 64),    # the filter open, no resonance or env mod: the saw
+             # 2026-11-14 (the 1.12 gate: three engines had no case, so the loop stopped at DRONE's KeyError and
+             # never measured them): their own defaults, DRONE's drift, beat and detune 0 (one clear pitch)
+             "DRONE": (0, 12, 0, 18, 0, 76, 0, 0), "ANALOG2": A2.DEFAULTS, "JUNO": J.DEFAULTS}
+    # and their page 2 at its start (0..127): DRONE's OCT 0 (q2 0.5: the note itself, dnfw.engines.drone.drone._target),
+    # ANALOG2's SEMI 0, JUNO's RNGE 8'
+    knobs2 = {"DRONE": tuple(round(127 * q) for q in DR.DEFAULTS2) + (0,), "ANALOG2": A2.DEFAULTS2,
+              "JUNO": J.DEFAULTS2 + (0,)}
     for k, name in enumerate(MNM.NAMES):    # each voice (2026-11-11: MONOMACHINE's engines by ENGN)
         f = []
         for note in (60, 72):
             h = PL.Harness()
             h.words.update(dpro.bench_words(h.L.md.mnm))
             h.words[h.L.md.C["fill"]] = MDK.Z_N
+            for j, v in enumerate(A2.table_words()):      # the coordinator loads the A2 filters' mix tables
+                h.words[h.L.md.mnm.scratch + A2.TABLES_OFF + 4 * j] = PL.bits(v)
             h.set_mnm_voice(k, knobs[name])
+            for (_r, slot, lo, top), x in zip(PM.FX_PARAMS, knobs2.get(name, ())):
+                h._half(PM.frame_offset(slot), PL.knob_word(x, top, lo))
             out = []
             for b in range(48):
                 out += h.block(note=float(note), trig=b == 0)

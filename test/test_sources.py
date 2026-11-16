@@ -49,6 +49,8 @@ def test_no_coldfire_source_writes_the_frame():
                 if addr in line:
                     # v0.25: the per-voice parameter mirror (smp_mod_apply writes SAMP's cell,
                     # which a static assert in link.c puts past the frame's end)
+                    # (rec_dt2.c spells the same type `unsigned short`; CTL_FRAME is held to reads above)
                     assert ("#define CTL_FRAME ((volatile u16 *)0x80005E60u)" in line
+                            or "#define CTL_FRAME ((volatile unsigned short *)0x80005E60u)" in line
                             or "#define MIRROR_CELL(b, s) ((volatile u16 *)(0x800068E4u" in line
                             or "_Static_assert(0x800068E4u + 34u + 2u * SAMP_SLOT >= 0x80005E60u + 2748u" in line), (f.name, line)

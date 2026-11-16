@@ -63,6 +63,8 @@ def test_applies_to_both_sections(applied, dn2_111):
     # v0.26: and the tables the ColdFire sends the DSP at power-on (dnfw.mods.waverider._tables)
     from dnfw.md import rom as md_rom
     want = 5 if md_rom.available() else 3
+    # 2026-11-10: and, with the A2 filters, their FLTR-list chunk (dnfw.engines.analog2.filters.coldfire)
+    want += "flt_chunk" in waverider.SPEC
     # v0.37: and the start-up animation: the stamp's code and its frames (ANIZ); v0.39: and
     # the mod's version label over its last frame (ANZL)
     kinds = [kind for kind, _ in chunks]
@@ -95,7 +97,9 @@ def test_the_fast_link_hook_replays_the_isr_instructions(applied, stock):
     assert at(stock, CF.TDM_SITE, 8) == CF.TDM_STOCK
     assert at(main, CF.TDM_SITE, 2) == bytes.fromhex("4eb9")
     assert at(main, CF.TDM_SITE + 6, 2) == bytes.fromhex("4e71")
-    code = _chunked(long_at(main, CF.TDM_SITE + 2), 64)
+    # (2026-11-11: the system meter's and the profiler's few words come first, so the hook is longer than 64 B;
+    # it still ends with the two instructions it displaced, then rts)
+    code = _chunked(long_at(main, CF.TDM_SITE + 2), 128)
     assert CF.TDM_STOCK + bytes.fromhex("4e75") in code
 
 
@@ -437,14 +441,28 @@ def test_v045_ping_is_gone_and_its_sites_are_stock(applied, dn2_111):
              0x400DC508, 0x400DC51A, 0x400DC52E, 0x400DC542,      # the name accessors
              0x400DD420,                                          # the LOAD bound
              0x400DC1FA, 0x400C2614, 0x4006ECA0)                  # slot_to_id, descriptor, curve
-    for e in waverider.SPEC["edits"]:
-        assert not any(e["va"] <= va < e["va"] + len(e["new"]) // 2 for va in sites), hex(e["va"])
     main, _ = platform.split(applied.payloads[3])
     stock = dn2_111.container.find(3).unpack()
-    for va in sites:
-        assert at(main, va, 8) == at(stock, va, 8), hex(va)
     assert at(main, 0x401DE150, 24) == struct.pack(">6I", 0, 1, 4, 3, 5, 2)   # stock's six filters
-    assert "ping_chunk" not in waverider.SPEC and not any(k.startswith("ping_") for k in waverider.SPEC["layout"])
+    assert "ping_chunk" not in waverider.SPEC
+    if "flt_chunk" not in waverider.SPEC:
+        for e in waverider.SPEC["edits"]:
+            assert not any(e["va"] <= va < e["va"] + len(e["new"]) // 2 for va in sites), hex(e["va"])
+        for va in sites:
+            assert at(main, va, 8) == at(stock, va, 8), hex(va)
+        assert not any(k.startswith("ping_") for k in waverider.SPEC["layout"])
+        return
+    # 2026-11-10: the A2 filter machines (dnfw.engines.analog2.filters.coldfire) take these sites again for their
+    # own FLTR list (filter types past 5 are theirs, and a stored sound keeps them); every one is a site of theirs,
+    # and their labels, which keep PING's names, are inside their own chunk
+    from dnfw.engines.analog2.filters import coldfire as A2F
+    a2_sites = {A2F.LIST_ALLOC, A2F.LIST_END, A2F.LIST_CAP, A2F.LIST_BEGIN, A2F.LOAD_BOUND, A2F.SLOT_SITE,
+                A2F.GRAPH_SITE, A2F.OVER_SITE} | {b for b, _, _, _ in A2F.NAME_SITES}
+    a2_sites |= {i + 2 for _, i, _, _ in A2F.NAME_SITES}          # (the base instructions' operands)
+    assert set(sites) <= a2_sites, sorted(map(hex, set(sites) - a2_sites))
+    f = waverider.SPEC["flt_chunk"]
+    lo, hi = f["load"], f["load"] + len(bytes.fromhex(f["code"]))
+    assert all(lo <= v <= hi for k, v in waverider.SPEC["layout"].items() if k.startswith("ping_"))
 
 
 def test_no_screen_intro(applied, stock):
