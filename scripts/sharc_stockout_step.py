@@ -30,6 +30,7 @@ control flips one bit of the main mix in the build's run and must be seen.
 
 from __future__ import annotations
 
+import copy
 import os
 import random
 
@@ -71,7 +72,7 @@ def scenario(sound, machines, seed: int, blocks: int, *, globals_random: bool, s
     moves = [[(rnd.randrange(16), rnd.choice(INDICES), rnd.randrange(0, 0x7F01)) for _ in range(6)]
              for _ in range(blocks)]
 
-    def fb(b):
+    def build(b):
         f = FR.Frame()
         for o, v in glob.items():
             f.put(o, v)
@@ -90,7 +91,9 @@ def scenario(sound, machines, seed: int, blocks: int, *, globals_random: bool, s
             for t in range(16):
                 f.trigger(t)
         return f.to_bytes()
-    return fb
+    # made once, in order (the parameter moves change PAGES as they go): every run reads the same bytes
+    frames = [build(b) for b in range(blocks)]
+    return lambda b: frames[b]
 
 
 def tx_page(m2, st) -> int:
@@ -120,6 +123,14 @@ def outputs(m2, st, reply):
 CONTROL_WORD = MAIN[0]
 
 
+def fresh(img):
+    """IMG with its loaded memory made again: a run's writes reach the image's memory under the snapshot, so a
+    second run on the same Image object would start from the first one's leftovers"""
+    out = copy.copy(img)
+    out.memory = img.memory.__class__.from_stream(img.stream)
+    return out
+
+
 def run(M5, snap, m2mach, m5img, stockimg, sound, machines, blocks: int = 16) -> dict:
     m2, V = M5.m2, M5.V
     plan = [("rotate A, globals stock", 11, False, None),
@@ -135,7 +146,7 @@ def run(M5, snap, m2mach, m5img, stockimg, sound, machines, blocks: int = 16) ->
         fb = scenario(sound, machines, seed, blocks, globals_random=gl, silence=sil)
         runs = {}
         for which, img in (("stock", stockimg), ("build", m5img)):
-            state = M5.init_on(snap, m2mach, img)
+            state = M5.init_on(snap, m2mach, fresh(img))
             caps, halt = [], None
             for b in range(blocks):
                 cur = {}
