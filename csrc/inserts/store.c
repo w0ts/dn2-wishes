@@ -52,6 +52,18 @@ extern void ins_record(int t, int j, u8 *f);
 extern void ins_set_record(int t, int j, const u8 *f);
 extern void ins_defaults(void);
 extern void ins_loaded(void);
+/* 2026-11-11: the send pages' second page (csrc/fxpage) rides in the same sector, after the inserts' check:
+ * 'FXP2', the sixteen values (four words), its own check. A record without it (a project saved before) is
+ * the defaults; an older build reads the record as before and ignores it. */
+extern void fxp_record(u8 *f);
+extern void fxp_set_record(const u8 *f);
+extern void fxp_defaults(void);
+#define FXP_MAGIC 0x46585032u
+#define W_FXP (W_CHECK + 1u)                    /* magic, 4 words of values, check */
+static u32 fxp_check(const u32 *w)
+{
+    return (w[W_FXP + 1] + 3u * w[W_FXP + 2] + 5u * w[W_FXP + 3] + 7u * w[W_FXP + 4]) ^ CHECK_XOR;
+}
 
 volatile u32 ins_wr_ring[8] D_;                 /* hooks.S: the slots stock wrote, newest at head - 1 */
 volatile u32 ins_wr_head D_ = 0;
@@ -98,6 +110,10 @@ static int load(int p)
     for (int t = 0; t < 16; t++)
         for (int j = 0; j < 2; j++)
             ins_set_record(t, j, r + 8 * (2 * t + j));
+    if (sec[W_FXP] == FXP_MAGIC && sec[W_FXP + 5] == fxp_check(sec))
+        fxp_set_record((const u8 *)(sec + W_FXP + 1));
+    else
+        fxp_defaults();
     ins_loaded();
     ins_st_loads++;
     return 1;
@@ -122,6 +138,9 @@ static void save(int p)
     sec[W_CHECK] = check(sec);
     for (u32 k = W_CHECK + 1u; k < 128u; k++)
         sec[k] = 0;
+    sec[W_FXP] = FXP_MAGIC;
+    fxp_record((u8 *)(sec + W_FXP + 1));
+    sec[W_FXP + 5] = fxp_check(sec);
     if (BLK_WRITE(INS_BASE + 2u * (u32)p + (u32)c, 512u, sec) == 0)
         ins_st_writes++;
     else
@@ -148,6 +167,7 @@ void ins_store_poll(void)
         seen_news = N;
         if (smp_pj_last == 2) {                 /* NEW: the defaults */
             ins_defaults();
+            fxp_defaults();
             ins_loaded();
             if (smp_pj_newslot >= 0 && smp_pj_newslot < 128)
                 save(smp_pj_newslot);
@@ -155,6 +175,7 @@ void ins_store_poll(void)
             int s = smp_pj_slot;
             if (!(s >= 0 && s < 128 && load(s))) {
                 ins_defaults();                 /* a project saved before this build: every slot OFF */
+                fxp_defaults();
                 ins_loaded();
             }
         }

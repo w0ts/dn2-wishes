@@ -49,3 +49,37 @@ LINE_A = STOCK_STATE + STOCK_AREA[0]
 LINE_B = LINE_A + 4 * LINE
 assert 2 * LINE == STOCK_WORDS
 CHUNK = 4096                         # words cleared a block when the stock delay comes back
+
+# -- the Delay page's second page (docs/fxpage.md, csrc/fxpage): the ColdFire turns the page's knobs (0..127) into
+# the engine's values, with the formulas below (csrc/fxpage/fxp_derive.h, held to derive() by test/test_fxpage.py),
+# and sends them in the directory page at EX: the change word (0: nothing received yet: the constants), then five
+# float32 words kf kn wl wr sn. Each knob's DEFAULT is the knob whose values are exactly the constants above (so a
+# project that never touched the page plays bit for bit as before); the instances (inserts) always use the constants.
+EX = 0x84000ED0
+EX_WORDS = 6
+SL_DEF = 58                          # SLEW: the times' follow KF; knob k: 1 / (48 x 1000^(k / 127)) (1 ms .. 1 s)
+KN_DEF = 61                          # KNEE: the soft knee; knob k: 0.3 + k x 0.65 / 127
+KN_LO, KN_STEP = 0.3, 0.65 / 127.0
+WD_DEF = 127                         # WDTH: the lines' spread into out L / R: 127 hard (L = line 1), 0 mono
+WD_K = 1.0 / 127.0
+IN_DEF = 64                          # INPT: the lines' inputs, (L + R) / 2 each (64), towards L / R (127), swapped (0)
+IN_K = 1.0 / 64.0
+
+
+def derive(sl: int, kn: int, wd: int, inp: int):
+    """the five float32 values of the page's knobs (the ColdFire's fxp_derive.h does the same, operation for operation):
+    kf kn wl wr sn"""
+    import numpy as np
+    F = np.float32
+    kf = F(KF) if sl == SL_DEF else F(1.0 / (SL_T0 * 1000.0 ** (sl / 127.0)))
+    k = F(KNEE) if kn == KN_DEF else F(kn) * F(KN_STEP) + F(KN_LO)
+    if wd == WD_DEF:
+        wl, wr = F(1.0), F(0.0)
+    else:
+        w = F(wd) * F(WD_K)
+        wl, wr = (F(1.0) + w) * F(0.5), (F(1.0) - w) * F(0.5)
+    sn = F(0.0) if inp == IN_DEF else (F(inp) - F(64.0)) * F(IN_K)
+    return kf, k, wl, wr, sn
+
+
+SL_T0 = 48.0

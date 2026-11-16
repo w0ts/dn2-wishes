@@ -166,6 +166,7 @@ class Ref:
         self.c = [F(0)] * 8
         self.dq = self.g1 = self.g2 = self.gh = self.ah = self.al = F(0)
         self.pd = 0
+        self.sd, self.f, self.wdl, self.wdr = F(1.0), F(0.0), F(1.0), F(0.0)
         self.cleared: list[tuple[int, int]] = []      # (DDR address, words) the stock clears asked for
 
     # -- the parameters, when one changed --------------------------------------------------
@@ -245,6 +246,14 @@ class Ref:
         w = exp2(w) * F(W_LPF)
         self.al = F(1.0) - exp2(w)
 
+    def extras(self, ex) -> None:
+        """the second page's values (design.EX): ex None, or its change word 0, the constants (every instance); else
+        (change word, sd, f, wl, wr) as the ColdFire sends them (design.derive)"""
+        if ex is None or not ex[0]:
+            self.sd, self.f, self.wdl, self.wdr = F(1.0), F(0.0), F(1.0), F(0.0)
+        else:
+            self.sd, self.f, self.wdl, self.wdr = (F(x) for x in ex[1:5])
+
     # -- per block: the lines' reads -------------------------------------------------------
     def lfo(self) -> list[int]:
         ro = []
@@ -274,7 +283,16 @@ class Ref:
 
     def run(self, inl, inr):
         ro = self.lfo()
-        gd = (self.g1, self.g1, self.g2, self.g2)
+        g1x = self.g1 * self.sd
+        g1x = min(g1x, F(D.DF_MAX))
+        g2x = self.g2 * self.sd
+        g2x = min(g2x, F(D.DF_MAX))
+        omf = F(1.0) - self.f
+        gx = []
+        for k in range(8):
+            t = self.g[k] * omf
+            gx.append(t + self.f)
+        gd = (g1x, g1x, g2x, g2x)
         outl, outr = [], []
         for j in range(D.BLOCK):
             xs = F(inl[j]) + F(inr[j])
@@ -308,7 +326,7 @@ class Ref:
                 t = self.c[k] * t
                 lp = o + t
                 self.lp[k] = lp
-                fk = lp * self.g[k]
+                fk = lp * gx[k]
                 f.append(fk)
                 s = fk if k == 0 else s + fk
                 if k == 0:
@@ -328,13 +346,21 @@ class Ref:
                 w = s - f[k]
                 w = w + x if k % 2 == 0 else w - x
                 self.wr(self.vt["RL"][k], w)
-            outl.append(l * F(D.GOUT))
-            outr.append(r * F(D.GOUT))
+            lg = l * F(D.GOUT)
+            rg = r * F(D.GOUT)
+            if self.wdr != F(0.0):
+                ol = lg * self.wdl
+                ol = ol + rg * self.wdr
+                orr = rg * self.wdl
+                orr = orr + lg * self.wdr
+                lg, rg = ol, orr
+            outl.append(lg)
+            outr.append(rg)
             self.p = (self.p - 1) & M32
         return outl, outr
 
     # -- the slot's call: the stock reverb, a switch's clearing, or FDN8 --------------------
-    def block(self, type_word: int, inl, inr, par):
+    def block(self, type_word: int, inl, inr, par, ex=None):
         tw = type_word & 0xFFFF
         t = 1 if tw == 0 else 2 if tw == 0x200 else 0
         if t != self.cur:
@@ -356,6 +382,7 @@ class Ref:
             return [F(0)] * D.BLOCK, [F(0)] * D.BLOCK
         if not self.cur:
             return "stock"
+        self.extras(ex)
         pw = [bits(x) for x in par]
         if pw != self.last:
             self.params(par)

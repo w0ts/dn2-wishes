@@ -136,3 +136,54 @@ def test_knee():
         a = abs(v)
         want = a if a <= D.KNEE else min(1.0, D.KNEE + 0.5 * np.tanh(min(2 * (a - D.KNEE), 2.0)))
         assert abs(abs(k) - want) < 2e-6 and (k <= 0) == (v <= 0)
+
+
+def put_ex(m: Mem, gen: int, sl: int, kn: int, wd: int, inp: int):
+    """the Delay page's second page as the ColdFire sends it (design.EX): the change word, then design.derive's five
+    float words; -> (the words, for the reference)"""
+    vals = D.derive(sl, kn, wd, inp)
+    m.put(D.EX, gen)
+    for k, v in enumerate(vals):
+        m.put(D.EX + 4 * (k + 1), fbits(v))
+    return (gen, *vals)
+
+
+def test_second_page_model_is_the_reference():
+    """every setting of the page's four knobs, the model of the DSL program against the reference, bit for bit"""
+    for knobs in ((20, 30, 40, 10), (0, 0, 0, 0), (127, 127, 127, 127), (58, 61, 0, 64), (58, 61, 127, 64),
+                  (58, 61, 127, 100), (90, 80, 64, 64)):
+        m, r = mem0(), R.Ref()
+        ex = put_ex(m, 1, *knobs)
+        heard = 0
+        for b, (tw, inl, inr, par) in enumerate(script(blocks=80)):
+            got = call(m, tw, inl, inr, par)
+            want = as_bits(r.block(tw, inl, inr, par, ex))
+            assert got == want, f"{knobs} block {b}"
+            if not isinstance(want, str):
+                heard += sum(1 for w in want[0] + want[1] if w & 0x7FFFFFFF)
+        assert heard > 300, knobs
+
+
+def test_second_page_defaults_are_todays_bits():
+    """the defaults, and a change word 0 (nothing sent yet), are exactly the engine without the page"""
+    base = None
+    for ex in (None, (1, *D.derive(D.SL_DEF, D.KN_DEF, D.WD_DEF, D.IN_DEF)), (0, 1, 2, 3, 4, 5)):
+        r = R.Ref()
+        outs = []
+        for tw, inl, inr, par in script(blocks=80):
+            outs.append(as_bits(r.block(tw, inl, inr, par, ex)))
+        base = base or outs
+        assert outs == base
+    # the instances (MODE 1, im != 0) ignore the page even when words are there; a send reads it
+    from dnfw.perc.dsl import Prog
+    for im, want in ((1, (D.KF, D.KNEE, 1.0, 0.0, 0.0)), (0, None)):
+        m = mem0()
+        put_ex(m, 1, 20, 30, 40, 10)
+        m.put(P.C["im"], im)
+        p = Prog("run", mem=m)
+        P.extras(p)
+        got = tuple(np.frombuffer(struct.pack("<I", m.get(P.C[n])), "<f")[0] for n in ("kf", "kn", "wl", "wr", "sn"))
+        if want:
+            assert got == tuple(np.float32(x) for x in want)
+        else:
+            assert got != tuple(np.float32(x) for x in (D.KF, D.KNEE, 1.0, 0.0, 0.0))

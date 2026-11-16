@@ -124,7 +124,7 @@ MD_DELAY_DDR = 0x82200000                    # 16 slots x core.PI_DELAY_STRIDE
 # 0x1c1d11) gets wr_fdn8 as its target; wr_fdn8 JUMPs on to the stock reverb unless TYPE (k 48)
 # asks for FDN8.
 FDN8_L2_LOAD = 0x200AA000
-FDN8_L2_SPAN = 0x2800                        # 10 KB (16 KB until XDLY took the rest)
+FDN8_L2_SPAN = 0x2400                        # 9 KB (2026-11-11: 10 KB until the send pages' second page: its code went to XDLY's; fdn8.asm 7,018 B; 16 KB until XDLY took the rest)
 FDN8_SW = 0xB80000 + (FDN8_L2_LOAD - 0x20000000) // 2       # 0xbd5000
 FDN8_STATE_DM = 0x2E6400
 FDN8_RING_DDR = 0x82400000
@@ -134,9 +134,9 @@ FDN8_RING_BYTES = 0x80000                   # 512 KB (256 KB until LONG)
 # 512 B of FDN8's L1 block, its two lines in the stock delay's own 4 MB sample area in DDR. The FX
 # bus's call of the stock delay (sw 0x1c1c58) gets wr_xdly as its target; wr_xdly JUMPs on to the
 # stock delay unless TYPE (k 40, Delay FX Routing) asks for XDLY.
-XDLY_L2_LOAD = FDN8_L2_LOAD + FDN8_L2_SPAN   # 0x200ac800
-XDLY_L2_SPAN = 0x200ADA00 - XDLY_L2_LOAD     # 4.5 KB (2026-11-10: 0x600 to the inserts, SUB DIST GATER RING; xdly.asm 4,148 B)
-XDLY_SW = 0xB80000 + (XDLY_L2_LOAD - 0x20000000) // 2       # 0xbd6400
+XDLY_L2_LOAD = FDN8_L2_LOAD + FDN8_L2_SPAN   # 0x200ac400
+XDLY_L2_SPAN = 0x200ADA00 - XDLY_L2_LOAD     # 5.5 KB (4.5 KB until 2026-11-11) (2026-11-10: 0x600 to the inserts, SUB DIST GATER RING; xdly.asm 4,148 B)
+XDLY_SW = 0xB80000 + (XDLY_L2_LOAD - 0x20000000) // 2       # 0xbd6200
 XDLY_STATE_DM = 0x2E6E00
 DELAY_SITE_SW = 0x1C1C58                     # the FX bus: CALL 0xb8482c (DB), then its two pushes
 DELAY_SITE_STOCK = bytes.fromhex("0418b8002c48")

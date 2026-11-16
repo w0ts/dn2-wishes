@@ -35,6 +35,7 @@ LINK_SOURCES = [SOURCE.parents[1] / "sampler" / "link.c", SOURCE.parents[1] / "s
                 SOURCE.parents[1] / "meter" / "meter.c", SOURCE.parents[1] / "meter" / "hooks.S",   # the system meter
                 SOURCE.parents[1] / "fdn8" / "ui.c",                 # FDN8's TYPE knob and names (docs/fdn8.md)
                 SOURCE.parents[1] / "xdly" / "ui.c",                 # XDLY's TYPE knob and names (docs/xdly.md)
+                SOURCE.parents[1] / "fxpage" / "fxp.c",               # the send pages' second page (docs/fxpage.md)
                 SOURCE.parents[1] / "inserts" / "ins.c",              # the per-track inserts' page (docs/inserts.md)
                 SOURCE.parents[1] / "inserts" / "store.c",            # ... saved with the project (2026-11-10)
                 SOURCE.parents[1] / "inserts" / "hooks.S",
@@ -83,6 +84,7 @@ METER_ENTRIES = ["mtr_isr_out", "mtr_switch", "mtr_poll", "mtr_draw"]
 FDN8_ENTRIES = ["rvt_poll", "rvt_cell", "rvt_state", "rvt_placed", "rvt_seen"]
 # XDLY (csrc/xdly, docs/xdly.md): the Delay page's TYPE, the same way
 XDLY_ENTRIES = ["dlt_poll", "dlt_cell", "dlt_state", "dlt_placed", "dlt_seen"]
+FXP_ENTRIES = ["fxp_pop", "fxp_draw", "fxp_begin", "fxp_seen", "fxp_words", "fxp_gen", "fxp_up", "fxp_v", "fxp_record", "fxp_set_record", "fxp_defaults"]
 # the per-track inserts (csrc/inserts, docs/inserts.md): the page's hooks and the values the checks read
 INS_ENTRIES = ["ins_pop", "ins_draw", "ins_visible", "ins_words", "ins_gen", "ins_up", "ins_sel", "ins_selv", "ins_mod", "ins_kv", "ins_hdr_tail",
                "ins_inst", "ins_edits", "ins_pj_write_hook", "ins_store_poll", "ins_wr_ring", "ins_wr_head",
@@ -92,7 +94,7 @@ DEVTEST_ENTRIES = ["dt_rx", "dt_poll", "dt_sw", "smp_bulk_at", "prof_isr", "prof
 LZMA7_ENTRIES = ["dn_depack7", "dn7_status", "dn7_length"]    # 2026-11-11 (docs/lzma7.md)
 MOD_ENTRIES = ["mod_mask_hook", "mod_lfo_mask", "mod_eval", "mod_eval_pre", "mod_wb", "mod_wb_cell",   # csrc/modulation
                "mv_begin", "mv_cell", "mv_poll"]
-LINK_ENTRIES = LINK_ENTRIES + DEVTEST_ENTRIES + LZMA7_ENTRIES + MOD_ENTRIES + SLIDE_ENTRIES + METER_ENTRIES + FDN8_ENTRIES + XDLY_ENTRIES + INS_ENTRIES + HOLD_ENTRIES
+LINK_ENTRIES = LINK_ENTRIES + DEVTEST_ENTRIES + LZMA7_ENTRIES + MOD_ENTRIES + SLIDE_ENTRIES + METER_ENTRIES + FDN8_ENTRIES + XDLY_ENTRIES + FXP_ENTRIES + INS_ENTRIES + HOLD_ENTRIES
 
 
 # the list popup (csrc/waverider/popup.c, docs/popups.md): on our machines' and FX's list parameters,

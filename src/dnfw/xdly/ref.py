@@ -49,15 +49,16 @@ def tanh(z) -> np.float32:
     return F(1.0) - e
 
 
-def knee(v) -> np.float32:
+def knee(v, kn=None) -> np.float32:
+    kn = F(D.KNEE) if kn is None else kn
     a = max(v, F(0.0) - v)
-    if a > F(D.KNEE):
-        z = a - F(D.KNEE)
+    if a > kn:
+        z = a - kn
         z = z * F(2.0)
         z = min(z, F(2.0))
         t = tanh(z)
         t = t * F(0.5)
-        a = t + F(D.KNEE)
+        a = t + kn
         a = min(a, F(1.0))
         return a if v > F(0.0) else F(0.0) - a
     return v
@@ -70,12 +71,22 @@ class Ref:
         self.wp = self.fill = self.q = 0
         self.da = self.db = self.ya = self.yb = self.fa = self.fb = F(0)
         self.ta = self.tb = self.md = self.g = self.c = F(0)
+        self.kf, self.kn, self.wl, self.wr, self.sn = F(D.KF), F(D.KNEE), F(1.0), F(0.0), F(0.0)
         self.cur = 0                              # 0 the stock delay, 1 XDLY
         self.clr = 0
         self.pos = 0
         self.cleared: list[tuple[int, int]] = []  # (word, words) of the stock area the clears asked for
 
-    def params(self, par) -> None:
+    def extras(self, ex) -> None:
+        """the second page's values (design.EX): ex None, or its change word 0, the constants (every instance);
+        else (change word, kf, kn, wl, wr, sn) as the ColdFire sends them (design.derive)"""
+        if ex is None or not ex[0]:
+            self.kf, self.kn, self.wl, self.wr, self.sn = F(D.KF), F(D.KNEE), F(1.0), F(0.0), F(0.0)
+        else:
+            self.kf, self.kn, self.wl, self.wr, self.sn = (F(x) for x in ex[1:6])
+
+    def params(self, par, ex=None) -> None:
+        self.extras(ex)
         pr = [min(max(F(x), F(0.0)), F(1.0)) for x in par]
         t = pr[D.P_TIME] * F(D.LOG2_TSPAN)
         t = t + F(D.LOG2_TMIN)
@@ -106,7 +117,7 @@ class Ref:
             f = F(0.0)
         v = f * self.g
         v = x + v
-        return f, knee(v)
+        return f, knee(v, self.kn)
 
     def tap(self, line, d) -> np.float32:
         i = trunc(d)
@@ -131,16 +142,24 @@ class Ref:
             return [F(0)] * D.BLOCK, [F(0)] * D.BLOCK
         outl, outr = [], []
         for k in range(D.BLOCK):
-            x = F(inl[k]) + F(inr[k])
+            l, r = F(inl[k]), F(inr[k])
+            dd = l - r
+            x = l + r
             x = x * F(0.5)
+            if self.sn != F(0.0):
+                d = dd * F(0.5)
+                d = d * self.sn
+                xa, xb = x + d, x - d
+            else:
+                xa = xb = x
             t = self.ta - self.da
-            t = t * F(D.KF)
+            t = t * self.kf
             self.da = self.da + t
             t = self.tb - self.db
-            t = t * F(D.KF)
+            t = t * self.kf
             self.db = self.db + t
-            self.fa, ia = self.loop_in(x, self.fa, self.ya)
-            self.fb, ib = self.loop_in(x, self.fb, self.yb)
+            self.fa, ia = self.loop_in(xa, self.fa, self.ya)
+            self.fb, ib = self.loop_in(xb, self.fb, self.yb)
             self.wp = (self.wp + 1) & D.LINE_MASK
             self.a[self.wp] = ia
             self.b[self.wp] = ib
@@ -153,17 +172,23 @@ class Ref:
             na = self.tap(self.a, self.moved(self.da, self.yb))
             nb = self.tap(self.b, self.moved(self.db, self.ya))
             self.ya, self.yb = na, nb
+            if self.wr != F(0.0):
+                ol = na * self.wl
+                ol = ol + nb * self.wr
+                orr = nb * self.wl
+                orr = orr + na * self.wr
+                na, nb = ol, orr
             outl.append(na)
             outr.append(nb)
         return outl, outr
 
-    def block(self, type_word: int, inl, inr, par):
+    def block(self, type_word: int, inl, inr, par, ex=None):
         t = 1 if (type_word & 0xFFFF) == 0 else 0
         if t != self.cur:
             self.cur, self.pos = t, 0
             self.clr = 0 if t else D.STOCK_WORDS
             if t:
-                self.params(par)
+                self.params(par, ex)
                 self.start()
         if self.clr:
             n = min(D.CHUNK, self.clr)
@@ -177,7 +202,7 @@ class Ref:
             return [F(0)] * D.BLOCK, [F(0)] * D.BLOCK
         if not self.cur:
             return "stock"
-        self.params(par)
+        self.params(par, ex)
         return self.run(inl, inr)
 
 

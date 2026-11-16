@@ -128,6 +128,13 @@ _Static_assert(LIBID_OFFSET >= META_PTR + 12u && LIBID_OFFSET % 4u == 0 && LIBID
 #define INS_OFFSET 0xF18u
 #define INS_WORDS 58u
 #define INS_REPEAT 3u
+/* 2026-11-11: the send pages' second page (csrc/fxpage): the Delay engine's change word and five float words, the Reverb engine's the same
+ * (dnfw.xdly.design.EX), in the directory page's 0xED0..0xEFF, which was BOUNCE's buffer directory's tail (BUF_DIR .. 0xECF; BOUNCE is gone from
+ * the ColdFire). Kept in the mirror's page too, so a load's page carries them */
+#define FXP_OFFSET 0xED0u
+#define FXP_WORDS 12u
+_Static_assert(FXP_OFFSET >= 0xE10u + 192u && FXP_OFFSET + 4u * FXP_WORDS <= CMD_OFFSET,
+               "the second pages' values lie after BOUNCE's buffer directory, before the command block");
 _Static_assert(INS_OFFSET >= CMD_OFFSET + 4u * CMD_WORDS && INS_OFFSET + 4u * INS_WORDS <= DIR_BYTES,
                "the inserts' values lie after the command block, inside the directory page");
 
@@ -467,15 +474,28 @@ void smp_tdm(u32 h)
         ins_words(ins_w);
         ins_left = INS_REPEAT;
     }
+    extern u32 fxp_gen;
+    extern void fxp_words(u32 *w);
+    static u32 fxp_seen_gen __attribute__((section(".data"))) = 0xFFFFFFFFu;
+    static u32 fxp_left __attribute__((section(".data"))) = 0;
+    static u32 fxp_w[FXP_WORDS] __attribute__((section(".data")));
+    if (!is_cmd && !ins_left && !fxp_left && fxp_gen != fxp_seen_gen) {
+        fxp_seen_gen = fxp_gen;
+        fxp_words(fxp_w);
+        for (u32 j = 0; j < FXP_WORDS; j++)
+            ((volatile u32 *)(DIR + FXP_OFFSET))[j] = fxp_w[j];     /* the mirror's page too */
+        fxp_left = INS_REPEAT;
+    }
     int is_ins = !is_cmd && ins_left;
-    int is_blank = !is_cmd && !is_ins && blank_left;
+    int is_fxp = !is_cmd && !is_ins && fxp_left;
+    int is_blank = !is_cmd && !is_ins && !is_fxp && blank_left;
     if (is_rt)
         for (int j = 0; j < CMD_WORDS; j++)
             cw[j] = rt_cw[j];
     else if (is_cmd)                            /* a command first: the command block's words */
         for (int j = 0; j < CMD_WORDS; j++)
             cw[j] = cmdq[cmd_tail % CMDQ][j];
-    if (is_cmd || is_ins || is_blank || (job_data && job_fast_next < job_n)) {
+    if (is_cmd || is_ins || is_fxp || is_blank || (job_data && job_fast_next < job_n)) {
         volatile u32 *t = TDM_TX(h);
         u32 k = job_fast_next, n = job_n - k, off = job_base + k;
         if (is_cmd) {
@@ -486,6 +506,10 @@ void smp_tdm(u32 h)
             k = 0;
             n = INS_WORDS;
             off = INS_OFFSET / 4u;
+        } else if (is_fxp) {
+            k = 0;
+            n = FXP_WORDS;
+            off = FXP_OFFSET / 4u;
         } else if (is_blank) {
             u32 at = (BLANK_PACKETS - blank_left) * RX_WORDS;
             k = 0;
@@ -514,6 +538,8 @@ void smp_tdm(u32 h)
         seq++;
         if (is_ins) {
             ins_left--;
+        } else if (is_fxp) {
+            fxp_left--;
         } else if (is_blank) {
             blank_left--;
             smp_blank_sent++;

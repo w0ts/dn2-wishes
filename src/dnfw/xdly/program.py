@@ -42,7 +42,8 @@ STOCK_DELAY = 0xB8482C
 _NAMES = (["la", "lb", "mode", "im", "cur", "clr", "pos", "par", "io", "went", "wp", "fill", "q", "da", "db", "ya", "yb", "fa", "fb",
            "ta", "tb", "md", "g", "c", "x", "ia", "na", "kv", "any"]
           + [f"pr{k}" for k in range(6)]
-          + [f"sv{k}" for k in range(16)] + ["svi0", "svi1", "svi2", "svi3", "svi4", "svi12", "sva"])
+          + [f"sv{k}" for k in range(16)] + ["svi0", "svi1", "svi2", "svi3", "svi4", "svi12", "sva"]
+          + ["kf", "kn", "wl", "wr", "sn", "xb"])      # 2026-11-11: the second page (extras): after the words an instance swaps
 C = {n: STATE + 4 * k for k, n in enumerate(_NAMES)}
 assert len(C) == len(_NAMES), "a state word named twice"
 assert STATE + 4 * len(_NAMES) <= STATE + STATE_BYTES
@@ -104,6 +105,33 @@ def params(p: Prog) -> None:
     p.fconst(1, 1.0)
     p.fop(0, 1, "-", 0)
     p.st(C["c"], 0)
+    extras(p)
+
+
+def extras(p: Prog) -> None:
+    """the second page's values (design.EX, ref.Ref.extras) -> kf kn wl wr sn; the instances' (MODE 1) and a send
+    before the ColdFire's first word: the constants. Clobbers R0, R12"""
+    def defaults():
+        p.fconst(0, D.KF)
+        p.st(C["kf"], 0)
+        p.fconst(0, D.KNEE)
+        p.st(C["kn"], 0)
+        p.fconst(0, 1.0)
+        p.st(C["wl"], 0)
+        p.fconst(0, 0.0)
+        p.st(C["wr"], 0)
+        p.st(C["sn"], 0)
+
+    def real():
+        for k, n in enumerate(("kf", "kn", "wl", "wr", "sn")):
+            p.ld(0, D.EX + 4 * (k + 1))
+            p.st(C[n], 0)
+
+    def received():
+        p.ld(0, D.EX)
+        p.ifz(0, "EQ", defaults, real)
+    p.ld(0, C["im"])
+    p.ifz(0, "NE", defaults, received)
 
 
 def start(p: Prog) -> None:
@@ -124,7 +152,7 @@ def knee(p: Prog) -> None:
     p.fop(5, 0, "MAX", 1)                        # a
 
     def over():
-        p.fconst(1, D.KNEE)
+        p.ld(1, C["kn"])
         p.fop(0, 5, "-", 1)
         p.fconst(1, 2.0)
         p.fop(0, 0, "*", 1)
@@ -141,7 +169,7 @@ def knee(p: Prog) -> None:
         p.fop(0, 1, "-", 0)                      # tanh z
         p.fconst(1, 0.5)
         p.fop(0, 0, "*", 1)
-        p.fconst(1, D.KNEE)
+        p.ld(1, C["kn"])
         p.fop(0, 0, "+", 1)
         p.fconst(1, 1.0)
         p.fop(0, 0, "MIN", 1)                    # a
@@ -154,12 +182,12 @@ def knee(p: Prog) -> None:
 
     def under():
         p.ld(0, C["kv"])
-    p.fconst(6, D.KNEE)
+    p.ld(6, C["kn"])
     p.if_(5, "GT", 6, over, under)
 
 
-def loop_in(p: Prog, f: str, y: str) -> None:
-    """F0 = the line's input (ref.loop_in), F name f updated; x in C['x']"""
+def loop_in(p: Prog, f: str, y: str, xn: str = "x") -> None:
+    """F0 = the line's input (ref.loop_in), F name f updated; the line's input x in C[xn] ('x', 'xb')"""
     p.ld(5, C[f])
     p.ld(6, C[y])
     p.fop(2, 6, "-", 5)
@@ -174,7 +202,7 @@ def loop_in(p: Prog, f: str, y: str) -> None:
     p.st(C[f], 5)
     p.ld(3, C["g"])
     p.fop(2, 5, "*", 3)
-    p.ld(0, C["x"])
+    p.ld(0, C[xn])
     p.fop(0, 0, "+", 2)
     knee(p)
 
@@ -241,11 +269,24 @@ def sample(p: Prog) -> None:
     """one sample; I0/I1 in, I2/I3 out; R11 the count (left alone)"""
     p.ldpost(0, 0)
     p.ldpost(1, 1)
+    p.fop(2, 0, "-", 1)                          # l - r
     p.fop(0, 0, "+", 1)
     p.fconst(1, 0.5)
     p.fop(0, 0, "*", 1)
     p.st(C["x"], 0)
-    p.fconst(4, D.KF)
+    p.st(C["xb"], 0)
+    p.ld(3, C["sn"])
+    p.fconst(4, 0.0)
+
+    def spread():
+        p.fop(2, 2, "*", 1)                      # d = (l - r) / 2
+        p.fop(2, 2, "*", 3)                      # x sn
+        p.fop(5, 0, "+", 2)
+        p.st(C["x"], 5)
+        p.fop(5, 0, "-", 2)
+        p.st(C["xb"], 5)
+    p.if_(3, "NE", 4, spread)
+    p.ld(4, C["kf"])
     for t, d in (("ta", "da"), ("tb", "db")):
         p.ld(2, C[t])
         p.ld(3, C[d])
@@ -255,7 +296,7 @@ def sample(p: Prog) -> None:
         p.st(C[d], 3)
     loop_in(p, "fa", "ya")
     p.st(C["ia"], 0)
-    loop_in(p, "fb", "yb")
+    loop_in(p, "fb", "yb", "xb")
     p.fpass(7, 0)                                # ib
     p.ld(8, C["wp"])
     p.iconst(12, 1)
@@ -303,8 +344,24 @@ def sample(p: Prog) -> None:
     p.st(C["yb"], 0)
     p.ld(1, C["na"])
     p.st(C["ya"], 1)
-    p.stpost(2, 1)
-    p.stpost(3, 0)
+    p.ld(2, C["wr"])
+    p.fconst(3, 0.0)
+
+    def width():
+        p.ld(4, C["wl"])
+        p.fop(5, 1, "*", 4)                      # na wl
+        p.fop(6, 0, "*", 2)                      # nb wr
+        p.fop(5, 5, "+", 6)
+        p.fop(6, 0, "*", 4)                      # nb wl
+        p.fop(7, 1, "*", 2)                      # na wr
+        p.fop(6, 6, "+", 7)
+        p.stpost(2, 5)
+        p.stpost(3, 6)
+
+    def hard():
+        p.stpost(2, 1)
+        p.stpost(3, 0)
+    p.if_(2, "NE", 3, width, hard)
 
 
 def silent_in(p: Prog) -> None:

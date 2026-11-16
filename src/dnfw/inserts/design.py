@@ -81,7 +81,7 @@ def flags(table: bytes | list[int]) -> list[int]:
 # block, x 14.125, into the block of the track the slot plays): L 32 floats at + 0x100 t, R at + 0x80
 BUS_BLOCKS = 0x258F68
 BUS_R = 0x80
-FDN8_SW, XDLY_SW = 0xBD5000, 0xBD6400                 # the engines' entries (dnfw.waverider.dsp FDN8_SW, XDLY_SW)
+FDN8_SW, XDLY_SW = 0xBD5000, 0xBD6200                 # the engines' entries (dnfw.waverider.dsp FDN8_SW, XDLY_SW)
 BUFFERS = 0x254A60                                # the 16 voice slots' buffers (dnfw.perc.program.BUFFERS)
 ROUTE = 0x257898                                  # 16 x s16: the track each voice slot plays (the frame's
                                                   # 0xa5a + 2 s, from the ColdFire's slot map 0x80005308;

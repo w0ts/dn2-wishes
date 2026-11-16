@@ -336,6 +336,7 @@ void wr_screen(void *screen, void *canvas)
     extern void wpop_begin(void);
     extern void wpop_draw(void *canvas);
     wpop_begin();                               /* the list popup: offered as the page draws */
+    { extern void fxp_begin(void); fxp_begin(); }   /* the send pages' second page (csrc/fxpage) */
     ins_title();                                /* the FX key's page names (csrc/inserts) */
     sl_screen(0, 0);
     extern void mv_begin(void);
@@ -376,6 +377,7 @@ void wr_screen(void *screen, void *canvas)
         } else {
             ins_dots(canvas);                   /* stock's FX page: FX 1/2's dots */
             scope_dots(canvas);                 /* stock's AMP page: AMP 1/2's dots */
+            { extern void fxp_draw(void *canvas); fxp_draw(canvas); }   /* XDLY's and FDN8's page 1/2, 2/2 */
         }
         wpop_draw(canvas);                      /* the list popup, over the page */
     }

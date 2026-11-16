@@ -59,6 +59,10 @@ XDLY, 1 the stock delay**, so every existing kit plays as before.
 - **The knob labels cannot follow TYPE**: the FX pages copy their labels when their views are built
   at boot (measured on the Reverb page, `docs/fdn8.md`).
 
+## Second page (2026-11-11)
+
+A FUNC tap on the Delay page (TYPE XDLY) shows a second page of knobs: SLEW, KNEE, WDTH, INPT beside TIME (docs/fxpage.md).
+
 ## DSP
 
 The FX bus calls the stock delay with `CALL 0xb8482c (DB)` at sw `0x1c1c58`, followed by two
@@ -81,7 +85,7 @@ uses, then does one of three things:
 
 | where | what | size |
 |---|---|---|
-| L2 `0x200ac800` (sw `0xbd6400`) | `xdly.asm`, generated from `dnfw.xdly.program` | 3,560 B (span 6 KB, to `0x200ae000`, where the per-track inserts' code starts) |
+| L2 `0x200ac400` (sw `0xbd6200`; 2026-11-11, was `0x200ac800` / `0xbd6400`) | `xdly.asm`, generated from `dnfw.xdly.program` | 3,560 B (span 6 KB, to `0x200ae000`, where the per-track inserts' code starts) |
 | L1 `0x2e6e00` | its words | 512 B (the last of FDN8's block, which shrank to 2.5 KB) |
 | DDR `0x80059130..0x80459130` | its two lines: the stock delay's sample area | 2 x 2 MB, the stock's own |
 

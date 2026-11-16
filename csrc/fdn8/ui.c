@@ -169,6 +169,8 @@ void rvt_cell(void *view, void *canvas, int x0, int y0, u32 id)
     rvt_seen = (v >> 8) & 0xFF;
     if (rvt_seen > 2)
         rvt_seen = 1;
+    extern void fxp_seen(int page, int ours);
+    fxp_seen(2, rvt_seen != 1);                 /* the page 2 of FDN8 and LONG (csrc/fxpage) */
     for (int x = x0; x < x0 + 24; x++)
         for (int y = y0 + 8; y < y0 + 24; y++)
             SET_PIXEL(canvas, x, y, 0);

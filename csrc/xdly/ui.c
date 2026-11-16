@@ -141,6 +141,8 @@ void dlt_cell(void *view, void *canvas, int x0, int y0, u32 id)
     unsigned char flag;
     int v = GET_VALUE(view, id, &flag);
     dlt_seen = (v >> 8) & 0xFF ? 1 : 0;
+    extern void fxp_seen(int page, int ours);
+    fxp_seen(1, !dlt_seen);                     /* the page 2 of XDLY (csrc/fxpage) */
     for (int x = x0; x < x0 + 24; x++)
         for (int y = y0 + 8; y < y0 + 24; y++)
             SET_PIXEL(canvas, x, y, 0);

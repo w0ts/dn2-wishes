@@ -136,3 +136,33 @@ def primes48() -> tuple[tuple[int, ...], tuple[int, ...]]:
 
 
 assert primes48() == (L48, A48)
+
+
+# -- the Reverb page's second page (docs/fxpage.md, csrc/fxpage): the ColdFire turns the page's knobs (0..127) into the
+# engine's values and sends them in the directory page at EX (after XDLY's: dnfw.xdly.design.EX + 24): the change
+# word (0: nothing received yet: the constants), then four float32 words sd f wl wr. Each knob's DEFAULT gives the
+# values under which the engine does exactly what it did before (x 1.0, + 0.0, a branch past the width), so a
+# project that never touched the page plays bit for bit as before; the instances (inserts) always use those.
+EX = 0x84000ED0 + 24
+EX_WORDS = 5
+DF_DEF = 64                          # DIFF: the diffusers' coefficients (0.75 .. 0.8 / 0.625 .. 0.7) x k / 64, held to 0.95
+DF_K = 1.0 / 64.0
+DF_MAX = 0.95
+WD_DEF = 127                         # WDTH: the lines' spread into out L / R: 127 as the tank has it, 0 mono
+WD_K = 1.0 / 127.0
+FZ_DEF = 0                           # FREZ: the lines' gains towards 1 (a hold): g x (1 - f) + f, f = k / 127
+FZ_K = 1.0 / 127.0
+
+
+def derive(df: int, wd: int, fz: int):
+    """the four float32 values of the page's knobs (csrc/fxpage/fxp_derive.h does the same): sd f wl wr"""
+    import numpy as np
+    F = np.float32
+    sd = F(1.0) if df == DF_DEF else F(df) * F(DF_K)
+    f = F(0.0) if fz == FZ_DEF else F(fz) * F(FZ_K)
+    if wd == WD_DEF:
+        wl, wr = F(1.0), F(0.0)
+    else:
+        w = F(wd) * F(WD_K)
+        wl, wr = (F(1.0) + w) * F(0.5), (F(1.0) - w) * F(0.5)
+    return sd, f, wl, wr

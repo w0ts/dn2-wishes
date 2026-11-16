@@ -31,6 +31,10 @@ RT60 of the reference (DAMP 30, MOD 64; an impulse, T30 x 2): SIZE 0 0.43 s, 45 
 1.34 s, 120 9.17 s, 126 13.4 s. Optimist's own (22.05 kHz, DAMP 30): 0.5 .. 1.5 s at 0..90,
 9.2 s at 120, 13.0 s at 126.
 
+## Second page (2026-11-11)
+
+A FUNC tap on the Reverb page (TYPE FDN8 or LONG) shows a second page of knobs: DIFF, WDTH, FREZ (docs/fxpage.md).
+
 ## LONG: the longer lines (TYPE 2, 2026-11-09)
 
 TYPE has a third value, **LONG**: FDN8 in a bigger, darker room. Record 131's top value is widened

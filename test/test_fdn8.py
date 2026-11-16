@@ -132,3 +132,52 @@ def test_approximations():
         assert abs(float(R.sqrt(np.float32(x))) / np.sqrt(x) - 1) < 1e-6
     for ph in (0, 1 << 30, 1 << 31, 3 << 30, 0x12345678):
         assert abs(float(R.sine(ph)) - np.sin(2 * np.pi * ph / 2 ** 32)) < 1e-6
+
+
+def put_ex(m: Mem, gen: int, df: int, wd: int, fz: int):
+    """the Reverb page's second page as the ColdFire sends it (design.EX): the change word, then design.derive's four
+    float words; -> (the words, for the reference)"""
+    vals = D.derive(df, wd, fz)
+    m.put(D.EX, gen)
+    for k, v in enumerate(vals):
+        m.put(D.EX + 4 * (k + 1), fbits(v))
+    return (gen, *vals)
+
+
+def test_second_page_model_is_the_reference():
+    """settings of DIFF, WDTH, FREZ: the DSL program's model against the reference, bit for bit, FDN8 and LONG"""
+    for knobs in ((20, 40, 30), (0, 0, 127), (127, 127, 60), (64, 0, 0), (64, 127, 0), (100, 100, 90)):
+        for tw in (0, 0x12340200):
+            m, r = mem0(), R.Ref()
+            ex = put_ex(m, 1, *knobs)
+            loud = 0
+            for b, (_, inl, inr, par) in enumerate(script(blocks=200 if tw == 0 else 300)):
+                got = call(m, tw, inl, inr, par)
+                want = as_bits(r.block(tw, inl, inr, par, ex))
+                assert got == want, f"{knobs} {tw:#x} block {b}"
+                if not isinstance(want, str):
+                    loud += sum(1 for w in want[0] + want[1] if w & 0x7FFFFFFF)
+            assert loud > 200, knobs
+
+
+def test_second_page_defaults_are_todays_bits():
+    """the defaults, and a change word 0 (nothing sent yet), are exactly the engine without the page; the instances
+    (im != 0) take the constants even with words in place"""
+    base = None
+    for ex in (None, (1, *D.derive(D.DF_DEF, D.WD_DEF, D.FZ_DEF)), (0, 1, 2, 3, 4)):
+        r = R.Ref()
+        outs = [as_bits(r.block(tw, inl, inr, par, ex)) for tw, inl, inr, par in script(blocks=120)]
+        base = base or outs
+        assert outs == base
+    from dnfw.perc.dsl import Prog
+    for im, want in ((1, (1.0, 0.0, 1.0, 0.0)), (0, None)):
+        m = mem0()
+        put_ex(m, 1, 20, 40, 30)
+        m.put(P.C["im"], im)
+        p = Prog("run", mem=m)
+        P.extras(p)
+        got = tuple(np.frombuffer(struct.pack("<I", m.get(P.C[n])), "<f")[0] for n in ("xsd", "xf", "xwl", "xwr"))
+        if want:
+            assert got == tuple(np.float32(x) for x in want)
+        else:
+            assert got != (np.float32(1.0), np.float32(0.0), np.float32(1.0), np.float32(0.0))

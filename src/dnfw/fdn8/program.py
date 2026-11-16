@@ -48,7 +48,8 @@ _NAMES = (["ring", "mode", "im", "cur", "clr", "pos", "force", "p4", "pd4", "xw"
            "dq", "io", "par", "went", "qin", "qn", "t0", "t1", "t2", "t3", "t4", "t5", "t6", "t7"]
           + [f"{n}{k}" for n in ("ph", "ro", "eta", "ap", "lp", "c", "g", "f") for k in range(8)]
           + [f"last{k}" for k in range(6)] + [f"pr{k}" for k in range(6)]
-          + [f"sv{k}" for k in range(16)] + ["svi0", "svi1", "svi2", "svi3", "svi4", "svi12", "sva"])
+          + [f"sv{k}" for k in range(16)] + ["svi0", "svi1", "svi2", "svi3", "svi4", "svi12", "sva"]
+          + ["xsd", "xf", "xwl", "xwr", "gdx1", "gdx2"] + [f"gx{k}" for k in range(8)])   # 2026-11-11: the second page, after the words an instance swaps
 C = {n: STATE + 4 * k for k, n in enumerate(_NAMES)}
 assert len(C) == len(_NAMES), "a state word named twice"
 DYN_WORDS = (C["sv0"] - STATE) // 4               # an instance's words: STATE .. sv0 (then ACT's)
@@ -479,8 +480,8 @@ def sample(p: Prog) -> None:
     p.ld(14, C["pd4"])
     ring_at(p)
     p.ldi(0, 0, 4)                               # x
-    p.ld(5, C["gd1"])
-    p.ld(6, C["gd2"])
+    p.ld(5, C["gdx1"])
+    p.ld(6, C["gdx2"])
     for k in range(4):
         g = 5 if k < 2 else 6
         p.ld(14, A[f"db{k}"])
@@ -514,7 +515,7 @@ def sample(p: Prog) -> None:
         p.fop(1, 2, "*", 1)
         p.fop(1, 0, "+", 1)
         p.st(C[f"lp{k}"], 1)
-        p.ld(2, C[f"g{k}"])
+        p.ld(2, C[f"gx{k}"])
         p.fop(1, 1, "*", 2)                      # f
         p.st(C[f"f{k}"], 1)
         if k == 0:
@@ -539,9 +540,25 @@ def sample(p: Prog) -> None:
         p.sti(0, 4, 1)
     p.fconst(3, D.GOUT)
     p.fop(5, 5, "*", 3)
-    p.stpost(2, 5)
     p.fop(6, 6, "*", 3)
-    p.stpost(3, 6)
+    p.ld(4, C["xwr"])
+    p.fconst(7, 0.0)
+
+    def width():
+        p.ld(3, C["xwl"])
+        p.fop(1, 5, "*", 3)                      # lg wl
+        p.fop(2, 6, "*", 4)                      # rg wr
+        p.fop(1, 1, "+", 2)
+        p.fop(2, 6, "*", 3)                      # rg wl
+        p.fop(0, 5, "*", 4)                      # lg wr
+        p.fop(2, 2, "+", 0)
+        p.stpost(2, 1)
+        p.stpost(3, 2)
+
+    def hard():
+        p.stpost(2, 5)
+        p.stpost(3, 6)
+    p.if_(4, "NE", 7, width, hard)
     p.iconst(14, 4)
     p.iop(8, 8, "-", 14)
 
@@ -641,6 +658,46 @@ def fdn8_block(p: Prog) -> None:
     p.ifz(3, "NE", lambda: (_lfo_phases(p), silence(p)), lambda: (_fdn8_block(p), _quiet_after(p)))
 
 
+def extras(p: Prog) -> None:
+    """once a block, before the samples: the second page's values (design.EX, ref.Ref.extras) -> xsd xf xwl xwr, and
+    the diffusers' gdx1 / gdx2 (g x sd, held to DF_MAX) and the lines' gains gx0..7 (g (1 - f) + f); the instances
+    (MODE 1) and a send before the ColdFire's first word use the constants: x 1.0 and + 0.0, exactly today's.
+    Clobbers R0-R3, R12"""
+    def defaults():
+        p.fconst(0, 1.0)
+        p.st(C["xsd"], 0)
+        p.st(C["xwl"], 0)
+        p.fconst(0, 0.0)
+        p.st(C["xf"], 0)
+        p.st(C["xwr"], 0)
+
+    def real():
+        for k, n in enumerate(("xsd", "xf", "xwl", "xwr")):
+            p.ld(0, D.EX + 4 * (k + 1))
+            p.st(C[n], 0)
+
+    def received():
+        p.ld(0, D.EX)
+        p.ifz(0, "EQ", defaults, real)
+    p.ld(0, C["im"])
+    p.ifz(0, "NE", defaults, received)
+    p.ld(1, C["xsd"])
+    p.fconst(2, D.DF_MAX)
+    for src, dst in (("gd1", "gdx1"), ("gd2", "gdx2")):
+        p.ld(0, C[src])
+        p.fop(0, 0, "*", 1)
+        p.fop(0, 0, "MIN", 2)
+        p.st(C[dst], 0)
+    p.ld(2, C["xf"])
+    p.fconst(1, 1.0)
+    p.fop(3, 1, "-", 2)                          # 1 - f
+    for k in range(8):
+        p.ld(0, C[f"g{k}"])
+        p.fop(0, 0, "*", 3)
+        p.fop(0, 0, "+", 2)
+        p.st(C[f"gx{k}"], 0)
+
+
 def _fdn8_block(p: Prog) -> None:
     # the parameters, when one changed (or after a switch)
     p.ld(3, C["force"])
@@ -656,6 +713,7 @@ def _fdn8_block(p: Prog) -> None:
     p.st(C["force"], 0)
     p.ifz(3, "NE", lambda: params(p))
     lfo(p)
+    extras(p)
     io_ptrs(p)
     p.ld(8, C["p4"])
     p.iconst(9, MASK4)

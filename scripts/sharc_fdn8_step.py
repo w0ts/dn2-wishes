@@ -198,6 +198,28 @@ def run(M5, snap, m2mach, m5img, stock_img) -> dict:
         min(cost_run), round(sum(cost_run) / len(cost_run)), max(cost_run))
     numbers["FDN8: instructions per clearing block: min, max"] = (min(cost_clear), max(cost_clear))
 
+    # 2b. the second page's knobs (DIFF, WDTH, FREZ) against the reference, each from a fresh start (the 32 clearing blocks,
+    # noise, an impulse, the tail): the assembled code is the reference's bit for bit at other values than the defaults
+    # (at the defaults section 2 above is today's)
+    ex_exact, ex_heard, ex_bad = True, 0, None
+    for knobs in ((20, 40, 127), (64, 0, 60)):
+        exv = (1, *FD.derive(*knobs))
+        pokes = {FD.EX: exv[0], **{FD.EX + 4 * (k + 1): fb(v) for k, v in enumerate(exv[1:5])}}
+        rx = M5.init_on(snap, m2mach, m5img)
+        rref = FR.Ref()
+        for b in range(n_stock, n_stock + 175):
+            tw, inl, inr, par = seq[b]
+            rx, hx, ox, _, _ = call(M5, rx, tw, inl, inr, par, pokes)
+            want = rref.block(tw, inl, inr, [np.float32(x) for x in par], exv)
+            wbits = ([fb(x) for x in want[0]], [fb(x) for x in want[1]])
+            if hx[0] != "stop" or ox != wbits:
+                ex_exact = False
+                ex_bad = ex_bad or (knobs, b, hx[0])
+            ex_heard += sum(1 for w in wbits[0] + wbits[1] if w & 0x7FFFFFFF)
+    checks["TYPE FDN8, second page: every output word as dnfw.fdn8.ref's at two settings of DIFF WDTH FREZ "
+           "(175 blocks each)"] = ex_exact and ex_heard > 1000
+    numbers["FDN8 second page: first mismatch"] = ex_bad
+
     # 3. the switches, on silence
     z = [0.0] * 32
     par = seq[-1][3]

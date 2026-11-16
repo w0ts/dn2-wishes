@@ -68,7 +68,7 @@ def script(n_stock=40, n_x=200, seed=11):
     return out
 
 
-def call(M5, r0, tw, inl, inr, par):
+def call(M5, r0, tw, inl, inr, par, ex=None):
     m2, fx = M5.m2, M5.fx
     r = r0.fresh_call(SITE, regs={**REGS, "R4": XD.STOCK_STATE, "R8": PAR, "R12": IO})
     m2.poke(r.state, XP.TYPE_WORD, tw & 0xFFFFFFFF)
@@ -83,6 +83,10 @@ def call(M5, r0, tw, inl, inr, par):
     for k, x in enumerate(par):
         m2.poke(r.state, PAR + 4 * k, fb(x))
     m2.poke(r.state, PAR + 0x18, fb(1.0))
+    if ex is not None:                           # the Delay page's second page (design.EX): the change word, kf kn wl wr sn
+        m2.poke(r.state, XD.EX, ex[0])
+        for k, v in enumerate(ex[1:6]):
+            m2.poke(r.state, XD.EX + 4 * (k + 1), fb(v))
     entry = dict(r.state.uregs)
     before = dict(r.state.overlay)
     how = fx.run(r, 6_000_000, fx.Fixups(), stop_at=[BACK])
@@ -182,6 +186,26 @@ def run(M5, snap, m2mach, m5img, stock_img) -> dict:
     numbers["XDLY: first mismatch"] = first_bad
     numbers["XDLY: instructions per block while running: min, mean, max"] = (
         min(cost), round(sum(cost) / len(cost)), max(cost))
+
+    # 2b. the second page's knobs (SLEW, KNEE, WDTH, INPT) against the reference, from a fresh start: the assembled
+    # code is the reference's bit for bit at other values than the defaults (and at them, section 2 above is today's)
+    exs = [(1, *XD.derive(*kn)) for kn in ((20, 30, 40, 10), (58, 61, 0, 64), (90, 127, 127, 100))]
+    ex_exact, ex_heard, ex_bad = True, 0, None
+    for exv in exs:
+        rx = M5.init_on(snap, m2mach, m5img)
+        rref = XR.Ref()
+        for b in range(n_stock, n_stock + 70):
+            tw, inl, inr, par = seq[b]
+            rx, hx, ox, _, _ = call(M5, rx, tw, inl, inr, par, exv)
+            want = rref.block(tw, inl, inr, [np.float32(x) for x in par], exv)
+            wbits = ([fb(x) for x in want[0]], [fb(x) for x in want[1]])
+            if hx[0] != "stop" or ox != wbits:
+                ex_exact = False
+                ex_bad = ex_bad or (exv[0], b, hx[0])
+            ex_heard += sum(1 for w in wbits[0] + wbits[1] if w & 0x7FFFFFFF)
+    checks["TYPE XDLY, second page: every output word as dnfw.xdly.ref's at three settings of SLEW KNEE WDTH INPT "
+           "(70 blocks each)"] = ex_exact and ex_heard > 1000
+    numbers["XDLY second page: first mismatch"] = ex_bad
 
     # 3. the switches, on silence
     z = [0.0] * 32
