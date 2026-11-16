@@ -2429,8 +2429,16 @@ def main() -> int:
             ty = kit + 52 + 0xDE
             # (2026-11-14, the 1.12 gate: down to GRID's row as stock reads it, not nine rows: 1.11's gate snapshot
             # holds v0.14's MACHINE SEL rows, a 1.12 per-build one this build's (LIST_NEW), GRID further down)
-            rs = (f"wait:3,poke:{ty:#x}:01,wait:4,tap:2,wait:6,func-src,wait:20,down-to:12,wait:3,"
-                  + "png:r0,yes,wait:20,right,wait:20,png:r1,left,wait:20,png:r2,right,wait:20,png:r3,types,"
+            # (2026-11-14, ours: MACHINE SEL in two columns draws over stock's single column, so its page and the row
+            # under its cursor are read from stock's own view; LIVE SELECT, on by default, closes it on YES (its "YES
+            # keeps it and closes"), so this step turns LIVE SELECT off first, through set_flag_put as the PERSONALIZE
+            # row does, and MACHINE SEL stays up after YES as stock's does: the v0.35 case it tests)
+            ms = "msel_draw" in lay
+            msr = (f",view:{MSEL_VT:#x}:{MSEL_PAGE}:4,view:{MSEL_VT:#x}:{MSEL_CURSOR}:4,"
+                   f"call:{MSEL_ROW_TYPE:#x}:view@{MSEL_VT:#x}") if ms else ""
+            live_off = f"call:{lay['set_flag_put']:#x}:4:1," if "ls_commits" in lay else ""
+            rs = (f"wait:3,{live_off}poke:{ty:#x}:01,wait:4,tap:2,wait:6,func-src,wait:20,down-to:12,wait:3,"
+                  + f"png:r0,yes,wait:20,right,wait:20,png:r1{msr},left,wait:20,png:r2{msr},right,wait:20,png:r3,types,"
                   # (2026-11-14: 300 M after NO and after SYN's release: stock shows the page's title a while after
                   # a key, then the pattern's name; both pictures are taken once the title has settled)
                   + "no,wait:300,png:v0,press:2,wait:30,png:v1,release:2,wait:300,png:v2")   # v0.35: SYN held (O14)
@@ -2450,11 +2458,24 @@ def main() -> int:
                         im = np.array(Image.open(r["screens"][name]).convert("L")) > 128
                         k = im.shape[1] // 128
                         return float(im[y0 * k:y1 * k, x0 * k:x1 * k].mean())
-                    types = r["memory"].get("types@0") or [None]
-                    facts = {"track 1 is GRID": types[0] == 12,
-                             "RIGHT: the FLTR column's first row marked": lit("r1", 8, 16) > 0.3,
-                             "... and its list drawn": lit("r1", 8, 60) > 0.1,
-                             "LEFT: the SRC column's bottom row (GRID) marked": lit("r2", 52, 60) > 0.3,
+                    types = r["memory"].get(next((k_ for k_ in r["memory"] if k_.startswith("types@")), ""), [None])
+                    if ms:                                  # MACHINE SEL in two columns: stock's view's own state
+                        from dnfw.waverider import msel as _ms   # noqa: PLC0415
+                        vals = [int(v, 16) if v else None for k_, v in r["memory"].items() if k_.startswith("0x")]
+                        rows_ = [c_["d0"] for c_ in r["direct_calls"] if c_["fn"] == f"{MSEL_ROW_TYPE:#x}"]
+                        got = dict(zip(("page r1", "cursor r1", "page r2", "cursor r2"), vals))
+                        cols = {"RIGHT: MACHINE SEL still up, the filter page, its first row under the cursor":
+                                got.get("page r1") == 1 and got.get("cursor r1") == 0
+                                and rows_[:1] == [_ms.filter_rows()[0]],
+                                "... and its two columns drawn": lit("r1", 8, 60, 2, 124) > 0.1,
+                                "LEFT: the machine page, GRID under the cursor (stock's reader and the drawn rows)":
+                                got.get("page r2") == 0 and rows_[1:2] == [12]
+                                and _ms.machine_rows()[got.get("cursor r2") or 0] == 12}
+                    else:
+                        cols = {"RIGHT: the FLTR column's first row marked": lit("r1", 8, 16) > 0.3,
+                                "... and its list drawn": lit("r1", 8, 60) > 0.1,
+                                "LEFT: the SRC column's bottom row (GRID) marked": lit("r2", 52, 60) > 0.3}
+                    facts = {"track 1 is GRID": types[0] == 12, **cols,
                              "RIGHT again: the same FLTR column": pathlib.Path(r["screens"]["r3"]).read_bytes()
                              == pathlib.Path(r["screens"]["r1"]).read_bytes(),
                              # O14: SYN held long on GRID's page shows its values, let go shows its labels
@@ -2463,7 +2484,9 @@ def main() -> int:
                              "SYN let go: the page as before": pathlib.Path(r["screens"]["v2"]).read_bytes()
                              == pathlib.Path(r["screens"]["v0"]).read_bytes()}
                     good = all(facts.values())
-                    why = f"{facts} types={types} lit={lit('r1', 8, 16):.3f}/{lit('r1', 8, 60):.3f}/{lit('r2', 52, 60):.3f}"
+                    why = (f"{facts} types={types} mem={ {k_: v for k_, v in r['memory'].items() if k_.startswith('0x')} } "
+                           f"calls={r.get('direct_calls')}" if ms else
+                           f"{facts} types={types} lit={lit('r1', 8, 16):.3f}/{lit('r1', 8, 60):.3f}/{lit('r2', 52, 60):.3f}")
                 return good, ("MACHINE SEL: RIGHT from GRID shows the FLTR column from its top, LEFT returns "
                               "to GRID; SYN held shows the page's values" if good else why)
             later("colsw", "MACHINE SEL columns, SYN held (ColdFire)", "MACHINE SEL columns, SYN held (ColdFire)", [r_cmd, sorted(EMU_ENV.items())], r_body)
