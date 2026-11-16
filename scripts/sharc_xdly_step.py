@@ -25,6 +25,7 @@ from dnfw.waverider import dsp, stockfx
 from dnfw.xdly import design as XD
 from dnfw.xdly import program as XP
 from dnfw.xdly import ref as XR
+import sharc_f32 as F32
 
 SITE, BACK = dsp.DELAY_SITE_SW, 0x1C1C5F     # (the bus pushes the return address - 1, 0x1c1c5e)
 PAR, IO = 0x257934, 0x257E6C
@@ -149,7 +150,7 @@ def run(M5, snap, m2mach, m5img, stock_img) -> dict:
     # 1. TYPE = stock: build vs stock image
     rs, rb = M5.init_on(snap, m2mach, stock_img), M5.init_on(snap, m2mach, m5img)
     same_out = same_regs = no_stray = ok = True
-    outside, stray, cost_stock, heard_stock = set(), set(), [], 0
+    outside, stray, cost_stock, heard_stock = set(), set(), [], F32.Ear()
     for b in range(n_stock):
         tw, inl, inr, par = seq[b]
         rs, hs, os_, _, ws = call(M5, rs, tw, inl, inr, par)
@@ -164,14 +165,14 @@ def run(M5, snap, m2mach, m5img, stock_img) -> dict:
         stray |= s
         no_stray &= not s
         cost_stock.append((hs[2], hb[2]))
-        heard_stock += sum(1 for w in os_[0] + os_[1] if w & 0x7FFFFFFF)
+        heard_stock.hear(os_[0] + os_[1])
         for a in ws:
             o = ddr(a) - XD.STOCK_STATE
             if 0 <= o < 0x800000 and not (XD.STOCK_AREA[0] <= o < XD.STOCK_AREA[1]):
                 outside.add(o)
     checks["TYPE stock: both images make the call and come back to the bus"] = ok
     checks["TYPE stock: every output word as the stock delay's (40 blocks: noise, an impulse, knobs moved)"] = same_out
-    checks["TYPE stock: the stock delay is heard in the test (not a run of zeros)"] = heard_stock > 200
+    checks["TYPE stock: the stock delay is heard in the test (not a run of zeros), finite"] = heard_stock.ok(200)
     checks["TYPE stock: every register at the return as stock's"] = same_regs
     checks["TYPE stock: every word written as stock's, but XDLY's own state words"] = no_stray
     numbers["stock: instructions per block (stock image, build): min, max"] = (
@@ -189,7 +190,7 @@ def run(M5, snap, m2mach, m5img, stock_img) -> dict:
     for b in range(n_stock):
         tw, inl, inr, par = seq[b]
         ref.block(tw, inl, inr, [np.float32(x) for x in par])
-    exact, regs_back, heard, first_bad, cost, xd_out = True, True, 0, None, [], set()
+    exact, regs_back, heard, first_bad, cost, xd_out = True, True, F32.Ear(), None, [], set()
     for b in range(n_stock, len(seq)):
         tw, inl, inr, par = seq[b]
         rb, hb, ob, entry, wb = call(M5, rb, tw, inl, inr, par)
@@ -201,7 +202,7 @@ def run(M5, snap, m2mach, m5img, stock_img) -> dict:
         keep = {f"R{k}" for k in range(16)} | {"I0", "I1", "I2", "I3", "I5"}
         if any(rb.state.uregs.get(k) != entry.get(k) for k in entry if str(k) in keep):
             regs_back = False
-        heard += sum(1 for w in wbits[0] + wbits[1] if w & 0x7FFFFFFF)
+        heard.hear(wbits[0] + wbits[1])
         cost.append(hb[2])
         for a in wb:
             x = ddr(a)
@@ -210,7 +211,7 @@ def run(M5, snap, m2mach, m5img, stock_img) -> dict:
                 xd_out.add(x)
     checks["TYPE XDLY: every output word as dnfw.xdly.ref's (200 blocks: noise, an impulse, the knee, "
            "knob moves, TIME 2 at 10 s)"] = exact
-    checks["TYPE XDLY: the repeats are heard (not a run of zeros)"] = heard > 3000
+    checks["TYPE XDLY: the repeats are heard (not a run of zeros), finite"] = heard.ok(3000)
     checks["TYPE XDLY: every R, I0-I3 and I5 register the bus left is back at the return"] = regs_back
     n = ref.fill + 4
     lines_ok = True
@@ -227,7 +228,7 @@ def run(M5, snap, m2mach, m5img, stock_img) -> dict:
     # 2b. the second page's knobs (SLEW, KNEE, WDTH, INPT) against the reference, from a fresh start: the assembled
     # code is the reference's bit for bit at other values than the defaults (and at them, section 2 above is today's)
     exs = [(1, *XD.derive(*kn)) for kn in ((20, 30, 40, 10), (58, 61, 0, 64), (90, 127, 127, 100))]
-    ex_exact, ex_heard, ex_bad = True, 0, None
+    ex_exact, ex_heard, ex_bad = True, F32.Ear(), None
     for exv in exs:
         rx = M5.init_on(snap, m2mach, m5img)
         rref = XR.Ref()
@@ -239,9 +240,9 @@ def run(M5, snap, m2mach, m5img, stock_img) -> dict:
             if hx[0] != "stop" or ox != wbits:
                 ex_exact = False
                 ex_bad = ex_bad or (exv[0], b, hx[0])
-            ex_heard += sum(1 for w in wbits[0] + wbits[1] if w & 0x7FFFFFFF)
+            ex_heard.hear(wbits[0] + wbits[1])
     checks["TYPE XDLY, second page: every output word as dnfw.xdly.ref's at three settings of SLEW KNEE WDTH INPT "
-           "(70 blocks each)"] = ex_exact and ex_heard > 1000
+           "(70 blocks each), heard, finite"] = ex_exact and ex_heard.ok(1000)
     numbers["XDLY second page: first mismatch"] = ex_bad
 
     # 3. the switches, on silence

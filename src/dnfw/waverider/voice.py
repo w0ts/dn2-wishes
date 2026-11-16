@@ -131,7 +131,15 @@ def bits_f32(w: int) -> float:
 
 
 def peak(samples: list[float]) -> float:
-    return max((abs(s) for s in samples), default=0.0)
+    """the loudest |sample|, or NaN when any sample is NaN or infinite, wherever it sits (2026-11-14: max() over a
+    NaN gave NaN or the finite peak depending on the order, so `peak > floor` could pass on NaN output; now both
+    `peak > floor` and `peak < ceiling` fail on any non-finite sample)"""
+    out = 0.0
+    for s in samples:
+        if not math.isfinite(s):
+            return math.nan
+        out = max(out, abs(s))
+    return out
 
 
 def rms(samples: list[float]) -> float:

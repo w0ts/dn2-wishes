@@ -21,6 +21,7 @@ import numpy as np
 from dnfw.inserts import design as D
 from dnfw.inserts import postref as R
 from dnfw.waverider import dsp
+import sharc_f32 as F32
 
 SITE, BACK = dsp.CHORUS_SITE_SW, 0x1C1BE8
 STATE, PAR, IO = 0x80459388, 0x257950, 0x257E6C          # the bus's R4, R8, R12 at this call (measured)
@@ -110,7 +111,7 @@ def run(M5, snap, m2mach, m5img, stock_img) -> dict:
     n_stock = 30
     rs, rb = M5.init_on(snap, m2mach, stock_img), M5.init_on(snap, m2mach, m5img)
     same_out = same_regs = no_stray = ok = True
-    stray, cost_stock, heard_stock = set(), [], 0
+    stray, cost_stock, heard_stock = set(), [], F32.Ear()
     for b in range(n_stock):
         typ, dp, sp, inl, inr = seq[b]
         rs, hs, os_, _, ws = call(M5, rs, typ, dp, sp, inl, inr)
@@ -123,10 +124,10 @@ def run(M5, snap, m2mach, m5img, stock_img) -> dict:
         stray |= s
         no_stray &= not s
         cost_stock.append((hs[2], hb[2]))
-        heard_stock += sum(1 for w in os_[0] + os_[1] if w & 0x7FFFFFFF and w != MARK)
+        heard_stock.hear(w for w in os_[0] + os_[1] if w != MARK)     # (MARK: a word the chorus left untouched)
     checks["TYPE STOCK: both images make the call and come back to the bus"] = ok
     checks["TYPE STOCK: every output word as the stock chorus's (30 blocks: noise, a sine)"] = same_out
-    checks["TYPE STOCK: the stock chorus writes its output in the test (not untouched)"] = heard_stock > 200
+    checks["TYPE STOCK: the stock chorus writes its output in the test (not untouched), finite"] = heard_stock.ok(200)
     checks["TYPE STOCK: every register at the return as stock's"] = same_regs
     checks["TYPE STOCK: every word written as stock's, but the send's own words"] = no_stray
     numbers["stock: instructions per block (stock image, build): min, max"] = (
@@ -137,7 +138,7 @@ def run(M5, snap, m2mach, m5img, stock_img) -> dict:
     ref = R.JsendRef()
     for b in range(n_stock):
         ref.block(*seq[b])
-    exact, regs_back, heard, first_bad, cost, outside, side = True, True, 0, None, [], set(), 0.0
+    exact, regs_back, heard, first_bad, cost, outside, side = True, True, F32.Ear(), None, [], set(), 0.0
     for b in range(n_stock, len(seq)):
         typ, dp, sp, inl, inr = seq[b]
         rb, hb, ob, entry, wb = call(M5, rb, typ, dp, sp, inl, inr)
@@ -152,7 +153,7 @@ def run(M5, snap, m2mach, m5img, stock_img) -> dict:
         keep = {f"R{k}" for k in range(16)} | {"I0", "I1", "I2", "I3", "I5"}
         if any(rb.state.uregs.get(k) != entry.get(k) for k in entry if str(k) in keep):
             regs_back = False
-        heard += sum(1 for w in wbits[0] + wbits[1] if w & 0x7FFFFFFF)
+        heard.hear(wbits[0] + wbits[1])
         side += float(sum(abs(a - c) for a, c in zip(want[0], want[1])))
         cost.append(hb[2])
         for a in wb:
@@ -161,7 +162,7 @@ def run(M5, snap, m2mach, m5img, stock_img) -> dict:
                 outside.add(x)
     checks["TYPE JUNO: every output word as dnfw.inserts.postref.JsendRef's (130 blocks: noise, a sine, an impulse; "
            "DPTH and SPD moved, MODE I / II / I+II; a switch to STOCK and back)"] = exact
-    checks["TYPE JUNO: the chorus is heard, in stereo (not a run of zeros, L not R)"] = heard > 3000 and side > 1.0
+    checks["TYPE JUNO: the chorus is heard, in stereo (not a run of zeros, L not R), finite"] = heard.ok(3000) and side > 1.0
     checks["TYPE JUNO: every R, I0-I3 and I5 register the bus left is back at the return"] = regs_back
     checks["TYPE JUNO: no DDR write outside the send's words and ring (and the test's buffers)"] = not outside
     numbers["JUNO: first mismatch"] = first_bad

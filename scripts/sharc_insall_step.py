@@ -20,6 +20,7 @@ import numpy as np
 from dnfw.inserts import design as D
 from dnfw.inserts import ref as R
 from dnfw.waverider import dsp
+import sharc_f32 as F32
 
 # ins.c DEFAULT[type] (K1..K6), by type number; MIX 127
 DEFAULT = {D.FUZZ: (64, 90, 0, 30, 0, 100), D.TAPE: (50, 30, 20, 25, 50, 10), D.FOLD: (80, 64, 0, 100, 100, 0),
@@ -105,17 +106,17 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
         ref = R.Ref()
         exact = bool(caps) and "halt" not in info
         changed = [0, 0]
-        heard = [0, 0]
+        heard = [F32.Ear(), F32.Ear()]
         for b, c in enumerate(caps):
             bufs = [[bf(w) for w in c["in"][t]] for t in range(16)]
             ref.block(D.records(c["par"]), bufs, c["route"], tempo=c["tempo"],
                       clk=GATER_CLK if typ == D.GATER else 0)
             exact &= c.get("out") == [[fb(x) for x in bufs[t]] for t in range(16)]
             half = b // 12
-            heard[half] += sum(1 for j in range(32) if c["in"][0][j] & 0x7FFFFFFF)
+            heard[half].hear(c["in"][0][:32])
             changed[half] += sum(1 for j in range(32) if c["out"][0][j] != c["in"][0][j])
         checks[f"{name}: every buffer after the pass as dnfw.inserts.ref's (24 blocks, defaults then every knob 127)"] = exact
-        checks[f"{name}: track 0 sounds in both halves (the test hears something)"] = min(heard) > 100
+        checks[f"{name}: track 0 sounds in both halves (the test hears something), finite"] = all(e.ok(100) for e in heard)
         checks[f"{name}: it changes the sound at its defaults (not equal to dry)"] = changed[0] > 20
         checks[f"{name}: it changes the sound at every knob 127 (not equal to dry)"] = changed[1] > 20
         numbers[f"{name}: words changed on track 0 (defaults, extreme); words heard"] = (changed, heard, info)

@@ -18,6 +18,7 @@ from dnfw.engines.analog2.filters import program as AP
 from dnfw.perc.dsl import Mem
 from dnfw.waverider import dsp
 from dnfw.waverider import frame as FR
+import sharc_f32 as F32
 
 # frame sound indices (dnfw.waverider.frame.RECORD_FIELDS)
 I_MODE, I_FREQ, I_RES, I_DEPTH, I_MOD2, I_ATK, I_DEC, I_FRQ2, I_RES2, I_KEYT = 66, 67, 68, 69, 70, 71, 72, 73, 74, 79
@@ -96,12 +97,14 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
     # slots read their own (0, stock) since the pass reads each slot's frame data, not its track's (the route words
     # are 0 here, so every slot "plays track 0": until then they all took slot 0's SVF and were filtered too)
     def _sounds(c, s):
-        return any(w & 0x7FFFFFFF for w in c["in"][s])
+        return F32.sounds(c["in"][s])
     checks["filter machines: " + ("at most one voice is filtered in a block, and one is (ONE_VOICE: the newest note's)"
                                  if AP.ONE_VOICE else "every sounding voice of the three slots is filtered, no other slot")] = (
         bool(caps) and all((sum(1 for s in range(16) if c["out"][s] != c["in"][s]) == 1 if AP.ONE_VOICE
                             else all((c["out"][s] != c["in"][s]) == (s < 3 and _sounds(c, s)) for s in range(16)))
                            or (b < 2) for b, c in enumerate(caps)))
+    checks["filter machines: every slot's input and output finite (no NaN, no infinity), every block"] = (
+        bool(caps) and all(F32.finite(c["in"][s]) and F32.finite(c["out"][s]) for c in caps for s in range(16)))
     nfil = [sum(1 for s in range(16) if c["out"][s] != c["in"][s]) for c in caps]
     numbers["filter machines: slots filtered a block (min, max, from block 2)"] = (min(nfil[2:]), max(nfil[2:])) if len(nfil) > 2 else None
     numbers["filter machines: first block with a mismatch, its words"] = next(

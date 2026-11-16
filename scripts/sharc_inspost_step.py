@@ -29,6 +29,7 @@ from dnfw.inserts import design as D
 from dnfw.inserts import post as P
 from dnfw.inserts import postref as R
 from dnfw.waverider import dsp
+import sharc_f32 as F32
 
 EMU_STEREO, EMU_STRIDE, EMU_R = 0x95FBA0, 0x400, 0x200       # where the emulator puts the voice chain's write
 KEEP = [f"R{k}" for k in range(16)] + [f"I{i}" for i in P.SAVE_I]
@@ -116,8 +117,8 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
            "entry (24 blocks)"] = bool(caps) and all(c["out"] == c["in"] for c in caps)
     checks["every insert OFF: R0..R15, I0..I4, I12 at the sends' entry as the engine passed them"] = (
         bool(caps) and all(c["regs_out"] == c["regs_in"] and None not in c["regs_in"].values() for c in caps))
-    heard = sum(1 for c in caps for s_ in range(16) for w in c["in"][0][s_] + c["in"][1][s_] if w & 0x7FFFFFFF)
-    checks["the test's voices sound in stereo (not a run of zeros)"] = heard > 500
+    heard = F32.Ear().hear(w for c in caps for s_ in range(16) for w in c["in"][0][s_] + c["in"][1][s_])
+    checks["the test's voices sound in stereo (not a run of zeros), finite"] = heard.ok(500)
     numbers["all OFF"] = info
 
     # 2. WIDE and CHOR with voices moving

@@ -33,6 +33,7 @@ import os
 import random
 
 from dnfw.waverider import frame as FR
+from sharc_f32 import finite, sounds
 
 OUTPUT_CALL_SW = 0x1C307B                       # the engine's call of the output stage 0x1c244d (R12 = reply)
 MAIN = (0x268438, 64)
@@ -92,20 +93,6 @@ def scenario(sound, machines, seed: int, blocks: int, *, globals_random: bool, s
     # made once, in order (the parameter moves change PAGES as they go): every run reads the same bytes
     frames = [build(b) for b in range(blocks)]
     return lambda b: frames[b]
-
-
-EXP_MASK = 0x7F800000                           # a float32 word with every exponent bit set is NaN or infinity
-
-
-def finite(words) -> bool:
-    """every word a finite float32 (no NaN, no infinity)"""
-    return all((w & EXP_MASK) != EXP_MASK for w in words)
-
-
-def sounds(words) -> bool:
-    """some word is a finite, nonzero float32: sound. NaN and infinity are not (2026-11-14: `w & 0x7fffffff` alone
-    counted them, so a run of NaN passed as sound)"""
-    return any((w & EXP_MASK) != EXP_MASK and w & 0x7FFFFFFF for w in words)
 
 
 def tx_page(m2, st) -> int:

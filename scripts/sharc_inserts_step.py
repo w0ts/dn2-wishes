@@ -19,6 +19,7 @@ import numpy as np
 from dnfw.inserts import design as D
 from dnfw.inserts import ref as R
 from dnfw.waverider import dsp
+import sharc_f32 as F32
 
 
 def bf(w) -> np.float32:
@@ -90,9 +91,9 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
     # 1. all OFF
     caps, info = blocks(lambda b: bytes(128), 30)
     same = bool(caps) and all(c.get("out") == c["in"] for c in caps)
-    heard = sum(1 for c in caps for t in range(16) for w in c["in"][t] if w & 0x7FFFFFFF)
+    heard = F32.Ear().hear(w for c in caps for t in range(16) for w in c["in"][t])
     checks["every insert OFF: every track buffer after the pass is the buffer before it (30 blocks)"] = same
-    checks["the test's tracks sound (not a run of zeros)"] = heard > 500
+    checks["the test's tracks sound (not a run of zeros), finite"] = heard.ok(500)
     numbers["all OFF: run info"] = info if "halt" in info else {"blocks": len(caps)}
 
     # 2. FUZZ on tracks 0 and 1

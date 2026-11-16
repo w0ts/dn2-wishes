@@ -3632,7 +3632,7 @@ def step_mainsrc(init, sound, machines, blocks) -> dict:
     seen = {"smp": [], "pvmix": []}
 
     def peak(r):
-        return max(abs(V.bits_f32(m2.word(r.state, SM.MIX_BUF + 4 * k) or 0)) for k in range(64))
+        return V.peak([V.bits_f32(m2.word(r.state, SM.MIX_BUF + 4 * k) or 0) for k in range(64)])   # (NaN if any is)
 
     def at_smp(r):
         seen["smp"].append(peak(r))

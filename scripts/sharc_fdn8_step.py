@@ -28,6 +28,7 @@ from dnfw.fdn8 import design as FD
 from dnfw.fdn8 import program as FP
 from dnfw.fdn8 import ref as FR
 from dnfw.waverider import dsp
+import sharc_f32 as F32
 
 SITE, BACK = dsp.REVERB_SITE_SW, 0x1C1D18
 PAR, IO = 0x257918, 0x257E6C
@@ -151,7 +152,7 @@ def run(M5, snap, m2mach, m5img, stock_img) -> dict:
     for b in range(n_stock):
         tw, inl, inr, par = seq[b]
         ref.block(tw, inl, inr, [np.float32(x) for x in par])
-    exact, regs_back, heard = True, True, 0
+    exact, regs_back, heard = True, True, F32.Ear()
     first_bad = None
     cost_run, cost_clear = [], []
     for b in range(n_stock, len(seq)):
@@ -165,11 +166,11 @@ def run(M5, snap, m2mach, m5img, stock_img) -> dict:
         keep = {f"R{k}" for k in range(16)} | {"I0", "I1", "I2", "I3", "I5"}
         if any(rb.state.uregs.get(k) != entry.get(k) for k in entry if str(k) in keep):
             regs_back = False
-        heard += sum(1 for w in wbits[0] + wbits[1] if w & 0x7FFFFFFF)
+        heard.hear(wbits[0] + wbits[1])
         (cost_clear if b - n_stock < FD.RING_WORDS // FR.CHUNK else cost_run).append(hb[2])
     checks["TYPE FDN8: every output word as dnfw.fdn8.ref's (230 blocks: 32 clearing, noise, an impulse, "
            "knob moves, SIZE 127)"] = exact
-    checks["TYPE FDN8: the tail is heard (not a run of zeros)"] = heard > 3000
+    checks["TYPE FDN8: the tail is heard (not a run of zeros), finite"] = heard.ok(3000)
     checks["TYPE FDN8: every R, I0-I3 and I5 register the bus left is back at the return"] = regs_back
     ring = FP.ring_view(lambda a: M5.m2.word(rb.state, a), dsp.FDN8_RING_DDR,
                         M5.m2.word(rb.state, FP.C["p4"]) or 0, FP.DIFF_SEND_L2)   # (2026-11-13: diffusers in L2)
@@ -196,8 +197,8 @@ def run(M5, snap, m2mach, m5img, stock_img) -> dict:
         checks["FDN8 quiet gate: the skip path gives back every R, I0-I3 and I5 register as it came"] = not any(
             rq.state.uregs.get(k) != entry_q.get(k) for k in entry_q if str(k) in keep_q)
         rq2, hq2, oq2, _, _ = call(M5, rb, tw_q, [0.3] * 32, [0.2] * 32, par_q, {FP.C["qn"]: FP.QUIET_BLOCKS})
-        checks["FDN8 quiet gate: a block with an input runs (the wet is not zeros) and qn goes back to 0"] = (
-            hq2[0] == "stop" and any(w & 0x7FFFFFFF for w in oq2[0] + oq2[1])
+        checks["FDN8 quiet gate: a block with an input runs (the wet sounds, finite) and qn goes back to 0"] = (
+            hq2[0] == "stop" and F32.sounds(oq2[0] + oq2[1]) and F32.finite(oq2[0] + oq2[1])
             and (M5.m2.word(rq2.state, FP.C["qn"]) or 0) == 0)
     numbers["FDN8: first mismatch"] = first_bad
     numbers["FDN8: instructions per block while running: min, mean, max"] = (
@@ -207,7 +208,7 @@ def run(M5, snap, m2mach, m5img, stock_img) -> dict:
     # 2b. the second page's knobs (DIFF, WDTH, FREZ) against the reference, each from a fresh start (the 32 clearing blocks,
     # noise, an impulse, the tail): the assembled code is the reference's bit for bit at other values than the defaults
     # (at the defaults section 2 above is today's)
-    ex_exact, ex_heard, ex_bad = True, 0, None
+    ex_exact, ex_heard, ex_bad = True, F32.Ear(), None
     for knobs in ((20, 40, 127), (64, 0, 60)):
         exv = (1, *FD.derive(*knobs))
         pokes = {FD.EX: exv[0], **{FD.EX + 4 * (k + 1): fb(v) for k, v in enumerate(exv[1:5])}}
@@ -221,9 +222,9 @@ def run(M5, snap, m2mach, m5img, stock_img) -> dict:
             if hx[0] != "stop" or ox != wbits:
                 ex_exact = False
                 ex_bad = ex_bad or (knobs, b, hx[0])
-            ex_heard += sum(1 for w in wbits[0] + wbits[1] if w & 0x7FFFFFFF)
+            ex_heard.hear(wbits[0] + wbits[1])
     checks["TYPE FDN8, second page: every output word as dnfw.fdn8.ref's at two settings of DIFF WDTH FREZ "
-           "(175 blocks each)"] = ex_exact and ex_heard > 1000
+           "(175 blocks each), heard, finite"] = ex_exact and ex_heard.ok(1000)
     numbers["FDN8 second page: first mismatch"] = ex_bad
 
     # 3. the switches, on silence
@@ -258,7 +259,7 @@ def run(M5, snap, m2mach, m5img, stock_img) -> dict:
     # 4. LONG (TYPE 2): from FDN8 (the ring cleared again, the variant's table copied), noise,
     # its tail (its shortest line is 185 blocks), against the reference; the ring word for word
     rnd = random.Random(23)
-    exact, heard, cost_long, first_bad = True, 0, [], None
+    exact, heard, cost_long, first_bad = True, F32.Ear(), [], None
     for b in range(300):
         noisy = 40 <= b < 46
         inl = [rnd.uniform(-0.5, 0.5) if noisy else 0.0 for _ in range(32)]
@@ -269,12 +270,12 @@ def run(M5, snap, m2mach, m5img, stock_img) -> dict:
         if hb[0] != "stop" or ob != wbits:
             exact = False
             first_bad = first_bad or (b, hb[0])
-        heard += sum(1 for w in wbits[0] + wbits[1] if w & 0x7FFFFFFF)
+        heard.hear(wbits[0] + wbits[1])
         if b >= FD.RING_WORDS // FR.CHUNK:
             cost_long.append(hb[2])
     checks["TYPE LONG: every output word as dnfw.fdn8.ref's (300 blocks: 32 clearing from FDN8, noise, "
            "the tail)"] = exact
-    checks["TYPE LONG: the tail is heard"] = heard > 3000
+    checks["TYPE LONG: the tail is heard, finite"] = heard.ok(3000)
     ring = [M5.m2.word(rb.state, dsp.FDN8_RING_DDR + 4 * k) or 0 for k in range(FD.RING_WORDS)]
     checks["TYPE LONG: the ring, word for word, as the reference's"] = ring == [fb(x) for x in ref.ring]
     numbers["LONG: first mismatch"] = first_bad

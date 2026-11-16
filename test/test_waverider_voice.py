@@ -89,3 +89,12 @@ def test_m3_landmarks_are_the_measured_addresses():
     assert V.READER_SW == 0x180000 and V.MACHINE5_SW == 0x180100
     # the four stock per-type render loops are all inside sw 0x1c8ef1
     assert all(0x1C8EF1 <= pc < 0x1C9B73 for pc in V.PER_TYPE_RENDER_LOOPS)
+
+
+def test_peak_is_nan_on_any_non_finite_sample_whatever_the_order():
+    import math
+    for xs in ([math.nan, 0.5], [0.5, math.nan], [0.1, math.inf, 0.2], [-math.inf]):
+        p = V.peak(xs)
+        assert math.isnan(p)
+        assert not p > 0.01 and not p < 16.0          # a floor and a ceiling check both fail
+    assert V.peak([]) == 0.0 and V.peak([-0.0, 0.0]) == 0.0
