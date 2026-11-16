@@ -40,7 +40,7 @@ typedef signed char s8;
 #define SET_DIRTY ((void (*)(void *))0x4011D5DEu)
 #define SLOT_ID   ((u32 (*)(u32, int, int))0x400DC18Eu)        /* (slot, machine, filter) -> record */
 #define FRAMES    (*(volatile u32 *)0x4058F8D4u)               /* 1,500 a second */
-#define RECORD(id) ((const int *)(0x401F83A4u + 60u * (id)))   /* +4 slot, +8 min, +12 max, +16 default */
+#define RECORD(id) ((const int *)(REC_BASE + 60u * (id)))   /* +4 slot, +8 min, +12 max, +16 default */
 #define KIT_POINTER (*(unsigned char *volatile *)0x800052A0u)
 #define UI_TRACK  (*(volatile u8 *)0x42432A6Cu)
 #define OWNER     ((volatile u32 *)0x80005308u)

@@ -3,8 +3,8 @@
  * Two runtime structures stand between the ten parameter records and a page
  * the instrument will show, and neither can be written at build time:
  *
- * - **the page-record table** at `0x42432c00`, ids 0..36, 44 bytes each, built
- *   by the UI at startup. `0x400c2474` turns an id into a record with
+ * - **the page-record table** at `0x42433c00`, ids 0..36, 44 bytes each, built
+ *   by the UI at startup. `0x400c25d8` turns an id into a record with
  *   `base + 44 * id` after rejecting anything above 36;
  * - **the mode's page vector**, three longwords holding the ids `4 5 6`, at the
  *   mode object's `+124`/`+128`. The header the screen draws is derived from
@@ -38,7 +38,7 @@
  */
 #include "ext.h"
 
-#define PAGE_TABLE   0x42432C00u
+#define PAGE_TABLE   0x42433C00u
 #define PAGE_STRIDE  44u
 #define PAGE_WORDS   (PAGE_STRIDE / 4u)
 #define LFO3_PAGE    6u

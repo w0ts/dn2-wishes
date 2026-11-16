@@ -145,6 +145,8 @@ def scenario_cascade(a, sym, rep):
 
 
 def scenario_drawn(a, sym, rep, names):
+    """(LFO1's page opened once with [MOD]; each WAVE then poked and the page asked to redraw: no page change, so
+    the count of MOD pages -- three, four with lfo4 -- does not matter)"""
     from emulib.panel import Panel
     shots, texts = {}, {}
     for label, build in (("build", a.build), ("without", a.before)):
@@ -163,9 +165,8 @@ def scenario_drawn(a, sym, rep, names):
             m.write(buf, bytes(32))
             M.guest(m, fmt, w << 8, buf)
             texts[(label, w)] = m.read(buf, 16).split(b"\0")[0].decode("latin1")
-            for _ in range(3):              # [MOD] three times: round its three pages to LFO1's again, drawn
-                panel.tap(MOD_KEY)          # from the sound
-            panel.settle(20_000_000)
+            m.write(sym["smp_overlay_dirty"], struct.pack(">i", 1))   # the page redrawn from the sound, LFO1's page kept (1.12
+            panel.settle(20_000_000)                    # redraws a poked value only when asked)
             shots[(label, w)] = pathlib.Path(panel.screen(f"wave{w:02d}")).read_bytes()
     new = [texts[("build", w)] for w in range(7, WAVES)]
     check("the WAVE formatter names the new waves", [x.upper() for x in new] == [n.upper() for n in names]

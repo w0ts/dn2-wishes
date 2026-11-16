@@ -1,9 +1,9 @@
 """Move the instrument's parameter table somewhere it can grow, and grow it.
 
 The Digitone II describes every knob it has in one table of 320 records, 60
-bytes each, at `0x401f7fc8` **inside the firmware image**. A fourth LFO needs
+bytes each, at `0x401f83d8` **inside the firmware image**. A fourth LFO needs
 ten more records, and the table cannot grow in place: the next byte after it
-already belongs to another array (`0x401fcac8`).
+already belongs to another array (`0x401fced8`).
 
 So the table is copied into the appended area with ten records after it, and
 every instruction that reaches the old one is repointed. That is possible only
@@ -11,7 +11,7 @@ because of how the accessors are written, which is worth stating once:
 
     cmpil #321,%d0                 ; the entry space, entry = index + 1
     scs %d1 ; mvsb %d1,%d1 ; andl %d1,%d0
-    lea 0x401f7f94,%a0             ; table - 60 + 8: the base, PRE-BIASED
+    lea 0x401f83a4,%a0             ; table - 60 + 8: the base, PRE-BIASED
     movel %d0,%d1 ; lsll #2,%d1 ; lsll #6,%d0 ; subl %d1,%d0
     movel %a0@(0,%d0:l),%d0
 
@@ -23,7 +23,7 @@ this module finds their sites by searching for the literal rather than holding
 an address list, then asserts the count it expects to find.
 
 A second table shadows the first at run time: **321 entries of 68 bytes** at
-`0x4243325c`, indexed by the same entry number, which is why it shares the
+`0x4243425c`, indexed by the same entry number, which is why it shares the
 `321`. It **does not move**, and `runtime_literals` is why: its initialiser is
 **unrolled**, and writes every entry's field addresses as absolute literals --
 902 of them, covering entries 0 to 320 with no gaps. There is no base to
@@ -56,13 +56,13 @@ from dataclasses import dataclass
 # which is 321, and assembles to the very `cmpil #321` this module hunts for.
 # Two of those turned a 53-site list into a 55-site one, and without the count
 # assertion the build would have "raised the bound" inside its own stub.
-STOCK_END = 0x4030B980
+STOCK_END = 0x4030C980
 
-TABLE, RECORD, COUNT = 0x401F7FC8, 60, 320
+TABLE, RECORD, COUNT = 0x401F83D8, 60, 320
 BIASES = (8, 16, 40)                       # the field each accessor wants
-EXPECTED_BASES = {8: 53, 16: 1, 40: 2}     # measured on stock 1.11, 56 in all
+EXPECTED_BASES = {8: 53, 16: 1, 40: 2}     # measured on stock 1.11, 56 in all (the same on 1.12: gen_lfo4_code)
 
-RUNTIME, RUNTIME_STRIDE, RUNTIME_ENTRIES = 0x4243325C, 68, 321
+RUNTIME, RUNTIME_STRIDE, RUNTIME_ENTRIES = 0x4243425C, 68, 321
 EXPECTED_RUNTIME = 902                     # the unrolled initialiser's literals
 
 # `cmpil #320` and `cmpil #321` both spell the same bound -- `bhi` against 320
@@ -74,12 +74,12 @@ NOT_THE_BOUND = (0x40031FEE, 0x40032422, 0x400325E2)
 
 # And one site that **is** this bound and must be left alone anyway.
 #
-# `param_set_tables_build` (0x400dc4d0) walks every record and files its entry
+# `param_set_tables_build` (0x400dc634) walks every record and files its entry
 # number into tables indexed by the record's **value slot**, one of them per
-# parameter group: `0x42c64b3c`, `0x42c647ac` and `0x42c649a8`, each of which
+# parameter group: `0x42c65b3c`, `0x42c657ac` and `0x42c659a8`, each of which
 # the same routine zeroes with `pea 0x194` -- 404 bytes, **101 longwords**, one
 # per slot 0..100. LFO4's records carry slots 101-108, which is 32 bytes past
-# the end of each, and the byte after `0x42c64b3c`'s 404th is `0x42c64cd0`, the
+# the end of each, and the byte after `0x42c65b3c`'s 404th is `0x42c65cd0`, the
 # filter table this routine zeroes two calls earlier.
 #
 # So raising this one bound registers ten records into three tables that have
@@ -89,17 +89,17 @@ NOT_THE_BOUND = (0x40031FEE, 0x40032422, 0x400325E2)
 #
 # Left at 321, the loop walks the relocated table's first 320 records and does
 # exactly what stock does. LFO4's slots stay unregistered, which is the read
-# side -- `0x400dc02a` bounds slots at 100 in its own right, so it answers 0 for
+# side -- `0x400dc18e` bounds slots at 100 in its own right, so it answers 0 for
 # 101 either way. Growing those three tables to 109 entries is five literals
 # each plus a size immediate, and it belongs with the rest of the read side.
 #
-# And `0x400c241c` guards the 68-byte companion table, which `runtime_literals`
+# And `0x400c2580` guards the 68-byte companion table, which `runtime_literals`
 # shows cannot move: entry 321 there would be 68 bytes past a table that ends
 # where the RTOS's task blocks begin. Left at 321 it clamps to entry 0, the
 # fallback, exactly as an out-of-range entry always did.
-NOT_THIS_TIME = {0x400DC7F0: "param_set_tables_build files by value slot into "
+NOT_THIS_TIME = {0x400DC954: "param_set_tables_build files by value slot into "
                              "101-entry tables; see docs/lfo4-build-plan.md",
-                 0x400C241C: "the 68-byte companion table has no base to move; "
+                 0x400C2580: "the 68-byte companion table has no base to move; "
                              "past its end are the RTOS task blocks"}
 EXPECTED_BOUNDS = 53
 
@@ -123,8 +123,14 @@ class Site:
 
 
 def _stock(content: bytes, base: int) -> bytes:
-    """`content` cut to the firmware's own image, without the appended area."""
-    return content[:max(0, min(len(content), STOCK_END - base))]
+    """`content` cut to the firmware's own image, without the appended area.
+
+    2026-11-14: this module's addresses are OS 1.12's (scripts/port_os112.py, docs/lfo-112-port.md); a MAIN OS
+    shorter than 1.12's (1.11's, 3,192,192 B) is refused rather than searched at the wrong addresses."""
+    if len(content) < STOCK_END - base:
+        raise ValueError(f"MAIN OS is {len(content):,} B, shorter than OS 1.12's {STOCK_END - base:,}: "
+                         "this parameter table is 1.12's")
+    return content[:STOCK_END - base]
 
 
 def _even_occurrences(content: bytes, base: int, value: int) -> list[int]:

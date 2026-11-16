@@ -869,7 +869,7 @@ static void buf_turn(int delta)
         return;
     int b = (int)rt_buf_of(t) + n;
     b = b < 0 ? 0 : b > 7 ? 7 : b;
-    const int *rw = (const int *)(0x401F83A4u + 60u * SMP_BUF_ID);
+    const int *rw = (const int *)(REC_BASE + 60u * SMP_BUF_ID);
     int lo = rw[2] >> 8, top = rw[3] >> 8, span = top - lo + 1;
     if (span < 8)
         span = 8;

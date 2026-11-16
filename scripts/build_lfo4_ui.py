@@ -16,9 +16,9 @@ findable rather than stumbled on. Seven windows in the whole image hold
 
 | site | stock | this build |
 |---|---|---|
-| `0x4010db18` | `SPH` is 81, 91 or 101 | and 327 |
-| `0x4010dbc6/cc` | the page index clamps to 2 | to 3 |
-| `0x4010dbce` | three `SLEW` entries `{80, 90, 100}` | four, `{..., 326}` |
+| `0x4010ddf8` | `SPH` is 81, 91 or 101 | and 327 |
+| `0x4010dea6/cc` | the page index clamps to 2 | to 3 |
+| `0x4010deae` | three `SLEW` entries `{80, 90, 100}` | four, `{..., 326}` |
 | `0x40039aba` | `DEST` is 78, 88 or 98 | and 324 |
 | `0x40039ad4` | the mask is `0x1e00`, `0x0e00` or `0x0600` | and `0x0200` |
 
@@ -83,13 +83,13 @@ def _jump(content, va, stock, target, what):
 # --- `RND` shows `SLEW` ------------------------------------------------------
 # moveq #81,%d0 ; cmpl %d2,%d0 ; beq ; moveq #91,%d1 ; cmpl %d2,%d1 ; beq ;
 # moveb #101,%d0 ; cmpl %d2,%d0 ; bne  -- 22 bytes, both exits inside them.
-SLEW_GATE = 0x4010DB18
+SLEW_GATE = 0x4010DDF8
 SLEW_GATE_STOCK = bytes.fromhex("7051b0826710725bb282670a103c0065b0826600 00ae".replace(" ", ""))
-SLEW_CLAMP = 0x4010DBC6          # moveq #2,%d1 -- the ceiling the index is tested against
-SLEW_CLAMPED = 0x4010DBCC        # moveq #2,%d0 -- what a larger index becomes
-SLEW_TABLE = 0x4010DBCE          # lea 0x40205454,%a0
-SLEW_TABLE_STOCK = bytes.fromhex("41f940205454")
-SLEW_ENTRIES = 0x40205454        # {80, 90, 100}, with a mangled RTTI string behind it
+SLEW_CLAMP = 0x4010DEA6          # moveq #2,%d1 -- the ceiling the index is tested against
+SLEW_CLAMPED = 0x4010DEAC        # moveq #2,%d0 -- what a larger index becomes
+SLEW_TABLE = 0x4010DEAE          # lea 0x4020590c,%a0
+SLEW_TABLE_STOCK = bytes.fromhex("41f94020590c")
+SLEW_ENTRIES = 0x4020590c        # {80, 90, 100}, with a mangled RTTI string behind it
 
 
 def slew(content, code):

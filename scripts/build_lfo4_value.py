@@ -68,7 +68,7 @@ def divert(content, code):
 # stub replays both. Without this the page draws eight empty dials -- it asks
 # for entries 321 to 329, the right ones, and the accessor's bound clamps every
 # answer to the fallback row (`scripts/emu_lfo4_widget.py`).
-COMPANION = 0x400C2418
+COMPANION = 0x400C257C
 COMPANION_STOCK = bytes.fromhex("202f00040c8000000141")   # movel 4(sp),d0 ; cmpil #321,d0
 
 
@@ -91,14 +91,14 @@ def companion(content, code):
           f"{code['lfo4_comp_stub']:#010x}")
 
 
-# The waveform preview is re-coded per LFO: three blocks at `0x4010e1f4`,
-# `0x4010e22e` and `0x4010e27e`, each calling `0x4006538e` five times with its
+# The waveform preview is re-coded per LFO: three blocks at `0x4010e4d4`,
+# `0x4010e50e` and `0x4010e55e`, each calling `0x4006538e` five times with its
 # own entry numbers as literals, chosen by an index the dispatch already
 # computes as 3 for LFO4. There is no block for 3, so the page drew no preview
 # and `SPH` came out a plain dial.
-WAVE_FALLBACK = 0x4010E2F0
+WAVE_FALLBACK = 0x4010E5D0
 WAVE_STOCK = bytes.fromhex("2f0a4eb94006597a")          # movel a2,-(sp) ; jsr 0x4006597a
-LFO3_BLOCK = (0x4010E27E, 0x4010E2C6)                   # the block this one transcribes
+LFO3_BLOCK = (0x4010E55E, 0x4010E5A6)                   # the block this one transcribes
 # (LFO3's literal, LFO4's) in the order the block calls for them.
 SUBSTITUTIONS = ((99, 325), (101, 327), (102, 328), (95, 321), (103, 329))
 

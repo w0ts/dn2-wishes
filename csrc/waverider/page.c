@@ -24,12 +24,9 @@
 #include "wr_gen.h"
 
 /* DN2_LFO4 (a generation option, default off; dnfw.waverider.pages.lfo4_on): our code's side of lfo4 -- the
- * parameter table and the LFO state it moves, the destination masks, the stored-sound hooks it shares with the
- * wishes record (docs/lfo-112-port.md, section 4). lfo4 itself is not on OS 1.12 yet, so a build that asks for
- * it stops here instead of shipping half of it. Off, this file is as it was. */
-#if DN2_LFO4
-#error "DN2_LFO4: lfo4 is not ported to OS 1.12 yet (docs/lfo-112-port.md); generate without DN2_LFO4"
-#endif
+ * parameter table and the LFO state it moves (REC_BASE, LFO_LIVE, LFO_STRIDE), LFO4's stored values in the wishes
+ * record (csrc/wishes/lfo4.c), the cascade with LFO4 both ways (csrc/modulation/cascade.c), and lfo4 in
+ * dnfw.mods.SHIPPED (docs/lfo-112-port.md). Off until it has passed its gate steps (6m4); then main asks the User. */
 
 typedef unsigned int u32;
 typedef unsigned char u8;
@@ -48,14 +45,14 @@ typedef unsigned char u8;
 #define CENTRED    2                                            /* TEXT flag: x is the centre */
 
 /* a parameter record: +8 min, +12 max, +16 default (TUN1: 0x400, 0x7c00, 0x4000) */
-#define RECORD(id) ((const int *)(0x401F83A4u + 60u * (id)))
+#define RECORD(id) ((const int *)(REC_BASE + 60u * (id)))
 
 /* W2: the record's name pointers, as every stock reader takes them (0x401f83a4 +
  * 60 id, then +0x28 the long name, +0x30 the short one: getLongName 0x400365c8,
  * getShortName 0x400372da, and the eleven places that read +0x30 directly, among
  * them the LFO destination list's row label 0x40105e52) */
-#define NAME_LONG(id)  (*(const char **)(0x401F83A4u + 60u * (id) + 0x28u))
-#define NAME_SHORT(id) (*(const char **)(0x401F83A4u + 60u * (id) + 0x30u))
+#define NAME_LONG(id)  (*(const char **)(REC_BASE + 60u * (id) + 0x28u))
+#define NAME_SHORT(id) (*(const char **)(REC_BASE + 60u * (id) + 0x30u))
 #define KIT_POINTER (*(unsigned char *volatile *)0x800052A0u)
 #define UI_TRACK    (*(volatile u8 *)0x42432A6Cu)
 
@@ -238,7 +235,7 @@ static int flt_on __attribute__((section(".data"))) = -2;   /* -2: not yet run *
 extern const char *mu_flt(int w, int k);
 static const unsigned short flt_fmt_ids[] = FLT_UNIT_IDS;
 #define NFFMT ((int)(sizeof flt_fmt_ids / sizeof flt_fmt_ids[0]))
-#define RECORD_FMT_AT(id) (*(void **)(0x401F83A4u + 60u * (id) + 0x34u))
+#define RECORD_FMT_AT(id) (*(void **)(REC_BASE + 60u * (id) + 0x34u))
 static void *flt_stock_fmt[NFFMT] __attribute__((section(".data")));
 static void flt_fmt(int w, int v, char *buf)
 {
@@ -441,6 +438,9 @@ int wr_poll(void *screen)
 #endif
 #if DN2_STOCK_UNITS
     { extern void stu_poll(void); stu_poll(); }    /* stock records' units, a build option (md_page.c) */
+#endif
+#if DN2_LFO4
+    { extern void wish_lfo4_poll(void); wish_lfo4_poll(); }   /* LFO4's values from loaded records (csrc/wishes/lfo4.c) */
 #endif
     extern void rvt_poll(void);
     rvt_poll();                                 /* FDN8: the Reverb page's TYPE and names (csrc/fdn8) */
@@ -857,7 +857,7 @@ void wr_page_draw(void *view, void *canvas)
         if (smp_values_held() && id) {             /* v0.35: SYN held: the value (O14) */
             u8 fl;
             vb[0] = 0;
-            ((void (*)(int, char *))(*(void **)(0x401F83A4u + 60u * id + 0x34u)))(GET_VALUE(view, id, &fl), vb);
+            ((void (*)(int, char *))(*(void **)(REC_BASE + 60u * id + 0x34u)))(GET_VALUE(view, id, &fl), vb);
             vb[6] = 0;
             label = vb;
         }

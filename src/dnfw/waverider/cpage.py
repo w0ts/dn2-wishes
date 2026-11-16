@@ -197,12 +197,21 @@ def compile_page(header: str, *, base: int) -> tuple[bytes, dict[str, int], int]
             defines["DN2_STOCK_UNITS"] = 1            # the stock records' units (md_page.c, page.c): a build option
         if PG.lfo4_on():
             defines["DN2_LFO4"] = 1                   # lfo4's side in our code (page.c; docs/lfo-112-port.md): an option
+        # 2026-11-14 (docs/lfo-112-port.md 4.2, 4.3): where stock reads the parameter records and the LFOs' live
+        # state. lfo4 moves both (its table copy at 0x46900000, four LFOs a voice from 0x46700000); every one of
+        # our C sources reads them through these, stock's values when DN2_LFO4 is off (the code is then today's)
+        defines.update({k: f"{v:#x}u" for k, v in PG.lfo4_moved().items()})
+        extra = []
+        if PG.lfo4_on():                          # LFO4's values in the wishes record: lfo4's table, by address
+            from ..mods import lfo4 as _l4
+            defines.update({f"LFO4_{k.upper()}": f"{v:#x}u" for k, v in _l4.SPEC["symbols"].items()})
+            extra.append(SOURCE.parents[1] / "wishes" / "lfo4.c")
         if os.environ.get("DNFW_SMP_STORE_TEST"):
             # an emulator-only build: the +Drive region inside the emulator's 15 MB device
             # (never shipped: scripts/gen_waverider_code.py refuses to write it)
             sector, floor = os.environ["DNFW_SMP_STORE_TEST"].split(",")
             defines.update({"STORE_SECTOR": sector + "u", "STORE_FLOOR": floor + "u"})
-        linked = cbuild.build([SOURCE, *LINK_SOURCES], base=base,
+        linked = cbuild.build([SOURCE, *LINK_SOURCES, *extra], base=base,
                               entries=[ENTRY, POLL, OVERLAY, *LINK_ENTRIES],
                               include=[pathlib.Path(tmp)], defines=defines)
     # libgcc's 64-bit helpers use instructions the ColdFire lacks (an illegal-instruction

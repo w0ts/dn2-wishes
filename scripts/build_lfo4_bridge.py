@@ -44,7 +44,7 @@ from dnfw.firmware import build as fwbuild                 # noqa: E402
 from dnfw.firmware.load import load                        # noqa: E402
 from dnfw.patch import area, cbuild, loader                # noqa: E402
 
-STOCK = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip"
+STOCK = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.12_dist.zip"   # (2026-11-14: OS 1.12, ported by port_os112)
 MAIN_OS, BASE = 3, 0x40000400
 SRC = ROOT / "csrc"
 OUT = ROOT / "out/lfo4-bridge"
@@ -84,7 +84,7 @@ def cave_source(table_va: int, refresh: int, for_block: int = 0) -> str:
     by 202 per track and `a4_bottom` restores `%a4` from it -- and it sits 16
     pointer the stock code uses for LFO1-3, and the displaced instruction was
     `lea %a4@(-34),%a4` -- so **`%a4` already holds it** when the stub runs.
-    Ghidra's decompilation of `0x40137726` confirms it: `local_18 = param_1 +
+    Ghidra's decompilation of `0x40137a06` confirms it: `local_18 = param_1 +
     0x22` advances 202 per track, and `iVar12 = local_18 - 0x22` is the very
     instruction replaced here. A register, not a stack slot, so no frame layout
     can be got wrong -- which two earlier attempts both did.
@@ -173,7 +173,7 @@ B_TOP_IDLE = """b_top:
 # on every track of every frame after the stub returns. On the ColdFire a
 # `nop` is not free: it waits for the pipeline to drain. So the idle build
 # branches over them: `jsr outer ; bra.s` to where the displaced block ended.
-OUTER_HOOK, OUTER_END = 0x40137AFC, 0x40137B18
+OUTER_HOOK, OUTER_END = 0x40137DDC, 0x40137DF8
 
 
 def skip_padding(content: bytearray) -> None:

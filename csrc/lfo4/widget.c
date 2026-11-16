@@ -12,7 +12,7 @@
  *
  *     [MOD] x3: entries [10, 95, 96, 97, 98, 99, 101, 102, 103]
  *     [MOD] x4: entries [10, 321, 322, 323, 324, 325, 327, 328, 329]
- *               96 of them answered 0x4243325c -- entry 0, the fallback
+ *               96 of them answered 0x4243425c -- entry 0, the fallback
  *
  * **The page asked the right questions.** The accessor's bound is 321 and
  * clamps anything above to entry 0, so every LFO4 parameter was handed the

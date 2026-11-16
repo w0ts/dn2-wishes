@@ -9,8 +9,8 @@
  * their registers *after* the call.
  *
  * The displaced pairs, read out of stock 1.11:
- *   memcpy  0x40134490  moveal 4(%sp),%a1 ; moveal 8(%sp),%a0
- *   memset  0x401344d8  moveal 8(%sp),%a0 ; mvzb 11(%sp),%d0
+ *   memcpy  0x40134770  moveal 4(%sp),%a1 ; moveal 8(%sp),%a0
+ *   memset  0x401347b8  moveal 8(%sp),%a0 ; mvzb 11(%sp),%d0
  * `scripts/build_lfo4_ext.py` checks both against the image before patching,
  * and checks that this file assembles back to exactly those bytes.
  */
@@ -82,8 +82,8 @@ lfo4_memset_displaced:
  * stored sound are both still in a2/a3 -- in opposite roles, which is why the
  * two stubs push their arguments in opposite orders.
  *
- *   load   0x400dd282  mvs.b 28(%a2),%d0 ; moveq #6,%d2          a2 live, a3 stored
- *   save   0x400dd724  mvs.b 54(%a2),%d0 ; move.l (%a0,%d0*4),%d0  a2 stored, a3 live
+ *   load   0x400dd3e6  mvs.b 28(%a2),%d0 ; moveq #6,%d2          a2 live, a3 stored
+ *   save   0x400dd888  mvs.b 54(%a2),%d0 ; move.l (%a0,%d0*4),%d0  a2 stored, a3 live
  */
 
     .globl  lfo4_load_stub

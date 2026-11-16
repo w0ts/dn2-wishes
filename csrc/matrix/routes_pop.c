@@ -44,7 +44,7 @@ typedef short s16;
 #define SET_DIRTY  ((void (*)(void *))0x4011D5DEu)
 #define FRAMES_NOW (*(volatile u32 *)0x4058F8D4u)       /* 1,500 a second */
 #define FONT       0x44508ED8u                          /* the grid's label font (popup.c's) */
-#define RECORD(id) ((const int *)(0x401F83A4u + 60u * (id)))   /* +4 slot, +16 default, +0x30 its short name */
+#define RECORD(id) ((const int *)(REC_BASE + 60u * (id)))   /* +4 slot, +16 default, +0x30 its short name */
 #define KIT_POINTER (*(u8 *volatile *)0x800052A0u)
 #define UI_TRACK   (*(volatile u8 *)0x42432A6Cu)
 #define UI_OWNER   ((u32 (*)(void))0x4018AC5Au)

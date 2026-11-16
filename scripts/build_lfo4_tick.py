@@ -49,7 +49,7 @@ into the real per-track mirror, so the modulation lands where it should.
 ## The state arrays have to move, and that is most of the edit count
 
 Three 1,920-byte arrays (16 **voices** x 3 LFOs x 40) sit wall to wall at
-`0x4463ed18`, `0x4463f498`, `0x4463fc18`. Four LFOs need 2,560 each, so all three
+`0x4463fd18`, `0x44640498`, `0x44640c18`. Four LFOs need 2,560 each, so all three
 relocate into the unclaimed 25.3 MB above BSS end `0x466b74d0`
 (`docs/memory-map.md`). Every site that names one, sizes one, strides one or
 initialises one is listed in `EDITS` below and asserted against its stock bytes.
@@ -107,15 +107,15 @@ STATE_STRIDE = 160          # per track: 4 LFOs x 40
 STOCK_LEN = 1920
 STOCK_STRIDE = 120
 
-STOCK_LIVE = 0x4463FC18
-STOCK_SECOND = 0x4463F498
-STOCK_BACKUP = 0x4463ED18
+STOCK_LIVE = 0x44640C18
+STOCK_SECOND = 0x44640498
+STOCK_BACKUP = 0x4463FD18
 
 # --- the cave ---------------------------------------------------------------
-# 0x402dfa1c is one of the three 896-byte runs that pass both of
+# 0x402dff5c is one of the three 896-byte runs that pass both of
 # `dnfw cave scan`'s checks (docs/code-caves.md).  Untouched by v4 and v5, which
-# used 0x402cf52c and 0x402d0664.
-CAVE = 0x402DFA1C
+# used 0x402cfa6c and 0x402d0ba4.
+CAVE = 0x402DFF5C
 CAVE_CAP = 896
 
 # --- LFO4's hard-coded parameters -------------------------------------------
@@ -135,7 +135,7 @@ PARAMS = struct.pack(
     LFO4_WAVE, LFO4_SPH, LFO4_MODE, LFO4_DEP,
 )
 
-STOCK = pathlib.Path("00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
+STOCK = pathlib.Path("00_Resources/00_Firmware/Digitone_II_OS1.12_dist.zip")   # (2026-11-14: OS 1.12)
 OUT = pathlib.Path("00_Resources/02_Builds/lfo4-tick6a_DN2_1.11.syx")
 
 
@@ -150,68 +150,68 @@ def edits(params_va: int) -> list[tuple[int, bytes, bytes, str]]:
     out: list[tuple[int, bytes, bytes, str]] = []
     add = lambda *a: out.append(a)
 
-    # -- evaluator A, 0x40137726 ------------------------------------------
-    add(0x4013773C, b"\x48\x78\x07\x80", b"\x48\x78\x0a\x00",
+    # -- evaluator A, 0x40137a06 ------------------------------------------
+    add(0x40137A1C, b"\x48\x78\x07\x80", b"\x48\x78\x0a\x00",
         "A: backup copy length 1920 -> 2560")
-    add(0x40137740, b"\x48\x79" + be32(STOCK_LIVE), b"\x48\x79" + be32(LIVE),
+    add(0x40137a20, b"\x48\x79" + be32(STOCK_LIVE), b"\x48\x79" + be32(LIVE),
         "A: copy source, live state base")
-    add(0x40137746, b"\x48\x79" + be32(STOCK_BACKUP), b"\x48\x79" + be32(BACKUP),
+    add(0x40137a26, b"\x48\x79" + be32(STOCK_BACKUP), b"\x48\x79" + be32(BACKUP),
         "A: copy destination, backup base")
-    add(0x4013775E, b"\x43\xf9" + be32(STOCK_LIVE), b"\x43\xf9" + be32(LIVE + 40),
+    add(0x40137A3E, b"\x43\xf9" + be32(STOCK_LIVE), b"\x43\xf9" + be32(LIVE + 40),
         "A: %a1 -> live state, +40 so %a2@(80) reaches LFO index 3")
-    add(0x40137784, b"\x72\x02", b"\x72\x03",
+    add(0x40137a64, b"\x72\x02", b"\x72\x03",
         "A: inner loop counter 2 -> 3, four LFOs")
-    add(0x401377E8, b"\xe7\x8a", b"\xeb\x8a",
+    add(0x40137AC8, b"\xe7\x8a", b"\xeb\x8a",
         "A: restore path, d2 = idx<<3 -> idx<<5")
-    add(0x401377F0, b"\x90\x82", b"\xd0\x82",
+    add(0x40137AD0, b"\x90\x82", b"\xd0\x82",
         "A: restore path, 128-8=120 -> 128+32=160")
-    add(0x401377F2, b"\x06\x80" + be32(STOCK_LIVE), b"\x06\x80" + be32(LIVE),
+    add(0x40137AD2, b"\x06\x80" + be32(STOCK_LIVE), b"\x06\x80" + be32(LIVE),
         "A: restore path, live base")
-    add(0x40137800, b"\xe7\x8a", b"\xeb\x8a",
+    add(0x40137ae0, b"\xe7\x8a", b"\xeb\x8a",
         "A: backup path, d2 = idx<<3 -> idx<<5")
-    add(0x40137808, b"\x90\x82", b"\xd0\x82",
+    add(0x40137ae8, b"\x90\x82", b"\xd0\x82",
         "A: backup path, stride 120 -> 160")
-    add(0x4013780C, b"\x06\x80" + be32(STOCK_BACKUP), b"\x06\x80" + be32(BACKUP),
+    add(0x40137AEC, b"\x06\x80" + be32(STOCK_BACKUP), b"\x06\x80" + be32(BACKUP),
         "A: backup path, backup base")
 
-    # -- evaluator B, 0x401373dc ------------------------------------------
-    add(0x401373FC, b"\xe7\x8a", b"\xeb\x8a",
+    # -- evaluator B, 0x401376bc ------------------------------------------
+    add(0x401376DC, b"\xe7\x8a", b"\xeb\x8a",
         "B: d2 = track<<3 -> track<<5")
-    add(0x40137418, b"\x92\x82", b"\xd2\x82",
+    add(0x401376f8, b"\x92\x82", b"\xd2\x82",
         "B: track stride 120 -> 160")
-    add(0x4013741C, b"\x74\x02", b"\x74\x03",
+    add(0x401376FC, b"\x74\x02", b"\x74\x03",
         "B: inner loop counter 2 -> 3")
-    add(0x4013741E, b"\xdb\xfc" + be32(STOCK_SECOND + 80),
+    add(0x401376FE, b"\xdb\xfc" + be32(STOCK_SECOND + 80),
         b"\xdb\xfc" + be32(SECOND + 120),
         "B: %a5 -> LFO index 3's state, not index 2's")
-    add(0x40137426, b"\xd5\xfc" + be32(STOCK_SECOND),
+    add(0x40137706, b"\xd5\xfc" + be32(STOCK_SECOND),
         b"\xd5\xfc" + be32(SECOND + 40),
         "B: %a2 -> state +40, so %a2@(80) reaches LFO index 3")
 
-    # -- the initialisers, 0x401372f4 and 0x40137348 -----------------------
-    add(0x401372FA, b"\x72\x03", b"\x72\x04",
+    # -- the initialisers, 0x401375d4 and 0x40137628 -----------------------
+    add(0x401375DA, b"\x72\x03", b"\x72\x04",
         "init A: 3 LFO records per track -> 4")
-    add(0x401372FC, b"\xd1\xfc" + be32(STOCK_LIVE + 37),
+    add(0x401375DC, b"\xd1\xfc" + be32(STOCK_LIVE + 37),
         b"\xd1\xfc" + be32(LIVE + 37),
         "init A: live base")
-    add(0x4013732E, b"\x06\x80" + be32(STOCK_STRIDE), b"\x06\x80" + be32(STATE_STRIDE),
+    add(0x4013760E, b"\x06\x80" + be32(STOCK_STRIDE), b"\x06\x80" + be32(STATE_STRIDE),
         "init A: track stride")
-    add(0x40137334, b"\x0c\x80" + be32(STOCK_LEN), b"\x0c\x80" + be32(STATE_LEN),
+    add(0x40137614, b"\x0c\x80" + be32(STOCK_LEN), b"\x0c\x80" + be32(STATE_LEN),
         "init A: array length")
-    add(0x4013734E, b"\x72\x03", b"\x72\x04",
+    add(0x4013762E, b"\x72\x03", b"\x72\x04",
         "init B: 3 LFO records per track -> 4")
-    add(0x40137350, b"\xd1\xfc" + be32(STOCK_SECOND + 37),
+    add(0x40137630, b"\xd1\xfc" + be32(STOCK_SECOND + 37),
         b"\xd1\xfc" + be32(SECOND + 37),
         "init B: second-state base")
-    add(0x40137382, b"\x06\x80" + be32(STOCK_STRIDE), b"\x06\x80" + be32(STATE_STRIDE),
+    add(0x40137662, b"\x06\x80" + be32(STOCK_STRIDE), b"\x06\x80" + be32(STATE_STRIDE),
         "init B: track stride")
-    add(0x40137388, b"\x0c\x80" + be32(STOCK_LEN), b"\x0c\x80" + be32(STATE_LEN),
+    add(0x40137668, b"\x0c\x80" + be32(STOCK_LEN), b"\x0c\x80" + be32(STATE_LEN),
         "init B: array length")
 
     # -- the two base accessors -------------------------------------------
-    add(0x40137340, b"\x20\x3c" + be32(STOCK_LIVE), b"\x20\x3c" + be32(LIVE),
+    add(0x40137620, b"\x20\x3c" + be32(STOCK_LIVE), b"\x20\x3c" + be32(LIVE),
         "accessor: returns the live state base")
-    add(0x40137394, b"\x20\x3c" + be32(STOCK_SECOND), b"\x20\x3c" + be32(SECOND),
+    add(0x40137674, b"\x20\x3c" + be32(STOCK_SECOND), b"\x20\x3c" + be32(SECOND),
         "accessor: returns the second-state base")
 
     return out
@@ -221,32 +221,32 @@ def edits(params_va: int) -> list[tuple[int, bytes, bytes, str]]:
 # `jmp cave` padded with nops so nothing downstream shifts.
 def hooks(params_va: int, cave_of: dict[str, int]) -> list[tuple[int, bytes, str, str]]:
     return [
-        (0x40137798,
+        (0x40137a78,
          b"\x49\xec\xff\xde\x47\xeb\x00\x74",
          "jsr", "a4_top",
          ),
-        (0x40137AF0,
+        (0x40137DD0,
          b"\x49\xec\xff\xf0\xb0\xaf\x00\x30",
          "jsr", "a4_bottom",
          ),
-        (0x40137AFC,
+        (0x40137DDC,
          b"\x22\x3c\x00\x00\x00\xca\x7e\x78\x24\x3c\x00\x00\x00\x99"
          b"\x52\x8d\xd3\xaf\x00\x34\xd5\xaf\x00\x3c\xdf\xaf\x00\x38",
          "jsr", "outer",
          ),
-        (0x401373B8,
+        (0x40137698,
          b"\x41\xf9" + be32(STOCK_SECOND + 38),
          "jmp", "flags",
          ),
-        (0x401372F4,
+        (0x401375D4,
          b"\x2f\x02\x42\x80\x20\x40",
          "jmp", "zero_backup",
          ),
-        (0x4013742C,
+        (0x4013770C,
          b"\x47\xed\x00\x24\x58\x8d\x2f\x42\x00\x30\x2f\x48\x00\x34",
          "jsr", "b_top",
          ),
-        (0x40137702,
+        (0x401379e2,
          b"\x49\xec\xff\xf0\x70\xff",
          "jsr", "b_bottom",
          ),
@@ -327,7 +327,7 @@ zero_backup:
     move.l  %d2,%sp@-
     clr.l   %d0
     movea.l %d0,%a0
-    jmp     0x401372fa
+    jmp     0x401375da
 
 | ---- evaluator B: %a4 for the fourth iteration -------------------------
 | Here the body reads %a4@(34..49), again with the decrement at the end, so the

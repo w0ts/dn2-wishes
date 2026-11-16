@@ -557,6 +557,22 @@ def lfo4_on() -> bool:
     return os.environ.get("DN2_LFO4", "") not in ("", "0")
 
 
+REC_BASE_STOCK = 0x401F83A4               # stock 1.12's records, pre-biased as stock's readers take them (+60 id)
+LFO_LIVE_STOCK, LFO_STRIDE_STOCK = 0x44640C18, 120   # stock 1.12's live LFO state: 3 LFOs x 40 B a voice
+LFO4_LIVE, LFO4_STRIDE = 0x46700000, 160  # lfo4's (dnfw.mods.lfo4 STATE_RAM): 4 LFOs x 40 B a voice
+
+
+def lfo4_moved() -> dict[str, int]:
+    """-> REC_BASE, LFO_LIVE, LFO_STRIDE for our C: stock's, or with DN2_LFO4 where lfo4 moves them (its table
+    copy, measured in lfo4_code.json: 53 stock reads of 0x401f83a4 go to table_va - 0x34)"""
+    if not lfo4_on():
+        return {"REC_BASE": REC_BASE_STOCK, "LFO_LIVE": LFO_LIVE_STOCK, "LFO_STRIDE": LFO_STRIDE_STOCK}
+    from ..mods import lfo4 as _l4
+    from ..patch import paramtable as _pt
+    return {"REC_BASE": _l4.SPEC["table_va"] - (_pt.TABLE - REC_BASE_STOCK), "LFO_LIVE": LFO4_LIVE,
+            "LFO_STRIDE": LFO4_STRIDE}
+
+
 def stock_units_on() -> bool:
     """2026-11-11 (the User: proper values on stock pages too, "gate it with a compile option at first"): the stock
     records' units are built only with DN2_STOCK_UNITS set (to anything but 0 or empty) when the code is generated"""

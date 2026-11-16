@@ -89,7 +89,7 @@ lfo4_comp_displaced:
 
 /* The fourth waveform-preview block, transcribed from the firmware's third.
  *
- * `0x4010e27e` is LFO3's, and LFO1's and LFO2's sit just above it: the same
+ * `0x4010e55e` is LFO3's, and LFO1's and LFO2's sit just above it: the same
  * instructions five times over with their own entry numbers as literals. The
  * dispatch hands LFO4 index 3 already and has no block for it, so this is that
  * block, with five constants changed and `jmp` where the firmware's falls

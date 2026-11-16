@@ -14,14 +14,14 @@ is opened somewhere else entirely, by a test this project had not found.
 `scripts/emu_lfo4_modal.py` found it by diffing what the four MOD pages
 execute while `DEST` is turned. 776 firmware blocks LFO1, LFO2 and LFO3 all
 reach and LFO4 never does; the largest cluster, 216 blocks at
-`0x40105a6c..0x40106d08`, is the browser view. Walking that back gave its
-opener (`0x401a074a`, one caller) and then a call chain; walking *forward* from
+`0x40105d4c..0x40106fe8`, is the browser view. Walking that back gave its
+opener (`0x401a0a2a`, one caller) and then a call chain; walking *forward* from
 the first place the traces part gave the decision itself:
 
 ```
 400679c8  cmpil #320,%d3            ; the entry bound -- already raised to 330
 400679ce  bhiw  0x40067ed6            by the table relocation
-400679da  lea   0x401f7f94,%a0      ; the parameter table, pre-biased
+400679da  lea   0x401f83a4,%a0      ; the parameter table, pre-biased
 400679e2  movel %a0@(24,%d0:l),%d0  ; field +44 of the record  (0x24 = 36; 8+36 = 44)
 400679e6  andil #0x70000,%d0        ; bits 18, 17, 16 -- and nothing else
 400679ec  beqw  0x40067edc          ; not a DEST: no browser

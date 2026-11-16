@@ -17,15 +17,15 @@ from dnfw.firmware.load import load
 from dnfw.patch import lfo4records, paramtable
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-STOCK_111 = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip"
+STOCK_112 = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.12_dist.zip"   # (2026-11-14: the table is 1.12's)
 MAIN_OS, BASE = 3, 0x40000400
 
 
 @pytest.fixture(scope="module")
 def stock():
-    if not STOCK_111.exists():
-        pytest.skip("Digitone II 1.11 is not in 00_Resources")
-    return load(read_image(STOCK_111)).container.find(MAIN_OS).unpack()
+    if not STOCK_112.exists():
+        pytest.skip("Digitone II 1.12 is not in 00_Resources")
+    return load(read_image(STOCK_112)).container.find(MAIN_OS).unpack()
 
 
 def test_the_site_counts_are_what_was_measured(stock):
@@ -128,7 +128,7 @@ def test_the_slot_filing_loop_keeps_its_bound(stock):
     end of three of them, and the byte after the first is the filter table the
     same routine zeroes two calls earlier. It boots and it draws.
     """
-    va = 0x400DC7F0
+    va = 0x400DC954
     assert va in paramtable.NOT_THIS_TIME
     at = va - BASE
     assert stock[at:at + 6] == b"\x0c\x82\x00\x00\x01\x41"          # cmpil #321,%d2
@@ -138,13 +138,13 @@ def test_the_slot_filing_loop_keeps_its_bound(stock):
 
 def test_the_three_slot_tables_are_101_entries_and_adjacent(stock):
     """404 bytes each, and the filter table begins at the end of the first."""
-    zeroed = {0x42C64B3C: 0x194, 0x42C647AC: 0x194, 0x42C649A8: 0x194,
-              0x42C64CD0: 0x48}
+    zeroed = {0x42C65B3C: 0x194, 0x42C657AC: 0x194, 0x42C659A8: 0x194,
+              0x42C65CD0: 0x48}
     for base_va, size in zeroed.items():
         pea = b"\x48\x78" + struct.pack(">H", size) + b"\x48\x79" + struct.pack(">I", base_va)
         assert pea in stock, f"{base_va:#010x} is not zeroed with {size} bytes"
-    assert 0x42C64B3C + 0x194 == 0x42C64CD0
-    assert 0x42C649A8 + 0x194 == 0x42C64B3C
+    assert 0x42C65B3C + 0x194 == 0x42C65CD0
+    assert 0x42C659A8 + 0x194 == 0x42C65B3C
 
 
 def test_the_scans_stop_at_the_firmware_s_own_image(stock):

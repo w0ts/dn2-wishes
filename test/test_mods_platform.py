@@ -53,11 +53,12 @@ def test_installs_the_loader_lfo4_passed_with(stock):
 
 
 def test_lfo4_alone_is_the_gated_build(stock):
-    """lfo4 on the platform: its edits, then its own two CODE chunks, as before."""
+    """lfo4 on the platform: its edits, then its own two CODE chunks, as before (2026-11-14: but its two stored-sound
+    hooks, the wishes record's sites on our series: dnfw.mods.lfo4.STORE_SITES)."""
     from dnfw.mods import lfo4
     spec = lfo4.SPEC
     image = bytearray(stock)
-    for e in spec["edits"]:
+    for e in (e for e in spec["edits"] if not lfo4._store_hook(e)):
         at = e["va"] - BASE
         image[at:at + len(e["new"]) // 2] = bytes.fromhex(e["new"])
     blob = bytearray.fromhex(spec["blob"])

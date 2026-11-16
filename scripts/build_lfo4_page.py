@@ -13,7 +13,7 @@ build time, so this adds two stubs instead:
 
 | site | what it does |
 |---|---|
-| `0x400c2474` | `id -> record`: answers for LFO4's id, which its table cannot |
+| `0x400c25d8` | `id -> record`: answers for LFO4's id, which its table cannot |
 | `0x40063f5c` | the mode-header renderer: gives the MOD mode a fourth page, once |
 
 The record is assembled from LFO3's the first time a MOD header is drawn --
@@ -55,7 +55,7 @@ ENTRIES = table.ENTRIES + ["lfo4_pages", "lfo4_page_for",
 # (name, the site, the stub, the symbol holding the bytes it replays, width).
 # The same shape as `build_lfo4_ext.SITES`, and checked the same way: a stub
 # that does not replay exactly what its jump displaces is refused.
-SITES = (("page record", 0x400C2474, "lfo4_page_stub", "lfo4_page_displaced", 6),
+SITES = (("page record", 0x400C25D8, "lfo4_page_stub", "lfo4_page_displaced", 6),
          ("mode header", 0x40063F5C, "lfo4_mode_stub", "lfo4_mode_displaced", 6))
 
 

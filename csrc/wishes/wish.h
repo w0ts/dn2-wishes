@@ -89,6 +89,7 @@ struct wish {
 #define WT_MACHINE 0x4000u
 #define WT_MX_ROUTES 0x0010u           /* the matrix's routes (csrc/matrix/matrix.c, docs/matrix.md) */
 #define WT_MX_ENV 0x0011u              /* ENV2: ATK HOLD DEC SUS REL MODE RSET, a byte kept 0 (csrc/matrix/env2_page.c) */
+#define WT_LFO4 0x0012u                /* LFO4: SPD MULT FADE DEST WAVE SPH MODE DEP, 8 x u16 (csrc/wishes/lfo4.c) */
 
 /* table.c */
 extern u8 wish_busy;
@@ -110,6 +111,11 @@ u32 wish_slot_of(const struct wish *w);
 void wish_cache_put(const struct wish *w);
 struct wish *wish_cache_get(u32 h0, u32 h1);
 void wish_load(u32 live, const u8 *stored);
+#if DN2_LFO4                                   /* lfo4.c */
+void wish_lfo4_save(u32 live);
+void wish_lfo4_load(u32 live, int linked);
+void wish_lfo4_poll(void);
+#endif
 void wish_save(u8 *stored, u32 live);
 int wish_link_read(const u8 *stored, u32 *h0, u32 *h1, u32 *len);
 void wish_link_write(u8 *stored, u32 h0, u32 h1, u32 len);

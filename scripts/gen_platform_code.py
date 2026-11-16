@@ -70,11 +70,16 @@ def check_against_lfo4(spec: dict) -> None:
         at = e["va"] - loader.BASE
         new = bytes.fromhex(e["new"])
         image[at:at + len(new)] = new
-    link_111 = {v: k for k, v in FROM_111.items()}.get(spec["link_va"], spec["link_va"]) - loader.BASE
+    # (2026-11-14: lfo4_code.json is 1.12's once lfo4 is ported, docs/lfo-112-port.md: its loader is then
+    # compared as it is; a 1.11 one is relocated as before)
+    old = "1.11" in lfo4.get("os", "Digitone II 1.11")
+    relocate = _relocate if old else bytes
+    link_at = ({v: k for k, v in FROM_111.items()}.get(spec["link_va"], spec["link_va"]) if old
+               else spec["link_va"]) - loader.BASE
     loader_bytes = bytes.fromhex(spec["loader"])
-    if _relocate(bytes(image[calls:calls + 8])).hex() != spec["hook"]:
+    if relocate(bytes(image[calls:calls + 8])).hex() != spec["hook"]:
         raise SystemExit("the start-up call differs from the one lfo4 installs")
-    if _relocate(bytes(image[link_111:link_111 + len(loader_bytes)])) != loader_bytes:
+    if relocate(bytes(image[link_at:link_at + len(loader_bytes)])) != loader_bytes:
         raise SystemExit("the loader differs from the one lfo4 installs")
 
 

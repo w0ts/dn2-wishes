@@ -4,7 +4,7 @@
 
 LFO4 is C (`csrc/lfo4/`), compiled and linked by `build_lfo4_browser.py`. The
 C stays the source; this runs that build's own composition (`RELEASE`) on the
-user's stock 1.11 image and writes what it changed as data -- the same pattern
+user's stock 1.12 image and writes what it changed as data -- the same pattern
 as `gen_lfo_waves_code.py`:
 
 - `edits`: every in-image run the build changes, with the **stock bytes it
@@ -50,6 +50,7 @@ def main() -> int:
         if rc:
             return rc
         content = (tmp / "build/section_3_MAIN_OS.bin").read_bytes()
+        built_syms = json.loads((tmp / "build/symbols.json").read_text())
 
     n = len(stock)
     edits, i = [], 0
@@ -72,12 +73,15 @@ def main() -> int:
     blob[at:at + stock_part] = bytes(stock_part)
 
     code = {
-        "os": "Digitone II 1.11",
+        "os": "Digitone II 1.12",
         "stock_length": n,
         "area_va": area.AREA_VA,
         "table_va": table.TABLE_VA,
         "table_offset": at,
         "table_records": paramtable.COUNT + lfo4records.GROUP_SIZE,
+        # 2026-11-14 (docs/lfo-112-port.md 4.1): what our code calls in lfo4's chunk with DN2_LFO4 -- LFO4's values
+        # go to and from the sound's wishes record through lfo4's own table
+        "symbols": {k: int(built_syms[k], 16) for k in ("ext_find", "ext_set", "ext_drop", "ext_default", "lfo4_cascade")},
         "edits": edits,
         "blob": bytes(blob).hex(),
     }
@@ -90,6 +94,14 @@ def main() -> int:
     from dnfw.mods import lfo4
     lfo4.SPEC = code
     rebuilt = lfo4.compose(stock)
+    # (2026-11-14: the mod leaves its two stored-sound hooks out, the wishes record's sites on our series: the build
+    # it must reproduce is this one with those two edits back to stock's bytes)
+    content = bytearray(content)
+    for e in edits:
+        if lfo4._store_hook(e):
+            pos = e["va"] - release.BASE
+            content[pos:pos + len(e["stock"]) // 2] = bytes.fromhex(e["stock"])
+    content = bytes(content)
     if rebuilt != content:
         raise SystemExit("the packaged mod does not reproduce the build byte for byte")
     print(f"{len(edits)} edits ({sum(len(e['stock']) // 2 for e in edits):,} B), "

@@ -238,7 +238,7 @@ int rt_is_bounce(u32 t)                         /* v0.49: FLEX (type 17, BOUNCE'
 
 /* v0.49: BUF over the knob's whole travel, BUF 1..8 an eighth of it each (BOUNCE's read 0..7 of a
  * 0..100 control: its default and most of the knob were BUF 8). fmt.c draws it the same way */
-#define REC_W(id) ((const int *)(0x401F83A4u + 60u * (id)))
+#define REC_W(id) ((const int *)(REC_BASE + 60u * (id)))
 u32 rt_buf_value(u32 v)                         /* the control's value (0..its top) -> 0..BUF_N-1 */
 {
     int top = REC_W(SMP_BUF_ID)[3] >> 8, lo = REC_W(SMP_BUF_ID)[2] >> 8;

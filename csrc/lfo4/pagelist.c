@@ -1,6 +1,6 @@
 /* The four MOD page ids, where the firmware's three are built from.
  *
- * `0x40061562` hands a **three**-entry list at `0x401e0048` and the count `3`
+ * `0x40061562` hands a **three**-entry list at `0x401e0458` and the count `3`
  * to the mode's page-vector constructor at startup. The list is `{4, 5, 6}`
  * and the longword after it is `16`, belonging to the next registration in a
  * packed pool with no gaps -- so a fourth id cannot be appended where it

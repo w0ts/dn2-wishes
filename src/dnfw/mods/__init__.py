@@ -38,8 +38,16 @@ from dataclasses import dataclass, field
 
 # The mods a shipped build applies, in order, to stock (the patcher's build, tools/patcher/dn2patch.py, and the
 # gate's rebuild, scripts/ship_gate.py). 2026-11-14 (the User: "Port both"): lfowaves joins on OS 1.12; lfo4
-# waits for its port (docs/lfo-112-port.md) and goes after lfowaves when it comes.
-SHIPPED = ("waverider", "lfowaves")
+# joins with DN2_LFO4 set at generation (docs/lfo-112-port.md), after lfowaves.
+def shipped(env=None) -> tuple[str, ...]:
+    """-> the shipped build's mods for ENV (default: this process's): lfo4 last with DN2_LFO4 set
+    (dnfw.waverider.pages.lfo4_on)"""
+    import os
+    env = os.environ if env is None else env
+    return ("waverider", "lfowaves") + (("lfo4",) if env.get("DN2_LFO4", "") not in ("", "0") else ())
+
+
+SHIPPED = shipped()
 
 # The pseudo-section of RAM a mod uses outside the image: an Extent in it is an
 # absolute address range at run time, compared like any other (`ram()`).

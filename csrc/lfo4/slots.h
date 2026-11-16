@@ -1,7 +1,7 @@
 /* Which parameter ids LFO4 answers to, and why those.
  *
  * The firmware's own setter (`docs/lfo4-build-plan.md` §"Step 4") guards its
- * write with `slot > 100 -> no write at all`, and the accessor at 0x400dc02c
+ * write with `slot > 100 -> no write at all`, and the accessor at 0x400dc190
  * carries the same bound. So ids **above** 100 are ones stock firmware already
  * handles by doing nothing: no stray write, no corrupted neighbour, and a
  * branch that is a well-defined place to divert from.

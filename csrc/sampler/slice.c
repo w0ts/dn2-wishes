@@ -30,7 +30,7 @@ typedef unsigned char u8;
 #define ACTIVE_TRACK (*(volatile u8 *)0x42432A6Cu)
 #define SOUND(t) (KIT + 52u + 1163u * (u32)(t))
 #define SLICE_TYPE 13                           /* dnfw.sampler.machines.TYPE_OF["SLICE"] */
-#define RECORD(id) ((const int *)(0x401F83A4u + 60u * (id)))
+#define RECORD(id) ((const int *)(REC_BASE + 60u * (id)))
 /* a record's value in a sound: the u16 at 20 + 2 x its slot (record + 4), the value in the
  * high byte, offset by the record's low (record + 8); as stock's setter 0x40037b74 stores it
  * (its values object at sound + 6: SAMP, slot 43, at sound + 0x6a, seen in the emulator) */

@@ -378,9 +378,15 @@ void wish_load(u32 live, const u8 *stored)
     wish_loads++;
     if (!wish_link_read(stored, &h0, &h1, &len)) {
         wish_drop(live);
+#if DN2_LFO4
+        wish_lfo4_load(live, 0);                /* lfo4.c: LFO4 at its defaults */
+#endif
         return;
     }
     wish_links_in++;
+#if DN2_LFO4
+    wish_lfo4_load(live, 1);                    /* lfo4.c: LFO4's values once the record is in RAM */
+#endif
     if (!take())
         return;
     w = add(live);
@@ -407,6 +413,9 @@ void wish_save(u8 *stored, u32 live)
     struct wish *w;
 
     wish_saves++;
+#if DN2_LFO4
+    wish_lfo4_save(live);                       /* lfo4.c: LFO4's values into the record, before it is hashed */
+#endif
     if (!wish_n || !take())
         return;
     w = find(live);

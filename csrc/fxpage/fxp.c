@@ -193,7 +193,7 @@ void fxp_words(u32 *w)
 
 /* page.c wr_poll, once a UI loop: with JUNO, records 105 / 106 named Mix / Mode, their values MIX % and I / II / I+II;
  * stock's names and formatter otherwise (stock 1.12's own: 0x40210a01 "Depth", 0x40210a3b "Speed", 0x400e3030) */
-#define REC_AT(id)    (0x401F83A4u + 60u * (id))
+#define REC_AT(id)    (REC_BASE + 60u * (id))
 #define REC_LONG(id)  (*(const char **)(REC_AT(id) + 0x28u))
 #define REC_FMT(id)   (*(void **)(REC_AT(id) + 0x34u))
 #define STOCK_FMT     0x400E3030u

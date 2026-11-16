@@ -32,8 +32,8 @@ typedef unsigned char u8;
  * SOPHIE, PLAITS and TB303 name their knob H TUNE too but span +-24 semitones (about 2.7 knob steps
  * each): v0.47's header would read knob units and FUNC + turn would jump an octave. So it is off. */
 #define MNM_TUNE_MONO 0
-#define RECORD_FMT(id) (*(void **)(0x401F83A4u + 60u * (id) + 0x34u))
-#define RECORD_LO(id) (((const int *)(0x401F83A4u + 60u * (id)))[2] >> 8)
+#define RECORD_FMT(id) (*(void **)(REC_BASE + 60u * (id) + 0x34u))
+#define RECORD_LO(id) (((const int *)(REC_BASE + 60u * (id)))[2] >> 8)
 
 extern int smp_count(void);
 extern const char *smp_name(int k);
@@ -254,7 +254,7 @@ int smp_quant(u8 *s, int slot, int value, u32 id)
         static u32 b_at __attribute__((section(".data"))) = 0;
         int old = *(volatile u16 *)(s + SOUND_VALUES + 2 * slot);
         int oc = old >> 8, nc = (value >> 8) & 0xFF, d = nc - oc;
-        const int *rw = (const int *)(0x401F83A4u + 60u * SMP_BUF_ID);
+        const int *rw = (const int *)(REC_BASE + 60u * SMP_BUF_ID);
         int lo = rw[2] >> 8, span = (rw[3] >> 8) - lo + 1;
         if (span < 8)
             span = 8;
@@ -644,7 +644,7 @@ extern void *stu_stock_of(int id);
 #else
 #define FINE_FMT RECORD_FMT(FINE_REF)
 #endif
-#define REC_W(id) ((int *)(0x401F83A4u + 60u * (id)))
+#define REC_W(id) ((int *)(REC_BASE + 60u * (id)))
 #define ENTRY_TYPE(id) ((u32 *)(0x4243425Cu + 68u * (id) + 4u))   /* the value type, 4 words */
 static const u16 pos_ids[3] = {SMP_STRT_ID, SMP_LEN_ID, SMP_LOOP_ID};
 static int pos_rec[3][3] __attribute__((section(".data")));   /* stock range, default, flag */

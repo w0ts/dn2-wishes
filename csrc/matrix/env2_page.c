@@ -24,7 +24,7 @@ typedef signed char s8;
 
 #define KIT_POINTER (*(u8 *volatile *)0x800052A0u)
 #define UI_TRACK   (*(volatile u8 *)0x42432A6Cu)
-#define RECORD(id) ((const int *)(0x401F83A4u + 60u * (id)))   /* +16 the default (units of 0x100) */
+#define RECORD(id) ((const int *)(REC_BASE + 60u * (id)))   /* +16 the default (units of 0x100) */
 #define PAGE_DOTS  ((void (*)(void *, void *, int, int, int))0x4006598Au)
 #define SET_PIXEL  ((void (*)(void *, int, int, int))0x40113E70u)
 #define AMP_PAGE_VTABLE 0x401E2320u

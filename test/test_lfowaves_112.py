@@ -50,8 +50,8 @@ def test_its_hand_written_addresses_are_1_12s():
 
 
 def test_the_shipped_build_applies_lfowaves_after_waverider():
-    from dnfw.mods import SHIPPED
-    assert SHIPPED == ("waverider", "lfowaves")
+    from dnfw.mods import shipped
+    assert shipped({}) == shipped({"DN2_LFO4": "0"}) == ("waverider", "lfowaves")
     patcher = (ROOT / "tools/patcher/dn2patch.py").read_text()
     assert "for mid in SHIPPED" in patcher and '"--mod", "waverider", "-o"' not in patcher
     gate = (ROOT / "scripts/ship_gate.py").read_text()
@@ -71,8 +71,8 @@ def test_dn2_lfo4_is_off_unless_asked(monkeypatch):
     assert 'if PG.lfo4_on():\n            defines["DN2_LFO4"] = 1' in cpage
 
 
-def test_dn2_lfo4_on_stops_the_build_until_lfo4_is_ported():
-    page = (ROOT / "csrc/waverider/page.c").read_text()
-    guard = page.index("#if DN2_LFO4")
-    assert page[guard:page.index("#endif", guard)].count("#error") == 1
-    assert "docs/lfo-112-port.md" in page[guard:page.index("#endif", guard)]
+def test_dn2_lfo4_on_adds_lfo4_and_its_gate_step():
+    from dnfw.mods import shipped
+    assert shipped({"DN2_LFO4": "1"}) == ("waverider", "lfowaves", "lfo4")
+    gate = (ROOT / "scripts/ship_gate.py").read_text()
+    assert '("lfo4", "LFO4: modulating' in gate and "scripts/emu_lfo4.py" in gate

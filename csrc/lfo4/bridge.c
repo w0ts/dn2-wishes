@@ -191,7 +191,7 @@ static u32 lfo4_voice_sound(u32 v)
 #endif
 
 /* The mirror geometry, from `docs/fx-master-modulation.md` §9 and the
- * evaluator's own arithmetic at `0x400db092`: `202*block + 34`. */
+ * evaluator's own arithmetic at `0x400db1f6`: `202*block + 34`. */
 #define MIRROR_BASE   0x800068E4u
 #define MIRROR_AT     34u
 #define MIRROR_STRIDE 202u
@@ -206,6 +206,11 @@ u32 lfo4_word;                       /* the frame word currently being reported 
 u32 lfo4_block_base = 0xFFFFFFFFu;   /* the lowest block seen = track 0's */
 
 u32 lfo4_refresh(u32 track);
+
+/* the series' cascade (csrc/modulation/cascade.c, DN2_LFO4): [0] LFO4_CASCADE_MAGIC, [1] (voice row, track row) ->
+ * the row this voice row reads */
+#define LFO4_CASCADE_MAGIC 0x4C433034u        /* 'LC04' */
+u32 lfo4_cascade[2];
 
 /* -> the row for the track whose mirror block this is.
  *
@@ -227,7 +232,7 @@ u32 lfo4_refresh(u32 track);
  * them) and `param_5`, at its `%sp@(96)`, is a pointer to a sixteen-byte array
  * holding **one signed byte per track: the voice allocated to that track, or
  * -1**. The caller builds it at `0x400271a2` -- both arrays default to -1 (`st
- * %d4`) and a real value is written only where `0x40138664(bit)` returns the
+ * %d4`) and a real value is written only where `0x40138944(bit)` returns the
  * same object as `0x4002b22e(track)`, which is what makes the byte a voice.
  *
  * What is *not* known is where that argument sits relative to this stub's
@@ -601,7 +606,15 @@ u32 lfo4_row_for_block(u32 block, u32 frame)
 #endif
     }
 #endif
-    return lfo4_refresh(track);
+    {
+        u32 row = lfo4_refresh(track);
+        /* 2026-11-14 (docs/lfo-112-port.md 4.4, the User: the cascade "Include"s LFO4): the series' cascade may
+         * hand this voice row a row of its own, the track's plus what LFO1..3 wrote into LFO4's controls last
+         * frame. Its slot is ours, zeroed by the loader, filled by the series' code: nothing without it. */
+        if (lfo4_cascade[0] == LFO4_CASCADE_MAGIC && lfo4_cascade[1])
+            row = ((u32 (*)(u32, u32))lfo4_cascade[1])(track, row);
+        return row;
+    }
 }
 
 /* -> the address of this track's row, current as of now. */

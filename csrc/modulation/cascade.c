@@ -67,6 +67,83 @@ static void mc_zero(void)
     MC->magic = MC_MAGIC;
 }
 
+#if DN2_LFO4
+typedef short s16;
+/* 2026-11-14 (docs/lfo-112-port.md 4.4, the User: "Include"): LFO1..3 into LFO4's controls. lfo4 keeps them per
+ * track in its own rows (csrc/lfo4/bridge.c), not in the mirror: a DEST of 101..108 would land in the next voice
+ * row. So the evaluator's write into one goes to a shadow cell of ours per voice row (mod_wb_cell), started from the
+ * value this voice row read last; at the next frame's start what was added there becomes this row's carry
+ * (mod_eval_pre), and lfo4 reads, through its cascade slot (lfo4_cascade), a row of this voice row's own: its
+ * track's plus the carry (mod_lfo4_row). One frame late, as LFO1..3's own; the carry restarts every frame. */
+#define L4_SLOT0 101u                                   /* csrc/lfo4/slots.h: SPD .. DEP */
+#define L4_N 8u
+#define L4_DEST 3u                                      /* LFO4's DEST: never a destination */
+#define L4_CASCADE ((volatile u32 *)LFO4_LFO4_CASCADE)  /* lfo4's slot: magic, function */
+#define L4_MAGIC 0x4C433034u                            /* 'LC04' (bridge.c) */
+struct l4_row {
+    u16 used, init;
+    u16 sh[L4_N], base[L4_N];
+    s16 carry[L4_N];                                    /* this frame's, from last frame's writes */
+    u16 own[L4_N];                                      /* the row handed to lfo4 */
+    const u16 *last;                                    /* the track row this voice row read last */
+};
+static struct l4_row l4[NROWS] __attribute__((section(".data")));
+static u32 l4_rows __attribute__((section(".data"))) = 0;  /* rows written this frame (bit v) */
+static u16 l4_sink[L4_N] __attribute__((section(".data")));   /* where a write we do not carry goes */
+u32 mod_l4_carried __attribute__((section(".data"))) = 0;  /* the checks read these */
+u32 mod_l4_rows_given __attribute__((section(".data"))) = 0;
+
+u32 mod_lfo4_row(u32 v, u32 row)
+{
+    if (v >= NROWS || !row)
+        return row;
+    struct l4_row *r = &l4[v];
+    r->last = (const u16 *)row;
+    u32 any = 0;
+    for (u32 b = 0; b < L4_N; b++)
+        any |= (u16)r->carry[b];
+    if (!any)
+        return row;
+    for (u32 b = 0; b < L4_N; b++) {
+        int x = (int)((const u16 *)row)[b] + r->carry[b];
+        r->own[b] = (u16)(x < 0 ? 0 : x > TOP ? TOP : x);
+    }
+    mod_l4_rows_given++;
+    return (u32)r->own;
+}
+
+static u32 l4_wb(u32 row, u32 dest)
+{
+    struct l4_row *r = &l4[row];
+    u32 b = dest - L4_SLOT0;
+    u16 bit = (u16)(1u << b);
+    if (!(r->init & bit)) {
+        r->sh[b] = r->base[b] = r->last ? r->last[b] : 0x4000u;
+        r->init |= bit;
+    }
+    r->used |= bit;
+    l4_rows |= 1u << row;
+    return (u32)r->sh - 2u * L4_SLOT0;                  /* + 2 x DEST: sh[DEST - 101] */
+}
+
+static void l4_frame(void)
+{
+    L4_CASCADE[1] = (u32)mod_lfo4_row;                  /* (each frame: lfo4's BSS may be zeroed again) */
+    L4_CASCADE[0] = L4_MAGIC;
+    u32 rows = l4_rows;
+    l4_rows = 0;
+    for (u32 v = 0; v < NROWS; v++) {
+        struct l4_row *r = &l4[v];
+        for (u32 b = 0; b < L4_N; b++)
+            r->carry[b] = (r->used >> b & 1u) && (rows >> v & 1u) ? (s16)((int)r->sh[b] - (int)r->base[b]) : 0;
+        if (r->used)
+            mod_l4_carried++;
+        r->used = 0;
+        r->init = 0;
+    }
+}
+#endif
+
 /* the frame's start, before the evaluator (hooks.S mod_eval, at 0x400272d4): last frame's lower
  * LFOs' writes into the higher LFOs' controls, added into the mirror */
 void mod_eval_pre(void)
@@ -74,6 +151,9 @@ void mod_eval_pre(void)
     if (MC->magic != MC_MAGIC)
         mc_zero();
     MC->frames++;
+#if DN2_LFO4
+    l4_frame();
+#endif
     u32 rows = MC->rows;                                /* bounded: 16 rows, 2 cells each at most */
     MC->rows = 0;
     for (u32 v = 0; rows; v++, rows >>= 1) {
@@ -107,6 +187,12 @@ void mod_eval_pre(void)
  * (never a DEST): our shadow cell; anything else: the mirror row, as stock. */
 u32 mod_wb_cell(u32 row, u32 lfo, u32 dest, u32 base)
 {
+#if DN2_LFO4
+    if (dest >= L4_SLOT0 && dest < L4_SLOT0 + L4_N)     /* LFO4's controls (hooks.S lets 101..108 through) */
+        return row < NROWS && lfo < 3u && dest - L4_SLOT0 != L4_DEST
+               ? l4_wb(row, dest)
+               : (u32)l4_sink - 2u * L4_SLOT0;          /* any other: a scratch cell, never the next voice row */
+#endif
     u32 k = (dest - 1u) >> 3, f = (dest - 1u) & 7u;
     if (row >= NROWS || dest < 9u || dest > 24u || k <= lfo || f == 3u || MC->magic != MC_MAGIC)
         return base;
@@ -155,10 +241,21 @@ static int ui_track_midi(void)
     return t > 15 || !kit || (signed char)kit[52u + 1163u * t + 0xDEu] == MIDI_TYPE;
 }
 
+#if DN2_LFO4
+#define REC_SLOT(id) (((const int *)(REC_BASE + 60u * (id)))[1])   /* a record's slot (+4) */
+#endif
+
 u32 mod_lfo_mask(u32 rec, u32 want)
 {
     u32 m = wr_lfo_mask(rec);
     u32 j = lfo_of_want(want), k = lfo_of(rec);
+#if DN2_LFO4
+    {   /* LFO4's controls (lfo4's records past stock's, slots 101..108 but its DEST): offered to LFO1..3 */
+        u32 sl = rec >= 321u && rec <= 330u ? (u32)REC_SLOT(rec) : 0u;   /* ids 321..330: rows 320..329 */
+        if (j && sl >= L4_SLOT0 && sl < L4_SLOT0 + L4_N && sl - L4_SLOT0 != L4_DEST && !ui_track_midi())
+            return want;
+    }
+#endif
     if (j && k && j != k && m && !ui_track_midi())      /* another LFO's control: offered */
         return want;
     return m;

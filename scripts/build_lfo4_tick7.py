@@ -21,12 +21,12 @@ answer is audible without any of the table, the page or storage being wired up:
 Where the index comes from, read out of the two evaluators (both checked
 against the stock bytes by the `poke` guards this reuses):
 
-- **evaluator A** `0x40137726` zeroes `%a5` at `0x40137758` and steps it once
-  per track, using it as a shift count at `0x40137770`-`0x4013777e`. So at the
+- **evaluator A** `0x40137a06` zeroes `%a5` at `0x40137a38` and steps it once
+  per track, using it as a shift count at `0x40137a50`-`0x40137a5e`. So at the
   `a4_top` hook `%a5` **is** the track index.
-- **evaluator B** `0x401373dc` takes it as an argument -- `movel %sp@(68),%d0`
+- **evaluator B** `0x401376bc` takes it as an argument -- `movel %sp@(68),%d0`
   -- and `%d0` is still live at the `b_top` hook, read but never written
-  between (`0x4013740c`, `0x40137410`).
+  between (`0x401376ec`, `0x401376f0`).
 
 Everything else is v6a's, imported rather than copied: the state relocation, the
 loop-count edits, the stride arithmetic, the flag sweep and five of the seven

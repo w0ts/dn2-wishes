@@ -19,12 +19,12 @@ So the fourth id is added where the vector is **born** instead:
 ```
 40061558  moveq #3,%d1              <- the count
 4006155c  movel %d1,%sp@-
-40061562  movel #0x401e0048,%d0     <- the list of page ids
+40061562  movel #0x401e0458,%d0     <- the list of page ids
 40061568  movel %d0,%sp@-
 4006156c  jsr %a5@                  <- vector<int>(vector, list, count)
 ```
 
-The list is `{4, 5, 6}` and `0x401e0054` is `16`, the next registration's, in a
+The list is `{4, 5, 6}` and `0x401e0464` is `16`, the next registration's, in a
 packed pool with no gaps -- so it is rehoused rather than extended, which is
 what `docs/lfo4-build-plan.md` predicted when this route was first read and set
 aside. Two literals: the count, and the pointer.
@@ -63,10 +63,10 @@ ENTRIES = ui.ENTRIES + ["lfo4_mod_pages"]
 
 COUNT_AT = 0x40061558            # moveq #3,%d1
 COUNT_STOCK = bytes.fromhex("7203")
-LIST_AT = 0x40061562             # movel #0x401e0048,%d0
-LIST_STOCK = bytes.fromhex("203c401e0048")
-STOCK_LIST = 0x401E0048
-NEIGHBOUR = 0x401E0054           # the next registration's id, proving no gap
+LIST_AT = 0x40061562             # movel #0x401e0458,%d0
+LIST_STOCK = bytes.fromhex("203c401e0458")
+STOCK_LIST = 0x401E0458
+NEIGHBOUR = 0x401E0464           # the next registration's id, proving no gap
 
 
 def pagelist(content, code):

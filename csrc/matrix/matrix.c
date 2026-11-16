@@ -62,7 +62,8 @@ static const u8 ENV1_SLOT[7] = {81, 82, 83, 84, 85, 91, 92};
 #define OUT_B 0x800068E4u               /* the evaluator's first argument: row v's slot s at OUT_B + 34 + 202 v + 2 s */
 #define VSOUND ((volatile u32 *)0x800052A8u)    /* the sound voice v plays */
 #define KIT_POINTER (*(u8 *volatile *)0x800052A0u)
-#define LFO_OUT(v) ((volatile u8 *)(0x44640C1Cu + 120u * (u32)(v)))    /* LFO l at + 40 l: state + 84 */
+#define LFO_OUT(v) ((volatile u8 *)(LFO_LIVE + 4u + LFO_STRIDE * (u32)(v)))   /* LFO l at + 40 l: state + 84 */
+/* (LFO_LIVE, LFO_STRIDE: stock's live LFO state, 120 B a voice; lfo4's, 160 B a voice, with DN2_LFO4: cpage) */
 #endif
 
 struct mx_e {

@@ -1,5 +1,5 @@
-"""The LFO4 mod: it applies to stock 1.11, refuses what it cannot sit on, and
-reproduces the image that was gated.
+"""The LFO4 mod: it applies to stock 1.12 (2026-11-14, docs/lfo-112-port.md; it was 1.11's), refuses what it cannot
+sit on, and reproduces the image that was gated.
 
 `scripts/gen_lfo4_code.py` packages `build_lfo4_browser.RELEASE`, the build
 the release `.syx` came from, so what is asserted here is **byte equality with
@@ -17,27 +17,27 @@ import struct
 
 import pytest
 
-from dnfw.mods import ModError, lfo4, moddest
+from dnfw.mods import ModError, lfo4
 from dnfw.patch import paramtable
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-STOCK_111 = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip"
-GATED = ROOT / "out/lfo4-fast/section_3_MAIN_OS.bin"
+STOCK_112 = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.12_dist.zip"
+GATED = ROOT / "out/lfo4-fast/section_3_MAIN_OS.bin"     # (1.11's gated build: none on 1.12 yet, so it skips)
 BASE = lfo4.BASE
 
 
 @pytest.fixture(scope="module")
-def dn2_111():
-    if not STOCK_111.exists():
-        pytest.skip("Digitone II 1.11 is not in 00_Resources")
+def dn2():
+    if not STOCK_112.exists():
+        pytest.skip("Digitone II 1.12 is not in 00_Resources")
     from dnfw.cli.files import read_image
     from dnfw.firmware.load import load
-    return load(read_image(STOCK_111))
+    return load(read_image(STOCK_112))
 
 
 @pytest.fixture(scope="module")
-def stock(dn2_111):
-    return dn2_111.container.find(lfo4.SECTION).unpack()
+def stock(dn2):
+    return dn2.container.find(lfo4.SECTION).unpack()
 
 
 @pytest.fixture(scope="module")
@@ -79,27 +79,17 @@ def test_refuses_a_changed_edit_site(stock):
         lfo4.compose(bytes(bad))
 
 
-def test_carries_a_table_edit_made_before_it(dn2_111, stock):
-    """moddest opens thirteen masks in the stock table; applied first, they
-    are in LFO4's relocated copy -- which is why the CLI applies lfo4 last."""
-    opened = moddest.apply(dn2_111).payloads[moddest.SECTION]
-    out = lfo4.compose(opened)
+def test_carries_a_table_edit_made_before_it(stock):
+    """An edit made in the stock table before lfo4 (on 1.11: moddest's thirteen masks, fxmod's Chorus records, mods
+    our 1.12 build does not have) is in lfo4's relocated copy -- why lfo4 is applied last (dnfw.mods.SHIPPED)."""
+    edited = bytearray(stock)
     table = paramtable.TABLE - BASE
+    picks = (78, 95, 244, 319)                              # four records' flags (+44), anywhere in the table
+    for rid in picks:
+        at = table + paramtable.RECORD * rid + 44
+        struct.pack_into(">I", edited, at, struct.unpack_from(">I", edited, at)[0] ^ 0x00A50000)
+    out = lfo4.compose(bytes(edited))
     moved = lfo4.SPEC["area_va"] - BASE + lfo4.SPEC["table_offset"]
-    for at, label in moddest._targets(stock):
-        assert struct.unpack_from(">I", out, moved + at - table)[0] == moddest.OPEN, label
-
-
-def test_carries_fxmod_table_edits(dn2_111, stock):
-    """fxmod rewrites ten Chorus records' masks inside the stock table."""
-    from dnfw.mods import fxmod
-    edited = fxmod.apply(dn2_111).payloads[fxmod.SECTION]
-    out = lfo4.compose(edited)
-    lo = paramtable.TABLE - BASE
-    hi = lo + paramtable.RECORD * paramtable.COUNT
-    moved = lfo4.SPEC["area_va"] - BASE + lfo4.SPEC["table_offset"]
-    inside = [e for e in fxmod.SPEC["edits"] if lo <= e["va"] - BASE < hi]
-    assert inside, "fxmod has no edit in the table any more; this test is stale"
-    for e in inside:
-        at, new = e["va"] - BASE, bytes.fromhex(e["new"])
-        assert out[moved + at - lo:moved + at - lo + len(new)] == new, hex(e["va"])
+    for rid in picks:
+        at = table + paramtable.RECORD * rid + 44
+        assert out[moved + at - table:moved + at - table + 4] == bytes(edited[at:at + 4]), rid

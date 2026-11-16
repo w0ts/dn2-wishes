@@ -16,9 +16,9 @@
 typedef unsigned int u32;
 
 #define GET_VALUE  ((int (*)(void *, u32, unsigned char *))0x4006538E)
-#define RECORD(id) ((const int *)(0x401F83A4u + 60u * (id)))
-#define NAME_SHORT(id) (*(const char **)(0x401F83A4u + 60u * (id) + 0x30u))
-#define FORMATTER(id)  (*(void (**)(int, char *))(0x401F83A4u + 60u * (id) + 0x34u))
+#define RECORD(id) ((const int *)(REC_BASE + 60u * (id)))
+#define NAME_SHORT(id) (*(const char **)(REC_BASE + 60u * (id) + 0x30u))
+#define FORMATTER(id)  (*(void (**)(int, char *))(REC_BASE + 60u * (id) + 0x34u))
 #define ID_LIMIT   1200u                        /* the records' table, generously (ids seen up to ~400) */
 #define MAX_LIST   64
 

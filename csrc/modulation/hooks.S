@@ -46,6 +46,16 @@ mod_eval:
         .globl  mod_wb
 mod_wb:
         movea.l 56(%sp), %a0
+#if DN2_LFO4
+        moveq   #100, %d1               | (2026-11-14, DN2_LFO4: DEST 101..108 are LFO4's controls: cascade.c)
+        cmp.l   %d7, %d1
+        bcc.s   2f                      | 100 or under: as before
+        moveq   #108, %d1
+        cmp.l   %d7, %d1
+        bcs.s   1f                      | past 108: stock's write
+        bra.s   3f                      | 101..108: mod_wb_cell
+2:
+#endif
         moveq   #8, %d1
         cmp.l   %d7, %d1
         bcc.s   1f
@@ -57,7 +67,7 @@ mod_wb:
         lsr.l   #3, %d1                 | the LFO whose control DEST is (1 LFO2, 2 LFO3)
         cmp.l   52(%sp), %d1
         ble.s   1f                      | not above this one: stock's write, heard this frame
-        move.l  %d0, -(%sp)
+3:      move.l  %d0, -(%sp)
         move.l  %a1, -(%sp)
         move.l  %a0, -(%sp)
         move.l  %d7, -(%sp)

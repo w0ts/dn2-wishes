@@ -101,6 +101,16 @@ SLOT_TO_ID = 0x400DC18E
 SLOT_HOOK = 0x400DC196                  # movel %sp@(12),%d0 ; moveal %sp@(16),%a1
 SLOT_HOOK_STOCK = bytes.fromhex("202f000c226f0010")
 SLOT_RESUME = 0x400DC19E
+# 2026-11-14, DN2_LFO4 (docs/lfo-112-port.md 4.4, the cascade with LFO4): LFO4's value slots 101..108 answered with
+# lfo4's records (ids 321..330, rows 320..329: dnfw.patch.lfo4records), as LFO3's slots 17..24 are answered from
+# stock's runtime table (0x400dc1c6) plus the distance between the two groups; and the two bounds that keep a slot
+# above 100 out of the destination builder's walk and the evaluator's DEST write
+SLOT_EXIT = 0x400DC210                  # movel %sp@+,%d2 ; rts
+SLOT_TABLE = 0x42C65B3C                 # stock's runtime table: slot -> id, for slots up to 24
+LFO4_SLOTS, LFO3_SLOTS, LFO4_ID_SHIFT = 101, 17, 321 - 95   # LFO4's first slot, LFO3's; ids 95.. -> 321..
+BUILDER_BOUND, BUILDER_BOUND_STOCK = 0x400395B8, bytes.fromhex("7265")   # moveq #101 (the walk's end)
+BUILDER_RESERVE, BUILDER_RESERVE_STOCK = 0x4003956E, bytes.fromhex("0065")   # pea 0x65's word (the list's room)
+EVAL_DEST_BOUND, EVAL_DEST_BOUND_STOCK = 0x40137D6E, bytes.fromhex("7264")   # moveq #100 (DEST past it: no write)
 
 # -- 5. the stored-sound LOAD (0x400dd34e) --------------------------------------------------
 # `d1 = (stored[244] + 1) & 0xff; keep the type if 6 > d1, else 0`. The bound is
@@ -249,12 +259,30 @@ def group_function(assemble) -> bytes:
 
 TRACK_TYPE_EXIT = 0x4004B81E            # getMachineType(track): its common exit
 
+def _lfo4_slots() -> str:
+    """DN2_LFO4: slots 101..108 -> lfo4's records, at the shim's start (a0 the slot; d2 saved at entry)"""
+    if not pages.lfo4_on():
+        return ""
+    return f"""    move.l  %a0,%d2                        | DN2_LFO4: LFO4's slots 101..108
+    subi.l  #{LFO4_SLOTS},%d2
+    moveq   #7,%d0
+    cmp.l   %d2,%d0
+    bcs.s   9f                             | not one of them
+    lea     {SLOT_TABLE + 4 * LFO3_SLOTS:#010x},%a1
+    move.l  %a1@(0,%d2.l*4),%d0            | the record LFO3's same control has
+    beq.s   8f
+    addi.l  #{LFO4_ID_SHIFT},%d0           | ... in LFO4's group
+8:  jmp     {SLOT_EXIT:#010x}
+9:
+"""
+
+
 SHIMS = f"""
 | param_set_slot_to_id, entered from {SLOT_HOOK:#010x}: the two loads it displaced,
 | then types {NEW_TYPE}..{TYPES_LAST} -> {CLONE} (WaveTone), then back. d2 is saved at entry and
 | overwritten before it is read ({SLOT_TO_ID + 0x16:#010x}).
 slot_shim:
-    move.l  %sp@(12),%d0
+{_lfo4_slots()}    move.l  %sp@(12),%d0
     movea.l %sp@(16),%a1
     cmpi.l  #{NEW_TYPE},%d0
     blt.s   1f
@@ -782,6 +810,12 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     # 4. slot_to_id
     edit(SLOT_HOOK, bytes.fromhex("4ef9") + _long(layout["slot_shim"]) + bytes.fromhex("4e71"),
          "param_set_slot_to_id: detour to the shim", SLOT_HOOK_STOCK)
+    if pages.lfo4_on():                 # DN2_LFO4: LFO4's controls as LFO1..3's destinations (cascade.c)
+        edit(BUILDER_BOUND, bytes.fromhex("726d"), "the destination builder walks LFO4's slots 101..108 too "
+             "(DN2_LFO4)", BUILDER_BOUND_STOCK)
+        edit(BUILDER_RESERVE, bytes.fromhex("006d"), "... its list's room 101 -> 109 (DN2_LFO4)", BUILDER_RESERVE_STOCK)
+        edit(EVAL_DEST_BOUND, bytes.fromhex("726c"), "the evaluator writes a DEST up to 108: LFO4's controls, which "
+             "mod_wb sends to the cascade's cells (DN2_LFO4)", EVAL_DEST_BOUND_STOCK)
 
     # 6. the SYN page tables
     for site, what in CANON_ARG_SITES:
@@ -917,8 +951,9 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
          "the frame's LFO evaluator: the lower LFOs' last writes into higher LFOs' controls added "
          "into the mirror first (mod_eval_pre), then stock's 0x40137a06, then the matrix's routes (mx_eval)",
          MOD_EVAL_STOCK)
-    _need(content, MOD_WB_SITE - 0x10, bytes.fromhex("752c004a72647f4225470068b2876538"),
-          "the write: DEST = mvs.b 74(%a4) into d7, bound-checked against 100")
+    _need(content, MOD_WB_SITE - 0x10, bytes.fromhex("752c004a" + ("726c" if pages.lfo4_on() else "7264")
+                                                     + "7f4225470068b2876538"),
+          "the write: DEST = mvs.b 74(%a4) into d7, bound-checked against 100 (DN2_LFO4: 108, edited above)")
     _need(content, MOD_WB_SITE + 8, bytes.fromhex("4df07a00"), "... the cell: lea (%a0,%d7.l*2),%fp")
     _need(content, 0x40137DC2, bytes.fromhex("53af0030"), "the LFO counter at 48(%sp), 2 down to 0")
     _need(content, 0x40137DEA, bytes.fromhex("528dd3af0034"), "the voice row in %a5, its slot 0 at 52(%sp)")

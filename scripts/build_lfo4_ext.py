@@ -34,7 +34,7 @@ from dnfw.firmware import build as fwbuild                 # noqa: E402
 from dnfw.firmware.load import load                        # noqa: E402
 from dnfw.patch import area, cbuild, loader                # noqa: E402
 
-STOCK = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip"
+STOCK = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.12_dist.zip"   # (2026-11-14: OS 1.12, ported by port_os112)
 MAIN_OS, BASE = 3, 0x40000400
 CODE_VA = 0x46800000              # above BSS, clear of every tenant (docs/memory-map.md)
 SRC = ROOT / "csrc"
@@ -44,10 +44,10 @@ SYX = ROOT / "00_Resources/02_Builds/lfo4-ext_DN2_1.11.syx"
 # Each site: what it is, where, the C stub, the symbol at the replayed
 # instructions, and how many bytes the jump displaces. A `jmp <abs.l>` is six,
 # so a six-byte site is exact and a longer one is padded with `nop`s.
-SITES = [("memcpy", 0x40134490, "lfo4_memcpy_stub", "lfo4_memcpy_displaced", 8),
-         ("memset", 0x401344D8, "lfo4_memset_stub", "lfo4_memset_displaced", 8),
-         ("sound load", 0x400DD282, "lfo4_load_stub", "lfo4_load_displaced", 6),
-         ("sound save", 0x400DD724, "lfo4_save_stub", "lfo4_save_displaced", 8)]
+SITES = [("memcpy", 0x40134770, "lfo4_memcpy_stub", "lfo4_memcpy_displaced", 8),
+         ("memset", 0x401347B8, "lfo4_memset_stub", "lfo4_memset_displaced", 8),
+         ("sound load", 0x400DD3E6, "lfo4_load_stub", "lfo4_load_displaced", 6),
+         ("sound save", 0x400DD888, "lfo4_save_stub", "lfo4_save_displaced", 8)]
 
 
 def compile_code() -> cbuild.Linked:

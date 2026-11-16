@@ -26,16 +26,16 @@ typedef unsigned short u16;
 #define SET_PIXEL ((void (*)(void *, int, int, int))0x40113E70)
 #define TEXT      ((void (*)(void *, u32, int, int, int, const char *, ...))0x4011573C)
 #define FONT      0x44508ED8u
-#define RECORD_FMT(id) (*(void **)(0x401F83A4u + 60u * (id) + 0x34u))   /* v0.35: its value text */
+#define RECORD_FMT(id) (*(void **)(REC_BASE + 60u * (id) + 0x34u))   /* v0.35: its value text */
 #define LABEL_FONT 0x40291ca0u                  /* the stock grid's 4 x 5 label font: the DT2's labels' */
 /* the stock grid's label text (0x40115948, as 0x4006448a calls it for each cell's name):
  * (canvas, font, x, y, align 1 centred, frame 0 none, width template 0, format, ...) */
 #define LABEL_TEXT ((void (*)(void *, u32, int, int, int, int, const char *, const char *, ...))0x40115948u)
 #define LABEL(c, x, y, fmt, ...) LABEL_TEXT((c), LABEL_FONT, (x), (y), 1, 0, 0, fmt, __VA_ARGS__)
 #define CENTRED   2
-#define RECORD(id) ((const int *)(0x401F83A4u + 60u * (id)))
+#define RECORD(id) ((const int *)(REC_BASE + 60u * (id)))
 extern int smp_values_held(void);                /* v0.35: SYN held long: the pages show their values (rec.c) */
-#define NAME_SHORT(id) (*(const char **)(0x401F83A4u + 60u * (id) + 0x30u))
+#define NAME_SHORT(id) (*(const char **)(REC_BASE + 60u * (id) + 0x30u))
 
 #define CELL_X(k) (21 + 26 * (k))         /* v0.20: the DT2's centres, 33 + 26 k (its own screen, measured) */
 #define TOP_Y 34

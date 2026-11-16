@@ -83,6 +83,12 @@ failure:
    lfowaves taken out, LFO1 on each wave through the frame's evaluator: stock's seven unchanged, each new one moving
    its destination with its own shape; the cascade carries an LFO into another's WAVE past 6; the WAVE formatter
    names the new waves and the LFO page draws every wave differently, stock's as before.
+6m4. **LFO4** (`emu_lfo4.py`, `dnfw.mods.lfo4` with `DN2_LFO4`, docs/lfo-112-port.md): LFO4 sweeps its destination
+   and not at depth zero; LFO4 into LFO1's SPD and LFO1 into LFO4's SPD each change the other's output (the
+   cascade both ways); LFO1..3's lists offer LFO4's seven controls, never its DEST; stock's own SAVE and LOAD carry
+   LFO4's values through the wishes record, and a sound saved at LFO4's defaults loads them so; on the build's own
+   snapshot, [MOD] walks four pages with LFO4's the fourth, each of its knobs moves its own LFO4 value and nothing
+   else, LFO1..3's knobs leave LFO4 alone, and a value in lfo4's table is drawn.
 6s. **DIRECT JUMP** (`emu_jump.py` run on the coupled emulator by `emu_jump_coupled.py`, docs/jump.md): the sequencer ticked through stock's own ISR;
    off is stock's state every tick; on, every track goes on from its own step (Elektron's rule); a cue
    that is not the PTN view's stays stock's; the setting persists in its sector; rapid fire (83 cues). Every run
@@ -219,6 +225,7 @@ TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platfo
          "test/test_gate_cache_foreign.py",                 # v0.48: the cache's cross-worktree guard and its control
          "test/test_slides.py",
          "test/test_lfowaves_112.py",                       # lfowaves on 1.12, SHIPPED, the DN2_LFO4 option
+         "test/test_wishes_lfo4.py",                        # LFO4's stored values in the wishes record (host)
          "test/test_modulation.py",                           # 2026-11-11: the lists, the cascade, the moving controls
          "test/test_moving_ours.py",                          # 2026-11-12: the moving controls on our own pages
          "test/test_libtree.py", "test/test_web_tool.py",   # v0.40: nested folders (the model, the page's levels)
@@ -292,6 +299,7 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("fineknob", "STRT's knob against stock's fine FREQ (ColdFire)"),
        ("modulation", "modulation: the destination lists, the LFO cascade, the moving controls (ColdFire)"),
        ("lfowaves", "LFO waveforms: the seven new waves modulating and drawn (ColdFire)"),
+       ("lfo4", "LFO4: modulating, the cascade both ways, its lists, its stored values, its page (ColdFire)"),
        ("link16", "sample link (ColdFire)"),
        ("pools", "per-project pools (ColdFire)"),
        ("erase", "ERASE MOD DATA (ColdFire)"),
@@ -3167,6 +3175,25 @@ def main() -> int:
             later("lfowaves", "LFO waveforms: the seven new waves modulating and drawn (ColdFire)",
                   "LFO waveforms: the seven new waves modulating and drawn (ColdFire)",
                   [lw_cmd, sorted(EMU_ENV.items())], lw_body)
+
+        # 6m4. lfo4 (2026-11-14, the User: "Port both", "Into the wishes record", "Include"; docs/lfo-112-port.md):
+        # when the shipped build carries it (DN2_LFO4)
+        if "lfo4" in SHIPPED_MODS:
+            l4_js = work / "lfo4.json"
+            l4_cmd = [a.venv, "-u", "scripts/emu_lfo4.py", "--build", a.build, "--snapshot", snap, "--json", l4_js,
+                      "--scenario", "modulating,cascade,into4,lists,stored,page"]     # page: snap booted on the build
+
+            def l4_body(tdir):
+                rc, out = run("lfo4", l4_cmd, logs, env=EMU_ENV, trace=tdir)
+                last = out.strip().splitlines()[-1] if out.strip() else ""
+                if rc != 0 or not last.startswith("PASS"):
+                    return False, "\n".join(l for l in out.splitlines() if "FAIL" in l)[-900:] or out[-900:]
+                return True, ("LFO4 modulates (not at depth zero); LFO4 into LFO1 and LFO1 into LFO4 heard; LFO1..3's "
+                              "lists offer LFO4's seven controls; stock's SAVE and LOAD carry LFO4 in the wishes record; "
+                              "[MOD]'s fourth page is LFO4's, each knob moves its own value")
+            later("lfo4", "LFO4: modulating, the cascade both ways, its lists, its stored values, its page (ColdFire)",
+                  "LFO4: modulating, the cascade both ways, its lists, its stored values, its page (ColdFire)",
+                  [l4_cmd, sorted(EMU_ENV.items())], l4_body)
 
         # the setup is done: from here on, nothing may import a module of ours (cached())
         setup_mods |= repo_modules()

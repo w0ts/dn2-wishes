@@ -72,8 +72,20 @@ def _platform_owned(e: dict) -> bool:
     return any(x.start < hi and lo < x.end for x in platform.extents())
 
 
+# 2026-11-14 (docs/lfo-112-port.md 4.1, the User: "Into the wishes record"): on our series the stored sound's lane is
+# the wishes link, and the stored-sound LOAD and SAVE sites are the wishes record's hooks (dnfw.mods.waverider,
+# csrc/wishes/hooks.S). lfo4's own two hooks there (csrc/lfo4/hooks.S, store.c: LFO4's values in the lane) are left
+# out; with DN2_LFO4 the wishes record carries LFO4's values (csrc/wishes/lfo4.c), through this mod's own table.
+STORE_SITES = ((0x400DD3E6, 6), (0x400DD888, 8))     # 1.12: load, save
+
+
+def _store_hook(e: dict) -> bool:
+    lo, hi = e["va"], e["va"] + len(e["new"]) // 2
+    return any(va < hi and lo < va + n for va, n in STORE_SITES)
+
+
 def _edits() -> list[dict]:
-    return [e for e in _spec()["edits"] if not _platform_owned(e)]
+    return [e for e in _spec()["edits"] if not _platform_owned(e) and not _store_hook(e)]
 
 
 def _chunks(blob: bytes) -> list[tuple[bytes, bytes]]:

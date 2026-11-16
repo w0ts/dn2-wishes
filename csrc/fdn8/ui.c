@@ -30,7 +30,7 @@
 typedef unsigned int u32;
 typedef unsigned short u16;
 
-#define RECORD_AT(id)   (0x401F83A4u + 60u * (id))
+#define RECORD_AT(id)   (REC_BASE + 60u * (id))
 #define NAME_LONG(id)   (*(const char **)(RECORD_AT(id) + 0x28u))
 #define NAME_SHORT(id)  (*(const char **)(RECORD_AT(id) + 0x30u))
 #define RECORD_FMT(id)  (*(void **)(RECORD_AT(id) + 0x34u))

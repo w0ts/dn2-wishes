@@ -21,11 +21,11 @@ typedef unsigned char u8;
 
 #define GET_VALUE ((int (*)(void *, u32, u8 *))0x4006538E)
 #define SET_PIXEL ((void (*)(void *, int, int, int))0x40113E70)
-#define RECORD(id) ((const int *)(0x401F83A4u + 60u * (id)))
+#define RECORD(id) ((const int *)(REC_BASE + 60u * (id)))
 #define FRAMES (*(volatile u32 *)0x4058F8D4u)                      /* 1,500 a second */
 #define UI_TRACK (*(volatile u8 *)0x42432A6Cu)
 #define MDUI ((const u8 *)MDUI_LOAD)
-#define NAME_SHORT_OF(id) (*(const char **)(0x401F83A4u + 60u * (id) + 0x30u))
+#define NAME_SHORT_OF(id) (*(const char **)(REC_BASE + 60u * (id) + 0x30u))
 
 enum { SMALL, SYM, BIG };
 
@@ -482,7 +482,7 @@ const char *mu_ins(int type, int knob, int k)
  * record whose formatter is stock's own (stu_stock: stock 1.12's address), so a record another part of ours
  * holds (a machine's, FDN8's) is left to it, and one handed back to stock's later gets ours again. The machines'
  * own records (STU_MACHINE_LO..HI) carry these texts only on a stock machine's track; on ours stock's text. */
-#define STU_FMT(id) (*(void **)(0x401F83A4u + 60u * (id) + 0x34u))
+#define STU_FMT(id) (*(void **)(REC_BASE + 60u * (id) + 0x34u))
 extern int wr_track_ours(void);
 
 static void stu_fmt(int w, int v, char *buf)

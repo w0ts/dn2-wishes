@@ -17,8 +17,8 @@
  *
  * **Neither map is edited.** §4's design renumbered LFO4 into live slots
  * 101-108 and widened the loops to reach them. It is not needed and it is not
- * free: the two maps are adjacent in the image (`0x401fcf20` is 100 longwords,
- * `0x401fd0b0` starts immediately after), so neither can grow in place. Instead
+ * free: the two maps are adjacent in the image (`0x401fd330` is 100 longwords,
+ * `0x401fd4c0` starts immediately after), so neither can grow in place. Instead
  * each loop is left exactly as it is and the eight ids are handled once, after
  * it, from the sound's own address -- the key step 1 already carries.
  *
