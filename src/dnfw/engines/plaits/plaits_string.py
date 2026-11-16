@@ -487,12 +487,28 @@ def _string_params(p: Prog) -> None:
 # bridge: its samples cost less even with the upsampler's work; one copy for PERC's code room), every temporary in a register instead of a slot word (U_D, U_AP, U_MAIN, U_OK are no longer written a
 # sample), the voice's random generator in R13 (its scale, -31, in R14) and the count in R15 through the loop.
 # The same operations on the same values in the same order: the output is bit for bit as before.
+# 2026-11-14 (plaits16, r52): the string sample's constants from a pool (plk.KTab) in the render scratch's XB row
+# KT_ROW (after the excitation's and the accumulator's rows), through I2, so each load rides on the compute before
+# it (a constant load is an instruction of its own); the delay lines through I4 instead of I2 (their loads never
+# rode on a compute: they follow the address's own setting), I4 (the half's output pointer) kept in KT_I4 meanwhile.
+# The same values, the same operations: the output is bit for bit as before.
+KT_ROW, KT_I4 = 48, 31
+KT_VALUES = (("i", 1664525), ("i", 1013904223), ("i", LINE - 1), ("i", STRETCH - 1), ("i", 3), ("i", 0), ("i", 1),
+             -0.5, 1.0, 4.0, -20.0, 20.0, DC_POLE, 0.5, -0.025, -1.5)
+_KT: list = [None]                                # the pool (set by half: its base is the layout's)
+
+
+def _k(p: Prog, d: int, v) -> None:
+    """Rd = the constant V from the pool (I2)"""
+    _KT[0].ld(p, d, v)
+
+
 def _addr(p: Prog, d: int, idx: int, mask: int | None, base: int | None, src: int | None = None) -> None:
     """Id = the line word (Rsrc & MASK, MASK None: Rsrc already in range; SRC None: Ridx) from the slot word BASE
     (U_LB / U_SB; None: R8 holds it already), Ridx its address. Clobbers R8, R12, Ridx."""
     src = idx if src is None else src
     if mask is not None:
-        p.iconst(12, mask)
+        _k(p, 12, ("i", mask))
         p.iop(idx, src, "AND", 12)
         src = idx
     p.lsh(idx, src, 2)
@@ -512,13 +528,13 @@ def _delay(p: Prog) -> None:
 
 def _disp(p: Prog) -> None:
     """the dispersion's jitter (R13 the generator, R14 -31): F5 = the delay, F6 = ap_delay, F7 = main_delay."""
-    p.iconst(12, 1664525)                        # plk.rnd01_inline's operations, the state kept in R13
+    _k(p, 12, ("i", 1664525))                    # plk.rnd01_inline's operations, the state kept in R13
     p.mul_ssi(13, 13, 12)
-    p.iconst(12, 1013904223)
+    _k(p, 12, ("i", 1013904223))
     p.iop(13, 13, "+", 12)
     p.lsh(12, 13, -1)
     p.float_(6, 12, 14)
-    K.addk(p, 6, 6, -0.5)
+    _KT[0].addk(p, 6, 6, -0.5)
     p.ldi(7, DISP, 1)
     p.fop(6, 6, "-", 7)
     K.ld(p, 8, U_NF)
@@ -527,7 +543,7 @@ def _disp(p: Prog) -> None:
     K.ld(p, 8, U_NA)                             # (before the store: it rides on the add)
     p.sti(DISP, 1, 7)
     p.fop(7, 7, "*", 8)
-    K.addk(p, 7, 7, 1.0)
+    _KT[0].addk(p, 7, 7, 1.0)
     p.fop(5, 5, "*", 7)
     K.ld(p, 6, U_SP)
     p.fop(6, 5, "*", 6)                          # ap_delay
@@ -543,7 +559,7 @@ def _bridge(p: Prog) -> None:
     p.ldi(6, BRG, 1)
     K.ld(p, 7, U_BC)
     p.fop(6, 6, "*", 7)
-    p.fconst(12, 1.0)
+    _k(p, 12, 1.0)
     p.fop(6, 12, "-", 6)
     p.fop(5, 5, "*", 6)
 
@@ -556,25 +572,25 @@ def _stretched(p: Prog) -> None:
     p.fop(5, 7, "-", 5)
     p.ldi(11, WP, 1)
     p.iop(0, 11, "+", 0)
-    _addr(p, 2, 0, LINE - 1, U_LB)
-    p.ldi(6, 0, 2)
-    p.ldi(7, 1, 2)
+    _addr(p, 4, 0, LINE - 1, U_LB)
+    p.ldi(6, 0, 4)
+    p.ldi(7, 1, 4)
     p.fop(7, 7, "-", 6)
     p.fop(7, 7, "*", 5)
     p.fop(9, 6, "+", 7)                          # s
     p.ldi(10, WP2, 1)
     p.iop(0, 10, "+", 4)
-    _addr(p, 2, 0, STRETCH - 1, U_SB)
-    p.ldi(6, 0, 2)                               # read
+    _addr(p, 4, 0, STRETCH - 1, U_SB)
+    p.ldi(6, 0, 4)                               # read
     K.ld(p, 11, U_APG)
     p.fop(7, 11, "*", 6)
     p.fop(7, 9, "+", 7)                          # write
-    _addr(p, 2, 0, None, None, src=10)           # (WP2 is kept in 0..255; R8 still U_SB)
-    p.sti(0, 2, 7)
+    _addr(p, 4, 0, None, None, src=10)           # (WP2 is kept in 0..255; R8 still U_SB)
+    p.sti(0, 4, 7)
     p.fop(7, 7, "*", 11)
     p.fop(9, 6, "-", 7)
     p.dec(10, 10)
-    p.iconst(12, STRETCH - 1)
+    _k(p, 12, ("i", STRETCH - 1))
     p.iop(10, 10, "AND", 12)
     p.sti(WP2, 1, 10)
 
@@ -587,17 +603,17 @@ def _hermite(p: Prog) -> None:
     p.ldi(11, WP, 1)
     p.iop(0, 11, "+", 0)
     p.dec(0, 0)
-    _addr(p, 2, 0, LINE - 1, U_LB)               # xm1 .. x2: the mirror covers the wrap
-    p.ldi(6, 0, 2)                               # xm1
-    p.ldi(7, 1, 2)                               # x0
-    p.ldi(9, 2, 2)                               # x1
-    p.ldi(10, 3, 2)                              # x2
+    _addr(p, 4, 0, LINE - 1, U_LB)               # xm1 .. x2: the mirror covers the wrap
+    p.ldi(6, 0, 4)                               # xm1
+    p.ldi(7, 1, 4)                               # x0
+    p.ldi(9, 2, 4)                               # x1
+    p.ldi(10, 3, 4)                              # x2
     p.fop(11, 9, "-", 6)
-    K.mulk(p, 11, 11, 0.5)                       # c
+    _KT[0].mulk(p, 11, 11, 0.5)                  # c
     p.fop(6, 7, "-", 9)                          # v
     p.fop(9, 11, "+", 6)                         # w
     p.fop(10, 10, "-", 7)
-    K.mulk(p, 10, 10, 0.5)
+    _KT[0].mulk(p, 10, 10, 0.5)
     p.fop(6, 9, "+", 6)
     p.fop(10, 6, "+", 10)                        # a
     p.fop(9, 9, "+", 10)                         # b_neg
@@ -621,13 +637,17 @@ def _stretched_call(p: Prog) -> None:
 
 def _curve(p: Prog) -> None:
     """curved_bridge_ = (|v| + v) sign, v = |s| - 0.025"""
-    K.fabs(p, 6, 9)
-    K.addk(p, 6, 6, -0.025)
-    K.fabs(p, 7, 6)
+    _k(p, 12, 0.0)                               # (plk.fabs's operations, its 0 from the pool)
+    p.fop(12, 12, "-", 9)
+    p.fop(6, 9, "MAX", 12)
+    _KT[0].addk(p, 6, 6, -0.025)
+    _k(p, 12, 0.0)
+    p.fop(12, 12, "-", 6)
+    p.fop(7, 6, "MAX", 12)
     p.fop(6, 7, "+", 6)
-    p.fconst(7, -1.5)
-    p.fconst(12, 0.0)
-    p.if_(9, "GT", 12, lambda: p.fconst(7, 1.0))
+    _k(p, 7, -1.5)
+    _k(p, 12, 0.0)
+    p.if_(9, "GT", 12, lambda: _k(p, 7, 1.0))
     p.fop(6, 6, "*", 7)
     p.sti(BRG, 1, 6)
 
@@ -637,22 +657,25 @@ def _close(p: Prog) -> None:
     its mirror word 1024 on below 3), WP one back; O1 = O0 (F0 too), O0 = s (F9 too)."""
     p.ldi(6, 0, 0)
     p.fop(9, 9, "+", 6)
-    K.clamp(p, 9, -20.0, 20.0)
+    _k(p, 12, -20.0)                             # (plk.clamp's operations, its bounds from the pool)
+    p.fop(9, 9, "MAX", 12)
+    _k(p, 12, 20.0)
+    p.fop(9, 9, "MIN", 12)
     p.ldi(6, DCX, 1)
     p.sti(DCX, 1, 9)
     p.ldi(7, DCY, 1)
-    K.mulk(p, 7, 7, DC_POLE)
+    _KT[0].mulk(p, 7, 7, DC_POLE)
     p.fop(7, 7, "+", 9)
     p.fop(7, 7, "-", 6)
     p.sti(DCY, 1, 7)
     svf_lp(p, 9, 7, DG)
     p.ldi(4, WP, 1)
-    _addr(p, 2, 0, None, U_LB, src=4)            # (WP is kept in 0..1023)
-    p.sti(0, 2, 9)
-    p.iconst(1, 3)
-    p.if_(4, "LT", 1, lambda: p.sti(LINE, 2, 9), kind="i")   # the mirror: the same word + 1024
+    _addr(p, 4, 0, None, U_LB, src=4)            # (WP is kept in 0..1023)
+    p.sti(0, 4, 9)
+    _k(p, 1, ("i", 3))
+    p.if_(4, "LT", 1, lambda: p.sti(LINE, 4, 9), kind="i")   # the mirror: the same word + 1024
     p.dec(4, 4)
-    p.iconst(12, LINE - 1)
+    _k(p, 12, ("i", LINE - 1))
     p.iop(4, 4, "AND", 12)
     p.sti(WP, 1, 4)
     p.ldi(0, O0, 1)
@@ -668,13 +691,13 @@ def _string_sample(p: Prog, disp: bool | None) -> None:
     if disp is None:
         def dsp():
             _disp(p)
-            p.iconst(0, 0)
-            p.fconst(12, 4.0)
-            p.if_(6, "GE", 12, lambda: p.if_(7, "GE", 12, lambda: p.iconst(0, 1)))
+            _k(p, 0, ("i", 0))
+            _k(p, 12, 4.0)
+            p.if_(6, "GE", 12, lambda: p.if_(7, "GE", 12, lambda: _k(p, 0, ("i", 1))))
 
         def brg():
             _bridge(p)
-            p.iconst(0, 0)
+            _k(p, 0, ("i", 0))
         K.ld(p, 0, U_DISP)
         p.ifz(0, "NE", dsp, brg)
         p.ifz(0, "NE", lambda: _stretched_call(p), lambda: _hermite_call(p))
@@ -682,9 +705,9 @@ def _string_sample(p: Prog, disp: bool | None) -> None:
         p.ifz(0, "EQ", lambda: _curve(p))
     elif disp:
         _disp(p)
-        p.iconst(0, 0)                           # (a flag, not two copies of the Hermite read: code room)
-        p.fconst(12, 4.0)
-        p.if_(6, "GE", 12, lambda: p.if_(7, "GE", 12, lambda: p.iconst(0, 1)))
+        _k(p, 0, ("i", 0))                       # (a flag, not two copies of the Hermite read: code room)
+        _k(p, 12, 4.0)
+        p.if_(6, "GE", 12, lambda: p.if_(7, "GE", 12, lambda: _k(p, 0, ("i", 1))))
         p.ifz(0, "NE", lambda: _stretched_call(p), lambda: _hermite_call(p))
     else:
         _bridge(p)
@@ -704,10 +727,10 @@ def _string_loop(p: Prog, unity: bool, disp: bool | None) -> None:
             p.ldi(4, SRC, 1)
             K.ld(p, 5, U_SRCR)
             p.fop(4, 4, "+", 5)
-            p.fconst(12, 1.0)
+            _k(p, 12, 1.0)
 
             def sample():
-                p.fconst(12, 1.0)
+                _k(p, 12, 1.0)
                 p.fop(4, 4, "-", 12)
                 p.sti(SRC, 1, 4)
                 _string_sample(p, disp)
@@ -739,7 +762,12 @@ def _string(p: Prog, L) -> None:
 
     p.iconst(1, 0)                               # the dispersion at unity; else the general loop (below unity,
     p.if_(4, "EQ", 5, lambda: p.ifz(0, "NE", lambda: p.iconst(1, 1)))   # or the bridge, whose samples cost less
+    bias = p.ibias.get(4)
+    p.geti(12, 4)                                # I4 (the half's output) kept while the lines use it
+    p.sti(KT_I4, 2, 12)
     p.ifz(1, "NE", lambda: _string_loop(p, True, True), lambda: _string_loop(p, False, None))   # even so)
+    p.ldi(12, KT_I4, 2)
+    p.seti(4, 12, bias=bias)
     K.sv(p, K.S_RNG, 13)
 
 
@@ -780,6 +808,8 @@ def half(p: Prog, L) -> None:
     p.fconst(0, 0.0)
     for k in range(K.HALF):
         p.stpost(1, 0)
+    _KT[0] = K.KTab(L.XB + 4 * KT_ROW, 2, KT_VALUES)   # 2026-11-14: the samples' constants (I2, the whole half)
+    _KT[0].write(p)
 
     def each():
         _voice(p, L)
