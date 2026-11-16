@@ -2228,6 +2228,8 @@ def recorder(p: Prog, L: Layout) -> None:
     p.ld(8, C["rchan"])
     p.ld(10, C["rsrc"])
     p.ld(5, C["rpk"])                         # the block's peak (0 above)
+    # v0.52 merge: the GAIN index (v0.50) once, in R7 (only settings() writes it): R8 holds rchan for every frame
+    p.ld(7, SM.REC_GAIN)
 
     def frame():
         p.ldi(4, 32, 1)                       # R
@@ -2246,11 +2248,9 @@ def recorder(p: Prog, L: Layout) -> None:
         def gained():                         # v0.50: a FLEX take's GAIN (settings()), and a track's
             p.ld(12, SM.REC_GAIN + 4)         # unity: x TRK_UNITY, the sample voice's -21.9 dB
             p.fop(3, 3, "*", 12)              # at its defaults made up
-            p.ld(8, C["rsrc"])
-            p.iconst(12, 2)
-            p.if_(8, "GE", 12, lambda: (p.fconst(12, SM.TRK_UNITY), p.fop(3, 3, "*", 12)), kind="i")
-        p.ld(8, SM.REC_GAIN)
-        p.ifz(8, "NE", gained)
+            p.iconst(12, 2)                   # (the source in R10, loaded above: R8 stays rchan)
+            p.if_(10, "GE", 12, lambda: (p.fconst(12, SM.TRK_UNITY), p.fop(3, 3, "*", 12)), kind="i")
+        p.ifz(7, "NE", gained)
         p.fconst(12, 0.999969)
         p.fop(3, 3, "MIN", 12)
         p.fconst(12, -1.0)
