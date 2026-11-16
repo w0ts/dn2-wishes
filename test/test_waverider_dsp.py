@@ -114,8 +114,10 @@ def test_the_five_patches_and_nothing_else_in_the_stock_blocks(stock7, built):
     # slot; nothing reads past slot 7
     assert dsp.SMP_ENGINE_SLOT == 5
     assert all(lookup[1 + t] == 5 for t in (*dsp.SMP_TYPES, *dsp.MNM_TYPES))
+    # 2026-11-08: a removed machine's reserved type reads the MIDI machine's slot (silent; lookup16)
+    assert all(lookup[1 + t] == dsp.MIDI_ENGINE_SLOT for t in dsp.RESERVED_TYPES)
     assert all(v in (0, k) for k, v in enumerate(lookup[1:])
-               if k not in dsp.SMP_TYPES and k not in dsp.MNM_TYPES) and max(lookup) <= 7
+               if k not in dsp.SMP_TYPES and k not in dsp.MNM_TYPES and k not in dsp.RESERVED_TYPES) and max(lookup) <= 7
     assert bootstream.read_span(built, dsp.sw_to_load(dsp.LOOKUP_SITE_SW), 6) == dsp.objects()["lookup_ptr"]
     # the idle loop's back edge, jump (pc,-0x10) at sw 0xb88abb in L2, becomes JUMP 0x16f500
     site = dsp.l2_sw_to_load(dsp.IDLE_SITE_SW)
@@ -144,9 +146,16 @@ def test_the_five_patches_and_nothing_else_in_the_stock_blocks(stock7, built):
     assert bootstream.read_span(stock7, pv, 18) == dsp.PVMIX_SITE_STOCK
     assert bootstream.read_span(built, pv, 18) == dsp.objects()["pvmix_jump"] + dsp.PVMIX_SITE_STOCK[6:]
     pv_off = bootstream.spans(stock7, pv, 6)[0][0]
+    # FDN8 and XDLY: the FX bus's reverb CJUMP and delay CALL, each with only its target changed
+    rv, dl = dsp.sw_to_load(dsp.REVERB_SITE_SW), dsp.sw_to_load(dsp.DELAY_SITE_SW)
+    assert bootstream.read_span(stock7, rv, 6) == dsp.REVERB_SITE_STOCK
+    assert bootstream.read_span(built, rv, 6) == dsp.reverb_cjump()
+    assert bootstream.read_span(stock7, dl, 6) == dsp.DELAY_SITE_STOCK
+    assert bootstream.read_span(built, dl, 6) == dsp.delay_call()
+    rv_off, dl_off = bootstream.spans(stock7, rv, 6)[0][0], bootstream.spans(stock7, dl, 6)[0][0]
     allowed = (set(range(entry_off, entry_off + 8)) | set(range(look_off, look_off + 6))
                | set(range(idle_off, idle_off + 6)) | set(range(call_off, call_off + 6))
-               | set(range(pv_off, pv_off + 6)))
+               | set(range(pv_off, pv_off + 6)) | set(range(rv_off, rv_off + 6)) | set(range(dl_off, dl_off + 6)))
     assert diff and set(diff) <= allowed
 
 
