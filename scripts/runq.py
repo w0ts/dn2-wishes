@@ -339,7 +339,8 @@ def ensure_dispatcher(d: pathlib.Path) -> None:
 def status(d: pathlib.Path) -> str:
     jobs = sorted(all_jobs(d), key=lambda j: j["submitted"])
     now = time.time()
-    lines = [f"Mac load {H.mac_load():.1f} (starts at <= {H.MAC_LOAD_MAX:g}, <= {H.MAC_JOBS_MAX} jobs)"]
+    lines = [f"Mac load {H.mac_load():.1f} of {H.MAC_CORES} cores (a job starts when its threads fit half the free cores, "
+             f"<= {H.MAC_JOBS_MAX} jobs)"]
     fu = H.farm_usage()
     lines.append("gpufarm: unreachable" if fu is None else
                  f"gpufarm: our CPUs {fu[0]:.1f} of {H.farm_cpu_max(time.time()):g}, load {fu[1]:.1f} (starts at <= {H.FARM_LOAD_MAX:g})")

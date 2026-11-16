@@ -80,6 +80,32 @@ def test_mac_jobs_run_at_nice_19_with_capped_threads(runq):
     assert "nice -n 19 env" in src and "OMP_NUM_THREADS" in src and "VECLIB_MAXIMUM_THREADS" in src
 
 
+def test_farm_jobs_run_at_nice_19(runq, tmp_path, monkeypatch):
+    sent = []
+
+    def fake_ssh(cmd, timeout=60, inp=None):
+        sent.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, b"", b"")
+    monkeypatch.setattr(runq.H, "ssh", fake_ssh)
+    tar = tmp_path / "job.tgz"
+    tar.write_bytes(b"")
+    for kind in ("runner", "cmd"):
+        sent.clear()
+        job = {"id": f"t-{kind}", "host": "gpufarm", "tar": str(tar), "kind": kind, "timeout": 60,
+               "cmd": ["python", "x.py"], "files": {}, "env": {"A": "1"}}
+        runq.H.start(job, tmp_path / "w")
+        started = sent[-1]
+        assert "( nice -n 19 timeout 60 " in started, started
+
+
+def test_status_runs(runq, tmp_path, monkeypatch):
+    monkeypatch.setattr(runq.H, "farm_usage", lambda: None)
+    d = tmp_path / "q"
+    d.mkdir(parents=True, exist_ok=True)
+    out = runq.status(d)
+    assert "Mac load" in out and "gpufarm: unreachable" in out
+
+
 def test_the_key_follows_tree_command_and_outside_files(runq, tmp_path):
     k = runq.job_key("t1", "runner", ["python", "x.py"], {}, [], {})
     assert k == runq.job_key("t1", "runner", ["python", "x.py"], {}, [], {})

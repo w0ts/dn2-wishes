@@ -241,7 +241,8 @@ def start(job: dict, work: pathlib.Path) -> dict:
     seed = (f"mkdir -p out/waverider && cp -n {FARM_ROOT}/seed/m2_init_* out/waverider/ 2>/dev/null; "
             if job["kind"] == "runner" else "")
     run = f"timeout {int(job['timeout'])} " + ("" if job["kind"] == "cmd" else f"{FARM_BENCH}/bench_ns112.sh . ")
-    sh = f"cd {root} && {seed}( {run}env {_env(job)} {_shell(job, 'farm')} ) > runq.log 2>&1{tail}"
+    # 2026-11-14 (main): nice 19 on gpufarm too, as on the Mac (17-19 jobs at a time ran at nice 0 until now)
+    sh = f"cd {root} && {seed}( nice -n 19 {run}env {_env(job)} {_shell(job, 'farm')} ) > runq.log 2>&1{tail}"
     r = ssh(f"nohup sh -c {shlex.quote(sh)} > /dev/null 2>&1 < /dev/null &", timeout=60)
     if r.returncode:
         raise HostError(f"gpufarm: start failed: {r.stderr.decode(errors='replace')[-200:]}")
