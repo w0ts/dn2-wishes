@@ -22,6 +22,8 @@ static void wg_knob(void *c, int s, int v) { rec_knob(s, v); }
 static void wg_label(void *c, int s, const char *t) { rec_label(s, t); }
 int smp_values_held(void) { return 0; }
 const char *mu_ins(int type, int knob, int k) { static char b[32]; sprintf(b, "u%d.%d=%d", type, knob, k); return b; }
+const char *const amp_title1 = "ENV1/AMP";
+void wpop_offer_mv(int a, const char *b, int c, int d, const char *(*e)(int, int), const char *(*f)(int, int), int g, void (*m)(int, int)) {}
 void wpop_offer(int a, const char *b, int c, int d, const char *(*e)(int, int), const char *(*f)(int, int), int g) {}
 int smp_overlay_dirty; void *wr_screen_obj;
 static u8 ui_track;
