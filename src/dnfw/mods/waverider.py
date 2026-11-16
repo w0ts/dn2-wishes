@@ -21,7 +21,7 @@ Two sections, both from committed data:
 
 Saved as its machine type by the stock SAVE. This build keeps 5-7 on LOAD; stock
 firmware (and any build without this mod) loads them as **FM Tone**, the stock LOAD
-bound's own fallback (`0x400dd286`), with their parameters as they were. A sound saved
+bound's own fallback (`0x400dd3ea`), with their parameters as they were. A sound saved
 with Waverider (type 5) on v0.10 or earlier loads as PERC here, its WaveTone values
 read as PERC's controls.
 """

@@ -8,8 +8,8 @@ One subject: putting those two things into a MAIN OS image, with every byte it
 replaces checked against stock first.
 
 The loader lives in a clean 138-byte cave no registered mod uses
-(`0x4028da6e`, measured 2026-09-19 by `dnfw.patch.cave.classify` against every
-mod's extents); it links at the next longword, `0x4028da70`, leaving 136 bytes.
+(`0x4028dfae`, measured 2026-09-19 by `dnfw.patch.cave.classify` against every
+mod's extents); it links at the next longword, `0x4028dfb0`, leaving 136 bytes.
 """
 
 from __future__ import annotations
@@ -22,8 +22,8 @@ from . import area, cbuild
 BASE = 0x40000400
 CALLS_VA = 0x4000053E
 CALLS_STOCK = bytes.fromhex("4ebaff1c4ebaff6e")      # jsr data_init ; jsr bss_clear
-CAVE_VA, CAVE_CAP = 0x4028DA6E, 138
-LINK_VA = 0x4028DA70
+CAVE_VA, CAVE_CAP = 0x4028DFAE, 138
+LINK_VA = 0x4028DFB0
 SOURCE = Path(__file__).resolve().parents[3] / "csrc"
 
 

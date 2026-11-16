@@ -5,7 +5,7 @@ The platform owns the three things those mods used to claim each for itself:
 
 - the start-up calls at `0x4000053e`, `jsr data_init ; jsr bss_clear`, replaced
   by one call to the loader;
-- the loader, `csrc/runtime/loader.S`, in the clean 138-byte cave at `0x4028da6e`;
+- the loader, `csrc/runtime/loader.S`, in the clean 138-byte cave at `0x4028dfae`;
 - the appended `DNFW` area past the end of MAIN OS (`dnfw.patch.area`).
 
 The loader copies the area's header and its data chunks to `RUNTIME_VA` plus

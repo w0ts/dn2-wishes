@@ -24,7 +24,7 @@ does. Every choice above lands in a `BOOT` chunk of the appended data area.
 - The images are **appended past the end of MAIN OS** and copied above BSS at
   boot, as data chunks in the platform's area (`dnfw.mods.platform`); the stamp
   itself is a `CODE` chunk at `0x46708000`. Until 2026-09-30 the stamp sat in the
-  cave at `0x402dfa1c` behind a copy stub of its own on the start-up hook, which
+  cave at `0x402dff5c` behind a copy stub of its own on the start-up hook, which
   kept this mod apart from lfo4 and lfowaves. The stamp's bytes are unchanged.
 - **Seen under the emulator** frame by frame against stock, and **on the
   instrument on 2026-09-17**: the owner's Digitone II booted and played the
@@ -130,7 +130,7 @@ def ascii_frames(lit, **options) -> tuple[list[bytes], int]:
 
 def _images(grids, W: int) -> list[bytes]:
     """Frames -> images for the ANIM chunk, stored upside down: the plain blit
-    that shows them (`0x401157fc`) turns the source over vertically, where the
+    that shows them (`0x40115adc`) turns the source over vertically, where the
     tunnel's sampler does not. Measured under the emulator, which runs the
     firmware's own blit, 2026-09-18."""
     return [image_from_pixels({(i % W, H - 1 - i // W) for i, v in enumerate(g) if v}) for g in grids]
