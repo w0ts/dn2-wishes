@@ -388,6 +388,7 @@ COST = {FUZZ: 5_700, TAPE: 8_200, FOLD: 6_300, HARM: 4_700, CHOR: 13_000, WIDE: 
         JUNO: 7_100}
 # FDN8's cost a block as a bus insert, the model on the shared scale (instructions + 4 L2 + 10 DDR accesses,
 # docs/dsp-cost.md), one instance less the pass with none: a clearing block (its first 32) and a steady one.
-# test_inserts_bus measures the clearing block again and holds COST[FDN8] >= 1.2 x it
-FDN8_MEASURED = {"clearing": 53_073, "steady": 32_606}
+# test_inserts_bus measures the clearing block again and holds COST[FDN8] >= 1.2 x it (53,073 / 32,606 until the bus
+# pass's scratch, own words and send set-aside moved to L1, 2026-11-12; the bound is left as it was)
+FDN8_MEASURED = {"clearing": 49_433, "steady": 28_410}
 assert COST[FDN8] >= 1.2 * max(FDN8_MEASURED.values())

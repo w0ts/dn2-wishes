@@ -1018,12 +1018,16 @@ def regions() -> list[tuple[str, int, int, str]]:
     if ins_post.LINE:
         area("the post pass's taps line (inserts.post.LINE, transient)", ins_post.LINE, 4 * ins_post.LINE_WORDS,
              "the Monomachine render scratch")
+    area("the bus pass's unit scratch (inserts.bus.UNIT_L1, transient)", ins_bus.UNIT_L1,
+         ins_bus.UNIT_L1_END - ins_bus.UNIT_L1, "the Monomachine render scratch")
+    area("the bus pass's own words and the send FX set aside (inserts.bus.WORDS_L1, transient)", ins_bus.WORDS_L1,
+         ins_bus.WORDS_L1_END - ins_bus.WORDS_L1, "the Monomachine render scratch")
     # L2: the loaded code and state, then the run-time areas
     for what, at, payload in l2_spans():
         area(what, at, len(payload))
     if "FX_DM" in globals():                     # (fx_spans(stock): built in section7 from stock's initial words)
         area("the stock delay's control words and chorus's state (opt-stock, dnfw.waverider.stockfx)", FX_DM, FX_BYTES)
-    area("the bus inserts' scratch and stores (inserts.bus HEAD_END..MV_STATE)", ins_bus.HEAD_END,
+    area("the bus inserts' XDLY stores (inserts.bus HEAD_END..MV_STATE)", ins_bus.HEAD_END,
          ins_bus.MV_STATE - ins_bus.HEAD_END)
     scr = "Monomachine scratch and the voice order, in L2 (zeros; v0.32; ANALOG2's mix tables)"
     scr = next((w for w, _a, _p in l2_spans() if w.startswith("Monomachine scratch")), scr)

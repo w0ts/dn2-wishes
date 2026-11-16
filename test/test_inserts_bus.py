@@ -112,6 +112,26 @@ def test_model_is_the_reference():
     assert not any(m.get(FP.RING + 4 * k) for k in range(0, 40000, 7))     # the send reverb's ring: untouched
 
 
+def test_the_units_l1_scratch_holds_nothing_across_blocks():
+    # 2026-11-12: a unit's scratch and the pass's own words are the Monomachine render scratch, which the voices
+    # rewrite every block: with it full of garbage before every call, every block is still the reference's
+    rnd = random.Random(11)
+    m, ref = mem0(), R.BusRef()
+    regs = {k: rnd.getrandbits(32) for k in range(16)}
+    for b in range(56):
+        for a in [*range(B.UNIT_L1, B.UNIT_L1_END, 4), *range(B.WORDS_L1, B.WORDS_L1_END, 4)]:
+            m.put(a, rnd.getrandbits(32))
+        par = table(rows_at(b))
+        left = [[rnd.uniform(-1.0, 1.0) for _ in range(32)] for _ in range(16)]
+        right = [[x * 0.5 for x in row] for row in left]
+        wl = [[np.float32(x) for x in row] for row in left]
+        wr = [[np.float32(x) for x in row] for row in right]
+        ref.block(par, wl, wr)
+        lo, ro, _ = call(m, par, left, right, regs)
+        assert lo == [[fbits(x) for x in row] for row in wl], f"block {b} left"
+        assert ro == [[fbits(x) for x in row] for row in wr], f"block {b} right"
+
+
 def test_all_off_leaves_every_block():
     rnd = random.Random(2)
     m = mem0()

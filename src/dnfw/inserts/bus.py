@@ -50,23 +50,35 @@ assert 4 * FD_WORDS <= FD_STRIDE and 4 * XD_WORDS <= XD_STRIDE
 # the head, loaded at power-on (zeros but the descriptor): OWNER 0 = no slot yet, so each instance's first
 # run starts it fresh (its words zeroed then set); the stores themselves are not loaded
 OWNER = STATE                                     # per instance (FDN8's, then XDLY's): 1 + record | type << 8
-DESC = OWNER + 4 * (D.FDN8_INSTANCES + D.XDLY_INSTANCES)    # the I/O descriptor the engines read:
+HEAD_END = OWNER + 4 * (D.FDN8_INSTANCES + D.XDLY_INSTANCES)
+# 2026-11-12 (opt-inserts): a unit's scratch in L1, not L2 (the engine reads and writes it every sample: ~340 L2
+# accesses a unit), in the Monomachine render scratch's IN after the post pass's taps line (inserts.post.LINE): the
+# arbiter's transient 0x2e54c0..0x2e5700. The voices rewrite it every block, so every unit writes its descriptor
+# (unit_io) before the engine reads it, as the power-on head (state_bytes) held it until then.
+UNIT_L1 = 0x2E54C0
+DESC = UNIT_L1                                    # the I/O descriptor the engines read:
 INP = DESC + 16                                   # +4 -> {in L, in R}, +0xc -> {out L, out R}
 OUTP = INP + 8
-HEAD_END = OUTP + 8
-XL = HEAD_END                                     # the input (the track x G_IN), the wet
+XL = OUTP + 8                                     # the input (the track x G_IN), the wet
 XR = XL + 4 * D.BLOCK
 WL = XR + 4 * D.BLOCK
 WR = WL + 4 * D.BLOCK
 PARF = WR + 4 * D.BLOCK                           # the instance's 6 parameters, floats (the struct the FX read)
-SCRATCH = PARF + 4 * 6
+UNIT_L1_END = PARF + 4 * 6
+assert UNIT_L1_END <= 0x2E5700
+# 2026-11-12 (opt-inserts, lever 4): the pass's own words (C) and the send FX's words set aside while instances
+# run (FD_SEND, XD_SEND) in L1, not L2: the arbiter's transient 0x2e5700..0x2e5b00 (the render's XB and YB, dead
+# after the voices). Each is written in the pass before it is read, and nothing is kept across blocks.
+WORDS_L1, WORDS_L1_LIMIT = 0x2E5700, 0x2E5B00
 SAVE_I = (0, 1, 2, 3, 4, 12)
 _NAMES = (["i", "t", "j", "rec", "sel", "inst", "fds", "xds", "own", "lp", "rp", "mix", "cnt"]
           + [f"sv{k}" for k in range(16)] + [f"svi{i}" for i in SAVE_I] + ["sva"])
-C = {n: SCRATCH + 4 * k for k, n in enumerate(_NAMES)}
-FD_SEND = (SCRATCH + 4 * len(_NAMES) + FD_STRIDE - 1) // FD_STRIDE * FD_STRIDE   # the send FX's words,
-XD_SEND = FD_SEND + FD_STRIDE                                                     # while instances run
-XD_STORE = XD_SEND + XD_STRIDE
+C = {n: WORDS_L1 + 4 * k for k, n in enumerate(_NAMES)}
+FD_SEND = WORDS_L1 + 4 * len(_NAMES)              # the send FX's words, while instances run
+XD_SEND = FD_SEND + 4 * FD_WORDS
+WORDS_L1_END = XD_SEND + 4 * XD_WORDS
+assert WORDS_L1_END <= WORDS_L1_LIMIT
+XD_STORE = (HEAD_END + XD_STRIDE - 1) // XD_STRIDE * XD_STRIDE
 END = XD_STORE + D.XDLY_INSTANCES * XD_STRIDE
 # perf (2026-11-11): the FDN8 instances' stores in L1 (every block copies an instance's words in and out: 2
 # L2 accesses a word), in the 5 KB free after the post pass's state (post.py ends at 0x2e4044; MNM_RENDER_DM
@@ -91,12 +103,20 @@ G_OUT = 14.125
 
 
 def state_bytes() -> bytes:
-    """the head's words at power-on: OWNER zeros, the descriptor's pointers"""
+    """the head's words at power-on: OWNER zeros"""
     import struct
-    w = [0] * ((HEAD_END - STATE) // 4)
-    for at, v in ((DESC + 4, INP), (DESC + 12, OUTP), (INP, XL), (INP + 4, XR), (OUTP, WL), (OUTP + 4, WR)):
-        w[(at - STATE) // 4] = v
-    return struct.pack(f"<{len(w)}I", *w)
+    return struct.pack(f"<{(HEAD_END - STATE) // 4}I", *[0] * ((HEAD_END - STATE) // 4))
+
+
+UNIT_IO = ((DESC, 0), (DESC + 4, INP), (DESC + 8, 0), (DESC + 12, OUTP), (INP, XL), (INP + 4, XR), (OUTP, WL),
+           (OUTP + 4, WR))
+
+
+def unit_io(p: Prog) -> None:
+    """the I/O descriptor and its two pairs, in the unit's L1 scratch. Clobbers R0"""
+    for at, v in UNIT_IO:
+        p.iconst(0, v)
+        p.st(at, 0)
 
 
 def save(p: Prog) -> None:
@@ -301,6 +321,7 @@ def unit_fdn8(p: Prog) -> None:
                 p.iconst(0, FP.D.LFO_PH0[k])
                 p.st(FP.C[f"ph{k}"], 0)
         owner(p, 0, fresh)
+        unit_io(p)
         params(p, FDN8_PAR)
         for name, v in (("par", PARF), ("io", DESC), ("mode", 1)):
             p.iconst(0, v)
@@ -336,6 +357,7 @@ def unit_xdly(p: Prog) -> None:
             p.iop(0, 12, "+", 0)
             p.st(XP.C["lb"], 0)
         owner(p, D.FDN8_INSTANCES, fresh)
+        unit_io(p)
         params(p, XDLY_PAR)
         for name, v in (("par", PARF), ("io", DESC), ("mode", 1)):
             p.iconst(0, v)
