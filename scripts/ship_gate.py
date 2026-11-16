@@ -1922,14 +1922,17 @@ def main() -> int:
             kit = 0x4210D08C
             snd0 = kit + 52
             from dnfw.perc import live as PLx      # noqa: PLC0415
-            st = ["wait:2", "png:stock"]
+            # (2026-11-14, the 1.12 gate's blind spots: 20 M before the stock page's picture, about four UI passes:
+            # 2 M held none on 1.12's snapshot, so no frame was composed; and a redraw asked after each poke, as
+            # a type chosen in MACHINE SEL asks one: 1.12 redrew only on a change of page)
+            st = ["wait:20", "png:stock"]
             for k, ty in enumerate(MMx.TYPES):       # 2026-11-11: MONOMACHINE on each engine (ENGN, page 1 H)
                 st += [f"poke:{snd0 + 0xDE:#x}:{ty:02x}"]
                 if MMx.NAMES[k] in MMx.MONO_ENGINES:
                     e = MMx.MONO_ENGINES.index(MMx.NAMES[k])
                     w = PLx.knob_word(MMx.mono_knob(e), PMx.PARAMS[7][3], PMx.PARAMS[7][2])
                     st += [f"poke:{snd0 + 0x14 + 2 * PMx.PARAMS[7][1]:#x}:{w:04x}"]
-                st += ["wait:20", f"png:m{k}"]
+                st += [f"poke:{lay['smp_overlay_dirty']:#x}:00000001", "wait:20", f"png:m{k}"]
             wslot = PMx.PARAMS[7][1]             # SOPHIE's MODL: the eighth place (H, 2026-11-11)
             st += [f"poke:{snd0 + 0xDE:#x}:{MMx.TYPES[MMx.NAMES.index('SOPHIE')]:02x}",
                    f"poke:{snd0 + 0x14 + 2 * wslot:#x}:0000", "wait:4"]
