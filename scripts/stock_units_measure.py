@@ -116,12 +116,14 @@ def filter_cmd(a) -> int:
                 return round(f1 + (f2 - f1) * (deg - p1) / (p2 - p1), 2)
         return None
     print(json.dumps({"cf": a.cf, "knob": a.knob, "reso": a.reso, "note": a.note, "f0": round(f0, 3),
+                      "x_peak": max(abs(v) for v in x), "y_peak": max(abs(v) for v in y),
+                      "y_nan": sum(1 for v in y if v != v),
                       "phase90_hz": crossing(-90.0), "phase180_hz": crossing(-180.0),
                       "peak_hz": max(pts, key=lambda q: q[1])[0] if pts else None, "h": pts}))
     return 0
 
 
-AMP_INDEX = {"atk": 81, "hold": 82, "dec": 83, "sus": 84, "rel": 85}
+AMP_INDEX = {"del": 80, "atk": 81, "hold": 82, "dec": 83, "sus": 84, "rel": 85}
 
 
 def env_cmd(a) -> int:
@@ -130,7 +132,7 @@ def env_cmd(a) -> int:
     stage's own input and output, so the machine's level cancels). Printed: the gain per block (the law and the time
     are read from it: a linear attack's slope, an exponential decay's ratio a block)"""
     dk, stock, sound, machines, img = _setup(a)
-    fields = {"atk": 0, "hold": 0, "dec": 0, "sus": a.sus, "rel": 0}
+    fields = {"del": 0, "atk": 0, "hold": 0, "dec": 0, "sus": a.sus, "rel": 0}
     fields[a.param] = a.knob
     with tempfile.TemporaryDirectory() as tmp:
         snap, m2mach = m5.snapshot_path(dk, stock, pathlib.Path(tmp))

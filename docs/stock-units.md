@@ -55,6 +55,18 @@ Measured so far (`scripts/stock_units_measure.py`, run in the bench container; e
   DC blocker, ~10 Hz, masks it) and 125..127: the law extrapolated. The page's 17-point curve adds up to ~3 % between
   its points.
 
+What the runner could not show (2026-11-12, measured, so not guessed):
+
+- **FLTR Lowpass 4** (filter type 1): its output decays to ~1e-44 (silence) with a normal input (peak 0.10): the
+  runner does not reproduce that filter. Measure on the unit.
+- **AMP HOLD** (63) and **AMP DEL** (61): no effect in these renders (frame indices 82 and 80, read from the record
+  table's word 1): the gain is full at once and falls as with HOLD 0; DEL does not delay. They may need the trig's gate
+  or the amp MODE, which the render's frame does not carry. Measure on the unit (or find the gate first).
+- **AMP REL** (66): needs a note-off, not made by these renders.
+- The send FX, compressor and master are not in the runner's render path (`sharc_waverider_m5.py`); their routines can
+  be called on their own (as `sharc_xdly_step.py` does) or measured on the unit.
+- **Legacy LP/HP** (type 4) renders, but its shape follows its own TYPE parameter (index 66): not mapped yet.
+
 Still to measure: the rows marked *(phase 2)* in the table (the other filter types, the filter envelope, AMP HOLD,
 REL and DEL, LFO speed and phase, the send FX's times and filters, compressor, BR/SRR, the machines' envelopes and
 tunes). AMP REL needs a note-off, which these renders do not make yet.
