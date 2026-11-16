@@ -581,6 +581,10 @@ def wavetables(p: Prog, L: K.Layout, pos: int, noise=None) -> None:
         p.lsh(r, r, 2)
         iaddk(p, r, r, L.T[WAVES[j]])
     p.iconst(15, 4)
+    # I0 on the six levels' scratch words (consecutive): each level's load rides on the add before it
+    assert all(C[WLVL[j]] == C[WLVL[0]] + 4 * j for j in range(6))
+    p.iconst(13, C[WLVL[0]])
+    p.seti(0, 13)
 
     def one():
         if noise:
@@ -596,10 +600,13 @@ def wavetables(p: Prog, L: K.Layout, pos: int, noise=None) -> None:
         for j, r in enumerate(POSR):
             p.seti(1, r)
             p.ldi(8, 0, 1)
-            p.ld(10, C[WLVL[j]])
+            if j == 0:
+                p.ldi(10, 0, 0)
             p.fop(8, 8, "*", 10)
             floorw(p, 13, 8)
             p.iop(9, 9, "+", 13)
+            if j < 5:
+                p.ldi(10, j + 1, 0)            # the next level (on the add's instruction)
             p.iop(r, 15, "+", r)
             p.iconst(12, L.T[WAVES[j]] + 4 * WAVE_N[j])
             p.if_(r, "EQ", 12, lambda j=j, r=r: p.iconst(r, L.T[WAVES[j]]), kind="i")
