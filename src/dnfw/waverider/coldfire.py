@@ -454,6 +454,17 @@ GLASS_SEND_STOCK = bytes.fromhex("4feffff048d7041c")
 PANEL_DIFF_SITE = 0x40131FD2            # lea -40(%sp),%sp ; movem.l %d2-%d6/%a2-%a4,(%sp)
 PANEL_DIFF_STOCK = bytes.fromhex("4fefffd848d71c7c")
 GLASS_WHOLE_SITE = 0x40131F54           # the whole-frame send dt_present calls (lea -28(%sp),%sp ; movem.l ...)
+# 2026-11-12: the preset browser's ENGINE filter (csrc/presets, dnfw.waverider.engfilt; measured in stock 1.12)
+ENG_TEST_SITE = 0x400AC9A8              # the preset list's rebuild: tst.b 1413(%a4) ; beq.s 0x400ac9ba (MIDI's test)
+ENG_TEST_STOCK = bytes.fromhex("4a2c0585670c")
+ENG_ROWS_SITE = 0x400ABAD8              # FILTER's builder after the 32 tags: move.l (%a2),%d6 ; clr.l 52(%sp)
+ENG_ROWS_STOCK = bytes.fromhex("2c1242af0034")
+ENG_CLEAR_SITE = 0x400A900E             # <CLEAR>'s action: movea.l 4(%sp),%a0 ; clr.b %d0
+ENG_CLEAR_STOCK = bytes.fromhex("206f00044200")
+ENG_STAR_SITE = 0x400A90DE              # FILTER's label: tst.b 1413(%a1) ; beq.s 0x400a90e8
+ENG_STAR_STOCK = bytes.fromhex("4a2905856704")
+ENG_CTOR_SITE = 0x400AC62C              # the view's constructor: move.b %d1,1412(%a2) ; move.b %d1,1413(%a2)
+ENG_CTOR_STOCK = bytes.fromhex("1541058415410585")
 LINK_RX_SITE = 0x4012197A               # lea 0x40207f9e,%a3: F0 00 20 3C, before the compare
 LINK_RX_STOCK = bytes.fromhex("47f940207f9e")
 LINK_FEED_SITE = 0x400276A2             # lea 0x40006c4a,%a2: the frame is built
@@ -633,6 +644,7 @@ def _cave_free(content: bytes, cave: tuple[int, int]) -> None:
 
 def compose(stock: bytes, assemble, compile_c) -> dict:
     from . import msel as _msel                  # 2026-11-11: MACHINE SEL in two columns (csrc/msel)
+    from . import engfilt as _eng                # 2026-11-12: the preset browser's ENGINE filter (csrc/presets)
     """-> {"content", "edits", "layout", "chunk"}. ASSEMBLE(source, base=...) -> bytes;
     COMPILE_C(header, base=...) -> (image, symbols, bss): csrc/waverider/page.c linked at
     BASE with `header` as its generated `wr_gen.h`."""
@@ -646,7 +658,7 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     from .. import slides as SL
     from .. import modversion                   # v0.39: the mod's version (VERSION), shown at the browser's top
     from ..a2f import pages as flt_pages        # 2026-11-10: the A2 filter machines' FLTR names
-    cimage, csyms, cbss = compile_c(pages.c_header() + _msel.c_header() + flt_pages.c_header() + SL.c_header(stock)
+    cimage, csyms, cbss = compile_c(pages.c_header() + _msel.c_header() + _eng.c_header() + flt_pages.c_header() + SL.c_header(stock)
                                     + modversion.c_define(),
                                      base=pages.C_LOAD)
     if cbss:
@@ -934,6 +946,24 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
          "panel_diff: the whole frame once when the armed state turns, else stock's diff (dt_present)",
          PANEL_DIFF_STOCK)
 
+    # 2026-11-12: the preset browser's ENGINE filter (csrc/presets): the rows in FILTER, the test in the rebuild
+    _need(content, ENG_TEST_SITE + 6, bytes.fromhex("4e922f032f004e95"),
+          "MIDI's test goes on: jsr (%a2) the library ; the slot ; jsr (%a5) is-MIDI")
+    _need(content, ENG_ROWS_SITE - 8, bytes.fromhex("7020b0866600ff1c"), "the tag rows' loop ends: 32 rows")
+    _need(content, ENG_ROWS_SITE + 6, bytes.fromhex("487800044e94"), "MIDI's row follows: pea 4 ; jsr (%a4)")
+    _need(content, ENG_CTOR_SITE - 8, bytes.fromhex("42aa058042aa0588"), "the constructor clears the tags and the sort")
+    edit(ENG_TEST_SITE, bytes.fromhex("4ef9") + _long(csyms["eng_test_hook"]),
+         "the preset list's rebuild: the engines ticked in FILTER (eng_match), else MIDI's test as stock's",
+         ENG_TEST_STOCK)
+    edit(ENG_ROWS_SITE, bytes.fromhex("4ef9") + _long(csyms["eng_rows_hook"]),
+         "FILTER's list: one tick row per MACHINE SEL engine after the tags, before MIDI", ENG_ROWS_STOCK)
+    edit(ENG_CLEAR_SITE, bytes.fromhex("4ef9") + _long(csyms["eng_clear_hook"]),
+         "FILTER's <CLEAR>: the engines too", ENG_CLEAR_STOCK)
+    edit(ENG_STAR_SITE, bytes.fromhex("4ef9") + _long(csyms["eng_star_hook"]),
+         "FILTER's label: '*' when an engine is ticked", ENG_STAR_STOCK)
+    edit(ENG_CTOR_SITE, bytes.fromhex("4eb9") + _long(csyms["eng_ctor_hook"]) + bytes.fromhex("4e71"),
+         "the preset view's constructor: the engines cleared with stock's filters", ENG_CTOR_STOCK)
+
     # the sample link: SysEx in (v0.14); out over the TDM link alone (v0.20)
     edit(LINK_RX_SITE, bytes.fromhex("4eb9") + _long(csyms["smp_rx_hook"]),
          "the SysEx router: the sample link's requests (F0 00 20 3C 7D 01) to smp_rx", LINK_RX_STOCK)
@@ -1130,6 +1160,8 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     for name in ("hold_seq", "hold_count", "hold_len", "hold_keys", "hold_poll", "hold_final", "hold_rel"):   # DRONE's HOLD (csrc/hold)
         layout[name] = csyms[name]
     for name in ("scope_up", "scope_taps", "scope_ring", "scope_pos", "smp_rx_sh"):   # AMP page 2's scope (csrc/scope)
+        layout[name] = csyms[name]
+    for name in ("eng_mask", "eng_tests", "eng_n"):   # the preset browser's ENGINE filter (csrc/presets)
         layout[name] = csyms[name]
     layout["mtr_ram"] = pages.METER_RAM      # the system meter's state block (csrc/meter/meter.c MTR_*)
     # 2026-11-11: where the page renderer's writable data starts and its image ends (its `.data`: every D_
