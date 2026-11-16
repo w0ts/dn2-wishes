@@ -532,6 +532,20 @@ METER_SITES = (
     (0x40000438, "203cffffdfff", "mtr_switch", "the context switch, interrupts masked: move.l #0xffffdfff,%d0"),
     (0x40027B82, "52b94058f8d4", "mtr_isr_out", "the audio ISR's frame count before its rte: addq.l #1,0x4058f8d4"),
 )
+# No screen intro (2026-11-10, the User: "just drop it completely (the one screen one)"; LED animations
+# stay). The start-up code computes the intro's skip flag here (tst.l %d0 ; sne %d0 ; mvs.b %d0,%d0 ;
+# neg.l %d0: normally bit 5 of the start-up flags 0x40287a60, read at 0x400cedc6), pushes it and calls
+# the intro starter 0x400d3920. With the flag forced to 1 the starter takes Elektron's own skip
+# branch: it posts the intro-done semaphore 0x42c4261c and never creates the intro task (entry
+# 0x400d3eea, prio 7); the main application task, which waits on that semaphore at 0x4002ed50,
+# starts at once. OS 1.12 addresses (measured on stock 1.12 and on the v0.46 build).
+NOINTRO_SITE = 0x400CF11C
+NOINTRO_STOCK = bytes.fromhex("4a8056c071004480")
+NOINTRO_NEW = bytes.fromhex("70014e714e714e71")      # moveq #1,%d0 ; nop ; nop ; nop
+NOINTRO_GUARDS = (                       # read, never written
+    (0x400CF124, "2f004eb9400d3920", "no intro: the flag is pushed and the intro starter 0x400d3920 called"),
+    (0x400D3946, "4a026714203c42c4261c", "no intro: the starter's skip branch (flag set): the intro-done semaphore 0x42c4261c posted"),
+)
 # the per-track inserts (csrc/inserts/hooks.S, docs/inserts.md): stock's mode header 0x40063f56
 # ends here; its first three exit instructions (6 bytes, also its one-page bge's target) jsr to
 # ins_hdr_tail, which renames a bare "FX" (the one-page track FX mode) "FX (1/2)" / "FX (2/2)" and
@@ -799,6 +813,12 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     for va, stock_hex, sym, what in METER_SITES:
         edit(va, bytes.fromhex("4eb9") + _long(csyms[sym]),
              f"the system meter: {what} -> {sym}, which replays it", bytes.fromhex(stock_hex))
+
+    # no screen intro: the intro's skip flag forced to 1 (Elektron's own skip path)
+    for va, want, why in NOINTRO_GUARDS:
+        _need(content, va, bytes.fromhex(want), why)
+    edit(NOINTRO_SITE, NOINTRO_NEW, "no screen intro: the start-up's intro skip flag forced to 1 (moveq #1,%d0): "
+         "the starter posts the intro-done semaphore and never starts the intro task", NOINTRO_STOCK)
 
     # the per-track inserts: the FX mode's header as a mode of two pages
     for va, want, why in INS_HDR_GUARDS:

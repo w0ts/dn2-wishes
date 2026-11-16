@@ -423,3 +423,17 @@ def test_v045_ping_is_gone_and_its_sites_are_stock(applied, dn2_111):
         assert at(main, va, 8) == at(stock, va, 8), hex(va)
     assert at(main, 0x401DE150, 24) == struct.pack(">6I", 0, 1, 4, 3, 5, 2)   # stock's six filters
     assert "ping_chunk" not in waverider.SPEC and not any(k.startswith("ping_") for k in waverider.SPEC["layout"])
+
+
+def test_no_screen_intro(applied, stock):
+    """2026-11-10 (the User: no screen intro): the start-up's intro skip flag is forced to 1 at
+    NOINTRO_SITE, so the starter takes Elektron's own skip branch; nothing else around it moves."""
+    main = applied.payloads[3]
+    assert CF.NOINTRO_SITE == 0x400CF11C
+    assert at(stock, CF.NOINTRO_SITE, 8) == CF.NOINTRO_STOCK == bytes.fromhex("4a8056c071004480")
+    assert at(main, CF.NOINTRO_SITE, 8) == CF.NOINTRO_NEW == bytes.fromhex("70014e714e714e71")
+    for va, want, _ in CF.NOINTRO_GUARDS:
+        assert at(stock, va, len(want) // 2) == at(main, va, len(want) // 2) == bytes.fromhex(want)
+    hits = [e for e in waverider.SPEC["edits"] if e["va"] == CF.NOINTRO_SITE]
+    assert len(hits) == 1 and hits[0]["new"] == CF.NOINTRO_NEW.hex()
+    assert any(e.section == 3 and e.start == CF.NOINTRO_SITE - BASE and e.length == 8 for e in waverider.extents())
