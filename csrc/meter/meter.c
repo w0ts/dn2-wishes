@@ -22,6 +22,8 @@
 typedef unsigned int u32;
 typedef unsigned char u8;
 
+#include "quiet.h"
+
 #define SET_PIXEL ((void (*)(void *, int, int, int))0x40113E70u)   /* (1.11: 0x40113b90) */
 #define SET_DIRTY ((void (*)(void *))0x4011D5DEu)
 #define FRAMES (*(volatile u32 *)0x4058F8D4u)                      /* 1,500 a second */
@@ -50,6 +52,7 @@ enum {
     MTR_W_AT, MTR_W_T, MTR_W_IDLE, MTR_W_ISR, MTR_W_SW, MTR_HEAP_AT, MTR_DRAW_NEXT, MTR_HELD_WAS,
     MTR_HEAP_TOT, MTR_DPK, MTR_DPK_AT, MTR_CPK, MTR_CPK_AT,                             /* the bars */
     MTR_ICON_AT_D, MTR_ICON_AT_C, MTR_ICON_AT_M, MTR_ICON_SHOWN, MTR_ICON_FORCE, MTR_ICON_HYS,   /* the load icons */
+    MTR_QUIET, MTR_CPU_FRESH,                                                           /* the CPU label's quiet */
     MTR_WORDS
 };
 _Static_assert(MTR_WORDS * 4 <= 256, "the meter's block");
@@ -153,6 +156,8 @@ static void peak(volatile u32 *pk, volatile u32 *at, int v, u32 f)
 #define ICON_BLINK    375u              /* frames: on a quarter second, off a quarter: 2 Hz */
 #define ICON_CPU_PM   900               /* the ColdFire's load, permille: on at this, off under ICON_CPU_OFF */
 #define ICON_CPU_OFF  850
+#define CPU_FRESH     2u                /* windows: after a quiet, the CPU label reads C again only from the
+                                         * second half second window, the first wholly after it (2026-11-14) */
 #define ICON_DSP_PCT  99                /* the DSP's load, percent: on at this, off under ICON_DSP_OFF.
                                          * 2026-11-10, the unit idle (sequencer stopped) reads D 94 %, so 95 lit it
                                          * there; the skips are what say the time ran out, this only the ceiling */
@@ -185,15 +190,34 @@ static u32 over(u32 bit, int v, int on, int off)    /* a level with hysteresis: 
     return h & bit;
 }
 
+/* 2026-11-14, the User: "Disable during firmware upgrade and until loading notification is gone". While
+ * stock is busy on purpose (quiet.c: the boot until its "Loading..." is gone, an OS upgrade arriving or
+ * being written) the CPU label stays unlit, its hold and its hysteresis cleared; after, it reads C again
+ * only from a window wholly after the quiet (CPU_FRESH), never from the load stock had meanwhile. DSP and
+ * RAM, and the FUNC meter's C, as before. */
+static int cpu_label_live(void)
+{
+    u32 quiet = mtr_quiet_why();
+    MTR[MTR_QUIET] = quiet;
+    if (quiet) {
+        MTR[MTR_ICON_HYS] &= ~2u;
+        MTR[MTR_ICON_AT_C] = 0;
+        MTR[MTR_CPU_FRESH] = 0;
+        return 0;
+    }
+    return MTR[MTR_CPU_FRESH] >= CPU_FRESH;
+}
+
 static u32 icons_live(u32 f)            /* the icons to show now (bits), the force ones included */
 {
+    int cpu_live = cpu_label_live();
     extern int smp_bulk_recent(void);   /* 2026-11-11: none while an OS upgrade (or a transfer) arrives (link.c) */
     if (smp_bulk_recent())
         return 0;
     extern volatile u32 dt_sw[];        /* the test channel's switch LABELS (csrc/devtest/whitelist.c) */
     u32 ev = !dt_sw[1] ? 0u : (smp_skipped_any() ? 1u : 0u)
            | (over(1u, smp_dsp_load(), ICON_DSP_PCT, ICON_DSP_OFF) ? 1u : 0u)
-           | (over(2u, mtr_cpu, ICON_CPU_PM, ICON_CPU_OFF) ? 2u : 0u)
+           | (cpu_live && over(2u, mtr_cpu, ICON_CPU_PM, ICON_CPU_OFF) ? 2u : 0u)
            | (ins_full_any() || heap_pct() >= ICON_HEAP_PCT ? 4u : 0u);
     u32 on = 0;
     for (int k = 0; k < 3; k++) {
@@ -238,6 +262,8 @@ void mtr_poll(void *screen)
     if (!w_at || f - w_at >= WINDOW) {
         cpu_window();
         w_at = f ? f : 1u;
+        if (MTR[MTR_CPU_FRESH] < CPU_FRESH)
+            MTR[MTR_CPU_FRESH]++;               /* a window more since the CPU label's last quiet */
     }
     peak(&MTR[MTR_DPK], &MTR[MTR_DPK_AT], smp_dsp_load(), f);
     peak(&MTR[MTR_CPK], &MTR[MTR_CPK_AT], pct_of_pm(mtr_cpu), f);

@@ -34,6 +34,7 @@ LINK_SOURCES = [SOURCE.parents[1] / "sampler" / "link.c", SOURCE.parents[1] / "s
                 SOURCE.parents[1] / "jump" / "jump.c", SOURCE.parents[1] / "jump" / "hooks.S",   # DIRECT JUMP
                 SOURCE.parents[1] / "slides" / "slide.c", SOURCE.parents[1] / "slides" / "hooks.S",   # parameter slides
                 SOURCE.parents[1] / "meter" / "meter.c", SOURCE.parents[1] / "meter" / "hooks.S",   # the system meter
+                SOURCE.parents[1] / "meter" / "quiet.c",              # ... the CPU label quiet while stock loads or upgrades
                 SOURCE.parents[1] / "fdn8" / "ui.c",                 # FDN8's TYPE knob and names (docs/fdn8.md)
                 SOURCE.parents[1] / "xdly" / "ui.c",                 # XDLY's TYPE knob and names (docs/xdly.md)
                 SOURCE.parents[1] / "fxpage" / "fxp.c",               # the send pages' second page (docs/fxpage.md)

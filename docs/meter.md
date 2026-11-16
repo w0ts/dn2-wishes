@@ -96,3 +96,25 @@ says it (the User). State: the meter's RAM block, words 25..29 (`MTR_ICON_*`); `
 (`METER_RAM + 0x74`, bits D C M) shows a label steadily, for the emulator's screenshots (no DSP, no audio
 ISR, a frame counter standing still there). Not measured: the audio ISR's lateness, a task's deadline.
 Not on hardware yet; the thresholds are first guesses.
+
+### The CPU label while stock loads or upgrades (2026-11-14)
+
+The User: "Disable during firmware upgrade and until loading notification is gone". CPU lit at boot while
+"Loading..." showed and while an OS upgrade arrived: stock busy on purpose, not over a limit. While
+`mtr_quiet_why()` (`csrc/meter/quiet.c`) says stock is loading or upgrading, the CPU label stays unlit, its
+hold and its hysteresis cleared; after, it reads C again only from the second half-second window after
+the quiet (`CPU_FRESH`), never from the load stock had meanwhile. DSP, RAM and the FUNC meter's C are
+unchanged. Pure reads of stock's own state, no hook. Each address traced in stock 1.12's code:
+
+| state | stock 1.12 | quiet while |
+|---|---|---|
+| loading | the view at `*0x44648980` (weak_ptr, control block `*0x44648984`, +4 its use count; built by `0x40060e72`, 0x228 B, +504 = 0 and +508 = -1 there). That constructor installs the lambda `0x4005e28a` (every tick, capturing the view): not ready, +504 counts up and at 2 posts "Loading..." (`0x402161d7`) through SAY `0x4005628c` on +156; ready, +504 = 0 and +508 = -1 (`0x4005e380`). `0x4005bd70` animates +508 (0..9) while +504 > 2 | the view never built (boot); or held (use count > 0) with +504 not 0 or +508 not -1. A view no one holds is not read |
+| loading | the title's message line `*0x446488c8` (built by `0x4018b2a4`, never freed): SAY writes its text (a one-pointer std::string) at +72 and its countdown at +76 | +76 > 0 and the text is "Loading..." |
+| upgrade | `MidiRpcDispatcher` (RTTI) at `0x445fb5cc`, static, built at the first RPC message (guard `0x445fb6a8`, `0x40125d64`); +4 its `OsUpgradeState` (RTTI, vtable `0x40208548`, +4 cleared by its constructor `0x40129860`). Its +4 is written 1 (`0x401298be`, OsUpgradeStart), 2 (`0x40129f56`, the first write), 3 (`0x4012a10c`, written to flash), 5 (failed or cancelled, `0x40129f5e` and five more); nothing else | 1, 2 or 3 |
+
+The upgrade state is Transfer's route; the bootloader's OS UPGRADE runs without this OS. An upgrade cut off
+without a cancel leaves 1 or 2 until the next boot: CPU unlit until then. The emulator's loading workers
+never report ready, so there the CPU label stays unlit after boot (the proof pokes the ready branch's
+values). Checked: `test/test_meter_quiet.py` (the reads over a model of that memory); the emulator from
+`boot400M` with C poked to 950 permille (unlit while loading and while an upgrade's state is 1..3, lit two
+windows after).
