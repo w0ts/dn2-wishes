@@ -291,7 +291,13 @@ def _sum22(p: Prog) -> None:
     p.iop(9, 9, "+", 10)
 
 
-def _clamp(p: Prog, r: int) -> None:
+def _clamp(p: Prog, r: int, cr: tuple[int, int] | None = None) -> None:
+    """Rr to [-2^23, 2^23 - 1]. CR: registers the caller holds 0x7FFFFF, -0x800000 in, else R12 is
+    loaded with each."""
+    if cr is not None:
+        p.iop(r, r, "MIN", cr[0])
+        p.iop(r, r, "MAX", cr[1])
+        return
     p.iconst(12, 0x7FFFFF)
     p.iop(r, r, "MIN", 12)
     p.iconst(12, -0x800000)
@@ -355,56 +361,64 @@ def _word_f(p: Prog, d: int, r: int) -> None:
     p.float_(d, r, 12)
 
 
-def _hp1f_body(p: Prog) -> None:
-    # I1: [cbh, cbl, gh, gl, y2, y1, u2, u1]; R4 the input -> R4 the output
+def _k22(p: Prog, k22: int | None) -> int:
+    """the register holding 2^-22: K22, else F12 loaded"""
+    if k22 is None:
+        p.fconst(12, 2.0 ** -22)
+        return 12
+    return k22
+
+
+def _hp1f_body(p: Prog, b: int = 0, cr: tuple[int, int] | None = None, k22: int | None = None) -> None:
+    # I1 + B: [cb, -, g, -, y2, y1, u2, u1]; R4 the input -> R4 the output
+    # (B, CR, K22: for a caller that runs it inline, several filters from one I1, the limiter's bounds and
+    # 2^-22 in registers; the same operations in the same order)
     p.ipass(3, 4)
-    _coef(p, 5, 0, 1)
-    p.ldi(4, 4, 1)
+    _coef(p, 5, b + 0, b + 1)
+    p.ldi(4, b + 4, 1)
     _word_f(p, 6, 4)
     p.fop(5, 5, "*", 6)                      # cb y[-2]
-    _coef(p, 7, 2, 3)
-    p.ldi(4, 5, 1)
-    p.sti(4, 1, 4)
+    _coef(p, 7, b + 2, b + 3)
+    p.ldi(4, b + 5, 1)
+    p.sti(b + 4, 1, 4)
     _word_f(p, 6, 4)
     p.fop(7, 7, "*", 6)                      # g y[-1]
     p.fop(5, 5, "+", 7)
-    p.fconst(12, 2.0 ** -22)
-    p.fop(5, 5, "*", 12)
+    p.fop(5, 5, "*", _k22(p, k22))
     p.trunc(9, 5)
-    p.ldi(5, 6, 1)
+    p.ldi(5, b + 6, 1)
     p.iop(9, 9, "+", 5)                      # + u[-2]
-    p.ldi(5, 7, 1)
+    p.ldi(5, b + 7, 1)
     p.iop(9, 9, "-", 5)
     p.iop(9, 9, "-", 5)                      # - 2 u[-1]
     p.iop(9, 9, "+", 3)                      # + u
-    p.sti(6, 1, 5)
-    p.sti(7, 1, 3)
-    _clamp(p, 9)
-    p.sti(5, 1, 9)
+    p.sti(b + 6, 1, 5)
+    p.sti(b + 7, 1, 3)
+    _clamp(p, 9, cr)
+    p.sti(b + 5, 1, 9)
     p.ipass(4, 9)
 
 
-def _res2f_body(p: Prog) -> None:
-    # I1: [c1h, c1l, gh, gl, c0h, c0l, y2, y1]; R4 the input -> R4 the output
+def _res2f_body(p: Prog, b: int = 0, cr: tuple[int, int] | None = None, k22: int | None = None) -> None:
+    # I1 + B: [c1, -, g, -, c0, -, y2, y1]; R4 the input -> R4 the output (B, CR, K22 as for _hp1f_body)
     _word_f(p, 8, 4)                         # x
-    _coef(p, 5, 0, 1)
-    p.ldi(4, 6, 1)
+    _coef(p, 5, b + 0, b + 1)
+    p.ldi(4, b + 6, 1)
     _word_f(p, 6, 4)
     p.fop(5, 5, "*", 6)                      # c1 y[-2]
-    _coef(p, 7, 2, 3)
-    p.ldi(4, 7, 1)
-    p.sti(6, 1, 4)
+    _coef(p, 7, b + 2, b + 3)
+    p.ldi(4, b + 7, 1)
+    p.sti(b + 6, 1, 4)
     _word_f(p, 6, 4)
     p.fop(7, 7, "*", 6)                      # g y[-1]
     p.fop(5, 5, "+", 7)
-    _coef(p, 7, 4, 5)
+    _coef(p, 7, b + 4, b + 5)
     p.fop(7, 7, "*", 8)                      # c0 x
     p.fop(5, 5, "+", 7)
-    p.fconst(12, 2.0 ** -22)
-    p.fop(5, 5, "*", 12)
+    p.fop(5, 5, "*", _k22(p, k22))
     p.trunc(9, 5)
-    _clamp(p, 9)
-    p.sti(7, 1, 9)
+    _clamp(p, 9, cr)
+    p.sti(b + 7, 1, 9)
     p.ipass(4, 9)
 
 
@@ -459,6 +473,21 @@ def hpc(p: Prog, off: int, exact: bool = False) -> None:
     hp1(p, off, exact)
     hp1(p, off + HP1_N, exact)
     delay2(p, off + 2 * HP1_N)
+
+
+def path_inline(p: Prog, fh: int, fr: int, cr: tuple[int, int], k22: int) -> None:
+    """hpc at state words FH then res4 at FR = FH + HPC_N, float filters, inline (not called): one I1 at their
+    middle (34 words: every offset within a compute's move), the limiter's bounds in the registers CR
+    (0x7FFFFF, -0x800000), 2^-22 in F<k22>. The same operations as hpc(); res4(). R4 in, R4 out; R11 the state
+    base. Clobbers R3, R5-R9, R12, R13, I1."""
+    assert fr == fh + HPC_N and not EXACT
+    mid = fh + 17
+    at(p, mid)
+    _hp1f_body(p, fh - mid, cr, k22)
+    _hp1f_body(p, fh + HP1_N - mid, cr, k22)
+    delay2(p, fh + 2 * HP1_N)
+    _res2f_body(p, fr - mid, cr, k22)
+    _res2f_body(p, fr + RES2_N - mid, cr, k22)
 
 
 def res4(p: Prog, off: int, exact: bool = False) -> None:
@@ -1333,16 +1362,29 @@ class TRXCY:
             wmul(p)
             ss(p, k, 4)
         state_base(p, L)
+        # the two paths' filters inline (path_inline): the limiter's bounds in R15 (the block) and R0 (free in
+        # the loop's body: loop() reloads it), 2^-22 in F10 (iadd below borrows R14)
+        cr = (15, 0)
+        if not EXACT:
+            p.iconst(15, 0x7FFFFF)
+            p.fconst(10, 2.0 ** -22)
+
+        def path(fh, fr):
+            if EXACT:
+                hpc(p, fh)
+                res4(p, fr)
+            else:
+                path_inline(p, fh, fr, cr, 10)
 
         def one():
+            if not EXACT:
+                p.iconst(0, -0x800000)
             p.ldi(4, 0, 5)
             p.ipass(1, 4)
-            hpc(p, TRXCY.FA)
-            res4(p, TRXCY.FB)
+            path(TRXCY.FA, TRXCY.FB)
             p.ipass(2, 4)                             # path 1
             p.ipass(4, 1)
-            hpc(p, TRXCY.FC)
-            res4(p, TRXCY.FD)
+            path(TRXCY.FC, TRXCY.FD)
             p.ipass(1, 4)                             # path 2
             p.ipass(5, 2)
             p.ld(6, C["g"])
