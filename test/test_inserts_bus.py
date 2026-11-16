@@ -126,3 +126,52 @@ def test_layout():
     assert B.END <= D.BUS_STATE_END
     assert D.FDN8_RING_STRIDE >= 4 * FP.D.RING_WORDS and D.FDN8_RING_DDR % D.FDN8_RING_STRIDE == 0
     assert D.XDLY_LINES_STRIDE == 2 * 4 * XP.D.LINE
+
+
+class _CountMem(Mem):
+    """Mem counting accesses by region: L1, L2 (0x2000_0000..), DDR (0x8000_0000..)"""
+
+    def __init__(self, base: Mem):
+        super().__init__()
+        self.w = dict(base.w)
+        self.n = [0, 0, 0]
+
+    def _count(self, a):
+        a &= 0xFFFFFFFF
+        self.n[2 if a >= 0x80000000 else 1 if 0x20000000 <= a < 0x20200000 else 0] += 1
+
+    def get(self, a):
+        self._count(a)
+        return super().get(a)
+
+    def put(self, a, v):
+        self._count(a)
+        super().put(a, v)
+
+
+def test_the_guard_bound_covers_a_clearing_fdn8():
+    # 2026-11-12: a fresh FDN8 instance's first blocks clear its ring (4,096 DDR writes a block); its guard
+    # bound (design.COST) must cover that block on the shared scale with 20 % to spare
+    import dnfw.perc.dsl as DSL
+    progs = []
+    init = DSL.Prog.__init__
+
+    def hook(self, *a, **k):
+        init(self, *a, **k)
+        progs.append(self)
+    DSL.Prog.__init__ = hook
+    try:
+        noise = [[0.1 * ((t * 7 + j * 3) % 11 - 5) for j in range(D.BLOCK)] for t in range(D.TRACKS)]
+        costs = []
+        for rows in ({}, {(0, 0): rec(D.FDN8, 0, 64, 10, 90, 30, 64, 0, 127)}):
+            m = _CountMem(mem0())
+            progs.clear()
+            call(m, table(rows), noise, noise, {r: 0 for r in range(16)})
+            steps = sum(x.steps for x in progs)
+            costs.append(steps + 4 * m.n[1] + 10 * m.n[2])
+    finally:
+        DSL.Prog.__init__ = init
+    clearing = costs[1] - costs[0]
+    assert m.n[2] >= 4096                                    # it is a clearing block
+    assert abs(clearing - D.FDN8_MEASURED["clearing"]) <= 0.02 * clearing
+    assert D.COST[D.FDN8] >= 1.2 * clearing

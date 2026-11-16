@@ -474,7 +474,7 @@ the voices' LIMIT from the next frame on (and a sudden one could run past the fr
   it: the voices' LIMIT is as if no insert ran;
 - each insert, before it runs in a block, checks it is expected to end before **INS_DEADLINE = P - TAIL -
   P/8** cycles after the frame's start (the frame less the guard's margin and the stock's own tail), with
-  its type's bound (`design.COST`: the runner's cost of one unit x 1.5, the DDR-heavy x 2: FDN8 32,000,
+  its type's bound (`design.COST`: the runner's cost of one unit x 1.5, the DDR-heavy x 2; FDN8 64,000 since 2026-11-12, 1.2 x its clearing block (53k on the shared scale; 32,000 before, under it),
   XDLY 20,000, CHOR 13,000, TAPE 8,200 ..); one that would not end in time is left out of that block (the
   sound passes dry; its state kept; `INS_SKIPS` counts). Until a frame is measured (and in the runner,
   whose clock stands still) every insert runs.

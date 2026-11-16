@@ -376,10 +376,18 @@ assert XDLY_LINES_DDR + XDLY_INSTANCES * XDLY_LINES_STRIDE <= POOL_DDR
 # it is expected to end before the frame's insert deadline; the bounds are the runner's cost of one
 # unit (docs/inserts.md) x 1.5, x 2 for the DDR-heavy (DDR's cost on the unit is unmeasured)
 COST = {FUZZ: 5_700, TAPE: 8_200, FOLD: 6_300, HARM: 4_700, CHOR: 13_000, WIDE: 4_700,
-        FDN8: 32_000, XDLY: 20_000,
+        # FDN8 (2026-11-12, opt-inserts): 32,000 until then, under its own cost: a fresh instance clears its
+        # 512 KB ring for 32 blocks, 4,096 DDR writes each (FDN8_MEASURED). The bound must never be under a
+        # block's cost, or the guard lets it run past the deadline: 1.2 x the clearing block
+        FDN8: 64_000, XDLY: 20_000,
         # SUB DIST GATER RING (2026-11-10, ins47): not run on the runner yet, so the model's steps of one
         # unit (2,143 / 2,946 / 1,610 / 1,836) x 1.2 (the runner read up to 20 % over the model) x 1.5
         SUB: 3_900, DIST: 5_400, GATER: 2_900, RING: 3_400,
         # JUNO (2026-11-12): the runner's 3,530 a voice slot (16 slots 58,926 less 1 slot 5,931, / 15) x 2 (DDR-heavy:
         # eight ring reads and a write a sample)
         JUNO: 7_100}
+# FDN8's cost a block as a bus insert, the model on the shared scale (instructions + 4 L2 + 10 DDR accesses,
+# docs/dsp-cost.md), one instance less the pass with none: a clearing block (its first 32) and a steady one.
+# test_inserts_bus measures the clearing block again and holds COST[FDN8] >= 1.2 x it
+FDN8_MEASURED = {"clearing": 53_073, "steady": 32_606}
+assert COST[FDN8] >= 1.2 * max(FDN8_MEASURED.values())
