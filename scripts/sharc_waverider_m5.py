@@ -4172,6 +4172,34 @@ def a2_para_frames(sound, machines, para, engine="ANALOG2"):
     return fb
 
 
+A2_PARA8_BLOCKS, A2_PARA8_NINTH, A2_PARA8_TENTH = 100, 24, 60   # 2026-11-15 ("Up to 8", "Drop the oldest")
+
+
+def a2_para8_frames(sound, machines, engine="ANALOG2", at=None):
+    """2026-11-15 (the User: "Up to 8", "Drop the oldest"): slots 0..9 on ENGINE, track 0, PARA ON: notes 48 + 3 u, AT
+    (slot -> its note's block, held; default: slots 0..7 at block 1, a chord of 8 led by slot 7, slot 8 at
+    A2_PARA8_NINTH, slot 9 at A2_PARA8_TENTH)"""
+    from dnfw.engines.analog2 import para as PA
+    from dnfw.mnm import machines as MM
+    types = dict(enumerate(MM.TYPES))
+    ak = MM.NAMES.index(engine)
+    at = at or ({u: 1 for u in range(8)} | {8: A2_PARA8_NINTH, 9: A2_PARA8_TENTH})
+
+    def fb(b):
+        f = base_frame(sound, machines, t0=types[ak], overrides=mnm_words(ak), note=0x3C00,
+                       others={t: types[ak] for t in range(1, 10)})
+        for t in range(10):
+            if b == at.get(t):
+                f.trigger(t, masks=(FR.TRIG_NOTE, 38))
+            for slot, w in mnm_words(ak).items():
+                f.param(t, slot, w)
+            f.header(FR.NOTE, t, (48 + 3 * t) << 8)
+            f.param(t, A2_PARA_SLOT, PA.ON_VALUE << 8)
+            f.put(A2_ROUTE_FRAME + 2 * t, 0)
+        return f.to_bytes()
+    return fb
+
+
 def a2_para_runs(init, sound, machines) -> dict:
     """for each PARA engine (PARA_ENGINES: tag): PARA_tag (PARA 4, held A2_PARA_HELD blocks, each slot's ROLE word and
     quiet count recorded after PERC) and PARA_tag_off; the step's exactness check holds every slot to the model (which
@@ -4189,6 +4217,17 @@ def a2_para_runs(init, sound, machines) -> dict:
         held["roles_rests"] = seen
         out[f"PARA_{tag}"] = held
         out[f"PARA_{tag}_off"] = _slim(run_blocks(init, a2_para_frames(sound, machines, 0, engine), A2_PARA_BLOCKS))
+        roles8 = []
+
+        def at_smp8(r, roles8=roles8):           # after PERC (the voices ran): each slot's ROLE word
+            roles8.append([m2.word(r.state, PA.ROLE + 4 * u) or 0 for u in range(10)])
+        full = _slim(run_blocks(init, a2_para8_frames(sound, machines, engine), A2_PARA8_BLOCKS,
+                                extra_hooks={dsp.SMP_SW: at_smp8}))
+        full["roles"] = roles8
+        out[f"PARA8_{tag}"] = full
+        join_at = {u: 1 for u in range(7)} | {8: A2_PARA8_NINTH}    # the control: a note joining a chord of 7
+        out[f"PARA8_{tag}_join"] = _slim(run_blocks(init, a2_para8_frames(sound, machines, engine, join_at),
+                                                    A2_PARA8_NINTH + 10))
     return out
 
 
@@ -4216,9 +4255,64 @@ def para_checks(runs, guards, n: dict) -> dict:
                                          for t in (0, 1, 2))
             and all(v > 0.05 for v in po_.values()))
         checks.update(a2_para_held_check(pr, n, engine, tag))
+        if f"PARA8_{tag}" in runs:
+            checks.update(a2_para8_checks(runs[f"PARA8_{tag}"], pr, n, engine, tag, runs.get(f"PARA8_{tag}_join")))
         if tag in guards:
             checks.update(a2_para_guard_checks(pr, guards[tag], n, engine, tag))
     return checks
+
+
+def a2_para8_checks(full, pr, n: dict, engine: str, tag: str, join=None) -> dict:
+    """PARA8_tag (a2_para8_frames) against PARA_tag (4 notes): the roles and fades (the 9th note: the leader's own
+    note fades out, it leads on; the 10th: the oldest member, slot 6, fades, then is DROPPED), the members silent,
+    the leader sounding every block with no step larger than the 8-note chord's own, and the level"""
+    from dnfw.engines.analog2 import para as PA
+    import math
+    ok = full["ok"] and pr["ok"]
+    rr = full.get("roles") or []
+
+    def role(b, u):
+        return (rr[b][u] >> PA.ROLE_SHIFT) & 3 if b < len(rr) else None
+
+    def fade(b, u):
+        return (rr[b][u] >> PA.FADE_SHIFT) & 7 if b < len(rr) else None
+    nb, nt = A2_PARA8_NINTH, A2_PARA8_TENTH
+    lead = perc_series(full, 7)
+    roles_ok = ok and len(rr) >= A2_PARA8_BLOCKS and (
+        role(nb - 1, 7) == PA.LEADER and fade(nb - 1, 7) == 0 and rr[nb - 1][7] & 0xFFFF == 0x7F
+        and all(role(nb - 1, u) == PA.MEMBER for u in range(7))
+        and role(nb + 8, 8) == PA.MEMBER and role(nb + 8, 7) == PA.LEADER and fade(nb + 8, 7) == PA.FADE_OUT
+        and role(nt + 8, 6) == PA.DROPPED and fade(nt + 8, 6) == PA.FADE_OUT and rr[nt + 8][7] & 0xFFFF == 0x33F
+        and all(role(nt + 8, u) == PA.MEMBER and fade(nt + 8, u) == 0 for u in (0, 1, 2, 3, 4, 5, 8, 9)))
+    silent = ok and all(all(x == 0.0 for x in perc_series(full, u)) for u in range(10) if u != 7)
+    blocks = [lead[32 * b:32 * b + 32] for b in range(len(lead) // 32)]
+    sounding = ok and len(blocks) >= A2_PARA8_BLOCKS - 2 and all(V.peak(x) > 0.005 for x in blocks[4:])
+    steps = [abs(lead[k] - lead[k - 1]) for k in range(1, len(lead))]
+
+    def most(b0, b1):
+        return max(steps[32 * b0:32 * b1]) if ok and len(steps) >= 32 * b1 - 1 else None
+    nend = len(steps) // 32
+    # each note joining the full chord (blocks e - 1 .. e + 8) against the chord's own steps before and after it
+    events = [(nb, most(nb - 1, nb + 8), most(8, nb - 1), most(nb + 9, nt - 1)),
+              (nt, most(nt - 1, nt + 8), most(nb + 9, nt - 1), most(nt + 9, nend))]
+    clean = ok and all(None not in ev and ev[1] <= 1.2 * max(ev[2], ev[3]) + 0.05 for ev in events)
+    jl = perc_series(join, 6) if join and join["ok"] else []   # the control's leader: slot 6 (a chord of 7, then 8)
+    plain = max(abs(jl[k] - jl[k - 1]) for k in range(32 * (nb - 1) + 1, min(len(jl), 32 * (nb + 8)))) if jl else None
+    four = perc_series(pr, 3)[32 * 8:]
+    eight = lead[32 * 8:32 * (nb - 1)]
+
+    def rms(x):
+        return math.sqrt(sum(v * v for v in x) / len(x)) if x else 0.0
+    n[f"para8_{tag}"] = {"fades_lead": [fade(b, 7) for b in range(nb - 1, nb + 6)] if ok else None,
+                         "fades_slot6": [fade(b, 6) for b in range(nt - 1, nt + 6)] if ok else None,
+                         "steps_event_around_before_after": events, "step_plain_join_ninth": plain,
+                         "level_4_notes": {"peak": round(V.peak(four), 4), "rms": round(rms(four), 4)} if ok else None,
+                         "level_8_notes": {"peak": round(V.peak(eight), 4), "rms": round(rms(eight), 4)} if ok else None}
+    return {f"{engine} PARA 8: a chord of 8 on slot 7; a 9th note joins and the leader's own note fades out (it leads on); "
+            "a 10th: the oldest member (slot 6) fades, then is DROPPED; the others play": roles_ok,
+            f"{engine} PARA 8: every slot but the leader exact silence, the leader sounds every block": silent and sounding,
+            f"{engine} PARA 8: no click: around the 9th and 10th notes (the oldest fading out) the leader's largest step "
+            "is no more than the chord's own before or after (x 1.2 + 0.05)": clean}
 
 
 def a2_para_held_check(pr, n: dict, engine: str = "ANALOG2", tag: str = "a2") -> dict:

@@ -10,7 +10,7 @@ not redraw after a turn), the VOICE key (panel code 49) on track 0:
 2. an ANALOG 2 track (type 22), MOD 0: the screen differs from (1)'s only inside B's label row (x 33..73, y 27..34),
    where PARA OFF is drawn;
 3. one held push of B a step (the harness passes about one step a hold, stock's own knob E too; measured
-   2026-11-15), four detents each. PARA is OFF / ON (2026-11-15, the User; ON stored as 0x0300, a chord of 4): right
+   2026-11-15), four detents each. PARA is OFF / ON (2026-11-15, the User; ON stored as 0x0300, a chord of up to 8): right
    three times -> MOD 0x0300 0x0300 0x0300, the screen then differs from OFF's inside B's row only (PARA ON); left
    twice -> 0x0000 0x0000; vm_sets counts the one step up and the one down;
 4. a JUNO track (type 23, 2026-11-15), MOD 0: the screen the ANALOG 2 track's (PARA OFF in B's row); one held push

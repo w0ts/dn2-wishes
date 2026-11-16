@@ -30,7 +30,8 @@ stole, as every voice was released, and judged by a fixed LOAD_AVAIL the unit's 
 13. a note joining the held chord is priced as a member (LOAD_PARA_MEMBER + LOAD_PARA_ADD) and its chord's slots at a
     member's each: a kit where it fits takes stock's result exactly; the same kit with PARA OFF steals;
 14. PARA OFF / ON (2026-11-15, the User): an older project's value 1 (2 pitches then) reads as ON: with two notes held a
-    third joins as a member; ON with four held, a fifth is past the chord's 4 and priced as dropped (LOAD_PARA_DROPPED);
+    third joins as a member; ON with eight held (a full chord, 2026-11-15: "Up to 8", "Drop the oldest"), a ninth joins
+    as a member too (the DSP stops the chord's oldest note);
 15. with none of the track's notes held, the note starts a chord: priced as the track's voice;
 16. a heavy note's further releases never take a PARA chord's voice (HOLD keeps its note-off back); with PARA OFF they
     take the chord's next oldest;
@@ -318,10 +319,10 @@ def para_checks(e: Emu, sym, res) -> None:
         need = counters(e, sym)["last_need"]
         check("14 an older project's PARA 1 (2 pitches then) reads as ON: two held, a third note joins as a member",
               need == join, f"need {need} (a member {join})")
-        twin(e, sym, chord(3, fill, notes=(60, 64, 67, 71)), 0, 74)
+        twin(e, sym, chord(3, fill, n1=6, notes=(60, 64, 67, 71, 74, 77, 81, 84)), 0, 88)
         need = counters(e, sym)["last_need"]
-        check("14 ... ON, four held: a fifth note is past the chord's 4, priced as dropped", need == pc["dropped"],
-              f"need {need} (dropped {pc['dropped']})")
+        check("14 ... ON, eight held (a full chord): a ninth note joins as a member (the oldest stops on the DSP)",
+              need == join, f"need {need} (a member {join})")
         twin(e, sym, chord(3, fill, held=False), 0, 67)
         need = counters(e, sym)["last_need"]
         check("15 none of the track's notes held: the note starts a chord, priced as the track's voice", need == 10000,

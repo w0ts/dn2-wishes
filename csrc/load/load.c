@@ -237,8 +237,8 @@ static u32 voice_cost(int t)
 
 /* 2026-11-15: PARA (ANALOG 2, JUNO; docs/paraphonic.md). A chord plays on its leader: each member renders its
  * per-note part (ANALOG 2's oscillators, noise and drive, LOAD_PARA_MEMBER; JUNO's DCO, LOAD_PARA_JUNO_MEMBER) and its
- * leader adds them (LOAD_PARA_ADD / LOAD_PARA_JUNO_ADD a member), a note past the chord's N is
- * dropped (LOAD_PARA_DROPPED: not rendered). The track's measured voices (load_meas) are its leader's, so they price
+ * leader adds them (LOAD_PARA_ADD / LOAD_PARA_JUNO_ADD a member). A full chord (PARA_NOTES) drops its oldest note
+ * for a new one (2026-11-15, the User: "Drop the oldest"): the new note plays. The track's measured voices (load_meas) are its leader's, so they price
  * a note that starts a chord, not one that joins it. */
 extern u32 para_live;                           /* hold.c: the held voices (the DSP's HELD, as the frame sends it) */
 
@@ -254,7 +254,7 @@ static u32 para_member(int t)
 }
 
 /* a note on track T, its voice costing ONE: on a PARA track, while some of the track's voices are held it joins
- * their chord (a member), past the chord's N it is dropped; with none held it starts a chord (ONE). (A joining note is
+ * their chord (a member; in a full chord too: the chord's oldest note stops); with none held it starts a chord (ONE). (A joining note is
  * the newest: the DSP runs it first, so its leader's guard room (para.reserve) is the room room_asked already keeps
  * for the last voice, FLOOR less a voice) */
 static u32 para_join_cost(int t, u32 one)
@@ -267,8 +267,6 @@ static u32 para_join_cost(int t, u32 one)
             held++;
     if (!held)
         return one;
-    if (held > para_value(t))                   /* ON: PARA_ON + 1 = 4 notes play */
-        return LOAD_PARA_DROPPED;
     return para_member(t) + (para_type(t) == PARA_TYPE_JUNO ? LOAD_PARA_JUNO_ADD : LOAD_PARA_ADD);
 }
 

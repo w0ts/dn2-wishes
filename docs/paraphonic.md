@@ -9,7 +9,7 @@ level "Louder with more notes" (each note at full level, no scaling of the sum).
 ## What it does
 
 - **The control:** the VOICE menu (the VOICE key: VOICE SETUP), knob B: **PARA OFF / ON** (2026-11-15, the User:
-  "i would have expected the para (in voice page) to be on or off ?"; ON: a chord of 4 notes, later notes dropped;
+  "i would have expected the para (in voice page) to be on or off ?"; ON: a chord of up to 8 notes ("Up to 8");
   stored as MOD 3, so an older build plays it as 4 pitches; an older project's 1 or 2 shows and plays as ON), on a track playing a PARA engine (ANALOG 2, JUNO). The User, 2026-11-15: "i would put the voice page, for the
   synth that support it. on B knob". Stock leaves B empty ("---"; a turn of it changes nothing, measured in the
   emulator: top row VOICE STEAL, ---, ---, REUSE; bottom VOICES, UNISON STATE, V.AMNT, SPREAD). On any other track
@@ -21,7 +21,12 @@ level "Louder with more notes" (each note at full level, no scaling of the sum).
   RES and key tracking from its note).
 - **The envelope:** one for the chord, legato: the chord's first note starts the AMP envelope, later notes join
   without restarting it, and the chord releases when its last note ends.
-- **Notes past N:** the first N notes of a chord play; later ones are silent until the chord ends.
+- **A full chord (2026-11-15, the User: "Drop the oldest"):** a chord plays its newest 8 notes. A 9th note plays
+  and the chord's oldest note fades out over 6 halves of its stream (~2.2 ms), then is silent until the chord ends.
+  When the oldest is the leader, only its own note fades: it leads on (the chord's filter and AMP envelope stay on
+  its slot). The fade's state is three bits of each slot's ROLE word (FADE, bits 21..23: 0 plays, 1..6 halves
+  left, 7 out), kept while the slot is in a chord. Before this (v0.53.12 .. v0.54.2) the first 4 played and later
+  notes were silent.
 - **A new chord** starts when a note comes while none of the track's chord's notes is held; the last chord's tail
   plays on beside it.
 - **Glide:** each note glides from its own previous note (stock's per voice). ANALOG 2's own GLID / GLTY (page 3)
@@ -115,6 +120,15 @@ a member's stream is its own.
   - the harness's later holds stall the UI for their first ~7 detents (no screen, no item): stock's own knob E
     (VOICES) does exactly the same under the same timing (the control run), so it is the harness's or stock's, not
     PARA's.
+
+## Up to 8 notes (2026-11-15, the User: "Up to 8")
+
+Level (`scripts/para_cost.py --level`, the model, notes 60..84 held; the summed track before the DN2's chain): ANALOG 2
+4 notes peak 1.68 / RMS 0.616, 8 notes 1.87 / 0.781 (its knee holds the peak; PARA OFF 2.65 at 8); JUNO 4 notes
+2.03 / 0.681, 8 notes 3.01 / 0.920 (the same with PARA OFF). No sample reaches the output guard's +-8. Cost
+(design B, steady): each note past 4 adds ~3,260 (ANALOG 2) or ~2,450 (JUNO) a block; 8 notes 29,672 vs 50,319
+PARA OFF (-41 %), JUNO 24,687 vs 56,969 (-57 %). The runner's step `para` holds an 8-note chord with a 9th and a 10th
+note to the model (`PARA8_*`: roles, fades, silence, no step over the chord's own).
 
 ## Design B: a member is not resampled (2026-11-15, the User: "Do that, skip DDRW/DENS")
 

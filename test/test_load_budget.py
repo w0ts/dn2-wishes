@@ -90,8 +90,9 @@ def test_the_room_asked_keeps_the_guards_floor_free():
 
 def test_a_para_chords_notes_are_priced_as_the_dsp_plays_them():
     # 2026-11-15 (main, for the User): PARA (ANALOG 2, JUNO). A note joining a held chord costs a member's voice and what it
-    # adds to its leader (the newest note: the DSP runs it first, its leader's guard room is room_asked's); past N
-    # it is dropped; with none held it starts a chord at the track's voice cost. A PARA track's slot is its own measure
+    # adds to its leader (the newest note: the DSP runs it first, its leader's guard room is room_asked's); in a full
+    # chord too (2026-11-15, the User: "Drop the oldest": the new note plays, the oldest stops); with none held it starts
+    # a chord at the track's voice cost. A PARA track's slot is its own measure
     p, pj = LD.load()["para"], LD.load()["para_juno"]
     h = LD.c_header(LD.load())
     for k, name in (("member", "LOAD_PARA_MEMBER"), ("add", "LOAD_PARA_ADD"), ("dropped", "LOAD_PARA_DROPPED")):
@@ -103,7 +104,7 @@ def test_a_para_chords_notes_are_priced_as_the_dsp_plays_them():
     assert p["dropped"] == round(LD.PER_VOICE * (1 + LD.MARGIN))
     assert p["dropped"] < p["add"] < p["member"] and p["member"] + p["add"] < min(LD.load()["a2flt"])
     join = re.search(r"static u32 para_join_cost\(.*?\n}\n", LOAD_C, re.S).group(0)
-    assert "held > para_value(t)" in join and "LOAD_PARA_DROPPED" in join
+    assert "LOAD_PARA_DROPPED" not in join and "PARA_NOTES" not in join
     assert "para_member(t) + (para_type(t) == PARA_TYPE_JUNO ? LOAD_PARA_JUNO_ADD : LOAD_PARA_ADD)" in join
     pre = re.search(r"void load_pre\(.*?\n}\n", LOAD_C, re.S).group(0)
     assert "one = para_join_cost(t, one);" in pre

@@ -59,7 +59,7 @@ def setup(slots, para: int, engine: str = "ANALOG2"):
     return h
 
 
-NOTES = [60.0, 64.0, 67.0, 71.0]
+NOTES = [60.0, 64.0, 67.0, 71.0, 74.0, 77.0, 81.0, 84.0]   # (2026-11-15: up to 8)
 BLOCKS, STEADY = 10, (4, 5, 6, 7)
 
 
@@ -117,7 +117,7 @@ def table_costs(engine: str = "ANALOG2") -> dict:
       dropped: a note past the chord's N (not rendered: only its guard and quiet test)"""
     _imports()
     from dnfw import load as LD
-    on, off = run(4, 3, engine), run(4, 0, engine)
+    on, off = run(4, PARA.ON_VALUE, engine), run(4, 0, engine)
     member = max(on["start"][u] for u in (0, 1, 2))
     lead_extra = on["start"][3] - max(off["start"].values())
     pass_extra = on["prepass_steps"]["start"] - off["prepass_steps"]["start"]
@@ -126,15 +126,65 @@ def table_costs(engine: str = "ANALOG2") -> dict:
             "dropped": round(LD.PER_VOICE * m)}
 
 
+LEVEL_BLOCKS, LEVEL_FROM = 120, 20             # the level runs: blocks, and the held part measured (from this block)
+
+
+def level(n: int, para: int, engine: str = "ANALOG2") -> dict:
+    """2026-11-15 (the User: "Up to 8"): N notes held on track 0's slots 0..N-1 (NOTES), PARA PARA: every slot's 48 kHz
+    output over blocks LEVEL_FROM.. summed (the track's sound before the DN2's own chain): its peak, its RMS, and how
+    many samples reach the output guard's limit (perc.program.OUT_LIMIT, which clamps)"""
+    import math
+    from dnfw.perc.dsl import Prog, bits, flt
+    slots = list(range(n))
+    h = setup(slots, para, engine)
+    L = h.L
+    mix = []
+    for b in range(LEVEL_BLOCKS):
+        for u in slots:
+            h.mem.put(PP.NOTE_CELLS + 4 * u, bits(NOTES[u]))
+            h.mem.put(PP.BUFFERS + 4 * u, BUFS + 0x100 * u)
+        on = sum(1 << u for u in slots) if b == 1 else 0
+        h.mem.put(PP.TRIG_WORD, (h.mem.get(PP.TRIG_WORD) & 0xFFFF) | (on << 16))
+        w = h.mem.get(PARA.PM.FRAME + PARA.NOTE_OFF)
+        h.mem.put(PARA.PM.FRAME + PARA.NOTE_OFF, w & 0xFFFF0000)
+        h.mem.put(L.C["mcost"], 0)
+        p = Prog("run", mem=h.mem)
+        p.spill = L.md.C["ash"]
+        PP.mnm_ages(p, L)
+        PP.para_prepass(p, L)
+        for u in [h.mem.get(L.md.mnm.scratch + PP.ORDER_OFF + 4 * k) for k in range(16)]:
+            if u in slots:
+                PP.run_voice(L, None, u, mem=h.mem)
+        if b >= LEVEL_FROM:
+            mix += [sum(flt(h.mem.get(BUFS + 0x100 * u + 4 * k)) for u in slots) for k in range(32)]
+    peak = max(abs(x) for x in mix)
+    rms = math.sqrt(sum(x * x for x in mix) / len(mix))
+    return {"peak": round(peak, 4), "rms": round(rms, 4),
+            "at_guard": sum(1 for x in mix if abs(x) >= PP.OUT_LIMIT), "guard": PP.OUT_LIMIT}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--json")
+    ap.add_argument("--level", action="store_true", help="the 1..8 note chords' level (PARA ON and OFF), not the cost")
     a = ap.parse_args()
     _imports()
+    if a.level:
+        out = {}
+        for engine in ("ANALOG2", "JUNO"):
+            for n in range(1, 9):
+                for para in ((0,) if n == 1 else (0, PARA.ON_VALUE)):
+                    r = level(n, para, engine)
+                    out[f"{engine}_n{n}_para{para}"] = r
+                    print(f"{engine} {n} notes PARA {para}: peak {r['peak']}  rms {r['rms']}  at the guard "
+                          f"{r['at_guard']} (+-{r['guard']})", flush=True)
+        if a.json:
+            pathlib.Path(a.json).write_text(json.dumps(out, indent=1))
+        return 0
     DC._install()
     out = {}
-    for engine, n in ((e, n) for e in ("ANALOG2", "JUNO") for n in (1, 2, 3, 4)):
-        for para in sorted({0, n - 1}):
+    for engine, n in ((e, n) for e in ("ANALOG2", "JUNO") for n in range(1, 9)):
+        for para in ((0,) if n == 1 else (0, PARA.ON_VALUE)):
             r = run(n, para, engine)
             out[f"{engine}_n{n}_para{para}"] = r
             st, sd = r["start"], r["steady"]

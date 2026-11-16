@@ -1,7 +1,7 @@
 /* ANALOG 2's PARA on the ColdFire (docs/paraphonic.md; dnfw.engines.analog2.para): which engines play it, and its
  * value in a track's sound. The value is stock record MOD (id 248, frame slot 37, 0..0x300, default 0): 0 OFF, any
- * other ON (2026-11-15, the User: "i would have expected the para ... to be on or off"): a chord of 4 notes, later
- * notes dropped. ON is stored as 3 (an older build's 4 pitches); an older project's 1 or 2 reads as ON. Read from the sound as page.c and rec.c read a sound's values (sound at [0x800052a0] + 52 +
+ * other ON (2026-11-15, the User: "i would have expected the para ... to be on or off"): a chord of PARA_NOTES (8,
+ * "Up to 8"). ON is stored as 3 (an older build's 4 pitches); an older project's 1 or 2 reads as ON. Read from the sound as page.c and rec.c read a sound's values (sound at [0x800052a0] + 52 +
  * 1163 t, its 16-bit values from +20, the machine type value 101 at +0xDE). */
 #ifndef PARA_H
 #define PARA_H
@@ -46,10 +46,11 @@ static inline int para_track(int t)
     return snd && para_engine((signed char)snd[PARA_SOUND_TYPE]);
 }
 
-#define PARA_ON 3                               /* the value stored for ON: its notes past the first (4 notes) */
+#define PARA_ON 3                               /* the value stored for ON (an older build plays it as its 4 notes) */
+#define PARA_NOTES 8                            /* ON: a chord's notes (dnfw.engines.analog2.para PITCHES; the User,
+                                                 * 2026-11-15: "Up to 8") */
 
-/* track T's PARA value, 0 (OFF) or PARA_ON (any stored value but 0), whatever its engine: a chord's notes past its
- * first */
+/* track T's PARA value, 0 (OFF) or PARA_ON (any stored value but 0), whatever its engine */
 static inline int para_value(int t)
 {
     const unsigned char *snd = para_sound(t);

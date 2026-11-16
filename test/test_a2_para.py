@@ -189,18 +189,65 @@ def test_para_off_and_a_chord_of_one_play_as_today(engine):
         assert x == y and r[2] == 0                                         # a chord of one: no role, today's
 
 
-@pytest.mark.parametrize("engine", ENGINES)
-def test_the_oldest_four_play_and_the_rest_are_dropped(engine):
-    """2026-11-15 (the User: PARA OFF / ON): ON is a chord of PITCHES (4) notes; a fifth is dropped"""
-    slots = [0, 1, 2, 3, 4]
-    notes = {0: 48.0, 1: 55.0, 2: 62.0, 3: 65.0, 4: 69.0}
+def _fade(r):
+    return (r >> PARA.FADE_SHIFT) & 7
+
+
+NOTES10 = {u: 48.0 + 3 * u for u in range(10)}
+NINTH, TENTH = 24, 60                     # the blocks the 9th and 10th notes come
+
+
+def _full_chord(engine, blocks=100, at=None):
+    """AT: slot -> the block its note comes (held). Default: slots 0..7 a chord of 8 in block 0 (slot 7 leads), the 9th
+    note on slot 8 at NINTH, the 10th on slot 9 at TENTH"""
+    at = at or ({u: 0 for u in range(8)} | {8: NINTH, 9: TENTH})
+    slots = list(range(10))
     h = setup(slots, para=PARA.ON_VALUE, engine=engine)
-    outs = [block(h, slots, notes, on=0b11111 if b == 0 else 0) for b in range(16)]
-    r = outs[0][1]
-    assert role_of(r[4]) == PARA.LEADER and r[4] & 0xFFFF == 0b01110        # the highest leads, the next three join
-    assert all(role_of(r[u]) == PARA.MEMBER for u in (1, 2, 3)) and role_of(r[0]) == PARA.DROPPED
-    assert all(o[u] == [0] * 32 for o, _r in outs for u in (0, 1, 2, 3))
-    assert [o[4] for o, _r in outs] == reference(notes, 4, [1, 2, 3], len(outs), engine)
+    out = []
+    for b in range(blocks):
+        on = sum(1 << u for u, t in at.items() if t == b)
+        notes = {u: NOTES10[u] for u in slots}
+        out.append(block(h, [u for u, t in at.items() if b >= t], notes, on=on))
+    return out
+
+
+def _steps(out, lead, b0, b1):
+    """the largest sample-to-sample step of slot LEAD's output over blocks B0..B1"""
+    x = [flt(w) for o, _r in out[b0:b1] for w in o[lead]]
+    return max(abs(x[k] - x[k - 1]) for k in range(1, len(x)))
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_a_full_chord_drops_its_oldest_note_with_a_fade(engine):
+    """2026-11-15 (the User: "Up to 8", "Drop the oldest"): a chord plays PITCHES (8) notes; a 9th note plays and the
+    chord's oldest note (its leader's own) fades out over FADE_HALVES halves, then is silent, the leader still leading
+    (its filter and envelope play the chord); a 10th: the oldest member fades, then is DROPPED. The members are silent
+    throughout; the leader's output has no step larger than the 8-note chord's own"""
+    assert PARA.PITCHES == 8
+    out = _full_chord(engine)
+    r = out[NINTH - 1][1]
+    assert role_of(r[7]) == PARA.LEADER and r[7] & 0xFFFF == 0x7F and _fade(r[7]) == 0
+    assert all(role_of(r[u]) == PARA.MEMBER and _fade(r[u]) == 0 for u in range(7))
+    r = out[NINTH][1]
+    assert role_of(r[8]) == PARA.MEMBER and role_of(r[7]) == PARA.LEADER
+    lead_fades = [_fade(o[1][7]) for o in out[NINTH:TENTH]]
+    assert lead_fades[-1] == PARA.FADE_OUT and all(0 < x <= PARA.FADE_HALVES or x == PARA.FADE_OUT for x in lead_fades)
+    assert lead_fades.index(PARA.FADE_OUT) <= 6                      # out within a few blocks (6 halves)
+    r = out[-1][1]
+    assert role_of(r[6]) == PARA.DROPPED and _fade(r[6]) == PARA.FADE_OUT          # the oldest member, out
+    assert all(role_of(r[u]) == PARA.MEMBER and _fade(r[u]) == 0 for u in (0, 1, 2, 3, 4, 5, 8, 9))
+    assert role_of(r[7]) == PARA.LEADER and r[7] & 0xFFFF == 0x33F       # 0..5, 8, 9
+    for o, _r in out:
+        assert all(o.get(u, [0] * 32) == [0] * 32 for u in range(10) if u != 7)
+    lead = [flt(w) for o, _r in out for w in o[7]]
+    assert min(max(abs(x) for x in lead[32 * b:32 * b + 32]) for b in range(4, len(out))) > 0.05
+    # no click: around each note joining the full chord (its oldest fading out: blocks e - 1 .. e + 8), no step larger
+    # than the chord's own waveform gives, before and after (a saw chord's edges are steep: JUNO's reach ~1.0 a sample)
+    for e, before, after in ((NINTH, (8, NINTH - 1), (NINTH + 9, TENTH - 1)),
+                             (TENTH, (NINTH + 9, TENTH - 1), (TENTH + 9, len(out)))):
+        own = max(_steps(out, 7, *before), _steps(out, 7, *after))
+        around = _steps(out, 7, e - 1, e + 8)
+        assert around <= 1.2 * own + 0.05, (e, around, own)
 
 
 @pytest.mark.parametrize("engine", ENGINES)

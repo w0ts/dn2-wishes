@@ -4,7 +4,7 @@
  * is an empty place: stock draws "---" there and a turn of B changes nothing (measured in the emulator, 2026-11-15).
  *
  * On a track whose machine plays PARA (para.h: ANALOG 2, JUNO), B is PARA: OFF / ON (2026-11-15, the User: "i would
- * have expected the para (in voice page) to be on or off ?"; ON a chord of 4 notes), the track's sound's record MOD (0,
+ * have expected the para (in voice page) to be on or off ?"; ON a chord of up to 8 notes), the track's sound's record MOD (0,
  * or PARA_ON stored; an older project's 1 or 2 shows and plays as ON), set through the knob's own path (setValue:
  * undo, the kit and the frame all see it), one step per four detents as every choice knob. On any other track nothing here draws or takes a turn: the menu is stock's, pixel for pixel.
  *
