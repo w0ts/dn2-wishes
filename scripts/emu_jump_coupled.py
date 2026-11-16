@@ -34,6 +34,7 @@ from emu_coupled import UI_SLICE, Coupled               # noqa: E402
 from emulib.panel import SETTLE, TAP, YES                       # noqa: E402
 
 ENTRIES_A_PERIOD_MAX = 1                                # at most one sequencer entry a period below 937 BPM
+SEQ_WAIT_MOST = 3000                                    # periods (2 s) without an entry: the sequencer stopped (an entry is due every ~12 at 81 BPM)
 
 
 class Paced(Coupled):
@@ -104,9 +105,12 @@ def main() -> int:
 
     def isr():
         """one sequencer entry: the periods up to and including the one that entered it"""
-        e0 = entries[0]
+        e0, waited = entries[0], 0
         while entries[0] == e0:
             periods(1)
+            waited += 1
+            if waited > SEQ_WAIT_MOST:
+                raise SystemExit(f"emu_jump rapid: {json.dumps({'ok': False, 'why': f'no sequencer entry in {waited} periods', 'faults': faults})}")
         if entries[0] - e0 > ENTRIES_A_PERIOD_MAX:
             raise SystemExit(f"{entries[0] - e0} sequencer entries in one period")
 
