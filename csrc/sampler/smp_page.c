@@ -281,42 +281,6 @@ static void w_samp(void *c, int x, int y, int slot)
         glyph(c, gx + 4 * k, y + 6, d[k], 1);
 }
 
-/* v0.47: the RECORDER's INTO, smaller than SAMP's (the owner: "shorter and slightly less
- * wide"): a box 20 x 11 (SAMP's 21 x 15), its left six columns filled with the bank letter cut out */
-static void w_samp_small(void *c, int x, int y, int slot)
-{
-    int cx = x + 12, x0 = cx - 9, x1 = cx + 10, y0 = y + 3, y1 = y + 13;
-    hline(c, x0 + 1, x1 - 1, y0, 0);
-    hline(c, x0 + 1, x1 - 1, y1, 0);
-    vline(c, x1, y0 + 1, y1 - 1, 0);
-    fill(c, x0, y0 + 1, x0 + 5, y1 - 1);
-    static const unsigned char bank_a[5] = {7, 5, 7, 5, 5};
-    for (int r = 0; r < 5; r++)
-        for (int b = 0; b < 3; b++)
-            if (bank_a[r] & (4 >> b))
-                SET_PIXEL(c, x0 + 2 + b, y + 10 - r, 0);
-    if (slot == 0) {
-        glyph(c, cx + 0, y + 6, '-', 1);
-        glyph(c, cx + 4, y + 6, '-', 1);
-        return;
-    }
-    char d[4];
-    int n = 0;
-    extern int rt_samp_buf(u32 samp);
-    int fb = rt_samp_buf((u32)slot);
-    if (fb >= 0) {                              /* v0.55: a FLEX buffer */
-        glyph(c, cx - 1, y + 6, 'B', 1);
-        glyph(c, cx + 4, y + 6, (char)('1' + fb), 1);
-        return;
-    }
-    if (slot >= 100) d[n++] = '0' + slot / 100;
-    if (slot >= 10) d[n++] = '0' + slot / 10 % 10;
-    d[n++] = '0' + slot % 10;
-    int gx = cx + 2 - 2 * (n - 1);
-    for (int k = 0; k < n; k++)
-        glyph(c, gx + 4 * k, y + 6, d[k], 1);
-}
-
 /* the DT2's knob: a circle of radius 8 (its own pixels, by row from the centre) */
 static const signed char knob_x[9][2] = {
     {8, 8}, {8, 8}, {8, 8}, {7, 7}, {7, 7}, {6, 6}, {5, 5}, {3, 4}, {0, 2}};
@@ -2162,134 +2126,8 @@ static void name_field(void *c, int y, int bar_y0, int bar_y1)
         LABEL(c, 118, y + 10, "%s", ">>");
 }
 
-/* the recording's waveform in [x0, x1] about yc, +-h: the slot's overview (100 columns) */
-static void wave(void *c, int slot, int x0, int x1, int yc, int h, u32 s, u32 e, u32 n)
-{
-    const u8 *o = smp_overview(slot);
-    int w = x1 - x0 + 1;
-    int sx = x0 + (int)((s >> 4) * (u32)w / ((n >> 4) + 1u));
-    int ex = x0 + (int)((e >> 4) * (u32)w / ((n >> 4) + 1u));
-    if (ex > x1) ex = x1;
-    hline(c, x0, x1, yc, 1);
-    if (o)
-        for (int x = x0; x <= x1; x++) {
-            int col = (x - x0) * 100 / w;
-            int a = o[col] * h / 255;
-            int inside = x >= sx && x <= ex;
-            for (int y = yc - a; y <= yc + a; y++)
-                if (inside || ((x + y) & 1) == 0)       /* outside the trim: half lit */
-                    on(c, x, y);
-        }
-    vline(c, sx, yc - h - 2, yc + h + 2, 0);
-    vline(c, ex, yc - h - 2, yc + h + 2, 0);
-    fill(c, sx, yc + h + 1, sx + 2, yc + h + 2);
-    fill(c, ex - 2, yc + h + 1, ex, yc + h + 2);
-}
-
-/* v0.25: the DT2's trim screen after a recording (its manual's 13.2 step 9; the owner's
- * photos): the keys across the top, the waveform with START and END, |<TRIM on E and
- * TRIM>| on H across the bottom */
-/* v0.33: TRIM zoomed (F: 2, 4, 8 times; G moves along): the window [pos, pos + n >> zoom)
- * from the slot's fine waveform (link.c's analysis, 1,024 columns over the whole sample) */
-extern int trim_zoom;
-extern u32 trim_pos;
-extern const u8 *smp_hires(void);
-extern int smp_analysis(int *pct);
-
-static void wave_zoom(void *c, int x0, int x1, int yc, int h, u32 s, u32 e, u32 n)
-{
-    const u8 *hr = smp_hires();
-    u32 span = n >> trim_zoom, a = trim_pos;
-    if (!span)
-        span = 1;
-    int w = x1 - x0 + 1;
-    hline(c, x0, x1, yc, 1);
-    for (int x = x0; x <= x1; x++) {
-        u32 f0 = a + (u32)(x - x0) * (span / (u32)w), f1 = f0 + span / (u32)w;
-        u32 c0 = f0 / ((n >> 10) + 1u), c1 = f1 / ((n >> 10) + 1u);   /* (1,024 columns) */
-        int pk = 0;
-        for (u32 k = c0; k <= c1 && k < 1024u; k++)
-            if (hr[k] > pk)
-                pk = hr[k];
-        int amp = pk * h / 255, inside = f0 >= s && f0 < e;
-        for (int y = yc - amp; y <= yc + amp; y++)
-            if (inside || ((x + y) & 1) == 0)
-                on(c, x, y);
-    }
-    if (s >= a && s < a + span) {               /* the ends, where they are in view */
-        int sx = x0 + (int)((s - a) / ((span / (u32)w) + 1u));
-        vline(c, sx, yc - h - 2, yc + h + 2, 0);
-        fill(c, sx, yc + h + 1, sx + 2, yc + h + 2);
-    }
-    if (e > a && e <= a + span) {
-        int ex = x0 + (int)((e - a) / ((span / (u32)w) + 1u));
-        if (ex > x1) ex = x1;
-        vline(c, ex, yc - h - 2, yc + h + 2, 0);
-        fill(c, ex - 2, yc + h + 1, ex, yc + h + 2);
-    }
-    int bw = w >> trim_zoom;                    /* where the window is, along the top */
-    int bx = x0 + (int)(a / ((n / (u32)w) + 1u));
-    hline(c, bx, bx + (bw < 2 ? 2 : bw), yc - h - 3, 0);
-}
-
-/* v0.40: the TRIM preview's playhead (rec.c's rec_pv_frame), a column across the waveform
- * at the frame playing, cleared either side so it reads over the wave; the column drawn
- * kept for the checks (-1: none) */
+/* v0.40: the TRIM preview's playhead column drawn (-1 none), for the checks; rec_dt2.c sets it */
 int trim_head_x __attribute__((section(".data"))) = -1;
-extern int rec_pv_frame(void);
-
-static void trim_head(void *c, int x0, int x1, int yc, int h, int zoomed)
-{
-    int f = rec_pv_frame(), x = -1;
-    u32 n = trim_n ? trim_n : 1u, w = (u32)(x1 - x0 + 1);
-    if (f >= 0 && (u32)f < n) {
-        if (!zoomed)
-            x = x0 + (int)(((u32)f >> 4) * w / ((n >> 4) + 1u));
-        else {
-            u32 span = n >> trim_zoom, a = trim_pos;
-            if (!span)
-                span = 1;
-            if ((u32)f >= a && (u32)f < a + span)
-                x = x0 + (int)(((u32)f - a) / ((span / w) + 1u));
-        }
-    }
-    if (x > x1)
-        x = x1;
-    trim_head_x = x;
-    if (x < x0)
-        return;
-    for (int y = yc - h - 1; y <= yc + h + 1; y++) {
-        if (x > x0)
-            SET_PIXEL(c, x - 1, y, 0);
-        on(c, x, y);
-        if (x < x1)
-            SET_PIXEL(c, x + 1, y, 0);
-    }
-}
-
-static void trim_draw(void *c)
-{
-    box(c, 2, 55, 125, 63, 0);
-    LABEL(c, 64, 57, "%s", "Y:SAVE FN+N:DEL FN+Y:PLAY");
-    box(c, 2, 11, 125, 53, 0);
-    extern int smp_analysis_slot(void);
-    trim_head_x = -1;
-    if (trim_zoom > 0 && smp_analysis(0) == 2 && smp_analysis_slot() == trim_slot) {
-        wave_zoom(c, 4, 123, 32, 17, trim_s, trim_e, trim_n ? trim_n : 1);
-        trim_head(c, 4, 123, 32, 17, 1);
-    } else if (smp_overview(trim_slot)) {
-        wave(c, trim_slot, 4, 123, 32, 18, trim_s, trim_e, trim_n ? trim_n : 1);
-        trim_head(c, 4, 123, 32, 18, 0);
-    } else {
-        LABEL(c, 64, 30, "%s", "NO WAVEFORM");
-        trim_head(c, 4, 123, 32, 18, 0);
-    }
-    LABEL(c, 16, 2, "%s", "|<TRIM");
-    if (trim_zoom > 0)
-        LABEL(c, 46, 2, "%s", trim_zoom == 1 ? "2X" : trim_zoom == 2 ? "4X" : "8X");
-    LABEL(c, 72, 2, "%d.%d S", (int)((trim_e - trim_s) / 48000u), (int)((trim_e - trim_s) / 4800u % 10u));
-    LABEL(c, 112, 2, "%s", "TRIM>|");
-}
 
 /* v0.25: FUNC held on FILE NAME: the DT2's character grid under the name */
 extern const char nm_grid[];
@@ -2310,75 +2148,6 @@ static void name_grid_draw(void *c)
     }
 }
 
-/* v0.25: the DT2's FILE NAME screen */
-static void name_draw(void *c)
-{
-    if (smp_func_held) {
-        name_grid_draw(c);
-        return;
-    }
-    LABEL(c, 64, 56, "%s", "FILE NAME");
-    box(c, 6, 36, 121, 48, 0);
-    name_field(c, 40, 37, 38);
-    LABEL(c, 34, 26, "%s", "FN+ARROW:EDIT");
-    LABEL(c, 34, 19, "%s", "FN+NO:DELETE");
-    LABEL(c, 34, 12, "%s", "FN+YES:INSERT");
-    LABEL(c, 34, 5, "%s", "YES:SAVE");
-    LABEL(c, 98, 26, "%s", "U/D:CHAR +/-");
-    LABEL(c, 98, 19, "%s", "L/R:MOVE");
-    LABEL(c, 98, 12, "%s", "NO:ABORT");
-}
-
-/* v0.25: ASSIGN, the DT2's question over the trim screen */
-static void assign_draw(void *c)
-{
-    trim_draw(c);
-    clear(c, 3, 18, 124, 46);
-    box(c, 3, 18, 124, 46, 0);
-    box(c, 5, 20, 122, 44, 0);
-    LABEL(c, 64, 35, "%s", "ASSIGN SAMPLE TO TRACK?");
-    LABEL(c, 64, 25, "%s", "TRG 1-16   NO:SKIP");
-}
-
-/* v0.25: NORMALIZING (and the +Drive's save before it), as the DT2 shows it */
-static void work_draw(void *c)
-{
-    extern int smp_norm_state(void);
-    extern int smp_work_pct(void);
-    LABEL(c, 64, 34, "%s", smp_norm_state() ? "NORMALIZING..." : "SAVING...");
-    int pct = smp_work_pct();
-    box(c, 24, 20, 103, 26, 0);
-    if (pct > 0)
-        fill(c, 25, 21, 25 + (pct > 100 ? 100 : pct) * 77 / 100, 25);
-}
-
-/* v0.25: the DT2's screen while it records: the meter, the waveform as it comes in, the
- * time and YES: STOP */
-extern u8 rec_wave[];
-extern u32 rec_wave_span;
-static void recording_draw(void *c, int heard)
-{
-    LABEL(c, 25, 57, "%s", "RECORDER");
-    int mx0 = 54, mx1 = 126, my0 = 55, my1 = 62, w = mx1 - mx0 - 2;
-    box(c, mx0, my0, mx1, my1, 0);
-    int lv = heard ? meter_x(rec_peak, w) : 0;
-    if (lv > 0)
-        fill(c, mx0 + 1, my0 + 1, mx0 + lv, my1 - 1);
-    box(c, 2, 11, 125, 53, 0);
-    hline(c, 4, 123, 32, 1);
-    u32 cols = rec_frames / rec_wave_span + 1u;
-    for (int x = 0; x < 120 && (u32)x < cols; x++) {
-        int a = rec_wave[x] * 19 / 255;
-        vline(c, 4 + x, 32 - a, 32 + a, 0);
-    }
-    u32 sec = rec_frames / 48000u;
-    LABEL(c, 22, 2, "%s", "RECORDING");
-    LABEL(c, 64, 2, "%d:%d%d", (int)(sec / 60u), (int)(sec % 60u / 10u), (int)(sec % 10u));
-    LABEL(c, 106, 2, "%s", "YES: STOP");
-}
-
-/* v0.41 (docs/rectrig.md): H's place with a step held: that step's REC trig (OFF, REC 1,
- * REC 2), drawn inverted when the step has one, as a p-lock; -> 1 drawn */
 /* v0.44 BOUNCE: the RECORDER of a BOUNCE track (rec.c bn_*; rectrig.c), one page: its title,
  * meter and SRC/CHAN (drawn by rec_screen_draw), then the RECORD box's place as the status
  * line (what the buffer and the track's recorder trigs are doing, always), THRES's place
@@ -2598,150 +2367,22 @@ static void bn_view_draw(void *c, int heard)
     (void)tl;
 }
 
-static int rt_h_draw(void *c)
-{
-    (void)c;
-    return 0;                                   /* v0.44: no lock on H any more (BOUNCE's [TRIG] keys) */
-}
-
-/* (v0.41's REC TRIGS view, rt_view_draw, is gone in v0.44: BOUNCE tracks have bn_view_draw) */
+/* (v0.48: BOUNCE's panel, bn_view_draw, is gone: docs/bounce-removal-plan.md; the RECORDER's screens are
+ * the Digitakt II's, rec_dt2.c) */
 void rec_screen_draw(void *c)
 {
-    if (rec_phase) {
-        clear(c, 0, 0, 127, 63);
-        if (rec_phase == 1)
-            trim_draw(c);
-        else if (rec_phase == 2)
-            name_draw(c);
-        else if (rec_phase == 3)
-            assign_draw(c);
-        else
-            work_draw(c);
-        return;
-    }
+    extern int rec_dt2_draw(void *c, int heard, int bounce);
     int heard = rec_heard && FRAMES_NOW + 1u - rec_heard < 1500u;
-    int state = heard ? rec_state : 0;
-    extern int rec_rt_take;
     clear(c, 0, 0, 127, 63);
-    if (state == 2 && !rec_rt_take) {           /* v0.25: recording: the DT2's screen */
-        recording_draw(c, heard);
-        return;
-    }
-
     extern int bn_active(void);
-    if (bn_active()) {                          /* v0.49: FLEX REC, its two pages, its own layout */
+    /* v0.49: FLEX REC, its two pages, its own layout (upstream's; v0.52 merge, main's rule c: FLEX's screens
+     * stay FLEX's) */
+    if (bn_active()) {
         bn_view_draw(c, heard);
         return;
     }
-    /* the title and the meter */
-    LABEL(c, 25, 57, "%s", "RECORDER");
-    hline(c, 0, 50, 54, 0);
-    int mx0 = 68, mx1 = 126, my0 = 55, my1 = 62, w = mx1 - mx0 - 2;
-    box(c, mx0, my0, mx1, my1, 0);
-    int lv = heard ? meter_x(rec_peak, w) : 0;
-    if (lv > 0)
-        fill(c, mx0 + 1, my0 + 1, mx0 + lv, my1 - 1);
-    int tx = mx0 + 1 + rec_thres * w / 120;
-    vline(c, tx, my0 - 2, my0 - 1, 0);
-
-    /* SRC, on the left, and over it CHAN (knob B) as its own icon, the DT2's way (v0.44; v0.33
-     * ..v0.43 wrote L+R / L / R under SRC): an L and an R cell, the recorded ones filled
-     * (L+R both, L or R one). The same on the BOUNCE panel, whose right column is the grid. */
-    extern int rec_chan;
-    const char *src = smp_rec_src[rec_src > SMP_REC_SOURCES - 1 ? SMP_REC_SOURCES - 1 : rec_src];
-    LABEL(c, 13, 32, "%s", src);
-    LABEL(c, 13, 22, "%s", "SRC");
-    {
-        int ch = rec_chan < 0 ? 0 : rec_chan > SMP_REC_CHANS - 1 ? SMP_REC_CHANS - 1 : rec_chan;
-        int cy0 = 41, cy1 = 47;
-        for (int k = 0; k < 2; k++) {
-            int x0 = 6 + 8 * k, x1 = x0 + 6;
-            int lit = ch == 0 || ch == k + 1;   /* L+R, or this side */
-            if (lit) {
-                fill(c, x0, cy0, x1, cy1);
-                glyph(c, x0 + 2, cy0 + 1, k ? 'R' : 'L', 0);
-            } else {
-                box(c, x0, cy0, x1, cy1, 1);
-                glyph(c, x0 + 2, cy0 + 1, k ? 'R' : 'L', 1);
-            }
-        }
-    }
-
-    /* the RECORD box: what YES does, or what the recorder is doing */
-    int bx0 = 29, bx1 = 97, by0 = 22, by1 = 48;
-    box(c, bx0, by0, bx1, by1, 1);
-    int cx = (bx0 + bx1) / 2;
-    extern int rt_q_waiting(void), rt_qrec;
-    extern const char *rt_qname(int q);
-    if (rt_q_waiting()) {                       /* v0.41: QREC: the take waits for its step */
-        LABEL(c, cx, by0 + 16, "%s", "WAITING");
-        LABEL(c, cx, by0 + 8, "Q.REC %s", rt_qname(rt_qrec));
-        LABEL(c, cx, by0 + 1, "%s", "NO:CANCEL");
-    } else if (state == 2 && rec_rt_take) {     /* v0.41: a REC trig's take, into a buffer */
-        fill(c, bx0 + 5, by0 + 15, bx0 + 11, by0 + 21);
-        int ds = (int)(rec_frames / 4800u);
-        LABEL(c, cx + 6, by0 + 16, "%s", "TRIG");
-        LABEL(c, cx, by0 + 8, "%d.%d S", ds / 10, ds % 10);
-        LABEL(c, cx, by0 + 1, "%s", "YES:RECORD");
-    } else if (state == 2) {
-        fill(c, bx0 + 5, by0 + 15, bx0 + 11, by0 + 21);   /* a solid dot: recording */
-        int ds = (int)(rec_frames / 4800u);
-        LABEL(c, cx + 6, by0 + 16, "%s", "REC");
-        LABEL(c, cx, by0 + 8, "%d.%d S", ds / 10, ds % 10);
-        LABEL(c, cx, by0 + 1, "%s", "YES:STOP");
-    } else if (state == 1) {
-        LABEL(c, cx, by0 + 16, "%s", "ARMED");
-        LABEL(c, cx, by0 + 8, "%s", rec_rstrt ? "ON PLAY" : "ON THRES");
-        LABEL(c, cx, by0 + 1, "%s", "NO:CANCEL");
-    } else if (!heard || rec_link < 0) {
-        LABEL(c, cx, by0 + 16, "%s", !heard ? "NO DSP" : "NO LINK");
-        LABEL(c, cx, by0 + 8, "%s", !heard ? "STATUS" : "TO DSP");
-    } else if (rec_room < 0x10000u) {
-        LABEL(c, cx, by0 + 16, "%s", smp_slot_empty(rec_dest < 0 ? 0 : rec_dest) ? "NO ROOM" : "NO FREE SLOT");
-        LABEL(c, cx, by0 + 8, "%s", "UNLOAD ONE");
-    } else {
-        fill(c, bx0 + 4, by0 + 14, bx0 + 18, by0 + 22);   /* YES, cut out of a filled badge */
-        glyph(c, bx0 + 6, by0 + 16, 'Y', 0);
-        glyph(c, bx0 + 10, by0 + 16, 'E', 0);
-        glyph(c, bx0 + 14, by0 + 16, 'S', 0);
-        LABEL(c, cx + 11, by0 + 16, "%s", state == 3 ? "AGAIN" : "RECORD");
-        /* v0.48: three lines inside the box (rows 24..28, 30..34, 38..42): the third sat on the border */
-        u32 secs = rec_room / 96000u;           /* int16 at 48 kHz */
-        LABEL(c, cx, by0 + 8, "%d S FREE", (int)(secs > 999 ? 999 : secs));
-        if (as_done >= 0 && rec_saved_slot >= 0)
-            LABEL(c, cx, by0 + 2, "%d ON TRK %d", rec_saved_slot + 1, as_done + 1);
-        else if (state == 3 && rec_saved_slot >= 0) {
-            extern int smp_rs_last;             /* v0.46: RECORDED full: the take is in the pool only */
-            LABEL(c, cx, by0 + 2, smp_rs_last == 2 ? "%d +DRV FULL" : "SAVED %d", rec_saved_slot + 1);
-        }
-    }
-
-    /* THRES, on the right */
-    LABEL(c, 113, 34, "%d", rec_thres);
-    LABEL(c, 113, 22, "%s", "THRES");
-
-    /* the bottom row: the slot the next recording goes into (v0.33: shown, not chosen: the
-     * first empty one), R.LEN, R.STRT, ARM */
-    w_samp_small(c, 1, 5, rec_dest < 0 ? 0 : rec_dest + 1);   /* v0.47: smaller */
-    LABEL(c, 13, 0, "%s", "INTO");
-    /* v0.48 (owner: every value of a control at one place and size): R.LEN's MAX and its step
-     * counts on R.STRT's line (y 9), one line, no STEPS under some values and not others; the label
-     * says what the number is */
-    if (rec_rlen <= 0)
-        LABEL(c, 47, 9, "%s", "MAX");
-    else
-        LABEL(c, 47, 9, "%d", rec_rlen);
-    LABEL(c, 47, 0, "%s", "R.LEN");
-    LABEL(c, 80, 9, "%s", rec_rstrt ? "PLAY" : "THRES");
-    LABEL(c, 80, 0, "%s", "R.STRT");
-    if (rt_h_draw(c))                           /* v0.41: a step held: its REC trig */
+    if (rec_dt2_draw(c, heard, 0))              /* the DT2's own screens (rec_dt2.c; v0.48: no BOUNCE track) */
         return;
-    int on = (state == 1 || state == 2) && !rec_rt_take;   /* ARM's switch: what the DSP is doing */
-    int sx0 = 104, sx1 = 122, sy0 = 8, sy1 = 15;
-    box(c, sx0, sy0, sx1, sy1, 0);
-    if (on)
-        fill(c, sx1 - 8, sy0 + 2, sx1 - 2, sy1 - 2);
-    else
-        box(c, sx0 + 2, sy0 + 2, sx0 + 8, sy1 - 2, 0);
-    LABEL(c, 113, 0, "%s", "ARM");
+    if (rec_phase)                              /* FILE NAME with FUNC held: our character grid */
+        name_grid_draw(c);
 }

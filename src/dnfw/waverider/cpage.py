@@ -22,6 +22,7 @@ OVERLAY = "wr_cell"                     # after each stock cell widget: paramete
 # v0.14: the sample link (csrc/sampler), linked into the same chunk
 LINK_SOURCES = [SOURCE.parents[1] / "sampler" / "link.c", SOURCE.parents[1] / "sampler" / "hooks.S",
                 SOURCE.parents[1] / "sampler" / "smp_page.c", SOURCE.parents[1] / "sampler" / "rec.c",
+                SOURCE.parents[1] / "sampler" / "rec_dt2.c",        # the RECORDER as the DT2's screens
                 SOURCE.parents[1] / "sampler" / "fmt.c", SOURCE.parent / "md_page.c",
                 SOURCE.parents[1] / "sampler" / "slice.c",
                 SOURCE.parents[1] / "sampler" / "lib.c",
@@ -54,7 +55,9 @@ LINK_ENTRIES = ["smp_rx_hook", "kb_rec_hook", "smp_hi", "smp_walk", "smp_booted"
                  "slc_pop", "slc_poll", "slc_stock_asked", "slc_fails", "slc_linked", "smp_norm_state",
                  "smp_pl_quiesce", "smp_analysis_slot", "smp_slot_frames", "wr_draws", "smp_pos_in", "smp_playhead",
                  # v0.40: folders inside folders (lib.c, smp_page.c)
-                 "smp_lib_fpar", "smp_fb_titletext", "smp_fb_delete"]
+                 "smp_lib_fpar", "smp_fb_titletext", "smp_fb_delete",
+                 # the RECORDER as the DT2's screens (rec_dt2.c): the DSP's status the checks set
+                 "rec_room", "rec_frames", "rec_peak", "rec_wave", "rec_thres", "rec_link"]
 # parameter slides (csrc/slides, dnfw.slides): the hooks and the state the checks read
 SLIDE_ENTRIES = ["sl_ui_table", "sl_cell", "sl_knob", "sl_screen", "sl_page_up", "sl_page_seen", "sl_pre_hook", "sl_pre", "sl_apply", "sl_smooth", "sl_build", "sl_clear", "sl_load", "sl_save",
                  "sl_lock_get", "sl_lock_set", "sl_v", "sl_cap", "sl_started", "sl_ticks"]

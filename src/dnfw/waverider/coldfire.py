@@ -952,6 +952,8 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
                  "smp_pl_quiesce", "smp_analysis_slot", "smp_slot_frames", "wr_draws", "smp_pos_in", "smp_playhead",
                  # v0.40: folders inside folders
                  "smp_lib_fpar", "smp_fb_titletext", "smp_fb_delete",
+                 # the RECORDER as the DT2's screens (rec_dt2.c): the DSP's status the checks set
+                 "rec_room", "rec_frames", "rec_peak", "rec_wave", "rec_thres", "rec_link",
                  # the system meter (csrc/meter): its hooks and the figures the checks read
                  "mtr_isr_out", "mtr_switch", "mtr_poll", "mtr_draw",
                  # FDN8 (csrc/fdn8): the Reverb page's TYPE and names
