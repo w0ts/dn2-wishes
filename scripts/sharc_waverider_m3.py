@@ -41,6 +41,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import sys
 import tempfile
 import time
@@ -133,7 +134,39 @@ def _selas(src: pathlib.Path, work: pathlib.Path):
     offs = [2 * syms[f"x_i{j}"] for j in range(k)]
     be = fix_shift_imm(sharc_object.code(data, "seg_pmco"), offs)
     mf.verify(be, offs, texts)          # (perf, 2026-11-11) multifunction lines: selas's compute field, checked
+    check_modify(be, offs, texts)       # (2026-11-12) MODIFY lines: the SHARC+ word, checked
     return be, offs
+
+
+MODIFY_NW = re.compile(r"^\s*I(\d+)\s*=\s*MODIFY\s*\(\s*I(\d+)\s*,\s*M(\d+)\s*\)\s*\(NW\)\s*;", re.I)
+
+
+def modify_nw_word(dst: int, src: int, m: int) -> int:
+    """`Id=MODIFY (Is,Mm)(NW)`, the SHARC+ Type 7a, as ADI's tools write it (Digitone II OS 1.12, sw 0x1c04bf
+    `i4=modify (i4,m6)(nw)` = 0x04BF30000000): bit 39 set, cond 37:33 (31, always), Is {32, 31:30}, Mm 29:27,
+    Id xor Is 26:24 (docs/selas-encoding.md)"""
+    assert (dst >= 8) == (src >= 8) == (m >= 8), "one DAG"
+    g, s, d = int(src >= 8), src & 7, dst & 7
+    return (0x04 << 40) | (1 << 39) | (g << 38) | (31 << 33) | (s >> 2) << 32 | (s & 3) << 30 | (m & 7) << 27 | (s ^ d) << 24
+
+
+def check_modify(be: bytes, offs: list[int], texts: list[str]) -> None:
+    """2026-11-12: selas wrote MODIFY(Ii, Mm) in a pre-SHARC+ layout the DSP reads as another instruction (MODIFY(I4,
+    M4) as `if gt i7=modify (i0,m1)`, the stack pointer: docs/selas-encoding.md). Every MODIFY line must be the form
+    whose word is checked here, `Id=MODIFY (Is,Mm)(NW)`, and assemble to it (whatever selas the bench has)."""
+    for k, text in enumerate(texts):
+        code = text.split("//", 1)[0]
+        if "MODIFY" not in code.upper():
+            continue
+        m = MODIFY_NW.match(code)
+        if not m:
+            raise SystemExit(f"MODIFY in a form not checked against the SHARC+ encoding: '{code.strip()}' "
+                             "(write Id=MODIFY (Is,Mm)(NW); docs/selas-encoding.md)")
+        want = modify_nw_word(*(int(x) for x in m.groups())).to_bytes(6, "big")
+        got = be[offs[k]:offs[k] + 6]
+        if got != want:
+            raise SystemExit(f"selas wrote '{code.strip()}' as {got.hex()}, the SHARC+ word is {want.hex()}: "
+                             "apply tools/selache/apply.sh (docs/selas-encoding.md)")
 
 
 def fix_shift_imm(be: bytes, offs: list[int]) -> bytes:

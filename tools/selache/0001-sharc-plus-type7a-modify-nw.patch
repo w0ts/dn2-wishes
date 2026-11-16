@@ -1,0 +1,202 @@
+diff --git a/selas/src/asmparse.rs b/selas/src/asmparse.rs
+index 6fc5f48..effbc9d 100644
+--- a/selas/src/asmparse.rs
++++ b/selas/src/asmparse.rs
+@@ -1864,6 +1864,18 @@ fn parse_dag_modify(text: &str, line: u32) -> Result<Instruction> {
+     let i_reg = if pm { i_reg_full - 8 } else { i_reg_full };
+     let m_reg = if pm { m_reg_full - 8 } else { m_reg_full };
+ 
++    // "MODIFY(Ii, Mm)(NW)": the SHARC+ 48-bit Type 7a
++    if text[close + 1..].trim().starts_with("(NW)") {
++        return Ok(Instruction::DagModifyNw {
++            pm,
++            i_src: i_reg,
++            i_dest: i_reg,
++            m_reg,
++            cond: 31,
++            compute: None,
++        });
++    }
++
+     Ok(Instruction::DagModify {
+         pm,
+         i_reg,
+@@ -1902,6 +1914,21 @@ fn parse_modify_assign(text: &str, line: u32) -> Result<Instruction> {
+                     cond,
+                     compute: Some(compute),
+                 }),
++                Instruction::DagModifyNw {
++                    pm,
++                    i_src,
++                    i_dest,
++                    m_reg,
++                    cond,
++                    ..
++                } => Ok(Instruction::DagModifyNw {
++                    pm,
++                    i_src,
++                    i_dest,
++                    m_reg,
++                    cond,
++                    compute: Some(compute),
++                }),
+                 Instruction::Modify { i_reg, value, .. } => {
+                     // Type 19 Modify doesn't have a compute field
+                     let _ = (i_reg, value, compute);
+@@ -1949,9 +1976,36 @@ fn parse_modify_assign_inner(text: &str, line: u32) -> Result<Instruction> {
+     // Check if second operand is M-register (Type 7) or immediate (Type 19)
+     if parts[1].starts_with('M') {
+         let m_reg_full = parse_reg_index(parts[1], 'M', line)?;
++        let dest_full = parse_reg_index(text[..eq].trim(), 'I', line)?;
+         let pm = i_reg_full >= 8;
++        if (dest_full >= 8) != pm || (m_reg_full >= 8) != pm {
++            return Err(Error::Parse {
++                line,
++                msg: "MODIFY: the I and M registers must be of one DAG".into(),
++            });
++        }
+         let i_reg = if pm { i_reg_full - 8 } else { i_reg_full };
+         let m_reg = if pm { m_reg_full - 8 } else { m_reg_full };
++        let dest = if pm { dest_full - 8 } else { dest_full };
++        // "Id=MODIFY (Is,Mm)(NW)": the SHARC+ 48-bit Type 7a, any destination
++        if rhs[close + 1..].trim().to_uppercase().starts_with("(NW)") {
++            return Ok(Instruction::DagModifyNw {
++                pm,
++                i_src: i_reg,
++                i_dest: dest,
++                m_reg,
++                cond: 31,
++                compute: None,
++            });
++        }
++        // without (NW): Type 7, which has no destination field (the 32-bit 7b's is not encoded yet); a
++        // destination other than the source was silently dropped before
++        if dest != i_reg {
++            return Err(Error::Parse {
++                line,
++                msg: "Id=MODIFY (Is,Mm) with Id != Is: only the (NW) form is encoded".into(),
++            });
++        }
+         Ok(Instruction::DagModify {
+             pm,
+             i_reg,
+@@ -5839,6 +5893,23 @@ mod tests {
+ 
+     // --- Phase 2: Batch B tests ---
+ 
++    /// SHARC+ Type 7a (NW) against ADI's own words (Digitone II OS 1.12's DSP code, sw 0x1c04bf,
++    /// 0x1c1fad, 0x1c2245, 0x1c109c)
++    #[test]
++    fn modify_nw_is_adi_encoding() {
++        for (src, want) in [
++            ("I4=MODIFY (I4,M6)(NW)", 0x04BF_3000_0000u64),
++            ("R2=R2+R2 , I1=MODIFY (I4,M5)(NW)", 0x04BF_2D00_1222),
++            ("R12=PASS R15 , I7=MODIFY (I7,M7)(NW)", 0x04BF_F802_1CF0),
++            ("MODIFY (I4,M4)(NW)", 0x04BF_2000_0000),
++        ] {
++            let instr = parse_instruction(src).unwrap_or_else(|e| panic!("{src}: {e}"));
++            let bytes = encode::encode(&instr).unwrap();
++            let got = bytes.iter().fold(0u64, |a, &b| (a << 8) | b as u64);
++            assert_eq!(got, want, "{src}: {got:#014x}, ADI's {want:#014x}");
++        }
++    }
++
+     #[test]
+     fn roundtrip_dag_modify() {
+         roundtrip(&Instruction::DagModify {
+diff --git a/selas/src/assemble.rs b/selas/src/assemble.rs
+index 2416bf7..e4a57e8 100644
+--- a/selas/src/assemble.rs
++++ b/selas/src/assemble.rs
+@@ -542,6 +542,20 @@ fn assemble_source_inner(raw_src: &str, visa: bool) -> Result<Vec<u8>> {
+                 } else {
+                     selinstr::visa_encode::visa_encode(instr, &isa_bytes)
+                 };
++                // a Type 7 word with bit 39 clear is the 32-bit Type 7b in VISA code: DagModify's 48-bit
++                // (pre-SHARC+) layout would be read as another instruction (MODIFY(I4,M4) as
++                // `if gt i7=modify (i0,m1)`): only its 32-bit form, or the (NW) form, exist here
++                if matches!(instr, selinstr::encode::Instruction::DagModify { .. })
++                    && matches!(encoded, selinstr::visa_encode::VisaEncoded::W48(_))
++                {
++                    return Err(crate::error::Error::Parse {
++                        line: 0,
++                        msg: format!(
++                            "{instr:?}: no 48-bit SHARC+ form (in .NOCOMPRESS, or with a compute): \
++                             write Ii=MODIFY (Ii,Mm)(NW)"
++                        ),
++                    });
++                }
+                 let bytes = encoded.to_bytes();
+                 sec.parcel_count += encoded.parcels();
+                 sec.code.extend_from_slice(&bytes);
+diff --git a/selcc/src/regalloc.rs b/selcc/src/regalloc.rs
+index ef14278..d6b9bda 100644
+--- a/selcc/src/regalloc.rs
++++ b/selcc/src/regalloc.rs
+@@ -1496,6 +1496,7 @@ impl Allocator {
+             | Instruction::BitOp { .. }
+             | Instruction::StackOp { .. }
+             | Instruction::DagModify { .. }
++            | Instruction::DagModifyNw { .. }
+             | Instruction::RegisterSwap { .. }
+             | Instruction::ImmShift { .. }
+             | Instruction::ImmStore { .. }
+diff --git a/selinstr/src/encode.rs b/selinstr/src/encode.rs
+index 3384ca3..08cda6a 100644
+--- a/selinstr/src/encode.rs
++++ b/selinstr/src/encode.rs
+@@ -448,6 +448,25 @@ pub enum Instruction {
+         /// Optional compute
+         compute: Option<ComputeOp>,
+     },
++    /// SHARC+ Type 7a, 48-bit: `[compute ,] Id=MODIFY (Is,Mm)(NW)`. Bit 39 set (in VISA code a Type 7 word
++    /// with bit 39 clear is the 32-bit Type 7b: `DagModify`'s 48-bit layout is the pre-SHARC+ one and reads
++    /// there as `if gt i7=modify (i0,m1)` for MODIFY(I4,M4)). The layout of ADI's own code (Digitone II
++    /// OS 1.12, sw 0x1c04bf `i4=modify (i4,m6)(nw)` = 0x04BF30000000): cond 37:33, Is {32, 31:30}, Mm 29:27,
++    /// Id xor Is 26:24, compute 22:0.
++    DagModifyNw {
++        /// 0=DAG1, 1=DAG2
++        pm: bool,
++        /// source I register index within the DAG (0-7)
++        i_src: u8,
++        /// destination I register index within the DAG (0-7)
++        i_dest: u8,
++        /// M register index within the DAG (0-7)
++        m_reg: u8,
++        /// Condition code (31=TRUE)
++        cond: u8,
++        /// Optional compute
++        compute: Option<ComputeOp>,
++    },
+     /// Type 5b: Compute, dreg<->cdreg (SIMD register swap).
+     RegisterSwap {
+         /// Data register index (0-15, R0-R15)
+@@ -698,6 +717,28 @@ pub fn encode_word(instr: &Instruction) -> Result<u64, EncodeError> {
+                 | (comp as u64);
+             Ok(word)
+         }
++        Instruction::DagModifyNw {
++            pm,
++            i_src,
++            i_dest,
++            m_reg,
++            cond,
++            compute,
++        } => {
++            let comp = encode_compute_opt(&compute)?;
++            let g = if pm { 1u64 } else { 0 };
++            let s = i_src as u64 & 7;
++            let word = (0x04u64 << 40)
++                | (1u64 << 39)
++                | (g << 38)
++                | ((cond as u64 & 0x1F) << 33)
++                | ((s >> 2) << 32)
++                | ((s & 3) << 30)
++                | ((m_reg as u64 & 0x7) << 27)
++                | (((i_src ^ i_dest) as u64 & 0x7) << 24)
++                | (comp as u64);
++            Ok(word)
++        }
+         Instruction::RegisterSwap {
+             dreg,
+             cdreg,
