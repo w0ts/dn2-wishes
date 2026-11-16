@@ -217,3 +217,17 @@ Not done:
 - The USB-upgrade and SHARC-upload limits in `dnfw.safety` were measured on 1.11 at BSS /
   code addresses that the map moves; the limits themselves rest on the unchanged layout
   (inferred from the whole-BSS shift, not re-measured on 1.12).
+
+## The uncached buffers moved +0x8000, and the literal scan missed them (found on the unit, 2026-11-08)
+
+Samples loaded (list, waveform) but played silent, preview too; a pool from 1.11 showed EMPTY.
+Cause, measured in both stock images: the uncached (0x4e...) buffer block moved **+0x8000**, not
+BSS's +0x1000: the SSI TDM buffers 0x4e6e0100 / 0x4e6df100 -> 0x4e6e8100 / 0x4e6e7100 (all 8 TX
+operand sites of the ISR, same addresses in both), the eSDHC EXT_CSD 0x4e6f1100 -> 0x4e6f9100 and
+its bounce buffer 0x4e6f1300 -> 0x4e6f9300. `port_os112.py`'s LIT pattern only matches 0x40..0x46,
+so `link.c` kept 1.11's TDM bases: every loader command and sample word went into a buffer the
+1.12 SSI never sends, and the DSP never got a sample (since v0.20 there is no other link).
+The emulator passed because `emu_waverider_menu.py`'s fake DSP hard-coded the same 1.11 constants;
+it now reads the TX base from stock's `addi.l` operand at 0x4002608a and refuses a mismatch.
+The same move put the +Drive bounce buffer over the old boot-screen stamp (0x46708000), the 1.12
+boot crash. Any future port: scan the 0x4e alias too, and check no chunk overlaps a stock buffer.

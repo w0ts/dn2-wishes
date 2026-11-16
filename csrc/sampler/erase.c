@@ -63,8 +63,9 @@ typedef unsigned char u8;
 #define SD_PRSSTAT (*(volatile u32 *)0xFC0CC024u)
 #define SD_IDLE(p) (((p) & (1u << 24)) && !((p) & 3u))
 /* the EXT_CSD as the driver read it at power-on (docs/drive-storage-research.md: byte-swapped
- * per word; SEC_COUNT, byte 212, at 0x4e6f11d4), for the status only */
-#define EXT_CSD 0x4E6F1100u
+ * per word; SEC_COUNT, byte 212, at 0x4e6f11d4 in 1.11), for the status only.
+ * OS 1.12: the driver's buffers moved +0x8000 (0x4e6f11d4 -> 0x4e6f91d4, 2 sites each image) */
+#define EXT_CSD 0x4E6F9100u
 #define CSD_BYTE(b) (*(volatile u8 *)(EXT_CSD + ((u32)(b) & ~3u) + (3u - ((u32)(b) & 3u))))
 
 /* the regions, as the files that own them define them */

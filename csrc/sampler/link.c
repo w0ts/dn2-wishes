@@ -80,8 +80,12 @@ typedef unsigned char u8;
 _Static_assert(SMP_MIRROR_BYTES >= 0x10000u + 3u * 0x10000u, "the stages fit in our RAM");
 
 #define REPLY_TAIL ((volatile u16 *)0x80005E40u)                    /* 0x800053a4 + 0xa9c: the DSP's status */
-#define TDM_TX(h) ((volatile u32 *)(0x4E6E0100u + ((u32)(h) << 11)))
-#define TDM_RX(h) ((volatile u32 *)(0x4E6DF100u + ((u32)(h) << 11)))
+/* OS 1.12: stock's SSI buffers moved +0x8000 (not BSS's +0x1000): the TX base is the
+ * operand of stock's addi.l at 0x4002608a, 0x4e6e0100 in 1.11 and 0x4e6e8100 in 1.12 (all 8
+ * operand sites in the ISR, same addresses in both images); RX is TX - 0x1000 in both.
+ * port_os112.py's literal scan skips the 0x4e uncached alias, so these were left at 1.11's. */
+#define TDM_TX(h) ((volatile u32 *)(0x4E6E8100u + ((u32)(h) << 11)))
+#define TDM_RX(h) ((volatile u32 *)(0x4E6E7100u + ((u32)(h) << 11)))
 
 #define PROTO 7                                 /* v0.40: FOLDER IN (30), TREE (31): folders in folders; v0.35: DROP (26); v0.31: the library (16..23); v0.22: 400 MB, the recordings' area a hole */
 #define BLK_READ  ((int (*)(u32, u32, void *))0x4012C87Au)          /* (sector, bytes, buf) -> 0 ok */

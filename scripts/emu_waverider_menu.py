@@ -125,13 +125,23 @@ BLK_READY, BLK_SECTORS = 0x4461C68C, 0x4461C6B0
 STORE_SECTOR = 0x600000
 REPLY_TAIL = 0x80005E40
 ROUTE_OFFSET = 0xA5A                     # the frame's per-track routing words (docs/link-research.md)
-TDM_TX, TDM_RX = 0x4E6E0100, 0x4E6DF100
+TDM_TX, TDM_RX = 0x4E6E8100, 0x4E6E7100  # OS 1.12 (1.11: 0x4E6E0100, 0x4E6DF100); checked below
+TDM_OPERAND = 0x4002608A                  # stock's addi.l #<TX base> in the SSI ISR (both OSes)
+
+
+def check_tdm(machine):
+    """the fake DSP must use the buffers stock's SSI ISR really uses, read from the running
+    image, never a constant that could agree with a stale one in the mod (OS 1.12 port bug)"""
+    tx = struct.unpack(">I", machine.read(TDM_OPERAND, 4))[0]
+    if (tx, tx - 0x1000) != (TDM_TX, TDM_RX):
+        raise AssertionError(f"stock's TDM TX base is {tx:#010x}, the harness uses {TDM_TX:#010x}")
 
 
 def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
     """the scenario's run: -> what was checked (see the link16: step)"""
     import random
     from unicorn import UC_HOOK_CODE
+    check_tdm(machine)
     # the +Drive, fresh for each scenario; the hooks once per machine
     shared = link16.__dict__.setdefault("shared", {})
     disk: dict[int, bytes] = {}
