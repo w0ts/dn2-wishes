@@ -1060,9 +1060,21 @@ class TRXCB:
                 p.if_(7, "GT", 6, lambda: p.iconst(5, -0x7FFCB9), kind="i")
                 p.ld(6, L.C[lvl])
                 wmul(p)
-                hpc(p, off)
+                if EXACT:
+                    hpc(p, off)
+                else:
+                    hpc_inline(p, off, cr, 0)
+
+            # the cascades inline (hpc_inline): the limiter's bounds in R15, R2 (the block), 2^-22 in F0 (free
+            # in the loop's body: loop() reloads it)
+            cr = (15, 2)
+            if not EXACT:
+                p.iconst(15, 0x7FFFFF)
+                p.iconst(2, -0x800000)
 
             def one():
+                if not EXACT:
+                    p.fconst(0, 2.0 ** -22)
                 osc(2, "a", 7, "c", TRXCB.F1)
                 p.ipass(1, 4)
                 osc(3, "b", 8, "d", TRXCB.F2)
