@@ -75,7 +75,7 @@ STATE_DM, STATE_BYTES = 0x2DDE00, 0x380      # save area, PERC's scratch, idle_l
 # 0x200fa000..0x200fdfff; the I-cache (enabled by the startup, docs/waverider-dsp-silence.md)
 # serves it. Its voices' state and scratch stay in L1, its tables in DDR.
 PERC_L2_LOAD = 0x200C0000
-PERC_L2_SPAN = 0x24C00                       # 147 KB (PLAITS VA+FM+ADD+SWARM+NOISE+PART+STRING+MODAL+BD+SD+HH, 2026-11-09: 149,892 B of code; VA 131,794; TB303: 128,282 B; PLAITS 123,128; 118,986 without SID, the DPRO machines and VO-6, 2026-11-08;
+PERC_L2_SPAN = 0x25000                       # 148 KB (v0.45 + b4, 2026-11-09: 150,710 B of code, BOUNCE's type and v0.45's PERC changes; 147 KB PLAITS VA+FM+ADD+SWARM+NOISE+PART+STRING+MODAL+BD+SD+HH, 2026-11-09: 149,892 B of code; VA 131,794; TB303: 128,282 B; PLAITS 123,128; 118,986 without SID, the DPRO machines and VO-6, 2026-11-08;
                                              # 142 KB SOPHIE, 140 KB v0.24..v0.42, 80 KB v0.17..v0.23). The span is zero-padded into
                                              # the DSP upload, so it is kept to the code
 PERC_SW = 0xB80000 + (PERC_L2_LOAD - 0x20000000) // 2       # 0xbe0000
