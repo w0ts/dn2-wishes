@@ -559,11 +559,18 @@ def main() -> int:
         # tests these sources, not an older build of them)
         if wanted("rebuild"):
             rb = work / "rebuilt.syx"
-            rc_b, out_b = run("rebuild", [sys.executable, "-c", "from dnfw.cli.main import main; main()", "mods", "apply",
-                                          a.stock, "--mod", "waverider", "-o", rb], logs, env={"PYTHONPATH": str(ROOT / "src")})
+            # 2026-11-14 (main: the 1.12 gate's blind spots): every 1.12 build is NOBOOT (scripts/noboot.py: stock's
+            # intro, no stamp), so an image without the boot screen is rebuilt the NOBOOT way; still byte for byte
+            from dnfw.mods import waverider as Wr   # noqa: PLC0415
+            nb = hasattr(Wr, "_boot") and not has_bootscreen(sec3)
+            pre = f"import sys; sys.path.insert(0, {str(HERE)!r}); import noboot; noboot.install(); " if nb else ""
+            rc_b, out_b = run("rebuild", [sys.executable, "-c", pre + "from dnfw.cli.main import main; main()", "mods",
+                                          "apply", a.stock, "--mod", "waverider", "-o", rb], logs,
+                              env={"PYTHONPATH": str(ROOT / "src")})
             same_b = rc_b == 0 and rb.exists() and read_image(rb) == build_bytes
-            gate("the build is this tree's", same_b, "dnfw mods apply here gives the same file, byte for byte"
-                 if same_b else ("it differs: rebuild it from this tree" if rc_b == 0 else out_b[-400:]))
+            how = "dnfw mods apply (NOBOOT, scripts/noboot.py)" if nb else "dnfw mods apply"
+            gate("the build is this tree's", same_b, f"{how} here gives the same file, byte for byte"
+                 if same_b else (f"it differs from {how}: rebuild it from this tree" if rc_b == 0 else out_b[-400:]))
 
         # 2 + 3. the DSP program
         if dsp_changed:
