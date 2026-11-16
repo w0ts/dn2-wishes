@@ -194,6 +194,37 @@ A removed knob's stored value stays in the record and goes to the DSP unchanged,
 same; the page just cannot change it (a NEW insert starts at its DEFAULT: HARM 100, SUB LEV 100, RING 100,
 SUB DRY 0). The place is left empty.
 
+### AUTO: the distortions' level follows the dry (2026-11-12)
+
+The User: "the drive post gain is hard to control when the gain/drive is on max. Could we have an 'auto adjust
+level'", and "put the post gain in the same position everywhere for all distos". On the distortions **PGAIN is knob F
+and AUTO knob G**, an on/off switch (a turn right sets ON, left OFF; stored 127 / 0, the DSP reads ON above 63). Done
+for **DIST, FOLD and HARM** (HARM's PGAIN is its stored LEV, K5, back on the page); FUZZ and TAPE wait for the
+User's call on which of their six knobs leaves the page.
+
+Measured on the reference models (110 Hz, MIX 127, defaults), the wet's level against the drive 0 .. 127 without
+AUTO: FUZZ +1 .. +13 dB on a -12 dBFS sine (+2.5 dB at 0 dBFS), TAPE -0 .. +13, FOLD -2 .. +10, DIST -1 .. +1.5
+(it already follows the voice's peak), HARM about -2 throughout. The rise depends on the input's level, so no
+curve over the drive knob holds it; AUTO measures instead.
+
+**ON**: the wet (after PGAIN, before MIX) is scaled by c = T x sqrt(Pin / Pout): Pin the dry's power (the clamped
+input), Pout the wet's, each a one-pole of ~50 ms over the blocks' mean squares, both floored at 1e-8 (silence: c
+= T), Pin / Pout held to 2^+-12; T is PGAIN's own gain (DIST 2 p, FOLD and HARM p). So turning the drive changes
+the tone and not the level, PGAIN still sets the level (x T of the dry's), and a quiet note stays quieter than a
+loud one (the levels are matched over ~50 ms, not per transient). c is computed once a block from the powers as
+they stood (no ramp: they move ~1.3 % a block). The powers update every block, ON or OFF, so a switch to ON starts
+from the voice's level; they start from zeros with the insert's state (a new type or track).
+
+**OFF** (0 in every record saved before AUTO: its place was empty, DEFAULT 0) multiplies the wet by exactly 1.0:
+the inserts are bit-identical to before (checked against the previous reference over 400 random blocks of every
+type, G anywhere in 0..63). State: two words per (voice slot, insert slot) at `design.AUTO_L2` (L2, after the bus
+pass's moved state; zeros at power-on) and two per moved slot 2 side at `AUTO_MV_L2`.
+
+**Cost**: 5 instructions a sample and ~100 once a block, in FUZZ's loop too (DIST shares it): about +265 a block on
+FUZZ, FOLD, HARM and DIST, ON or OFF; their guard bounds rose by 1.5 x that (DIST 1.8 x): 6,100 6,700 5,100 5,900.
+The per-block part is one leaf subroutine (`ins_auto_pre`, `ins_auto_post`, its 1/x and square root inline), so the
+code grew ~640 B: the inserts' L2 span is 0x2000 (0x1c00 until then; the L2 to 0x200afa00 was unused).
+
 **DIST**: Optimist's DIST, on FUZZ's sample loop (one copy of the loop, `fz_loop`, run after FUZZ's or
 DIST's block values; DIST adds its block values only). The drive is relative to the voice's peak (FUZZ's
 envelope follower, instant up, ~0.35 s down; floor 0.1), so DRIV clips a quiet and a loud note alike:
@@ -474,10 +505,27 @@ the voices' LIMIT from the next frame on (and a sudden one could run past the fr
   it: the voices' LIMIT is as if no insert ran;
 - each insert, before it runs in a block, checks it is expected to end before **INS_DEADLINE = P - TAIL -
   P/8** cycles after the frame's start (the frame less the guard's margin and the stock's own tail), with
-  its type's bound (`design.COST`: the runner's cost of one unit x 1.5, the DDR-heavy x 2; FDN8 64,000 since 2026-11-12, 1.2 x its clearing block (53k on the shared scale; 32,000 before, under it),
+  its type's bound (`design.COST`: the runner's cost of one unit x 1.5, the DDR-heavy x 2; FDN8 charged by the block it will run since 2026-11-12, evening (`bus.fdn8_bound`): 60,000 while it clears its ring (a new owner, then 32 blocks; 1.2 x the clearing block's 49k on the shared scale), 34,200 after (1.2 x the steady 28k); 64,000 on every block in r11f, where the unit's skips rose 1,579 -> 40,041 a minute on pattern A09; 32,000 before that, under the clearing block),
   XDLY 20,000, CHOR 13,000, TAPE 8,200 ..); one that would not end in time is left out of that block (the
   sound passes dry; its state kept; `INS_SKIPS` counts). Until a frame is measured (and in the runner,
   whose clock stands still) every insert runs.
+- **2026-11-12, the hold (`guard.ins_gate`, `program.smooth`; main, after the unit's skips 1,579 -> 40,041 a minute on
+  A09, each a wet / dry toggle of a sounding voice's insert, likely clicks):** a per-voice insert (the pre pass, and a
+  moved slot 2) once refused stays out until it has fitted `INS_HOLD` (64) blocks in a row, ~43 ms, instead of coming
+  back the next block. The block it goes out, the dry gets the last block's wet - dry difference at its last sample,
+  fading to 0 over the block; the block it comes back, the wet gets dry - wet at its first sample, fading likewise
+  (a step of 0.40 became 0.02 on a 220 Hz sine). One gate around the type's code, its bound from `COST_TAB`; the
+  instance's out count and its last difference are words 2 and 3 of its aux words (`design.AUX_WORDS`, with AUTO's
+  powers). A deadline of 0 (the runner) admits every block, so nothing changes there; `INS_TESTCLK` stands in for
+  EMUCLK in the model's tests. The post pass (CHOR WIDE JUNO; the User: "juno in any insert => bad") holds the same
+  way, L and R each smoothed (its aux and gate words in the Monomachine L2 scratch, `design.POST_AUX_L2`; its code
+  from 0x200afa00, the arbiter). JUNO admitted every block is clean at its block edges (postref, a sine: the second
+  difference at the edges as inside). The bus pass (FDN8 XDLY) holds the same way but fades as opt-host's
+  `ins_fade` (its parked branch claude/insfade-wip): a refusal still within P/16 past the deadline runs the unit
+  once more and `blend`'s MIX ramps to 0 over that block (it ends on the dry sample), back in it ramps up; past the
+  grace it is out at once. MIX x g with g exactly 1.0 when not fading: the sound as before. One gate and one blend
+  for both units (insbus.asm ~4.1 KB of its 4.2). A moved slot 2 still has the bus pass's own admit around it
+  (MV_COST) besides the pre pass's hold inside.
 - **2026-11-11 fix (`guard.ins_start`, `INS_DLP`):** INS_DEADLINE leaves room for the WHOLE stock tail, but only the
   pre pass and a2f run at its start. The post pass runs at the FX sends and the bus pass (FDN8/XDLY) just
   before the output stage, with most of the tail already done, so it was counted twice. The unit's

@@ -43,15 +43,19 @@ _NAMES = ["t", "i", "j", "rec", "w1", "sa", "buf", "gn"] + [f"p{k}" for k in ran
     "gd", "step", "lvl", "d", "rb", "sel", "tr",
     # SUB DIST GATER RING (ports3, 2026-11-09): FUZZ's loop's values (DIST shares it), GATER's block values
     "pa", "rel", "a1", "lv", "kl", "fz", "inv", "inc", "sl", "nsl", "pat", "nx", "b1", "h0", "h1",
-    "ret"]                       # one's return address - 1 (2026-11-11: the bus pass calls it too)
+    "ret",                       # one's return address - 1 (2026-11-11: the bus pass calls it too)
+    "aa", "au", "at",            # AUTO (design.AUTO_L2): the aux words' address, on (1.0) / off, PGAIN's gain T
+    "icost", "ist", "d0", "d31"]  # the gate (2026-11-12): this type's bound, its status, the dry's first and last
 C = {n: SCRATCH + 4 * k for k, n in enumerate(_NAMES)}
 assert len(C) == len(_NAMES)
 SCRATCH_BYTES = 4 * len(_NAMES)
 # GATER's tables after the words: RATE's 1 / ticks (float32), the 16 patterns (loaded with the state)
 RATE_TAB = SCRATCH + SCRATCH_BYTES
 PAT_TAB = RATE_TAB + 4 * len(D.GT_RATE)
-TABLE_WORDS = [struct.unpack("<I", struct.pack("<f", 1.0 / d))[0] for d in D.GT_RATE] + list(D.GT_PAT)
-assert PAT_TAB + 4 * len(D.GT_PAT) <= TABLE
+COST_TAB = PAT_TAB + 4 * len(D.GT_PAT)            # 2026-11-12: each type's guard bound (design.COST, 0 for the others)
+TABLE_WORDS = ([struct.unpack("<I", struct.pack("<f", 1.0 / d))[0] for d in D.GT_RATE] + list(D.GT_PAT)
+               + [D.COST.get(t, 0) for t in range(len(D.NAMES))])
+assert COST_TAB + 4 * len(D.NAMES) <= TABLE
 
 
 def state_bytes() -> bytes:
@@ -59,6 +63,82 @@ def state_bytes() -> bytes:
     change word and the skip flags (zeros)"""
     head = bytes(RATE_TAB - STATE) + struct.pack(f"<{len(TABLE_WORDS)}I", *TABLE_WORDS)
     return head + bytes(D.FLAGS + 4 * D.FLAG_WORDS - STATE - len(head))
+
+
+def auto_pre(p: Prog) -> None:
+    """AUTO's gain this block (ref.Ref.auto_gain) in F10: 1.0 off (C['au'] 0), else C['at'] x sqrt(Pin / Pout) of the
+    powers at C['aa']; F8, F9 = 0, the block's sums of squares (auto_sample). One copy, a leaf (its 1/x and sqrt
+    inline: the inserts' L2 span). Clobbers R0-R5, R12, I4, I12"""
+    p.call("ins_auto_pre", lambda: _auto_pre(p))
+
+
+def _auto_pre(p: Prog) -> None:
+    p.ld(2, C["aa"])
+    p.seti(4, 2)
+    p.ldi(5, 0, 4)                               # Pin
+    p.ldi(0, 1, 4)                               # Pout
+    p.fconst(1, D.AUTO_FLOOR)
+    p.fop(5, 5, "MAX", 1)
+    p.fop(0, 0, "MAX", 1)
+    FP._recip(p)
+    p.fop(0, 0, "*", 5)
+    p.fconst(1, D.AUTO_R_MIN)
+    p.fop(0, 0, "MAX", 1)
+    p.fconst(1, D.AUTO_R_MAX)
+    p.fop(0, 0, "MIN", 1)
+    FP._sqrt(p)
+    p.ld(1, C["at"])
+    p.fop(10, 0, "*", 1)
+    p.ld(1, C["au"])
+    p.ifz(1, "EQ", lambda: p.fconst(10, 1.0), kind="f")
+    p.fconst(8, 0.0)
+    p.fconst(9, 0.0)
+
+
+def auto_sample(p: Prog, x: int, o: int) -> None:
+    """the dry F{x} and the wet F{o} into the sums (F8, F9), then the wet x AUTO's gain (F10). Clobbers F4"""
+    p.fop(4, x, "*", x)
+    p.fop(8, 8, "+", 4)
+    p.fop(4, o, "*", o)
+    p.fop(9, 9, "+", 4)
+    p.fop(o, o, "*", 10)
+
+
+def auto_post(p: Prog) -> None:
+    """the block's sums into AUTO's powers at C['aa'] (ref.Ref.auto_end), on or off. One copy, a leaf. Clobbers
+    R1-R3, R12, I4, I12"""
+    p.call("ins_auto_post", lambda: _auto_post(p))
+
+
+def _auto_post(p: Prog) -> None:
+    p.ld(2, C["aa"])
+    p.seti(4, 2)
+    for k, acc in ((0, 8), (1, 9)):
+        p.fconst(1, 1 / 32)
+        p.fop(acc, acc, "*", 1)
+        p.ldi(2, k, 4)
+        p.fop(3, acc, "-", 2)
+        p.fconst(1, D.AUTO_A)
+        p.fop(3, 3, "*", 1)
+        p.fop(2, 2, "+", 3)
+        p.sti(k, 4, 2)
+
+
+def auto_set(p: Prog, t: float | None) -> None:
+    """C['au'] = 1.0 when the type's knob G (p6) is on, C['at'] = p5 x T (None: no AUTO, FUZZ). Clobbers R0, R1"""
+    p.fconst(0, 0.0)
+    if t is None:
+        p.st(C["au"], 0)
+        return
+    p.st(C["au"], 0)
+    p.ld(0, C["p6"])
+    p.fconst(1, D.AUTO_ON)
+    p.if_(0, "GT", 1, lambda: (p.fconst(0, 1.0), p.st(C["au"], 0)))
+    p.ld(0, C["p5"])
+    if t != 1.0:
+        p.fconst(1, t)
+        p.fop(0, 0, "*", 1)
+    p.st(C["at"], 0)
 
 
 def fuzz(p: Prog) -> None:
@@ -87,6 +167,7 @@ def fuzz(p: Prog) -> None:
     p.st(C["lv"], 0)
     p.fconst(0, 0.0)
     p.st(C["kl"], 0)
+    auto_set(p, None)
 
 
 def dist(p: Prog) -> None:
@@ -130,6 +211,7 @@ def dist(p: Prog) -> None:
     p.st(C["a1"], 0)
     p.fconst(0, D.DS_REL)
     p.st(C["rel"], 0)
+    auto_set(p, D.DS_LEV_MAX)
 
 
 def fz_loop(p: Prog) -> None:
@@ -149,6 +231,7 @@ def fz_loop(p: Prog) -> None:
     p.fop(3, 0, "*", 1)
     p.fop(2, 3, "-", 2)
     p.st(C["y0"], 2)
+    auto_pre(p)
     p.ld(4, C["buf"])
     p.seti(0, 4)
     p.seti(1, 4)
@@ -231,12 +314,14 @@ def fz_loop(p: Prog) -> None:
         p.ld(1, C["kl"])
         p.fop(2, 2, "*", 1)
         p.fop(3, 3, "+", 2)                      # (DIST: the low band back, dry)
+        auto_sample(p, 0, 3)
         p.fop(3, 3, "-", 0)
         p.ld(1, C["p0"])
         p.fop(3, 3, "*", 1)
         p.fop(3, 0, "+", 3)
         p.stpost(1, 3)
     p.loop_r(11, D.BLOCK, one)
+    auto_post(p)
 
 
 def tape(p: Prog) -> None:
@@ -456,6 +541,8 @@ def fold(p: Prog) -> None:
     p.st(C["b"], 0)
     tone_c(p, "p4")
     p.st(C["c"], 0)
+    auto_set(p, 1.0)
+    auto_pre(p)
     p.ld(4, C["buf"])
     p.seti(0, 4)
     p.seti(1, 4)
@@ -501,12 +588,14 @@ def fold(p: Prog) -> None:
         p.ld(1, C["p5"])
         p.fop(3, 2, "*", 1)
         p.ld(0, C["k"])
+        auto_sample(p, 0, 3)
         p.fop(3, 3, "-", 0)
         p.ld(1, C["p0"])
         p.fop(3, 3, "*", 1)
         p.fop(3, 0, "+", 3)
         p.stpost(1, 3)
     p.loop_r(11, D.BLOCK, one)
+    auto_post(p)
 
 
 def harm(p: Prog) -> None:
@@ -527,6 +616,8 @@ def harm(p: Prog) -> None:
     p.fconst(1, D.HM_AMNT_MAX)
     p.fop(0, 0, "*", 1)
     p.st(C["b"], 0)                              # k
+    auto_set(p, 1.0)
+    auto_pre(p)
     p.ld(4, C["buf"])
     p.seti(0, 4)
     p.seti(1, 4)
@@ -564,12 +655,14 @@ def harm(p: Prog) -> None:
         p.fop(3, 0, "+", 3)
         p.ld(1, C["p5"])
         p.fop(3, 3, "*", 1)
+        auto_sample(p, 0, 3)
         p.fop(3, 3, "-", 0)
         p.ld(1, C["p0"])
         p.fop(3, 3, "*", 1)
         p.fop(3, 0, "+", 3)
         p.stpost(1, 3)
     p.loop_r(11, D.BLOCK, one)
+    auto_post(p)
 
 
 def sub(p: Prog) -> None:
@@ -969,12 +1062,106 @@ def skip_moved(p: Prog) -> None:
     p.ifz(0, "NE", lambda: p.ifz(5, "NE", check))     # (C['rec'] is the record's only when it plays)
 
 
+def auto_addr(p: Prog) -> None:
+    """C['aa'] = the aux words (design.AUX_WORDS) for the state at R2 (C['sa']): the pre pass's (L1, STATE + 32 i) at
+    AUTO_L2 + 16 i, a moved slot 2's (L2, MV_STATE + 32 k) at AUTO_MV_L2 + 16 ((MV_STATE / 32 + k) mod 32). Keeps R2"""
+    p.lsh(1, 2, -5)
+    p.iconst(12, D.RECORDS - 1)
+    p.iop(1, 1, "AND", 12)
+    p.lsh(1, 1, 4)
+    p.iconst(12, D.AUTO_L2)
+    p.iconst(3, 0x20000000)                      # L2 and above: a moved slot 2's state (bus.MV_STATE)
+    p.if_(2, "GE", 3, lambda: p.iconst(12, D.AUTO_MV_L2), kind="i")
+    p.iop(1, 12, "+", 1)
+    p.st(C["aa"], 1)
+
+
+def dry_ends(p: Prog, buf_at: int | None = None, d0_at: int | None = None, d31_at: int | None = None) -> None:
+    """the first and last samples of the buffer (address at BUF_AT) before the insert, to D0_AT and D31_AT (smooth's;
+    the pre pass's words by default). Clobbers R0-R2, I0"""
+    p.ld(2, C["buf"] if buf_at is None else buf_at)
+    p.seti(0, 2)
+    p.ldi(0, 0, 0)
+    p.st(C["d0"] if d0_at is None else d0_at, 0)
+    p.ldi(1, D.BLOCK - 1, 0)
+    p.st(C["d31"] if d31_at is None else d31_at, 1)
+
+
+def smooth(p: Prog, aa_at: int | None = None, ist_at: int | None = None, buf_at: int | None = None,
+           d0_at: int | None = None, d31_at: int | None = None, diff: int = 3) -> None:
+    """2026-11-12 (perc.guard.ins_gate): no step where an instance goes out or comes back. Its aux word DIFF holds
+    the last block's wet - dry at its last sample; the block it goes out (status 2), the dry gets that difference,
+    fading to 0 over the block; the block it comes back (1), the wet gets dry - wet at its first sample, fading
+    likewise. Every block it runs (0, 1), word DIFF = its last wet - the dry's; out (2, 3), 0. The buffer's address
+    is at BUF_AT, the status at IST_AT, the dry's ends at D0_AT, D31_AT, the aux words' address at AA_AT (the pre
+    pass's words by default; ramp reads the buffer's address at BUF_AT too). Clobbers R0-R3, R11, R12, I0, I1, I4"""
+    aa_at = C["aa"] if aa_at is None else aa_at
+    buf_at = C["buf"] if buf_at is None else buf_at
+    p.ld(2, aa_at)
+    p.seti(4, 2)
+    p.ld(3, C["ist"] if ist_at is None else ist_at)
+    p.iconst(1, 2)
+
+    def left_out():
+        def went():
+            p.ldi(0, diff, 4)
+            ramp(p, buf_at)
+        p.iconst(1, 2)
+        p.if_(3, "EQ", 1, went, kind="i")
+        p.fconst(0, 0.0)
+        p.ld(2, aa_at)
+        p.seti(4, 2)
+        p.sti(diff, 4, 0)
+
+    def ran():
+        def back():
+            p.ld(2, buf_at)
+            p.seti(0, 2)
+            p.ldi(1, 0, 0)
+            p.ld(0, C["d0"] if d0_at is None else d0_at)
+            p.fop(0, 0, "-", 1)
+            ramp(p, buf_at)
+        p.iconst(1, 1)
+        p.if_(3, "EQ", 1, back, kind="i")
+        p.ld(2, buf_at)
+        p.seti(0, 2)
+        p.ldi(0, D.BLOCK - 1, 0)
+        p.ld(1, C["d31"] if d31_at is None else d31_at)
+        p.fop(0, 0, "-", 1)
+        p.ld(2, aa_at)
+        p.seti(4, 2)
+        p.sti(diff, 4, 0)
+    p.if_(3, "GE", 1, left_out, ran, kind="i")
+
+
+def ramp(p: Prog, buf_at: int) -> None:
+    """the buffer at the address at BUF_AT + F0 x (31 - j) / 32, j = 0..31 (one copy a program, a leaf: every call
+    in a program passes the same BUF_AT). Clobbers R0-R3, R11, R12, I0, I1, I12"""
+    p.call("ins_ramp", lambda: _ramp(p, buf_at))
+
+
+def _ramp(p: Prog, buf_at: int) -> None:
+    p.fconst(1, 1.0 / D.BLOCK)
+    p.fop(1, 0, "*", 1)                          # the step
+    p.ld(2, buf_at)
+    p.seti(0, 2)
+    p.seti(1, 2)
+
+    def one():
+        p.fop(0, 0, "-", 1)
+        p.ldpost(2, 0)
+        p.fop(2, 2, "+", 0)
+        p.stpost(1, 2)
+    p.loop_r(11, D.BLOCK, one)
+
+
 def one(p: Prog) -> None:
     """one insert: the record at C['rec'] (type C['sel'], a BUILT one, played by track C['tr']) over the 32
     floats at C['buf'], in place; its state the 8 words at C['sa'] (zeros when the type or the track changed
     since it last ran there), TAPE's ring at C['rb']. The pre pass runs it for each voice slot's insert; the
     bus pass for a moved slot 2 on the track's L and R (2026-11-11)"""
     p.ld(2, C["sa"])
+    auto_addr(p)
     p.seti(4, 2)
     p.ldi(7, D.STATE_WORDS - 1, 4)               # the last M.SEL
     p.ldi(6, D.STATE_WORDS - 2, 4)               # the last track
@@ -991,6 +1178,10 @@ def one(p: Prog) -> None:
         p.ld(5, C["sel"])
         p.sti(D.STATE_WORDS - 2, 4, 8)
         p.sti(D.STATE_WORDS - 1, 4, 5)
+        p.ld(2, C["aa"])                         # the aux words too (AUTO's powers, the gate's)
+        p.seti(4, 2)
+        for k in range(D.AUX_WORDS):
+            p.sti(k, 4, 9)
 
         def fresh_ring():                        # TAPE starts from a silent ring
             p.ld(1, C["rb"])
@@ -1018,16 +1209,27 @@ def one(p: Prog) -> None:
         p.st(C[f"s{k}"], 8)
     values(p, C)
     fzd = D.FUZZ in D.BUILT or D.DIST in D.BUILT
-    if fzd:                                      # FUZZ and DIST (when the guard admits them) set it:
-        p.iconst(0, 0)                           # their shared loop, emitted once, runs after
-        p.st(C["fz"], 0)
-    _by_type(p, [(typ, (lambda fn, typ: lambda p: G.ins_admit(p, D.COST[typ], lambda: fn(p)))(fn, typ))
-                 for typ, fn in ((D.FUZZ, fuzz), (D.TAPE, tape), (D.FOLD, fold), (D.HARM, harm),
-                                 (D.SUB, sub), (D.DIST, dist), (D.GATER, gater), (D.RING, ring))
-                 if typ in D.BUILT])             # dnfw.builder: only the inserts this build runs
-    if fzd:
-        p.ld(0, C["fz"])
-        p.ifz(0, "NE", lambda: fz_loop(p))
+
+    def run():
+        if fzd:                                  # FUZZ and DIST set it: their shared loop, emitted once, runs after
+            p.iconst(0, 0)
+            p.st(C["fz"], 0)
+        _by_type(p, [(typ, fn) for typ, fn in ((D.FUZZ, fuzz), (D.TAPE, tape), (D.FOLD, fold), (D.HARM, harm),
+                                               (D.SUB, sub), (D.DIST, dist), (D.GATER, gater), (D.RING, ring))
+                     if typ in D.BUILT])         # dnfw.builder: only the inserts this build runs
+        if fzd:
+            p.ld(0, C["fz"])
+            p.ifz(0, "NE", lambda: fz_loop(p))
+    dry_ends(p)
+    p.ld(1, C["sel"])                            # the type's bound (COST_TAB)
+    p.lsh(1, 1, 2)
+    p.iconst(12, COST_TAB)
+    p.iop(1, 12, "+", 1)
+    p.seti(4, 1)
+    p.ldi(1, 0, 4)
+    p.st(C["icost"], 1)
+    G.ins_gate(p, C["icost"], C["aa"], C["ist"], run)
+    smooth(p)
     p.ld(2, C["sa"])
     p.seti(4, 2)
     for k in range(D.STATE_WORDS - 2):

@@ -71,7 +71,7 @@ assert UNIT_L1_END <= 0x2E5700
 # after the voices). Each is written in the pass before it is read, and nothing is kept across blocks.
 WORDS_L1, WORDS_L1_LIMIT = 0x2E5700, 0x2E5B00
 SAVE_I = (0, 1, 2, 3, 4, 12)
-_NAMES = (["i", "t", "j", "rec", "sel", "inst", "fds", "xds", "own", "lp", "rp", "mix", "cnt"]
+_NAMES = (["i", "t", "j", "rec", "sel", "inst", "fds", "xds", "own", "lp", "rp", "mix", "cnt", "bnd", "aa", "ist", "unit"]
           + [f"sv{k}" for k in range(16)] + [f"svi{i}" for i in SAVE_I] + ["sva"])
 C = {n: WORDS_L1 + 4 * k for k, n in enumerate(_NAMES)}
 FD_SEND = WORDS_L1 + 4 * len(_NAMES)              # the send FX's words, while instances run
@@ -93,6 +93,8 @@ assert END <= D.BUS_STATE_END, f"the bus pass's state runs past its room: {END:#
 MV_STATE = END
 MV_END = MV_STATE + 4 * D.STATE_WORDS * D.MV_INSTANCES
 assert MV_END <= D.BUS_STATE_END, f"the moved inserts' state runs past the bus pass's room: {MV_END:#x}"
+assert MV_END <= D.AUTO_L2, "AUTO's words (design.AUTO_L2) after the moved inserts' state"
+assert MV_STATE >= 0x20000000 > PR.STATE and D.MV_INSTANCES <= D.RECORDS   # program.auto_addr's test and its mod 32
 # the guard's bound for a moved insert: the dearest BUILT type, twice (L and R; the unit's cost unmeasured)
 MV_COST = 2 * max(D.COST[t] for t in D.BUILT)
 SITE_SW = 0x1C1FEF                                # the routing, after its per-track loop: JUMP wr_inbus here
@@ -207,7 +209,16 @@ def take_input(p: Prog) -> None:
 
 
 def blend(p: Prog) -> None:
-    """the track's block: x + (wet G_OUT - x) MIX"""
+    """the track's block: x + (wet G_OUT - x) MIX g. 2026-11-12 (the guard's hold, guard.ins_gate; opt-host's ins_fade):
+    g = 1 (MIX x 1.0, exact: the sound as before), or by the gate's status a ramp: 1 (back) 1/32 .. 1, 4 (refused,
+    run once more) 31/32 .. 0, the block's end dry"""
+    p.fconst(8, 1.0)
+    p.fconst(7, 0.0)
+    p.ld(13, C["ist"])
+    p.iconst(12, 1)
+    p.if_(13, "EQ", 12, lambda: (p.fconst(8, 1.0 / D.BLOCK), p.fconst(7, 1.0 / D.BLOCK)), kind="i")
+    p.iconst(12, 4)
+    p.if_(13, "EQ", 12, lambda: (p.fconst(8, 1.0 - 1.0 / D.BLOCK), p.fconst(7, -1.0 / D.BLOCK)), kind="i")
     for src, wet in (("lp", WL), ("rp", WR)):
         p.ld(0, C[src])
         p.seti(0, 0)
@@ -216,13 +227,16 @@ def blend(p: Prog) -> None:
         p.seti(2, 0)
         p.fconst(4, G_OUT)
         p.ld(5, C["mix"])
+        p.fpass(6, 8)
 
         def one():
             p.ldpost(0, 0)                       # x
             p.ldpost(1, 2)                       # wet
             p.fop(1, 1, "*", 4)
             p.fop(1, 1, "-", 0)
-            p.fop(1, 1, "*", 5)
+            p.fop(3, 5, "*", 6)                  # MIX g
+            p.fop(6, 6, "+", 7)
+            p.fop(1, 1, "*", 3)
             p.fop(0, 0, "+", 1)
             p.stpost(1, 0)
         p.loop_r(11, D.BLOCK, one)
@@ -260,6 +274,15 @@ XDLY_PAR = [(0, 1 / 127), (None, 0.0), (1, 1 / 128), (2, 1 / 128), (3, 1 / 127),
 def owner(p: Prog, slot: int, fresh) -> None:
     """OWNER[SLOT + inst] = 1 + record | type << 8; when it differs, FRESH() (the instance starts as a
     new engine: its swapped-in words set anew). Clobbers R0-R3, R8, R12, I4 before FRESH"""
+    def changed():
+        p.sti(0, 4, 1)
+        fresh()
+    owner_differs(p, slot, changed)
+
+
+def owner_differs(p: Prog, slot: int, then) -> None:
+    """THEN() when OWNER[SLOT + inst] is not 1 + record | type << 8 (R1 that word, I4 at OWNER[SLOT + inst]).
+    Clobbers R0-R3, R8, R12, I4"""
     p.ld(0, C["inst"])
     p.lsh(0, 0, 2)
     p.iconst(12, OWNER + 4 * slot)
@@ -272,11 +295,7 @@ def owner(p: Prog, slot: int, fresh) -> None:
     p.lsh(2, 2, 8)
     p.iop(1, 1, "OR", 2)
     p.ldi(3, 0, 4)
-
-    def changed():
-        p.sti(0, 4, 1)
-        fresh()
-    p.if_(1, "NE", 3, changed, kind="i")
+    p.if_(1, "NE", 3, then, kind="i")
 
 
 def enter(p: Prog, sw: int, model) -> None:
@@ -321,7 +340,6 @@ def unit_fdn8(p: Prog) -> None:
                 p.iconst(0, FP.D.LFO_PH0[k])
                 p.st(FP.C[f"ph{k}"], 0)
         owner(p, 0, fresh)
-        unit_io(p)
         params(p, FDN8_PAR)
         for name, v in (("par", PARF), ("io", DESC), ("mode", 1)):
             p.iconst(0, v)
@@ -330,8 +348,21 @@ def unit_fdn8(p: Prog) -> None:
         enter(p, D.FDN8_SW, FP.run_instance)
         copy(p, "own", FP.STATE, FP.DYN_WORDS)
         copy(p, "cnt", FP.ACT, FP.NV)
-        blend(p)
-    G.ins_admit(p, D.COST[D.FDN8], run)
+    run()                                        # (slot gates it and blends once for both units)
+
+
+def fdn8_bound(p: Prog) -> None:
+    """C['bnd'] = the guard's bound for this block of the instance (2026-11-12, main: the skips 1,579 -> 40,041 a
+    minute on the unit with 64,000 on every block): design.FDN8_COST_CLEAR when it will clear its ring (its
+    stored clr nonzero, or a new owner: fresh, then cleared), else COST[FDN8]. Clobbers R0-R3, R8, R12, I4"""
+    store_area(p, "own", FD_STORE, FD_L1_BYTES)
+    p.ld(2, C["own"])
+    p.seti(4, 2)
+    p.ldi(0, (FP.C["clr"] - FP.STATE) // 4, 4)
+    p.iconst(1, D.COST[D.FDN8])
+    p.ifz(0, "NE", lambda: p.iconst(1, D.FDN8_COST_CLEAR))
+    p.st(C["bnd"], 1)
+    owner_differs(p, 0, lambda: (p.iconst(1, D.FDN8_COST_CLEAR), p.st(C["bnd"], 1)))
 
 
 def unit_xdly(p: Prog) -> None:
@@ -357,7 +388,6 @@ def unit_xdly(p: Prog) -> None:
             p.iop(0, 12, "+", 0)
             p.st(XP.C["lb"], 0)
         owner(p, D.FDN8_INSTANCES, fresh)
-        unit_io(p)
         params(p, XDLY_PAR)
         for name, v in (("par", PARF), ("io", DESC), ("mode", 1)):
             p.iconst(0, v)
@@ -365,8 +395,7 @@ def unit_xdly(p: Prog) -> None:
         take_input(p)
         enter(p, D.XDLY_SW, XP.run_instance)
         copy(p, "own", XP.STATE, XP.DYN_WORDS)
-        blend(p)
-    G.ins_admit(p, D.COST[D.XDLY], run)
+    run()                                        # (slot gates it and blends once for both units)
 
 
 def slot(p: Prog) -> None:
@@ -384,20 +413,45 @@ def slot(p: Prog) -> None:
     p.lsh(3, 3, -D.TYPE_BITS)
     p.st(C["inst"], 3)
 
+    p.iconst(0, 0)
+    p.st(C["unit"], 0)
+
+    def unit(k: int, first: int) -> None:       # C['unit'] = K and its aux words (design.BUS_AUX_L2)
+        p.iconst(0, k)
+        p.st(C["unit"], 0)
+        p.ld(0, C["inst"])
+        p.lsh(0, 0, 4)
+        p.iconst(12, D.BUS_AUX_L2 + 4 * D.AUX_WORDS * first)
+        p.iop(1, 12, "+", 0)
+        p.st(C["aa"], 1)
+
     def fdn8():
         p.ld(3, C["inst"])
         p.iconst(12, D.FDN8_INSTANCES)
-        p.if_(3, "LT", 12, lambda: (block_ptrs(p), unit_fdn8(p)), kind="i")
+        p.if_(3, "LT", 12, lambda: (fdn8_bound(p), unit(1, 0)), kind="i")
 
     def xdly():
         p.ld(3, C["inst"])
         p.iconst(12, D.XDLY_INSTANCES)
-        p.if_(3, "LT", 12, lambda: (block_ptrs(p), unit_xdly(p)), kind="i")
+        p.if_(3, "LT", 12, lambda: (p.iconst(1, D.COST[D.XDLY]), p.st(C["bnd"], 1), unit(2, D.FDN8_INSTANCES)),
+              kind="i")
     p.ld(5, C["sel"])
     p.iconst(6, D.FDN8)
     p.iconst(7, D.XDLY)
     p.if_(5, "EQ", 6, fdn8, lambda: (p.ld(5, C["sel"]), p.iconst(7, D.XDLY),
                                      p.if_(5, "EQ", 7, xdly, kind="i")), kind="i")
+
+    def run():                                   # the unit, then the blend (once for both)
+        p.ld(0, C["unit"])
+        p.iconst(1, 1)
+        p.if_(0, "EQ", 1, lambda: unit_fdn8(p), lambda: unit_xdly(p), kind="i")
+        blend(p)
+
+    def gated():                                 # 2026-11-12: the guard's hold (guard.ins_gate), faded in blend
+        block_ptrs(p)
+        G.ins_gate(p, C["bnd"], C["aa"], C["ist"], run, grace=True)
+    p.ld(0, C["unit"])
+    p.ifz(0, "NE", gated)
     p.ld(0, C["i"])
     p.iconst(12, 1)
     p.iop(0, 0, "AND", 12)
@@ -467,6 +521,7 @@ def body(p: Prog) -> None:
 
 
 def _walk(p: Prog) -> None:
+    unit_io(p)                                   # once a pass: the engines only read it, nothing else here writes it
     p.iconst(0, 0)
     p.st(C["fds"], 0)
     p.st(C["xds"], 0)

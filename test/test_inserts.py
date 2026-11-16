@@ -192,3 +192,73 @@ def test_two_slots_run_in_order():
         assert got == [[fbits(x) for x in w] for w in want], f"block {b}"
         assert got[9] == [fbits(np.float32(x)) for x in bufs[9]]
         assert got[6] != [fbits(np.float32(x)) for x in bufs[6]]
+
+
+def test_auto_level_model_is_the_reference_and_holds_the_level():
+    # 2026-11-12 (AUTO, design.AUTO_TYPES): DIST, FOLD, HARM with knob G on follow the dry's power times PGAIN's
+    # gain; off (G 0) they are the inserts as before. The model is the reference, word for word, on and off,
+    # through drive moves and a switch to on; at a steady drive the wet's level is the dry's x T within 1.5 dB
+    import math
+    rows = {0: [D.DIST, 127, 20, 90, 20, 64, 64, 127], 1: [D.DIST, 127, 20, 90, 20, 64, 64, 0],
+            2: [D.FOLD, 127, 30, 64, 0, 100, 100, 127], 3: [D.FOLD, 127, 30, 64, 0, 100, 100, 0],
+            4: [D.HARM, 127, 50, 70, 64, 80, 100, 127], 5: [D.HARM, 127, 50, 70, 64, 80, 100, 64]}
+    m, r = mem0(), R.Ref()
+    level = {}
+    for b in range(260):
+        if b == 100:                             # every drive to full
+            for t in rows:
+                rows[t] = rows[t][:2] + [127] + rows[t][3:]
+        if b == 130:
+            rows[1] = rows[1][:7] + [127]        # DIST switched to on
+        ph = [2 * math.pi * 110 * (32 * b + j) / D.FS for j in range(32)]
+        bufs = [[0.25 * math.sin(x) for x in ph] for _ in range(D.TRACKS)]
+        par = par_of(rows)
+        want = [[np.float32(x) for x in buf] for buf in bufs]
+        r.block(par, want)
+        got = call(m, par, bufs)
+        assert got == [[fbits(x) for x in w] for w in want], f"block {b}"
+        if 60 <= b < 100 or 220 <= b < 260:     # mean squares over 40 blocks (~10 cycles of 110 Hz)
+            for t in rows:
+                acc = level.setdefault(t, [0.0, 0.0])
+                acc[b >= 220] += sum(float(x) ** 2 for x in want[t]) / (40 * 32)
+    level = {t: [math.sqrt(a) / (0.25 / math.sqrt(2)) for a in v] for t, v in level.items()}
+    t_of = {0: 64 / 127 * D.DS_LEV_MAX, 2: 100 / 127, 4: 100 / 127, 5: 100 / 127}
+    for t in (0, 2, 4, 5):
+        for lv in level[t]:
+            assert abs(20 * math.log10(lv / t_of[t])) < 1.5, (t, level[t])
+    assert abs(20 * math.log10(level[1][1] / t_of[0])) < 1.5      # on after the switch
+    assert abs(20 * math.log10(level[3][1] / level[3][0])) > 3      # FOLD off: louder at full drive
+
+
+def test_a_refused_insert_stays_out_and_switches_without_a_step():
+    # 2026-11-12 (perc.guard.ins_gate, program.smooth; the unit's skips toggled inserts every block, a click each): a
+    # refused instance stays out until it fits INS_HOLD blocks in a row, and the block it goes out or comes back
+    # carries no step: the output's first sample is within a small fraction of the wet-dry step of the last
+    import math
+    from dnfw.perc import guard as G
+    rows = {2: [D.FUZZ, 127, 100, 90, 0, 30, 0, 100]}
+    unfit = {20, 21, 30}                         # refused at 20 and 21 (and at 30: the count starts again)
+
+    def play(deadline: bool):
+        m, out = mem0(), []
+        if deadline:
+            m.put(G.INS_DLP, 100_000)
+        for b in range(140):
+            m.put(G.INS_TESTCLK, 99_000 if b in unfit else 0)
+            ph = [2 * math.pi * 220 * (32 * b + j) / D.FS for j in range(32)]
+            bufs = [[0.3 * math.sin(x) for x in ph] for _ in range(D.TRACKS)]
+            out.append([fval(w) for w in call(m, par_of(rows), bufs)[2]])
+        return m, out
+    m, got = play(True)
+    _, want = play(False)
+    back = 30 + G.INS_HOLD                       # fits from 31: back at 30 + 64
+    assert m.get(G.INS_SKIPS) == back - 20
+    assert got[:20] == want[:20]
+    for b in range(21, back):                    # out: the dry
+        ph = [2 * math.pi * 220 * (32 * b + j) / D.FS for j in range(32)]
+        assert got[b] == [np.float32(0.3 * math.sin(x)) for x in ph], b
+    for b in (20, back):                         # where it goes out and comes back: a tenth of the step it was
+        dry0 = np.float32(0.3 * math.sin(2 * math.pi * 220 * 32 * b / D.FS))
+        raw = abs(float((dry0 if b == 20 else want[b][0]) - got[b - 1][31]))
+        jump = abs(float(got[b][0] - got[b - 1][31]))
+        assert raw > 0.2 and jump < 0.1 * raw, (b, jump, raw)

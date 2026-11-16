@@ -68,18 +68,22 @@ static const u8 BUILT[TYPES] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};   /* 
 
 static const char *const NAME[TYPES] = {"OFF", "FUZZ", "TAPE", "FOLD", "CHOR", "WIDE", "HARM", "FDN8", "XDLY",
                                         "SUB", "DIST", "GATR", "RING", "JUNO"};
+/* 2026-11-12 (the User: "auto adjust level", "the post gain in the same position everywhere for all distos"): on the
+ * distortions PGAIN is place 4 (F) and AUTO place 5 (G), an on/off switch: a turn right sets 127, left 0 (the DSP: on
+ * above 63, dnfw.inserts.design.AUTO_ON). HARM's PGAIN is its stored LEV (K5), back on the page */
+static const char AUTO_LABEL[] = "AUTO";
 static const char *const LABEL[TYPES][6] = {
     {"", "", "", "", "", ""},
     {"DRIV", "TONE", "BIAS", "PRE", "GATE", "PGAIN"},
     {"DRIV", "WOW", "WRAT", "FLUT", "AGE", "HISS"},
-    {"AMNT", "SYMM", "SHPE", "TONE", "PGAIN", ""},
+    {"AMNT", "SYMM", "SHPE", "TONE", "PGAIN", AUTO_LABEL},
     {"DPTH", "RATE", "DLY", "VOIC", "WDTH", "FDBK"},
     {"WDTH", "TIME", "BASS", "TONE", "", ""},
-    {"AMNT", "FREQ", "EVEN", "TONE", "", ""},
+    {"AMNT", "FREQ", "EVEN", "TONE", "PGAIN", AUTO_LABEL},
     {"PRE", "SIZE", "DAMP", "MOD", "HPF", "LPF"},     /* FDN8 (docs/fdn8.md's knobs) */
     {"TIM1", "TIM2", "FDBK", "MOD", "TONE", ""},      /* XDLY (docs/xdly.md's knobs) */
     {"BAND", "TONE", "OCT", "", "", ""},              /* SUB (docs/inserts.md, ported from Optimist); stored LEV (K1) and DRY (K5) off the page 2026-11-11, so place k is stored field k + 1 (DOFF) */
-    {"DRIV", "TONE", "BIAS", "LOW", "PGAIN", ""},       /* DIST */
+    {"DRIV", "TONE", "BIAS", "LOW", "PGAIN", AUTO_LABEL},   /* DIST */
     {"DPTH", "PATN", "RATE", "SHPE", "SWNG", ""},     /* GATER */
     {"FREQ", "SHPE", "AM", "", "", ""},              /* RING (LEV, K4, off the page 2026-11-11) */
     {"MODE", "", "", "", "", ""},                    /* JUNO: I / II / I+II (thirds of 0..127); MIX as Optimist's */
@@ -271,7 +275,10 @@ static void turn(int knob, int delta)
         int y = ins_sel[t][j];
         if (y && LABEL[y][knob - 2][0]) {
             u8 *v = &ins_kv[t][j][y][knob - 2 + DOFF(y)];
-            *v = (u8)clamp(*v + delta, 0, 127);
+            if (LABEL[y][knob - 2] == AUTO_LABEL)
+                *v = delta > 0 ? 127 : delta < 0 ? 0 : *v;   /* a switch */
+            else
+                *v = (u8)clamp(*v + delta, 0, 127);
         }
     }
     ins_gen++;

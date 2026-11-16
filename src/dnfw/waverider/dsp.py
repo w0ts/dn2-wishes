@@ -160,7 +160,7 @@ STOCK_DELAY_SW = 0xB8482C
 # the range proven on units; XDLY's branch ends its span here), their state after the code. smp.asm's
 # tail JUMPs to wr_ins, which JUMPs on to PING.
 INS_L2_LOAD = 0x200ADA00                     # 2026-11-10 (0x200AE000 until the four ports)
-INS_L2_SPAN = 0x1C00                         # the code (0x1b00 until 2026-11-11: one, the bus pass's moved inserts); 0x1800 until
+INS_L2_SPAN = 0x2000                         # the code (2026-11-12: AUTO, 0x1c00 until then; 0x1b00 until 2026-11-11: one, the bus pass's moved inserts); 0x1800 until
                                              # 2026-11-10: two slots' state and the unpacked records need the room)
 INS_SW = 0xB80000 + (INS_L2_LOAD - 0x20000000) // 2          # 0xbd7000
 INS_STATE_DM = 0x2E3000                                      # 2026-11-11 (perf): L1, in the zeros after the shared tail (was L2 0x200af400)
@@ -168,8 +168,8 @@ INS_STATE_DM = 0x2E3000                                      # 2026-11-11 (perf)
 # L2 after the inserts' state (below the sample machines' span), their state after the code, their rings
 # in DDR. The engine's call of the FX sends (sw 0x1c3054) gets wr_inpost as its target; wr_inpost JUMPs on
 # to the sends.
-POST_L2_LOAD = 0x200B0000
-POST_L2_SPAN = 0x1800                        # the code (4,078 B since 2026-11-11, the unrolled loops; 0x1000 before; the L2 from 0x200b1800 to the sample machines' is unused)
+POST_L2_LOAD = 0x200AFA00                    # 2026-11-12 (the guard's hold; the arbiter): 0x200b0000 until then, same end
+POST_L2_SPAN = 0x1E00                        # the code (4,078 B since 2026-11-11, the unrolled loops; 0x1000 before; the L2 from 0x200b1800 to the sample machines' is unused)
 POST_SW = 0xB80000 + (POST_L2_LOAD - 0x20000000) // 2        # 0xbd8000
 # 2026-11-09: DRONE's BEAT side blocks at 0x200b1800 (dnfw.inserts.post.SIDE_L2, 0x900 B); the A2 filter
 # machines' pass (dnfw.a2f.program): its code, then its state
@@ -190,9 +190,9 @@ SENDS_SITE_STOCK = bytes.fromhex("04181c003817")
 # instances' stores, not loaded); each instance's DDR in dnfw.inserts.design (FDN8_RING_DDR,
 # XDLY_LINES_DDR), not loaded either (a fresh instance clears, or never reads, what it has not written)
 INSBUS_L2_LOAD = 0x200BC000
-INSBUS_L2_SPAN = 0x1000                      # (0xc00 until 2026-11-11: the unrolled copy loops, insbus.asm 3,154 B)
+INSBUS_L2_SPAN = 0x1100                      # (0x1000 until 2026-11-12: the FDN8 bound by block; 0xc00 until 2026-11-11: the unrolled copy loops, insbus.asm 3,154 B)
 INSBUS_SW = 0xB80000 + (INSBUS_L2_LOAD - 0x20000000) // 2    # 0xbde000
-INSBUS_STATE_L2 = INSBUS_L2_LOAD + INSBUS_L2_SPAN            # 0x200bd000
+INSBUS_STATE_L2 = INSBUS_L2_LOAD + INSBUS_L2_SPAN            # 0x200bd100
 # 2026-11-12: the chorus SEND's TYPE JUNO (dnfw.inserts.jsend, docs/inserts.md "The chorus send"): its code in L2 in
 # the old MD state room after opt-samples' 0x200a0000..0x200a1800 (claimed in docs/memory-map.md's SHARC list); the
 # FX bus's CALL of the stock chorus retargeted to it; its scratch is the post pass's (L1), its words and ring in DDR
@@ -779,6 +779,10 @@ def l2_spans() -> list[tuple[str, int, bytes]]:
     assert _ins().INS_ONE_SW == INS_SW + 3
     out.append(("the moved inserts' state (zeros), in L2", ins_bus.MV_STATE,
                 bytes(ins_bus.MV_END - ins_bus.MV_STATE)))
+    # 2026-11-12: the insert instances' aux words (dnfw.inserts.design.AUTO_L2 .. BUS_AUX_END: AUTO's powers and the
+    # guard's hold, perc.guard.ins_gate; the pre pass's, the moved slot 2s', the bus instances'), zeros
+    out.append(("the inserts' aux words: AUTO, the guard's hold (zeros), in L2", _ins().AUTO_L2,
+                bytes(_ins().BUS_AUX_END - _ins().AUTO_L2)))
     if "a2f" in obj:                             # 2026-11-09: the A2 filter machines' pass (dnfw.a2f)
         from ..a2f import program as a2f_program
         code = obj["a2f"]
@@ -1053,7 +1057,9 @@ def regions() -> list[tuple[str, int, int, str]]:
              ("the costs", PP.MNM_COSTS_OFF, 64), ("the voice order", PP.ORDER_OFF, 0x50),
              ("the rests", PP.RESTS_OFF, 64), ("the strikes", PP.STRIKES_OFF, 64), ("the bounds", PP.BOUNDS_OFF, 64),
              ("the slot counter", PP.SLOT_N, 4), ("ANALOG 2's mix tables", A2.TABLES_OFF, 4 * len(A2.table_words())),
-             ("the velocities (VEL_OFF)", getattr(PP, "VEL_OFF", None), 64)]
+             ("the velocities (VEL_OFF)", getattr(PP, "VEL_OFF", None), 64),
+             ("the post inserts' aux and gate words (inserts.design.POST_AUX_L2)", _ins().POST_AUX_L2 - MNM_SCRATCH_L2,
+              _ins().POST_AUX_END - _ins().POST_AUX_L2)]
     for what, off, n in words:
         if off is not None:
             area(what, mnm + off, n, scr)

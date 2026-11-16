@@ -60,7 +60,7 @@ assert PACK_OFFSET + 4 * PACK_WORDS == 0x1000 and RECORDS * FIELDS * 7 == 32 * P
 # the bus pass's L2 (dnfw.waverider.dsp.INSBUS_L2_LOAD: the 16 KB between the sample machines' code,
 # which ends at 0x200bc000, and PERC's at 0x200be200 (0x200c0000 until 2026-11-12); clear of ports3's 0x200b1800..0x200b6000): its
 # code, then its state
-BUS_STATE = 0x200BD000                            # (dnfw.waverider.dsp.INSBUS_STATE_L2)
+BUS_STATE = 0x200BD100                            # (dnfw.waverider.dsp.INSBUS_STATE_L2; 0x200bd000 until 2026-11-12, the code's span + 0x100)
 BUS_STATE_END = 0x200BE200                        # PERC's code starts here (dnfw.waverider.dsp.PERC_L2_LOAD)
 # the unpacked records, then the last change word: in the pre pass's state (loaded with zeros). 2026-11-11 (perf):
 # L1 (0x2e3000 + 0x600; was L2 0x200AFA00, 4 cycles an access): the pre and post passes' state and scratch are in
@@ -194,6 +194,37 @@ DS_LOW_LO, DS_LOW_SPAN = 20.0, 16.0
 W_DL = -2 * math.pi * DS_LOW_LO / FS / math.log(2)
 LOG2_DL_SPAN = math.log2(DS_LOW_SPAN)
 DS_LEV_MAX = 2.0
+
+# AUTO (2026-11-12, the User: "auto adjust level"): DIST, FOLD and HARM's knob G (stored field 5), on (64..127) or off
+# (0..63; 0 in every record saved before it). On, the wet (after PGAIN) is scaled so that its power follows the dry's
+# (the clamped input's) times PGAIN's own gain T: c = T x sqrt(Pin / Pout), each power a one-pole of ~50 ms over the
+# blocks' mean squares, both floored (silence: c = T), Pin / Pout held to 2^+-12. Off, c = 1.0 (bit-identical). The
+# powers update every block, on or off, so a switch to on starts from the voice's level. Two words per (voice slot,
+# insert slot), and per moved slot 2 (L and R), in L2 after the bus pass's moved state (zeros at power-on; zeroed
+# with the insert's state when its type or track changes)
+AUTO_TYPES = (DIST, FOLD, HARM)
+AUTO_ON = 0.5                                     # p6 = field 5 / 127 above this: on (the page writes 0 or 127)
+AUTO_TAU = 0.05
+AUTO_A = 1.0 - math.exp(-BLOCK / (AUTO_TAU * FS))
+AUTO_FLOOR = 1e-8                                 # a power (-80 dB)
+AUTO_R_MIN, AUTO_R_MAX = 2.0 ** -12, 2.0 ** 12
+# 2026-11-12 (the guard's hold, perc.guard.ins_gate): the same instances' aux words are 4: AUTO's Pin, Pout, the
+# gate's out count, the last block's wet - dry difference at its last sample (program.smooth)
+AUX_WORDS = 4
+AUTO_L2 = 0x200BDA00                              # 32 x 4 words: the pre pass's (voice slot, insert slot) i
+AUTO_MV_L2 = AUTO_L2 + 4 * AUX_WORDS * RECORDS    # 32 x 4 words: a moved slot 2's, 2 t + side
+AUTO_END = AUTO_MV_L2 + 4 * AUX_WORDS * MV_INSTANCES
+# the bus instances' (FDN8's then XDLY's): word 2 the gate's out count (guard.ins_gate; the fade is bus.blend's MIX)
+BUS_AUX_L2 = AUTO_END
+BUS_AUX_END = BUS_AUX_L2 + 4 * AUX_WORDS * 12      # (FDN8_INSTANCES + XDLY_INSTANCES, below)
+assert BUS_AUX_END <= 0x200BE100 <= BUS_STATE_END   # the bus pass's room (the arbiter, 2026-11-12)
+# the post pass's (CHOR WIDE JUNO): its instances' aux words (32 x 4: the last wet - dry, L and R, the gate's out
+# count) and its gate's own words (8: its L1 scratch is full), in the Monomachine L2 scratch (the arbiter,
+# 2026-11-12: +0x3440..+0x36c0; a loaded span, zeros at every DSP load)
+POST_AUX_L2 = 0x200A7440
+POST_GW_L2 = POST_AUX_L2 + 4 * AUX_WORDS * RECORDS
+POST_AUX_END = POST_GW_L2 + 4 * 8
+assert POST_AUX_END <= 0x200A76C0
 
 # RING: K1 FREQ, K2 SHPE, K3 AM, K4 LEV. The voice times a sine of 26 Hz x 100^p (26 Hz .. 2.6 kHz,
 # Optimist's range, an exponential knob); SHPE drives the sine into a clip (x 1 .. 16: towards a square);
@@ -368,6 +399,7 @@ def unpack(words: list[int]) -> list[int]:
 FDN8_INSTANCES = 8
 FDN8_RING_DDR, FDN8_RING_STRIDE = 0x82800000, 0x80000      # 8 x 512 KB (aligned to its size: the ring's mask)
 XDLY_INSTANCES = 4
+assert BUS_AUX_END == BUS_AUX_L2 + 4 * AUX_WORDS * (FDN8_INSTANCES + XDLY_INSTANCES)
 XDLY_LINES_DDR, XDLY_LINES_STRIDE = 0x83000000, 0x400000   # 4 x 4 MB: two lines of 2^19 floats (10.9 s)
 assert FDN8_RING_DDR + FDN8_INSTANCES * FDN8_RING_STRIDE <= XDLY_LINES_DDR
 assert XDLY_LINES_DDR + XDLY_INSTANCES * XDLY_LINES_STRIDE <= POOL_DDR
@@ -375,14 +407,17 @@ assert XDLY_LINES_DDR + XDLY_INSTANCES * XDLY_LINES_STRIDE <= POOL_DDR
 # -- the guard (dnfw.perc.guard, "the inserts never cost a voice"): an insert runs in a block only if
 # it is expected to end before the frame's insert deadline; the bounds are the runner's cost of one
 # unit (docs/inserts.md) x 1.5, x 2 for the DDR-heavy (DDR's cost on the unit is unmeasured)
-COST = {FUZZ: 5_700, TAPE: 8_200, FOLD: 6_300, HARM: 4_700, CHOR: 13_000, WIDE: 4_700,
+# AUTO (2026-11-12): + ~265 a block in the model on FUZZ (DIST's loop), FOLD, HARM, DIST (5 instructions a sample, ~100 a
+# block); their bounds + 1.5 x that (DIST + 1.8 x, its own rule below): 5,700 6,300 4,700 5,400 until then
+COST = {FUZZ: 6_100, TAPE: 8_200, FOLD: 6_700, HARM: 5_100, CHOR: 13_000, WIDE: 4_700,
         # FDN8 (2026-11-12, opt-inserts): 32,000 until then, under its own cost: a fresh instance clears its
         # 512 KB ring for 32 blocks, 4,096 DDR writes each (FDN8_MEASURED). The bound must never be under a
-        # block's cost, or the guard lets it run past the deadline: 1.2 x the clearing block
-        FDN8: 64_000, XDLY: 20_000,
+        # block's cost, or the guard lets it run past the deadline: 1.2 x the clearing block (64,000, r11f). Since
+        # 2026-11-12 a steady block's (1.2 x FDN8_MEASURED steady); a clearing block is charged FDN8_COST_CLEAR
+        FDN8: 34_200, XDLY: 20_000,
         # SUB DIST GATER RING (2026-11-10, ins47): not run on the runner yet, so the model's steps of one
         # unit (2,143 / 2,946 / 1,610 / 1,836) x 1.2 (the runner read up to 20 % over the model) x 1.5
-        SUB: 3_900, DIST: 5_400, GATER: 2_900, RING: 3_400,
+        SUB: 3_900, DIST: 5_900, GATER: 2_900, RING: 3_400,
         # JUNO (2026-11-12): the runner's 3,530 a voice slot (16 slots 58,926 less 1 slot 5,931, / 15) x 2 (DDR-heavy:
         # eight ring reads and a write a sample)
         JUNO: 7_100}
@@ -391,4 +426,8 @@ COST = {FUZZ: 5_700, TAPE: 8_200, FOLD: 6_300, HARM: 4_700, CHOR: 13_000, WIDE: 
 # test_inserts_bus measures the clearing block again and holds COST[FDN8] >= 1.2 x it (53,073 / 32,606 until the bus
 # pass's scratch, own words and send set-aside moved to L1, 2026-11-12; the bound is left as it was)
 FDN8_MEASURED = {"clearing": 49_433, "steady": 28_410}
-assert COST[FDN8] >= 1.2 * max(FDN8_MEASURED.values())
+# 2026-11-12 (main: on the unit the skips rose 1,579 -> 40,041 a minute with 64,000 on every block): the bus pass
+# charges a block by what it will run (bus.fdn8_bound): COST[FDN8] a steady block, FDN8_COST_CLEAR one that clears
+# the ring (its first 32), each 1.2 x its measure
+FDN8_COST_CLEAR = 60_000
+assert COST[FDN8] >= 1.2 * FDN8_MEASURED["steady"] and FDN8_COST_CLEAR >= 1.2 * FDN8_MEASURED["clearing"]

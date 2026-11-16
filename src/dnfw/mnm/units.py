@@ -18,7 +18,7 @@ import math
 import pathlib
 
 KINDS = ("raw", "pct", "spct", "hz", "hz100", "ms", "c10", "c", "db", "oct", "patn", "rate", "pctc", "mode", "ms10", "voic",
-         "glid", "st10", "juno")
+         "glid", "st10", "juno", "onoff")
 # 2026-11-11: GLID up to 5 minutes (dnfw.mnm.a2glide.ms_of): too steep for a 17-point curve, so read exactly a knob
 # from its own table (`glid_table`), one a record span: ANALOG 2's LEV2 0..127, DRONE's AMD 0..120
 GLID_TOPS = (127, 120)
@@ -116,14 +116,14 @@ INS_UNITS: dict[str, dict[int, tuple]] = {
              2: ("hz100", lambda k: 10.0 * 20.0 ** (k / 127.0), False), 3: ("pct", None, False),
              4: ("hz", lambda k: 16000.0 * 2.0 ** (-3.0 * k / 127.0), False), 5: ("pct", None, False)},
     "FOLD": {0: ("db", lambda k: 24.0 * k / 127.0, False), 1: ("spct", None, False), 2: ("pct", None, False),
-             3: ("pct", None, False), 4: ("pct", None, False)},
+             3: ("pct", None, False), 4: ("pct", None, False), 5: ("onoff", None, False)},
     "CHOR": {0: ("ms10", lambda k: 40.0 * k / 127.0, False), 1: ("hz100", lambda k: 5.0 * 100.0 ** (k / 127.0), False),
              2: ("ms", lambda k: 5.0 + 10.0 * k / 127.0, False), 3: ("voic", None, False), 4: ("pct", None, False),
              5: ("pctc", lambda k: 70.0 * k / 127.0, False)},
     "WIDE": {0: ("pct", None, False), 1: ("ms10", lambda k: (24.0 + 936.0 * k / 127.0) / 48.0 * 10.0, False),
              2: ("hz", lambda k: 40.0 * 16.0 ** (k / 127.0), False), 3: ("pct", None, False)},
     "HARM": {0: ("pct", None, False), 1: ("hz", lambda k: 500.0 * 16.0 ** (k / 127.0), False),
-             2: ("pct", None, False), 3: ("pct", None, False), 4: ("pct", None, False)},
+             2: ("pct", None, False), 3: ("pct", None, False), 4: ("pct", None, False), 5: ("onoff", None, False)},
     "FDN8": {0: ("ms", lambda k: 100.0 * (k / 127.0) ** 2, False), 1: ("pct", None, False), 2: ("pct", None, False),
              3: ("pctc", lambda k: 200.0 * k / 127.0, False), 4: ("hz", lambda k: 20.0 * 100.0 ** (k / 127.0), False),
              5: ("hz", lambda k: 200.0 * 100.0 ** (k / 127.0), False)},
@@ -133,7 +133,8 @@ INS_UNITS: dict[str, dict[int, tuple]] = {
             2: ("hz", lambda k: 60.0 * 16.0 ** (k / 127.0), False), 3: ("oct", None, False), 4: ("pct", None, False)},
     "DIST": {0: ("db", lambda k: 20.0 * math.log10(0.5 * 2.0 ** (math.log2(96.0) * k / 127.0)), False),
              1: ("hz", lambda k: 300.0 * 40.0 ** (k / 127.0), False), 2: ("spct", None, False),
-             3: ("hz", lambda k: 20.0 * 16.0 ** (k / 127.0), False), 4: ("pctc", lambda k: k * 200.0 / 127.0, False)},
+             3: ("hz", lambda k: 20.0 * 16.0 ** (k / 127.0), False), 4: ("pctc", lambda k: k * 200.0 / 127.0, False),
+             5: ("onoff", None, False)},           # AUTO (2026-11-12, design.AUTO_TYPES): OFF 0..63, ON 64..127
     "GATER": {0: ("pct", None, False), 1: ("patn", None, False), 2: ("rate", None, False),
               3: ("pct", None, False), 4: ("pctc", lambda k: k * 50.0 / 127.0, False)},
     "RING": {0: ("hz", lambda k: 26.0 * 100.0 ** (k / 127.0), False), 1: ("pct", None, False),

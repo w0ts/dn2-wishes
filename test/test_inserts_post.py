@@ -210,3 +210,45 @@ def test_the_taps_line_is_the_arbiters_transient_l1():
     from dnfw.waverider import dsp
     assert P.LINE == dsp.MNM_RENDER_DM == 0x2E5400
     assert 4 * P.LINE_WORDS <= 0x200
+
+
+def test_a_refused_juno_stays_out_and_switches_without_a_step():
+    # 2026-11-12 (the User: "juno in any insert => bad"; perc.guard.ins_gate, program.smooth in the post pass): a refused
+    # JUNO stays out until it fits INS_HOLD blocks in a row, the dry while out, and the block it goes out or comes back
+    # carries no step on either side (a tenth of the step it was)
+    import math
+    from dnfw.perc import guard as G
+    route = [0] + [0xFFFF] * 15
+
+    def play(deadline: bool):
+        m, out = Mem(), []
+        if deadline:
+            m.put(G.INS_DLP, 100_000)
+        for b in range(110):
+            m.put(G.INS_TESTCLK, 99_000 if b == 20 else 0)
+            p1 = bytearray(128)
+            p1[0:8] = bytes([D.JUNO, 127, 110, 0, 0, 0, 0, 0])
+            ph = [2 * math.pi * 220 * (32 * b + j) / D.FS for j in range(32)]
+            left = [[0.0] * 32 for _ in range(16)]
+            right = [[0.0] * 32 for _ in range(16)]
+            left[0] = [0.3 * math.sin(x) for x in ph]
+            right[0] = [0.2 * math.sin(x) for x in ph]
+            lo, ro, _ = call(m, bytes(p1), left, right, route)
+            out.append(([fv(w) for w in lo[0]], [fv(w) for w in ro[0]], left[0], right[0]))
+        return m, out
+
+    def fv(w):
+        return np.float32(struct.unpack("<f", struct.pack("<I", w & 0xFFFFFFFF))[0])
+    m, got = play(True)
+    _, want = play(False)
+    back = 20 + G.INS_HOLD
+    assert m.get(G.INS_SKIPS) == G.INS_HOLD
+    assert got[:20] == want[:20]
+    for b in range(21, back):
+        assert got[b][0] == [np.float32(x) for x in got[b][2]] and got[b][1] == [np.float32(x) for x in got[b][3]], b
+    for b in (20, back):
+        for side in (0, 1):
+            first = np.float32(got[b][side + 2][0]) if b == 20 else want[b][side][0]
+            raw = abs(float(first - got[b - 1][side][31]))
+            jump = abs(float(got[b][side][0] - got[b - 1][side][31]))
+            assert raw > 0.02 and jump < 0.1 * raw, (b, side, jump, raw)

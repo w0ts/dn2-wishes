@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..fdn8.ref import F, exp2, recip, sine, trunc
+from ..fdn8.ref import F, exp2, recip, sine, sqrt, trunc
 from . import design as D
 
 
@@ -43,6 +43,7 @@ class Ref:
         self.st = [[F(0)] * D.STATE_WORDS for _ in range(D.RECORDS)]
         self.last = [(0, 0)] * D.RECORDS         # per (voice slot, insert slot): (type, track) it last ran
         self.ring = [np.zeros(D.TP_RING, F) for _ in range(D.RECORDS)]
+        self.au = [[F(0), F(0)] for _ in range(D.RECORDS)]   # AUTO's powers (design.AUTO_L2): Pin, Pout
 
     def block(self, par: bytes, bufs, route=None, tempo: int = 0, clk: int = 0) -> None:
         """TEMPO: the frame's BPM x 120 (0: 120 BPM); CLK: the ColdFire's clock word (design.CLK)"""
@@ -63,10 +64,12 @@ class Ref:
             return
         if (sel, tr) != self.last[k]:
             self.st[k] = [F(0)] * D.STATE_WORDS
+            self.au[k] = [F(0), F(0)]
             self.last[k] = (sel, tr)
             if sel == D.TAPE:
                 self.ring[k][:] = 0
         p = [F(b) * F(1 / 127) for b in v[1:8]]
+        self.k = k
         if sel == D.FUZZ:
             self.fuzz(self.st[k], p, buf)
         elif sel == D.TAPE:
@@ -84,18 +87,41 @@ class Ref:
         elif sel == D.RING:
             self.ring_mod(self.st[k], p, buf)
 
+    def auto_gain(self, on, t) -> np.float32:
+        """AUTO's gain for this block (program.auto_pre): 1.0 off, else T x sqrt(Pin / Pout)"""
+        a = self.au[self.k]
+        pi = max(a[0], F(D.AUTO_FLOOR))
+        po = max(a[1], F(D.AUTO_FLOOR))
+        r = recip(po)
+        r = r * pi
+        r = max(r, F(D.AUTO_R_MIN))
+        r = min(r, F(D.AUTO_R_MAX))
+        c = sqrt(r)
+        c = c * t
+        return c if on else F(1.0)
+
+    def auto_end(self, si, so) -> None:
+        """the block's sums of squares into the powers (program.auto_post)"""
+        a = self.au[self.k]
+        for n, x in ((0, si), (1, so)):
+            m = x * F(1 / 32)
+            d = m - a[n]
+            d = d * F(D.AUTO_A)
+            a[n] = a[n] + d
+
     def fuzz(self, s, p, buf) -> None:
         mod, drv, tone, bias, pre, gate, lev = p
         g = drv * F(D.FZ_DRIVE_OCT)
         g = exp2(g)
         k = pre * F(D.FZ_PRE_MAX)
         thr = gate * F(D.FZ_GATE_MAX)
-        v = dict(g=g, k=k, thr=thr, pa=F(D.FZ_PRE_A), rel=F(D.FZ_ENV_REL), a1=F(1.0), lv=lev, kl=F(0.0))
+        v = dict(g=g, k=k, thr=thr, pa=F(D.FZ_PRE_A), rel=F(D.FZ_ENV_REL), a1=F(1.0), lv=lev, kl=F(0.0),
+                 au=False, at=F(0.0))
         self.fz_loop(s, v, tone, bias, mod, buf)
 
     def dist(self, s, p, buf) -> None:
         """DIST: FUZZ's loop, the drive over the peak (s1, the follower), the low band dry (s0)"""
-        mod, drv, tone, bias, low, lev, _ = p
+        mod, drv, tone, bias, low, lev, auto = p
         gd = drv * F(D.DS_DRIVE_OCT)
         gd = exp2(gd)
         gd = gd * F(D.DS_DRIVE_LO)
@@ -109,7 +135,8 @@ class Ref:
         lv = lv * pk
         lv = lv * m
         pa = self.pole_c(low, D.W_DL, D.LOG2_DL_SPAN)
-        v = dict(g=g, k=F(1.0), thr=F(0.0), pa=pa, rel=F(D.DS_REL), a1=F(0.0), lv=lv, kl=F(1.0))
+        v = dict(g=g, k=F(1.0), thr=F(0.0), pa=pa, rel=F(D.DS_REL), a1=F(0.0), lv=lv, kl=F(1.0),
+                 au=auto > F(D.AUTO_ON), at=lev * F(D.DS_LEV_MAX))
         self.fz_loop(s, v, tone, bias, mod, buf)
 
     def fz_loop(self, s, v, tone, bias, mod, buf) -> None:
@@ -123,6 +150,8 @@ class Ref:
         b15 = b * F(1.5)
         y0 = b15 - y0
         lp, env, gg, dx, dy, tl = s[0], s[1], s[2], s[3], s[4], s[5]
+        ac = self.auto_gain(v["au"], v["at"])
+        si = so = F(0.0)
         for j in range(D.BLOCK):
             x = F(buf[j])
             x = max(x, F(-D.IN_MAX))
@@ -164,10 +193,14 @@ class Ref:
             o = o * gg
             lo = lp * kl
             o = o + lo
+            si = si + x * x
+            so = so + o * o
+            o = o * ac
             o = o - x
             o = o * mod
             buf[j] = x + o
         s[0], s[1], s[2], s[3], s[4], s[5] = lp, env, gg, dx, dy, tl
+        self.auto_end(si, so)
 
     def tape(self, t, s, p, buf) -> None:
         """TAPE: state s0 the age one-pole, s1 / s2 the wow / flutter phases, s3 the delay at the
@@ -255,13 +288,15 @@ class Ref:
 
     def fold(self, s, p, buf) -> None:
         """FOLD: state s0 dx, s1 dy (the DC blocker), s2 the tone one-pole"""
-        mod, amnt, symm, shpe, tone, lev, _ = p
+        mod, amnt, symm, shpe, tone, lev, auto = p
         g = amnt * F(D.FD_GAIN_OCT)
         g = exp2(g)
         b = symm - F(0.5)
         b = b * F(2 * D.FD_BIAS_MAX)
         c = self.tone_c(tone)
         dx, dy, tl = s[0], s[1], s[2]
+        ac = self.auto_gain(auto > F(D.AUTO_ON), lev)
+        si = so = F(0.0)
         for j in range(D.BLOCK):
             x = F(buf[j])
             x = max(x, F(-D.IN_MAX))
@@ -290,14 +325,18 @@ class Ref:
             w = w * c
             tl = tl + w
             o = tl * lev
+            si = si + x * x
+            so = so + o * o
+            o = o * ac
             o = o - x
             o = o * mod
             buf[j] = x + o
         s[0], s[1], s[2] = dx, dy, tl
+        self.auto_end(si, so)
 
     def harm(self, s, p, buf) -> None:
         """HARM: state s0 the band's one-pole, s1 dx, s2 dy, s3 the tone one-pole"""
-        mod, amnt, freq, even, tone, lev, _ = p
+        mod, amnt, freq, even, tone, lev, auto = p
         a = freq * F(D.LOG2_HM_SPAN)
         a = exp2(a)
         a = a * F(D.W_HM)
@@ -306,6 +345,8 @@ class Ref:
         c = self.tone_c(tone)
         k = amnt * F(D.HM_AMNT_MAX)
         lp, dx, dy, tl = s[0], s[1], s[2], s[3]
+        ac = self.auto_gain(auto > F(D.AUTO_ON), lev)
+        si = so = F(0.0)
         for j in range(D.BLOCK):
             x = F(buf[j])
             x = max(x, F(-D.IN_MAX))
@@ -335,10 +376,14 @@ class Ref:
             y = tl * k
             y = x + y
             y = y * lev
+            si = si + x * x
+            so = so + y * y
+            y = y * ac
             y = y - x
             y = y * mod
             buf[j] = x + y
         s[0], s[1], s[2], s[3] = lp, dx, dy, tl
+        self.auto_end(si, so)
 
     def sub(self, s, p, buf) -> None:
         """SUB: state s0 the band's one-pole, s1 its envelope, s2 the rounded square, s3 the flip-flop,

@@ -194,4 +194,57 @@ def test_the_guard_bound_covers_a_clearing_fdn8():
     clearing = costs[1] - costs[0]
     assert m.n[2] >= 4096                                    # it is a clearing block
     assert abs(clearing - D.FDN8_MEASURED["clearing"]) <= 0.02 * clearing
-    assert D.COST[D.FDN8] >= 1.2 * clearing
+    assert D.FDN8_COST_CLEAR >= 1.2 * clearing
+
+
+def test_the_fdn8_bound_is_the_clearing_one_only_while_it_clears():
+    # 2026-11-12 (the unit's skips with 64,000 on every block): the bus pass charges a block the clearing bound
+    # while the instance clears its ring (a new owner, then 32 blocks), the steady one after
+    noise = [[0.1 * ((t * 7 + j * 3) % 11 - 5) for j in range(D.BLOCK)] for t in range(D.TRACKS)]
+    m = mem0()
+    rows = {(0, 0): rec(D.FDN8, 0, 64, 10, 90, 30, 64, 0, 127)}
+    bounds = []
+    for b in range(40):
+        call(m, table(rows), noise, noise, {r: 0 for r in range(16)})
+        bounds.append(m.get(B.C["bnd"]))
+    assert bounds[:32] == [D.FDN8_COST_CLEAR] * 32 and bounds[33:] == [D.COST[D.FDN8]] * 7, bounds
+    rows = {(0, 0): rec(D.FDN8, 0, 64, 10, 90, 30, 64, 0, 127), (1, 0): rec(D.FDN8, 0, 64, 10, 90, 30, 64, 0, 127)}
+    call(m, table({(1, 0): rows[(1, 0)]}), noise, noise, {r: 0 for r in range(16)})
+    assert m.get(B.C["bnd"]) == D.FDN8_COST_CLEAR                 # the instance to another track: a new owner
+
+
+def test_a_refused_bus_insert_fades_out_stays_out_and_fades_back():
+    # 2026-11-12 (perc.guard.ins_gate with grace, bus.blend's MIX x g; opt-host's ins_fade): an XDLY refused within
+    # P/16 past the deadline runs once more, fading to the dry over that block; it stays out INS_HOLD blocks (the
+    # track's block untouched) and comes back fading in. Refused past the grace, it is out at once
+    import math
+    from dnfw.perc import guard as G
+    rows = {(0, 0): rec(D.XDLY, 0, 127, 20, 30, 100, 40, 90)}
+
+    def fval(w):
+        return np.float32(struct.unpack("<f", struct.pack("<I", w & 0xFFFFFFFF))[0])
+
+    def play(clk_at):
+        m, out = mem0(), []
+        m.put(G.INS_DLP, 100_000)
+        m.put(G.PERIOD, 666_667)
+        for b in range(100):
+            m.put(G.INS_TESTCLK, clk_at.get(b, 0))
+            ph = [2 * math.pi * 220 * (32 * b + j) / D.FS for j in range(32)]
+            left = [[0.0] * 32 for _ in range(16)]
+            left[0] = [0.3 * math.sin(x) for x in ph]
+            lo, ro, _ = call(m, table(rows), left, left, {r: 0 for r in range(16)})
+            out.append(([fval(w) for w in lo[0]], [np.float32(x) for x in left[0]]))
+        return m, out
+    m, got = play({20: 90_000})                  # 110,000 > 100,000, within 100,000 + 41,666: faded
+    _, always = play({})
+    back = 20 + G.INS_HOLD
+    assert got[:20] == always[:20]
+    assert got[20][0] != got[20][1] and got[20][0][31] == got[20][1][31]   # it ran, and ends on the dry
+    for b in range(21, back):
+        assert got[b][0] == got[b][1], b          # out: the track's block as it came
+    assert got[back][0] != got[back][1]           # back
+    assert abs(float(got[back][0][0] - got[back][1][0])) < 0.1 * abs(float(always[back][0][0] - always[back][1][0])) + 1e-6
+    assert m.get(G.INS_SKIPS) == back - 20
+    m2, hard = play({20: 200_000})               # past the grace: out at once
+    assert hard[20][0] == hard[20][1] and m2.get(G.INS_SKIPS) == back - 20

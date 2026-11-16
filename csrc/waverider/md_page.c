@@ -309,6 +309,8 @@ static const char *unit_text_of(int kind, int curve, int k)
         return mode5[(k * 5) >> 7];
     if (kind == MU_JUNO)                            /* JUNO's MODE (dnfw.inserts.design.JN_MODE_K) */
         return juno3[(k * 3) >> 7];
+    if (kind == MU_ONOFF)                           /* 2026-11-12: the inserts' AUTO (design.AUTO_ON) */
+        return k < 64 ? "OFF" : "ON";
     if (kind == MU_VOIC) {                          /* CHOR's voices: 1 + trunc(3.99 p) */
         int vv = 1 + (k * 399 / 127) / 100;
         ub[0] = 'V'; ub[1] = (char)('0' + (vv > 4 ? 4 : vv)); ub[2] = 0;

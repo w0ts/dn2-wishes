@@ -83,8 +83,10 @@ INS_LO = GUARD - 0x10
 INS_DLP = INS_LO + 0x00          # 2026-11-11: this pass's deadline (ins_start), 0 when none is known
 INS_BUSEND = INS_LO + 0x04       # 2026-11-11: EMUCLK as the bus pass (the last insert pass) ended
 REST_OUT = INS_LO + 0x08         # 2026-11-11: the stock's time after the bus pass (the output stage), held at its peak
-INS_LO_END = INS_LO + 0x0C
+INS_TESTCLK = INS_LO + 0x0C      # 2026-11-12: the model's stand-in for EMUCLK in ins_gate (the DSP never reads it)
+INS_LO_END = INS_LO + 0x10
 assert INS_LO_END <= GUARD
+INS_HOLD = 64                    # 2026-11-12 (ins_gate): blocks an instance, once refused, must fit in a row to come back
 
 
 # 2026-11-09 (the User's choice B): a PLAITS note's first START_BLOCKS blocks are expected at the
@@ -620,11 +622,80 @@ def ins_end(p, last: bool = False) -> None:
     p.st(INS_ACC, 8)
 
 
-def ins_admit(p, cost: int, run) -> None:
+def ins_gate(p, cost_at: int, aux_at: int, status_at: int, run, grace: bool = False) -> None:
+    """2026-11-12 (main: the unit's skips toggled inserts wet / dry every block, a click each): RUN() for an insert
+    instance by its bound (the word at COST_AT) against the pass's deadline, as ins_admit, but an instance once
+    refused stays out until it has fitted INS_HOLD blocks in a row. Its out count is word 2 of its aux words (the
+    address at AUX_AT). STATUS_AT gets 0 ran, 1 ran again after being out, 2 left out (just refused), 3 left out
+    (still); 2 and 3 count in INS_SKIPS. The model reads INS_TESTCLK for EMUCLK (0 deadline: every block fits, as
+    the runner). GRACE (the bus pass, opt-host's ins_fade): a refusal still within P/16 past the deadline is 4, RUN
+    once more (the caller fades it out over that block), counted as left out. Clobbers R0-R3, R8-R10, R12, I4
+    before RUN."""
+    p.iconst(9, 1)                               # fits
+    p.ld(10, INS_DLP)
+
+    def check():
+        if p.run:
+            p.ld(8, INS_TESTCLK)
+        else:
+            p.e("R8 = EMUCLK;")
+        p.ld(9, MARK0)
+        p.iop(8, 8, "-", 9)
+        p.ld(9, cost_at)
+        p.iop(8, 8, "+", 9)
+        p.iconst(9, 1)
+        p.if_(8, "GT", 10, lambda: p.iconst(9, 0), kind="i")
+    p.ifz(10, "NE", check)
+    p.ld(2, aux_at)
+    p.seti(4, 2)
+    p.ldi(3, 2, 4)                               # the out count
+
+    def fits():
+        def back():
+            p.iconst(12, 1)
+            p.iop(3, 3, "-", 12)
+            p.sti(2, 4, 3)
+            p.iconst(0, 3)
+            p.ifz(3, "EQ", lambda: p.iconst(0, 1))
+        p.iconst(0, 0)
+        p.ifz(3, "NE", back)
+
+    def refused():
+        def just():
+            p.iconst(0, 2)
+            if grace:                            # R8: when it would end, R10 the deadline
+                p.ld(1, PERIOD)
+                p.lsh(1, 1, -4)
+                p.iop(1, 10, "+", 1)
+                p.if_(8, "LE", 1, lambda: p.iconst(0, 4), kind="i")
+        p.iconst(0, 3)
+        p.ifz(3, "EQ", just)
+        p.iconst(3, INS_HOLD)
+        p.sti(2, 4, 3)
+    p.ifz(9, "NE", fits, refused)
+    p.st(status_at, 0)
+    p.iconst(1, 2)
+
+    def out():
+        p.ld(8, INS_SKIPS)
+        p.iconst(9, 1)
+        p.iop(8, 8, "+", 9)
+        p.st(INS_SKIPS, 8)
+    p.if_(0, "GE", 1, out, kind="i")
+    p.ld(0, status_at)                           # RUN once in the code: 0, 1, and (GRACE) 4
+    if grace:
+        p.iconst(1, 4)
+        p.if_(0, "EQ", 1, lambda: p.iconst(0, 0), kind="i")
+    p.iconst(1, 2)
+    p.if_(0, "LT", 1, run, kind="i")
+
+
+def ins_admit(p, cost: int, run, cost_at: int | None = None) -> None:
     """RUN() if the insert is expected to end before its pass's deadline (INS_DLP: EMUCLK - MARK0
     + COST), or no deadline is known yet (0: the runner, a frame not measured); else INS_SKIPS + 1 and the
     insert left out of this block (the sound passes as it is). The model always runs it (the runner's clock
-    does not move either). Clobbers R8-R10 before RUN."""
+    does not move either). COST_AT: the word holding this block's bound instead of COST (2026-11-12, the
+    bus FDN8's clearing and steady blocks). Clobbers R8-R10 before RUN."""
     if p.run:
         run()
         return
@@ -636,7 +707,10 @@ def ins_admit(p, cost: int, run) -> None:
     p.e("R8 = EMUCLK;")
     p.ld(9, MARK0)
     p.e("R8 = R8 - R9;", "into the frame")
-    p.iconst(9, cost)
+    if cost_at is None:
+        p.iconst(9, cost)
+    else:
+        p.ld(9, cost_at)
     p.e("R8 = R8 + R9;", "and this insert's bound")
     p.e("COMP(R8, R10);")
     p.jump("LE", go)

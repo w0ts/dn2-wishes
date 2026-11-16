@@ -32,6 +32,7 @@ _NAMES = (["t", "cnt", "tr", "sel", "i", "j", "rec", "sa", "rb", "lp", "rp"] + [
           + [f"sv{k}" for k in range(16)] + [f"svi{i}" for i in SAVE_I] + ["sva", "bk", "bg"])
 C = {n: SCRATCH + 4 * k for k, n in enumerate(_NAMES)}
 SCRATCH_BYTES = 4 * len(_NAMES)
+GW = {n: D.POST_GW_L2 + 4 * k for k, n in enumerate(("aa", "icost", "ist", "rbuf", "dl0", "dl31", "dr0", "dr31"))}
 SENDS_SW = 0x1C1738              # the FX sends, the call's stock target
 MASK = D.POST_RING - 1
 # 2026-11-12 (opt-inserts): a tap's reads in a block lie in one span of its ring that the block does not write
@@ -909,6 +910,9 @@ def run(p: Prog) -> None:
     p.iconst(12, D.POST_RING_DDR + 4 * D.POST_MIRROR)   # the words before the ring mirror its last (CHOR: one, JUNO: three)
     p.iop(1, 12, "+", 8)
     p.st(C["rb"], 1)
+    p.iconst(12, D.POST_AUX_L2)                  # its aux words (R9 = 16 i)
+    p.iop(1, 12, "+", 9)
+    p.st(GW["aa"], 1)
     p.ld(0, C["t"])
     p.lsh(1, 0, 8)                               # the voice slot's stereo block
     p.iconst(12, D.STEREO)
@@ -937,6 +941,10 @@ def run(p: Prog) -> None:
         p.ld(5, C["sel"])
         p.sti(STATE_WORDS - 2, 4, 8)
         p.sti(STATE_WORDS - 1, 4, 5)
+        p.ld(2, GW["aa"])
+        p.seti(4, 2)
+        for k in range(D.AUX_WORDS):
+            p.sti(k, 4, 9)
         p.ld(1, C["rb"])
         p.seti(0, 1)
         p.fconst(0, 0.0)
@@ -952,15 +960,27 @@ def run(p: Prog) -> None:
         p.ldi(8, k, 4)
         p.st(C[f"s{k}"], 8)
     PR.values(p, C)
-    p.ld(5, C["sel"])
-    p.iconst(6, D.WIDE)
 
-    def not_wide():
+    def by_type(wide_, juno_, chor_):
         p.ld(5, C["sel"])
-        p.iconst(6, D.JUNO)
-        p.if_(5, "EQ", 6, lambda: G.ins_admit(p, D.COST[D.JUNO], lambda: juno(p)),
-              lambda: G.ins_admit(p, D.COST[D.CHOR], lambda: chor(p)), kind="i")
-    p.if_(5, "EQ", 6, lambda: G.ins_admit(p, D.COST[D.WIDE], lambda: wide(p)), not_wide, kind="i")
+        p.iconst(6, D.WIDE)
+
+        def not_wide():
+            p.ld(5, C["sel"])
+            p.iconst(6, D.JUNO)
+            p.if_(5, "EQ", 6, juno_, chor_, kind="i")
+        p.if_(5, "EQ", 6, wide_, not_wide, kind="i")
+
+    def cost(typ):
+        return lambda: (p.iconst(1, D.COST[typ]), p.st(GW["icost"], 1))
+    by_type(cost(D.WIDE), cost(D.JUNO), cost(D.CHOR))
+    for side, d0, d31 in (("lp", "dl0", "dl31"), ("rp", "dr0", "dr31")):
+        PR.dry_ends(p, C[side], GW[d0], GW[d31])
+    G.ins_gate(p, GW["icost"], GW["aa"], GW["ist"], lambda: by_type(lambda: wide(p), lambda: juno(p), lambda: chor(p)))
+    for k, (side, d0, d31) in enumerate((("lp", "dl0", "dl31"), ("rp", "dr0", "dr31"))):
+        p.ld(0, C[side])
+        p.st(GW["rbuf"], 0)
+        PR.smooth(p, GW["aa"], GW["ist"], GW["rbuf"], GW[d0], GW[d31], k)
     p.ld(2, C["sa"])
     p.seti(4, 2)
     for k in range(6):
