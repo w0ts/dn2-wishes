@@ -334,7 +334,7 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
         p.float_(5, 4, 12)
         p.fconst(12, 1.0 / top)
         p.fop(5, 5, "*", 12)
-        p.st(C[f"p{k}" if k < 8 else f"q{k - 8}"], 5)
+        p.st(C[f"p{k}" if k < 8 else f"q{k - 8}" if k < 15 else f"r{k - 15}"], 5)
     for k, (_rid, slot, lo, top) in enumerate(M.PARAMS):
         param(k, slot, lo, top)
 
@@ -353,6 +353,16 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
         p.iconst(12, idx)
         p.if_(5, "EQ", 12, lambda: p.iconst(6, 1), kind="i")
     p.ifz(6, "NE", fx_params)
+    # 2026-11-11: page 3's words (r0, r1: ANALOG 2's GLID, GLTY), for the Monomachine machines that have one
+    page3 = [k + 1 for k, _m in enumerate(_MNMM.MACHINES) if hasattr(_m, "PNAMES3")]
+    if page3:
+        p.ld(5, C["mnm"])
+        p.iconst(6, 0)
+        for idx in page3:
+            p.iconst(12, idx)
+            p.if_(5, "EQ", 12, lambda: p.iconst(6, 1), kind="i")
+        p.ifz(6, "NE", lambda: [param(8 + 7 + k, slot, lo, top)
+                                for k, (_rid, slot, lo, top) in enumerate(M.P3_RECS[:M.P3_READ])])
     # the Machinedrum machine (v0.17, docs/md.md): its slot's words at I3
     p.ld(9, C["t"])
     p.lsh(12, 9, 10)

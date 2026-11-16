@@ -14,7 +14,11 @@ from __future__ import annotations
 
 import math
 
-KINDS = ("raw", "pct", "spct", "hz", "hz100", "ms", "c10", "c", "db", "oct", "patn", "rate", "pctc", "mode", "ms10", "voic")
+KINDS = ("raw", "pct", "spct", "hz", "hz100", "ms", "c10", "c", "db", "oct", "patn", "rate", "pctc", "mode", "ms10", "voic",
+         "glid")
+# 2026-11-11: GLID up to 5 minutes (dnfw.mnm.a2glide.ms_of): too steep for a 17-point curve, so read exactly a knob
+# from its own table (`glid_table`), one a record span: ANALOG 2's LEV2 0..127, DRONE's AMD 0..120
+GLID_TOPS = (127, 120)
 OFF_BIT = 0x80
 
 
@@ -33,13 +37,14 @@ UNITS: dict[str, dict[str, tuple]] = {
         "TONE": ("hz", _tone_hz, False),
         "BEAT": ("hz100", lambda k: 5.0 * 800.0 ** (k / 127.0), True),   # Optimist's F_LFOHZ: 0.05 .. 40 Hz, 0 OFF
         "DTUN": ("c10", lambda k: k * 67.0 / 128.0, False),              # the generators' step, up to ~6.7 cents
-        "GLID": ("ms", lambda k: 10.0 ** (4.0 * k / 127.0), True),       # 1 ms .. 10 s, 0 OFF
+        "GLID": ("glid", None, True),                                    # 1 ms .. 5 min (a2glide.ms_of), 0 OFF
     },
     "ANALOG2": {
         "DTN": ("c", None, False), "MIX": ("pct", None, False), "NOIS": ("pct", None, False),
         "CUT": ("hz", lambda k: 30.0 * 2.0 ** (k * math.log2(16000.0 / 30.0) / 127.0), False),
         "RES": ("pct", None, False), "DRV": ("pct", None, False), "KTR": ("spct", None, False),
         "SDTN": ("pct", None, False), "DRFT": ("pct", None, False),
+        "GLID": ("glid", None, True),                                    # 2026-11-11, page 3: DRONE's, 0 OFF
     },
 }
 
@@ -142,18 +147,36 @@ def curve(fn) -> list[int]:
     return [int(round(fn(min(127, 8 * i)))) for i in range(17)]
 
 
-def tables(machines, pnames) -> tuple[list[list[int]], list[list[int]], list[list[int]]]:
+def _glid_code(ms: float) -> int:
+    """a GLID time as the page reads it: ms under 10 s, else 10000 + tenths of a second"""
+    return int(round(ms)) if ms < 9999.5 else 10000 + int(round(ms / 100.0))
+
+
+def glid_table(top: int) -> list[int]:
+    """GLID's time for each knob 0..127 the page shows (md_page.c mnm_k: (v 254 + top) / (2 top)) of a record
+    value v 0..top, as the DSP reads it (q = v / top); a knob no value gives takes the nearest value's"""
+    from .a2glide import ms_of
+    out: list[int | None] = [None] * 128
+    for v in range(top + 1):
+        out[(v * 254 + top) // (2 * top)] = _glid_code(ms_of(v / top))
+    return [x if x is not None else _glid_code(ms_of(round(k * top / 127) / top)) for k, x in enumerate(out)]
+
+
+def tables(machines, pnames, tops=None) -> tuple[list[list[int]], list[list[int]], list[list[int]]]:
     """-> (kind code per machine and control (OFF_BIT set: knob 0 reads OFF), curve index per machine and
-    control, the curves). `machines` the CF machines in table order, `pnames(M)` their 16 control names"""
+    control, the curves). `machines` the CF machines in table order, `pnames(M)` their 24 control names,
+    `tops(j)` control j's record span (a glid kind's curve index is its place in GLID_TOPS)"""
     curves: list[list[int]] = []
     kinds, at = [], []
     for M in machines:
         krow, arow = [], []
-        for name in pnames(M):
+        for j, name in enumerate(pnames(M)):
             kind, fn, off = UNITS.get(M.NAME, {}).get(name, ("raw", None, False))
             code = KINDS.index(kind) | (OFF_BIT if off else 0)
             idx = 0
-            if fn is not None:
+            if kind == "glid":
+                idx = GLID_TOPS.index(tops(j) if tops else 127)
+            elif fn is not None:
                 c = curve(fn)
                 if c not in curves:
                     curves.append(c)

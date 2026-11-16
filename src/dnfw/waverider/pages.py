@@ -206,7 +206,8 @@ MNM_CHOICES = {
     "ANALOG2": {"WAVE": ("SAW", "SQR", "TRI", "SIN", "PWM"), "WAV2": ("=1", "SAW", "SQR", "TRI", "SIN", "PWM"),
                 "SYNC": ("OFF", "ON"), "SWRM": ("OFF", "1", "2", "3", "4", "5", "6"), "SEMI": 49,
                 "FLT": tuple(m[0] + md.replace("NTCH", "NT") for m in ("SVF", "LADR", "OTA", "DIOD", "MS20")
-                             for md in ("L12", "L24", "BP", "HP", "NTCH"))},
+                             for md in ("L12", "L24", "BP", "HP", "NTCH")),
+                "GLTY": ("OFF", "RATE", "TIME")},           # 2026-11-11: page 3 (OFF: the record's stock default)
     "DRONE": {"TOPO": ("PAIR", "CHN", "RING"), "GLTY": ("RATE", "TIME"), "HOLD": ("OFF", "ON"),
               # 2026-11-11, the User: an octave knob, -3..+3 (dnfw.mnm.drone q2), in its unit
               "OCT": ("-3oc", "-2oc", "-1oc", "0oct", "+1oc", "+2oc", "+3oc")},
@@ -227,6 +228,7 @@ MNM_WIDGET = {("SOPHIE", "MODL"): 5, ("PLAITS", "MODL"): 5,
               ("VO-6", "V-SW"): 5,
               ("DRONE", "TOPO"): 5, ("ANALOG2", "WAVE"): 5, ("ANALOG2", "WAV2"): 5, ("ANALOG2", "SYNC"): 5,
               ("ANALOG2", "SWRM"): 5, ("ANALOG2", "FLT"): 5, ("ANALOG2", "SEMI"): 6, ("DRONE", "GLTY"): 5, ("DRONE", "HOLD"): 5, ("DRONE", "OCT"): 5,
+              ("ANALOG2", "GLTY"): 5,
               # 2026-11-09: 6 MW_SEMIS, the step - n / 2 as +7 / -12 / 0 (the User, build #3: semitones,
               # not the note name); 7 MW_CENTS, the step - n / 2 as +12c / -30c
               ("PLAITS", "TUNE"): 6, ("PLAITS", "FINE"): 7}   # 2026-11-09: md_page.c draws a choice as a
@@ -244,12 +246,16 @@ MNM_PAGE = PARAM_IDS
 # Machinedrum's track-FX records and TYPE, which PERC applies only to its own machines): 16 controls
 MNM_PAGE2 = (*FX_IDS, TYPE_ID)
 from ..mnm import units as _mnm_units
-MNM_RECS = tuple(_perc.PARAMS) + tuple(_perc.FX_PARAMS) + (_perc.TYPE_REC + (0, 127),)   # (rid, slot, lo, top) x 16
+# 2026-11-11: a machine with PNAMES3 (ANALOG 2's GLID, GLTY) has a third page on eight WaveTone records no
+# machine of ours uses (their stock ranges and defaults: dnfw.perc.machines.P3_RECS): 24 controls
+MNM_PAGE3 = tuple(r for r, _slot, _lo, _top in _perc.P3_RECS)
+MNM_RECS = (tuple(_perc.PARAMS) + tuple(_perc.FX_PARAMS) + (_perc.TYPE_REC + (0, 127),)
+            + tuple(_perc.P3_RECS))   # (rid, slot, lo, top) x 24
 
 
 def mnm_pnames(M) -> tuple[str, ...]:
-    """a machine's 16 control names: its eight, then its page 2's (none: eight '---')"""
-    return tuple(M.PNAMES) + tuple(getattr(M, "PNAMES2", ("---",) * 8))
+    """a machine's 24 control names: its eight, then its page 2's and page 3's (none: eight '---')"""
+    return tuple(M.PNAMES) + tuple(getattr(M, "PNAMES2", ("---",) * 8)) + tuple(getattr(M, "PNAMES3", ("---",) * 8))
 
 
 def _mnm_ix(d: int) -> int:
@@ -262,10 +268,12 @@ def _mnm_ix(d: int) -> int:
 
 
 def mnm_pages(M) -> int:
-    return 2 if hasattr(M, "PNAMES2") else 1
+    return 3 if hasattr(M, "PNAMES3") else 2 if hasattr(M, "PNAMES2") else 1
 MNM_LABELS = [{r: (sh if sh != "---" and sh not in MNM_UNPORTED else "-") for r, sh in zip(PARAM_IDS, M.PNAMES)}
               for M in _mnm.CF_MACHINES]
-MNM_LABELS2 = [{r: (sh if sh != "---" else "-") for r, sh in zip(MNM_PAGE2, mnm_pnames(M)[8:])}
+MNM_LABELS2 = [{r: (sh if sh != "---" else "-") for r, sh in zip(MNM_PAGE2, mnm_pnames(M)[8:16])}
+               for M in _mnm.CF_MACHINES]
+MNM_LABELS3 = [{r: (sh if sh != "---" else "-") for r, sh in zip(MNM_PAGE3, mnm_pnames(M)[16:])}
                for M in _mnm.CF_MACHINES]
 MNM_TITLES = tuple(sh for _lo, sh in _mnm.CF_LIST_NAMES)
 MNM_SUBTITLES = tuple(lo for lo, _sh in _mnm.CF_LIST_NAMES)
@@ -276,7 +284,7 @@ def mnm_named(k: int) -> dict[int, tuple[str, str]]:
     M = _mnm.CF_MACHINES[k]
     out = {r: ((MNM_LONG_BY.get((M.NAME, sh), MNM_LONG.get(sh, sh)), sh) if sh != "---" and sh not in MNM_UNPORTED
                else (UNUSED_LONG, "-"))
-           for r, sh in zip(PARAM_IDS + MNM_PAGE2, mnm_pnames(M))}
+           for r, sh in zip(PARAM_IDS + MNM_PAGE2 + MNM_PAGE3, mnm_pnames(M))}
     out.update({r: (UNUSED_LONG, UNUSED_SHORT) for r in range(238, 263) if r not in out})
     return out
 
@@ -300,6 +308,16 @@ def mnm_retired() -> str:
     if c == len(MNM_CHOICES[_mnm.CF_MACHINES[mi].NAME][_mnm.CF_MACHINES[mi].PNAMES[j]]) - 1:
         raise ValueError("a retired choice needs one after it")
     return f"((mi) == {mi} && (j) == {j} && (c) == {c})"
+
+
+def mnm_default_words(d, M) -> list[int]:
+    """the 24 words MACHINE SEL writes for machine M (page 1's DEFAULTS d), 0xffff: not written"""
+    out = [_knob_word(x, t, lo) for (_r, _s, lo, t), x in zip(_perc.PARAMS, d)]
+    for pg, attr in ((1, "DEFAULTS2"), (2, "DEFAULTS3")):
+        recs = MNM_RECS[8 * pg:8 * pg + 8]
+        out += ([_knob_word(x, t, lo) for (_r, _s, lo, t), x in zip(recs, getattr(M, attr))]
+                if hasattr(M, attr) else [0xFFFF] * 8)
+    return out
 
 
 def mnm_c_header() -> str:
@@ -329,7 +347,7 @@ def mnm_c_header() -> str:
     labels = ", ".join("{" + ", ".join(q + (sh if sh != "---" and sh not in MNM_UNPORTED else "-") + q
                                        for sh in mnm_pnames(M)) + "}" for M in _mnm.CF_MACHINES)
     pidx = _pch_names()[0]
-    _UNITS = _mnm_units.tables(_mnm.CF_MACHINES, mnm_pnames)
+    _UNITS = _mnm_units.tables(_mnm.CF_MACHINES, mnm_pnames, tops=lambda j: MNM_RECS[j][3])
     _ik, _ia, _ic = _mnm_units.ins_tables()
     _base = len(_UNITS[2])
     _UNITS = (_UNITS[0], _UNITS[1], _UNITS[2] + _ic)
@@ -352,7 +370,7 @@ def mnm_c_header() -> str:
         f"#define MNM_WAVES {MNM_WAVES}",
         f"#define MNM_PCH {MNM_PCH}",
         f"static const unsigned char mnm_pch_idx[128] = {{{', '.join(map(str, pidx))}}};",
-        "#define MNM_J 16                       /* a machine's controls: page 1's eight, page 2's eight */",
+        "#define MNM_J 24                       /* a machine's controls: page 1's eight, page 2's, page 3's */",
         f"static const unsigned char mnm_npages[MNM_N] = {{{', '.join(str(mnm_pages(M)) for M in _mnm.CF_MACHINES)}}};",
         f"static const char mnm_labels[MNM_N][MNM_J][6] = {{{labels}}};",
         f"static const unsigned char mnm_lo[MNM_J] = {{{', '.join(str(lo) for _r, _s, lo, _t in MNM_RECS)}}};",
@@ -366,9 +384,9 @@ def mnm_c_header() -> str:
         # v0.33: each machine's own start (dnfw.mnm's DEFAULTS), set by MACHINE SEL (rec.c), as
         # the words the eight records take (perc.live.knob_word), and the records' ids
         f"static const unsigned short mnm_rid[MNM_J] = {{{', '.join(str(r) for r, _s, _lo, _t in MNM_RECS)}}};",
-        # page 2's start: a machine with PNAMES2 its DEFAULTS2 (knob 0..127 each), else the records'
-        # words untouched (0xffff: not written)
-        f"static const unsigned short mnm_default[MNM_N][MNM_J] = {{{arr([[_knob_word(x, t, lo) for (_r, _s, lo, t), x in zip(_perc.PARAMS, d)] + ([_knob_word(x, t, lo) for (_r, _s, lo, t), x in zip(MNM_RECS[8:], getattr(M, 'DEFAULTS2'))] if hasattr(M, 'PNAMES2') else [0xFFFF] * 8) for d, M in zip(_mnm.CF_DEFAULTS, _mnm.CF_MACHINES)])}}};",
+        # page 2's and page 3's start: a machine with PNAMES2 / PNAMES3 its DEFAULTS2 / DEFAULTS3 (knob
+        # 0..127 each), else the records' words untouched (0xffff: not written)
+        f"static const unsigned short mnm_default[MNM_N][MNM_J] = {{{arr([mnm_default_words(d, M) for d, M in zip(_mnm.CF_DEFAULTS, _mnm.CF_MACHINES)])}}};",
         # 2026-11-09: a RETIRED choice (an empty name: PLAITS' GRAN, removed): shown as the choice
         # before it, stepped past (md_page.c, page.c, fmt.c); its knob slot stays, so saved knobs keep
         # their choice
@@ -376,10 +394,12 @@ def mnm_c_header() -> str:
         "enum { MW_KNOB, MW_EMPTY, MW_GRID, MW_SLIDE, MW_VU, MW_SWITCH, MW_SEMIS, MW_CENTS };",
         f"static const unsigned char mnm_widget[MNM_N][MNM_J] = {{{arr([[MNM_WIDGET.get((M.NAME, sh), 1 if sh == '---' or sh in MNM_UNPORTED else 0) for sh in mnm_pnames(M)] for M in _mnm.CF_MACHINES])}}};",
         # 2026-11-10: the value readout's units (dnfw.mnm.units): kind (bit 7: 0 reads OFF), curve, the curves
-        "enum { MU_RAW, MU_PCT, MU_SPCT, MU_HZ, MU_HZ100, MU_MS, MU_C10, MU_C, MU_DB, MU_OCT, MU_PATN, MU_RATE, MU_PCTC, MU_MODE, MU_MS10, MU_VOIC };",
+        "enum { MU_RAW, MU_PCT, MU_SPCT, MU_HZ, MU_HZ100, MU_MS, MU_C10, MU_C, MU_DB, MU_OCT, MU_PATN, MU_RATE, MU_PCTC, MU_MODE, MU_MS10, MU_VOIC, MU_GLID };",
         f"static const unsigned char mnm_unit[MNM_N][MNM_J] = {{{arr(_UNITS[0])}}};",
         f"static const unsigned char mnm_unit_curve[MNM_N][MNM_J] = {{{arr(_UNITS[1])}}};",
         f"static const short mnm_curves[{len(_UNITS[2])}][17] = {{{arr(_UNITS[2])}}};",
+        # 2026-11-11: GLID's time a knob (MU_GLID; ms under 10 s, else 10000 + tenths of a second), a record span each
+        f"static const unsigned short mnm_glid[{len(_mnm_units.GLID_TOPS)}][128] = {{{arr([_mnm_units.glid_table(t) for t in _mnm_units.GLID_TOPS])}}};",
         f"static const unsigned char flt_unit[{len(_fk)}] = {{{', '.join(map(str, _fk))}}};",
         f"static const unsigned char flt_unit_curve[{len(_fk)}] = {{{', '.join(map(str, _fa))}}};",
         f"#define FLT_UNIT_IDS {{{', '.join(map(str, _mnm_units.FLT_IDS))}}}",
@@ -662,7 +682,8 @@ def source(page_draw: int, cell: int) -> str:
                      f"    .long {', '.join(str(e) for e in entries)}\n"
                      f"    .long {TAG}")
     page_data = "\n".join(pages)
-    mlabs = [{**lab, **(MNM_LABELS2[k] if mnm_pages(_mnm.CF_MACHINES[k]) > 1 else {})}
+    mlabs = [{**lab, **(MNM_LABELS2[k] if mnm_pages(_mnm.CF_MACHINES[k]) > 1 else {}),
+              **(MNM_LABELS3[k] if mnm_pages(_mnm.CF_MACHINES[k]) > 2 else {})}
              for k, lab in enumerate(MNM_LABELS)]
     mtables = "\n".join(f"    .long mnm_labels_{k}" for k in range(len(mlabs)))
     mtables += "\n" + "\n".join(f"mnm_labels_{k}:\n" + "\n".join(f"    .long {rid}, mlab_{k}_{rid}" for rid in lab)
@@ -681,6 +702,9 @@ def source(page_draw: int, cell: int) -> str:
                               f"    .long {TAG}" for k in range(len(MNM_LABELS)))
     mnm2_page_data = "\n".join(f"    .long mnm_title_{k}, mnm_subtitle_{k}\n"
                                f"    .long {', '.join(str(e) for e in MNM_PAGE2)}\n"
+                               f"    .long {TAG}" for k in range(len(MNM_LABELS)))
+    mnm3_page_data = "\n".join(f"    .long mnm_title_{k}, mnm_subtitle_{k}\n"
+                               f"    .long {', '.join(str(e) for e in MNM_PAGE3)}\n"
                                f"    .long {TAG}" for k in range(len(MNM_LABELS)))
     smp_page_data = "\n".join(f"    .long smp_title_{k}, smp_subtitle_{k}\n"
                               f"    .long {', '.join(str(e) for e in entries)}\n"
@@ -797,18 +821,22 @@ wr_page:
     move.b  %a0@(0,%d0:l),%d0
     andi.l  #0xff,%d0
     movea.l %sp@+,%a0
-    move.l  %sp@(16),%d1                   | its page: 0, or 1 when it has two (2026-11-09)
-    beq.w   10f
-    subq.l  #1,%d1
-    bne.w   6b
-    move.l  %a0,%sp@-
-    lea     mnm_npages_tab,%a0
+    move.l  %a0,%sp@-                      | its page 0..npages - 1 (2026-11-09: 2; 2026-11-11: 3), else
+    lea     mnm_npages_tab,%a0             | the empty page
     moveq   #0,%d1
     move.b  %a0@(0,%d0:l),%d1
     movea.l %sp@+,%a0
-    subq.l  #2,%d1
-    bne.w   6b
-    moveq   #44,%d1
+    cmp.l   %sp@(16),%d1
+    bls.w   6b
+    move.l  %sp@(16),%d1
+    beq.w   10f
+    subq.l  #1,%d1
+    beq.w   13f
+    moveq   #44,%d1                        | page 3
+    mulu.w  %d1,%d0
+    addi.l  #mnm3_descriptors,%d0
+    bra.w   2f
+13: moveq   #44,%d1                        | page 2
     mulu.w  %d1,%d0
     addi.l  #mnm2_descriptors,%d0
     bra.w   2f
@@ -954,6 +982,8 @@ mnm_descriptors:
 {mnm_page_data}
 mnm2_descriptors:
 {mnm2_page_data}
+mnm3_descriptors:
+{mnm3_page_data}
 mnm_ix_tab:
     .byte {", ".join(str(_mnm_ix(d)) for d in range(max(MNM_KINDS) - 7))}
     .align 2

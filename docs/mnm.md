@@ -105,6 +105,32 @@ machines. The ColdFire's type range, names, MACHINE SEL list and group, its page
 - **The increments**: on the DSP each machine's `pitch` computes them in float from the
   DN2's pitch; `dnfw.mnm.exact` computes them in the Monomachine's integer arithmetic.
 
+## ANALOG 2's page 3: the glide (2026-11-11)
+
+The User asked for DRONE's mono legato glide on ANALOG 2. Pages 1 and 2 use 16 of WaveTone's 25 saved records, so
+page 3 sits on records none of our machines used (`dnfw.perc.machines.P3_RECS`). They keep their stock ranges, so
+p-locks, LFO destinations and SAVE/LOAD work as for any record.
+
+| control | record (slot) | range | what |
+|---|---|---|---|
+| GLID | LEV2 245 (36) | 0..127 | 1 ms .. 1 s as Optimist's TIME_MS index, then up to 5 minutes; 0 OFF (DRONE's) |
+| GLTY | TYPE 259 (46) | 0..2 | OFF, RATE (GLID is an octave's time), TIME (GLID is any glide's time) |
+
+- **Old projects play as before.** GLTY OFF is TYPE's stock default (0). No free record with a 0..127 range
+  defaults to 0 (LEV2 0x6400, DEC 0x7f00, MAST and FINE 0x4000, measured in the 1.11 and 1.12 tables), so the
+  OFF has to be GLTY's. A track whose TYPE word was set by something else before reads RATE or TIME.
+- **MACHINE SEL** starts it at GLTY OFF, GLID 54 (Optimist's SLIDE_T, ~50 ms).
+- **Legato, as DRONE's** (`dnfw.mnm.a2glide`): a note glides only when its trig comes while the slot's gate is
+  still open (no note-off since the last note); a separate note jumps. Only the oscillators glide; KTR keys the
+  filter from the note itself, as Optimist's ANALOG 2 does. A note that glides does not restart the phases at
+  DRFT 0 (Optimist's LEGATO plays it on the sounding voice).
+- **Up to 5 minutes** (the User, 2026-11-11: "drone glide should go to minutes"; DRONE's GLID too):
+  `a2glide.ms_of`: the lower three quarters of the knob are Optimist's 10^(4 q) ms (1 ms .. 1 s), the top quarter
+  climbs from 1 s to 5 min (~20 % a step). The readout is exact a knob (`units.glid_table`: "40ms", "1.5s", "12s",
+  "2.5m"). voice.c's whole-unit step (1/4096 semitone a block, at least one) is not kept: it capped a glide at ~3 s
+  a semitone; the step is a float now, so every glide takes its time.
+- The DSP reads page 3 only for a machine that has one (`dnfw.perc.program`, words `r0`, `r1`).
+
 ## The tables, over the fast link
 
 The DSP image had about 50 KB to spare, so the tables no longer ride in it. The ColdFire

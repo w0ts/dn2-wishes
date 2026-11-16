@@ -41,6 +41,12 @@ def page2(p: Prog, L, d: int, k: int) -> None:
     p.ld(d, L.perc.C[f"q{k}"])
 
 
+def page3(p: Prog, L, d: int, k: int) -> None:
+    """Fd = page-3 control k (0..1) as 0..1: `dnfw.perc.machines.P3_RECS`' first two, read only for a
+    machine that has a page 3 (dnfw.perc.program), each clamp(knob - lo, 0, top) / top."""
+    p.ld(d, L.perc.C[f"r{k}"])
+
+
 def st(p: Prog, d: int, k: int) -> None:
     K.s(p, d, k)
 

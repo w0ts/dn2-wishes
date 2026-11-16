@@ -41,10 +41,10 @@ def test_the_formatter_fits_four_characters(tmp_path):
     a, b = src.index("static int ucat"), src.index("static int mnm_choice_count")
     hdr = WP.mnm_c_header()
     keep = [ln for ln in hdr.splitlines()
-            if ln.startswith(("#define MNM_N", "#define MNM_J", "enum { MU_", "static const unsigned char mnm_unit", "static const unsigned char ins_unit", "static const unsigned char flt_unit", "static const short mnm_curves"))]
-    prog = ("#include <stdio.h>\n#define MNM_J 16\n" + "\n".join(ln for ln in keep if not ln.startswith("#define MNM_J"))
+            if ln.startswith(("#define MNM_N", "#define MNM_J", "enum { MU_", "static const unsigned char mnm_unit", "static const unsigned char ins_unit", "static const unsigned char flt_unit", "static const short mnm_curves", "static const unsigned short mnm_glid"))]
+    prog = ("#include <stdio.h>\n" + "\n".join(keep)
             + "\n" + src[a:b].replace("__attribute__((section(\".data\")))", "")
-            + "\nint main(void){for(int mi=0;mi<MNM_N;mi++)for(int j=0;j<16;j++)for(int k=0;k<128;k++){"
+            + "\nint main(void){for(int mi=0;mi<MNM_N;mi++)for(int j=0;j<MNM_J;j++)for(int k=0;k<128;k++){"
               "const char*t=mnm_unit_text(mi,j,k);if(t)printf(\"%d %d %d %s\\n\",mi,j,k,t);}"
               "for(int w=0;w<9;w++)for(int k=0;k<128;k++){const char*t=mu_flt(w,k);if(t)printf(\"f%d 0 %d %s\\n\",w,k,t);}"
               "for(int ty=0;ty<13;ty++)for(int kn=0;kn<8;kn++)for(int k=0;k<128;k++){"

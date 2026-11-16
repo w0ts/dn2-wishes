@@ -15,7 +15,8 @@ phase modulation, 0 .. a quarter turn), TOPO (PAIRS 0<->1 2<->3, CHAIN 0->1->2->
 CHAR (sine -> 1.5 x - 0.5 x^3), DRIFT (each generator's slow triangle, up to +-6.8 cents,
 0.015 .. 0.11 Hz), TONE, BEAT (0 OFF, else Optimist's F_LFOHZ curve rounded as LFO_HZ_X100,
 0.05 .. 40 Hz), DTUNE (Optimist's track DETUNE: the generators {-3 -1 1 3} x up to ~6.7 cents).
-Page 2 (`core.page2`): q0 GLID (0 off, else Optimist's TIME_MS index q0 x 127: 1 ms .. 10 s),
+Page 2 (`core.page2`): q0 GLID (0 off, else dnfw.mnm.a2glide.ms_of(q0): 1 ms .. 1 s as Optimist's TIME_MS
+index q0 x 127, then up to 5 minutes, 2026-11-11),
 q1 GLTY (index trunc(2 q1): 0 RATE = GLID is the time an octave takes, 1 TIME = GLID is the time
 of any glide; default 0.5 = TIME), q2 OCT (2026-11-11, the User: -3..+3 octaves, trunc(7 q2) - 3, default
 0.5 = 0, so a project saved before it plays as it did; 12 x OCT semitones are added to the note before the
@@ -41,8 +42,8 @@ Against Optimist:
   one-pole's floored product (-2^-16 a sample: TONE 0 54 dB against 25) and the drift's
   inc >> 16 (DRIFT 127 63 dB against 41).
 - COUPLE's "+ m->shape" and TONE's "+ m->cutoff" are gone (the DN2's LFOs move the knobs).
-- Glide as Optimist's voice.c (glide_set / its per-block step, in 1/4096 semitone, truncated as
-  there): a trig with GLID > 0 glides from the current pitch, except into a fresh network. The
+- Glide as Optimist's voice.c (glide_set / its per-block step, in 1/4096 semitone; since 2026-11-11 not
+  truncated, and up to 5 minutes: dnfw.mnm.a2glide): a trig with GLID > 0 glides from the current pitch, except into a fresh network. The
   note's later moves without a trig (VW pitch) pass straight through.
 - HOLD: the machine sees no key-up, and the DN2's amp envelope gates the track, so the latch
   itself (a note held past its key-up, the key again letting it go) is NOT done here: it needs
@@ -164,9 +165,12 @@ def trig(p: Prog, L: C.Layout) -> None:
 
 def _glide_start(p: Prog, L: C.Layout) -> None:
     """S_GST: voice.c glide_set's step (1/4096 semitone a block, as semitones) for GLID's time
-    ms = 10^(4 q0): TIME |d| / trunc(ms FS / 1000 / 32), RATE trunc(ENV_LIN x 3 / 1024).
-    In: F1 the target, F2 GLID (> 0)."""
-    _k(p, 3, 2, "*", -4.0 * math.log2(10.0))
+    ms = a2glide.ms_of(q0) (2026-11-11: up to 5 minutes): TIME |d| / trunc(ms FS / 1000 / 32), RATE
+    ENV_LIN x 3 / 1024, neither truncated (a2glide.step_semis). In: F1 the target,
+    F2 GLID (> 0)."""
+    from . import a2glide as G
+    G.curve_x(p, 3, 2)
+    _k(p, 3, 3, "*", -math.log2(10.0))
     _exp2(p, 4, 3)                               # 1 / ms
     _k(p, 4, 4, "*", float(1 << 24) * 32.0 * 1000.0 / SR)
     p.trunc(5, 4)                                # ENV_LIN
@@ -190,20 +194,15 @@ def _glide_start(p: Prog, L: C.Layout) -> None:
         p.fop(3, 3, "MAX", 4)
         _k(p, 3, 3, "*", 4096.0)                 # |d|, units
         p.fop(3, 3, "*", 6)
-        _k(p, 3, 3, "*", 1.0 + 2e-7)
-        p.trunc(5, 3)                            # gstep (>= 1)
+        _k(p, 3, 3, "*", 1.0 + 2e-7)             # gstep, units
 
     def rate():
         p.iconst(12, -10)
         p.float_(3, 5, 12)
         _k(p, 3, 3, "*", 3.0)
-        p.trunc(5, 3)
     p.fconst(12, 0.5)
     p.if_(6, "GE", 12, time_, rate)
-    p.iconst(12, 1)
-    p.iop(5, 5, "MAX", 12)
-    p.iconst(12, -12)
-    p.float_(3, 5, 12)
+    G.step_semis(p)
     _sv(p, S_GST, 3)
 
 

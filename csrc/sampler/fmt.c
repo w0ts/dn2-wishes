@@ -514,8 +514,10 @@ static void mf(int j, int v, char *buf)
 }
 #define MFN(j) static void mf##j(int v, char *b) { mf(j, v, b); }
 MFN(0) MFN(1) MFN(2) MFN(3) MFN(4) MFN(5) MFN(6) MFN(7) MFN(8) MFN(9) MFN(10) MFN(11) MFN(12) MFN(13) MFN(14) MFN(15)
+MFN(16) MFN(17) MFN(18) MFN(19) MFN(20) MFN(21) MFN(22) MFN(23)                 /* 2026-11-11: page 3 */
 static void (*const mnm_fmts[MNM_J])(int, char *) = {mf0, mf1, mf2, mf3, mf4, mf5, mf6, mf7, mf8, mf9, mf10,
-                                                       mf11, mf12, mf13, mf14, mf15};
+                                                       mf11, mf12, mf13, mf14, mf15, mf16, mf17, mf18, mf19,
+                                                       mf20, mf21, mf22, mf23};
 static void *mnm_stock[MNM_J] __attribute__((section(".data")));
 static int mnm_saved __attribute__((section(".data"))) = 0;
 

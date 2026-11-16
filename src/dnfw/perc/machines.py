@@ -56,6 +56,19 @@ FX_PARAMS = ((239, 26, 0, 120),           # AMD: WAV1, 0..0x7800, default 0 (off
              (243, 32, 0, 120),           # FLTF: WAV2, 0..0x7800, default 0 (no high pass)
              (258, 45, 0, 127),           # FLTW: WDTH, 0..0x7f00, default 0x7f00 (no low pass)
              (253, 40, 0, 127))           # FLTQ: ATK, 0..0x7f00, default 0
+# 2026-11-11: page 3 of a Monomachine machine that has one (ANALOG 2's glide): eight WaveTone records no machine of
+# ours used, with their stock ranges and defaults (measured in the 1.11 and 1.12 parameter tables). The DSP reads
+# the first two (r0, r1); the rest are the page's empty cells. TYPE's stock default 0 is ANALOG 2's GLTY OFF, so a
+# track saved before has its glide off.
+P3_RECS = ((245, 36, 0, 127),             # LEV2: 0..0x7f00, default 0x6400 -> ANALOG 2's GLID
+           (259, 46, 0, 2),               # TYPE: 0..0x200, default 0 -> ANALOG 2's GLTY (OFF RATE TIME)
+           (255, 42, 0, 127),             # DEC: 0..0x7f00, default 0x7f00
+           (261, 48, 0, 127),             # MAST: default 0x4000
+           (262, 49, 0, 127),             # FINE: default 0x4000
+           (248, 37, 0, 3),               # MOD: 0..0x300, default 0
+           (249, 39, 0, 2),               # RSET: 0..0x200, default 0x100
+           (247, 27, 0, 1))               # TBL1: 0..0x100, default 0
+P3_READ = 2                               # the page-3 records the DSP reads (r0, r1)
 FX_NAMES = (("AMD", "Amp Mod Depth"), ("AMF", "Amp Mod Rate"), ("EQF", "EQ Freq"),
             ("EQG", "EQ Gain"), ("FLTF", "Filter Base"), ("FLTW", "Filter Width"),
             ("FLTQ", "Filter Q"))
@@ -140,7 +153,8 @@ SC_WORDS = ("t", "count", "out", "tr", "type", "note", "trig", "sbase",
             "s3k", "s3a1", "s3a2", "s3a3", "s4k", "s4a1", "s4a2", "s4a3",
             "s5k", "s5a1", "s5a2", "s5a3", "buf", "amd", "amdt", "eqm", "fxam", "fxeq", "fxhp", "fxlp", "fxy",
             "mnm", "lev",   # v0.26: the Monomachine machine (index + 1, 0 PERC), the output level,
-            "mcost", "mskip")  # the Monomachine voices' cost so far this block, this one's over the budget
+            "mcost", "mskip",  # the Monomachine voices' cost so far this block, this one's over the budget
+            "r0", "r1")        # 2026-11-11: page 3's first two (P3_RECS), for a Monomachine machine that has one
 
 
 class Layout:

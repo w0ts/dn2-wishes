@@ -202,6 +202,9 @@ def _adapter(M):
         # 2026-11-09: a second page (PERC's page-2 records; dnfw.waverider.pages.MNM_PAGE2)
         **({"PNAMES2": _pad8(M.PNAMES2, "---"), "DEFAULTS2": _pad8(_knobs(M.DEFAULTS2), 0)}
            if hasattr(M, "PNAMES2") else {}),
+        # 2026-11-11: a third page (dnfw.perc.machines.P3_RECS; dnfw.waverider.pages.MNM_PAGE3)
+        **({"PNAMES3": _pad8(M.PNAMES3, "---"), "DEFAULTS3": _pad8(_knobs(M.DEFAULTS3), 0)}
+           if hasattr(M, "PNAMES3") else {}),
         "host": staticmethod(_host_ddrw if M is ddrw else _host),
         "init": staticmethod(lambda p, L, M=M: M.init(p, L.mnm)),
         "trig": staticmethod(lambda p, L, M=M: M.trig(p, L.mnm)),

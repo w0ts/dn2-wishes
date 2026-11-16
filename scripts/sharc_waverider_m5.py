@@ -3969,6 +3969,15 @@ def step_gran(init, sound, machines) -> dict:
 
 # -- step 8: the Monomachine machines (v0.26, docs/mnm.md) ---------------------------------------
 
+A2_NOTE2, A2_BLOCKS = 12, 40                    # ANALOG 2's glide runs: the second note's block, the length
+
+
+def _up_periods(x: list) -> list:
+    """the distances between successive upward zero crossings of x (samples)"""
+    ups = [i for i in range(1, len(x)) if x[i - 1] < 0.0 <= x[i]]
+    return [b - a for a, b in zip(ups, ups[1:])]
+
+
 def mnm_words(k: int, knobs=None) -> dict:
     """frame slot -> word for the Monomachine machine K's eight knobs (0..127, default its
     own defaults), on PERC's eight parameter records (as page.c's mnm_knob reads them)"""
@@ -4052,6 +4061,28 @@ def step_mnm(init, sound, machines, blocks) -> dict:
         for name, args, nb in (("0", (50,), 24), ("+1", (65,), 24), ("-1", (35,), 24), ("turn", (50, 65), 112),
                                ("glide", (50, 65, True), 24)):
             runs[f"DRONE_oct{name}"] = _slim(run_blocks(init, drone_oct(*args), nb))
+    # 2026-11-11: ANALOG 2's legato glide (page 3: GLID on LEV2 slot 36, GLTY on TYPE slot 46): note 72 on at
+    # block 1, note 84 at block A2_NOTE2; "held" no note-off between, "released" its note-off at block 6. One saw
+    # (MIX 0), the filter open, GLID knob 30 (~9 ms, ~13 blocks). GLTY OFF, RATE, TIME
+    if "ANALOG2" in MM.NAMES:
+        ak = MM.NAMES.index("ANALOG2")
+        a2_knobs = [0, 0, 0, 0, 127, 0, 0, 64]
+
+        def a2_leg(released, glty):
+            def fb(b):
+                f = base_frame(sound, machines, t0=types[ak], overrides=mnm_words(ak, a2_knobs),
+                               note=0x4800 if b < A2_NOTE2 else 0x5400, trigger=False)
+                if b in (1, A2_NOTE2):
+                    f.put(FR.TRIG_NOTE, 1)
+                if released and b == 6:
+                    f.put(36, 1)
+                f.param(0, 36, 30 << 8)                  # GLID knob 30
+                f.param(0, 46, glty << 8)                # GLTY 0 OFF, 1 RATE, 2 TIME
+                return f.to_bytes()
+            return fb
+        for glty, gn in ((0, "OFF"), (1, "RATE"), (2, "TIME")):
+            runs[f"A2_held_{gn}"] = _slim(run_blocks(init, a2_leg(False, glty), A2_BLOCKS))
+            runs[f"A2_released_{gn}"] = _slim(run_blocks(init, a2_leg(True, glty), A2_BLOCKS))
     # 2026-11-09: every PLAITS model (MODL's choices past WS, which the default runs), triggered at
     # block 1 and again at block 4, its HARM/TIMB/MORP off-centre; and a track whose MODL changes
     # every two blocks through the models (each entry runs the model's init), bit-exact as above
@@ -4183,6 +4214,23 @@ def step_mnm(init, sound, machines, blocks) -> dict:
             and 1.5 <= z["+1"] / z["0"] <= 2.5 and 0.375 <= z["-1"] / z["0"] <= 0.625
             and zt[0] > 0 and 1.5 <= zt[1] / zt[0] <= 2.5)
         n["drone_octave_ups"] = {"oct": z, "turn": zt}
+    if "A2_held_OFF" in runs:                    # 2026-11-11: ANALOG 2's legato glide
+        a2 = {k[3:]: perc_series(r, 0) for k, r in runs.items() if k.startswith("A2_")}
+        a2ok = all(r["ok"] for k, r in runs.items() if k.startswith("A2_"))
+        cut, after = A2_NOTE2 * BLOCK, (A2_NOTE2 + 1) * BLOCK
+        periods = {k: _up_periods(v[after:]) for k, v in a2.items()}
+        # note 72 is 91.7 samples at the 48 kHz output, note 84 45.9: a glide plays the periods between
+        between = {k: sum(1 for d in v if 52 <= d <= 80) for k, v in periods.items()}
+        checks["ANALOG2 glide: before the second note every run is the same as GLTY OFF's (the first note jumps)"] = (
+            a2ok and all(v[:cut] == a2[k.split("_")[0] + "_OFF"][:cut] for k, v in a2.items()))
+        checks["ANALOG2 glide: a held note glides with RATE and with TIME (differs from OFF after it, and plays "
+               "periods between the two notes' 92 and 46 samples, which OFF never does)"] = (
+            a2ok and all(a2[f"held_{g}"][after:] != a2["held_OFF"][after:] for g in ("RATE", "TIME"))
+            and between["held_OFF"] == 0 and between["held_RATE"] > 0 and between["held_TIME"] > 0)
+        checks["ANALOG2 glide: a released note jumps (RATE and TIME bit-identical to OFF, every block)"] = (
+            a2ok and a2["released_RATE"] == a2["released_OFF"] and a2["released_TIME"] == a2["released_OFF"])
+        n["a2_glide_periods_between"] = between
+        n["a2_glide_periods"] = {k: v[:24] for k, v in periods.items()}
     dynr = runs["dynamic"]
 
     def dpk(b, t):

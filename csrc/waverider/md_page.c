@@ -288,6 +288,26 @@ static const char *unit_text_of(int kind, int curve, int k)
         ub[0] = k < 64 ? '1' : '2'; ub[1] = 'o'; ub[2] = 'c'; ub[3] = 't'; ub[4] = 0;
         return ub;
     }
+    if (kind == MU_GLID) {                          /* 2026-11-11: GLID up to 5 minutes, exact a knob */
+        int e = mnm_glid[curve][k > 127 ? 127 : k], n = 0;
+        if (e < 100) {
+            n = ucat(ub, 0, e);
+            ub[n++] = 'm'; ub[n++] = 's';
+        } else if (e < 9950) {
+            int t = (e + 50) / 100;                 /* tenths of a second */
+            n = ucat(ub, 0, t / 10);
+            ub[n++] = '.'; ub[n++] = (char)('0' + t % 10); ub[n++] = 's';
+        } else if (e < 10595) {                     /* 10000 + tenths of a second: whole seconds to 59 */
+            n = ucat(ub, 0, e < 10000 ? 10 : (e - 10000 + 5) / 10);
+            ub[n++] = 's';
+        } else {
+            int t = (e - 10000 + 30) / 60;          /* tenths of a minute */
+            n = ucat(ub, 0, t / 10);
+            ub[n++] = '.'; ub[n++] = (char)('0' + t % 10); ub[n++] = 'm';
+        }
+        ub[n] = 0;
+        return ub;
+    }
     const short *cv = mnm_curves[curve];
     int i = k >> 3, den = i == 15 ? 7 : 8;
     int v = cv[i] + (cv[i + 1] - cv[i]) * (k - 8 * i) / den;       /* the curve's value */

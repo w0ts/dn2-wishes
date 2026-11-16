@@ -17,6 +17,8 @@ min(n - 1, trunc(q n))): q0 SWRM (0..6 copies, 0 off), q1 SEMI (-24..+24 st, osc
 q2 SDTN (the copies' spread, q x 127), q3 SYNC (ON for q >= 0.5), q4 WAV2 (=1 SAW SQR TRI SIN
 PWM; 0 osc 1's), q5 DRFT (round(q x 127): Optimist's DRFT, 0 restarts the phases on a trig),
 q6 FLT (model x 5 + mode, 25 choices: SVF LP12 .. MS20 NOTCH; 0 SVF LP12, ANALOG's).
+Page 3 (2026-11-11, `core.page3`): r0 GLID, r1 GLTY (OFF RATE TIME), DRONE's mono legato glide on the
+oscillators (dnfw.mnm.a2glide); OFF is its record's stock default, so older tracks play as before.
 
 Against Optimist:
 - Float32 for its Q15 integers; the phases and the increments stay 32-bit integers (a phase
@@ -49,6 +51,7 @@ L2 scratch, which the coordinator loads.
 
 from __future__ import annotations
 
+from . import a2glide as G
 from . import core as C
 from .tb303 import _exp2p
 from ..a2f import models as M
@@ -61,6 +64,10 @@ PNAMES2 = ("SWRM", "SEMI", "SDTN", "SYNC", "WAV2", "DRFT", "FLT")
 # page 2's start as knobs 0..127 (dnfw.waverider.pages mnm_default: perc.live.knob_word; q ~ knob / 127):
 # Optimist's SWRM 0, SEMI 0, SDTN 34, SYNC OFF, WAV2 =1, DRFT 0, FLT SVF LP12
 DEFAULTS2 = (0, 64, 34, 0, 0, 0, 0)
+# 2026-11-11: page 3, the glide (dnfw.mnm.a2glide). MACHINE SEL starts it OFF, GLID at Optimist's SLIDE_T (TIME_MS
+# index 54, ~50 ms), so RATE or TIME glides at once
+PNAMES3 = ("GLID", "GLTY")
+DEFAULTS3 = (54, 0)
 WAVES = ("SAW", "SQR", "TRI", "SIN", "PWM")
 WAVES2 = ("=1",) + WAVES
 FLTS = tuple(f"{m} {md}" for m in M.MODELS for md in M.MODES)
@@ -99,6 +106,8 @@ S_END = 30
 (D_INC1, D_INC2, D_DINC, D_NC, D_W1, D_W2, D_G1, D_GC, D_G2, D_SYNC, D_NZ, D_DRV, D_DW,
  D_GS, D_GA, D_GB, D_RES, D_MODE, D_MODEL, D_RI1, D_IF2, D_N0, D_HN, D_RI2, D_TH2) = range(S_END, S_END + 25)
 D_END = S_END + 25
+GW = G.Words(D_END)                              # the glide's words (2026-11-11), up to GW.END
+assert GW.END <= C.K.NS
 
 
 def ctx(L: C.Layout) -> M.Ctx:
@@ -158,7 +167,7 @@ def init(p: Prog, L: C.Layout) -> None:
     p.iop(0, 12, "+", 0)
     p.seti(2, 0)
     p.iconst(1, 0)
-    p.loop(L.W["n5"], D_END, lambda: p.stpost(2, 1))
+    p.loop(L.W["n5"], GW.END, lambda: p.stpost(2, 1))
     for k in range(1, 7):
         p.iconst(0, COPY_AT[k - 1])
         _sv(p, K_A + k, 0)
@@ -183,8 +192,12 @@ def _drift_amount(p: Prog, L: C.Layout, d: int) -> None:
 
 def trig(p: Prog, L: C.Layout) -> None:
     """A note: DRFT 0 restarts the phases (osc 2 a quarter turn on; with SYNC, osc 1's wrap at the
-    first sample restarts it); otherwise nothing."""
+    first sample restarts it), unless the note glides (a2glide: legato, as Optimist's LEGATO); otherwise
+    nothing."""
+    G.trig(p, L, GW)
+    p.ipass(2, 0)                                # 1: this note glides
     _drift_amount(p, L, 0)
+    p.ifz(2, "NE", lambda: p.iconst(0, 1))       # (DRFT's 0 test below then fails)
 
     def restart():
         p.iconst(0, HALF)
@@ -403,10 +416,11 @@ def _filter_ctl(p: Prog, L: C.Layout) -> None:
 def pitch(p: Prog, L: C.Layout) -> None:
     """The block's control: the increments (DTN, SEMI, DRFT), the swarm's spread, the gains,
     the waves, the filter's cutoffs and choice."""
+    G.pitch(p, L, GW)                            # 2026-11-11: the glide's pitch, GW.CUR
     _waves(p, L)
     _gains(p, L)
     _filter_ctl(p, L)
-    C.vw(p, 15, "pitch")
+    _ld(p, 15, GW.CUR)
     _k(p, 15, 15, "+", -69.0)
     _inc(p)
     _sv(p, D_INC1, 15)
@@ -433,7 +447,7 @@ def pitch(p: Prog, L: C.Layout) -> None:
         p.trunc(9, 7)                            # its fine factor
         _k(p, 6, 6, "*", 1.0 / 16.0)
         p.fop(6, 6, "+", 5)
-        C.vw(p, 15, "pitch")
+        _ld(p, 15, GW.CUR)
         p.fop(15, 15, "+", 6)
         _k(p, 15, 15, "+", -69.0)
         _inc(p)
