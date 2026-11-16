@@ -94,9 +94,10 @@ def test_every_reference_but_overbridges_names_the_stub():
     for routine, stub in ROUTINES.items():
         ref = [e for e in SPEC["edits"] if bytes.fromhex(e["stock"]) == struct.pack(">I", routine)]
         assert all(bytes.fromhex(e["new"]) == struct.pack(">I", LAYOUT[stub]) for e in ref)
-        kept = [va for va in CF.WISH_KEEP if routine == CF.WISH_MEMCPY]
+        kept = [va for va in (*CF.WISH_KEEP, *CF.WISH_HOOKED) if routine == CF.WISH_MEMCPY]   # (WISH_HOOKED: another
+        # hook's already, v0.52 merge)
         assert len(ref) == CF.WISH_REFS[routine] - len(kept)
-        assert not {e["va"] for e in ref} & set(CF.WISH_KEEP)
+        assert not {e["va"] for e in ref} & {*CF.WISH_KEEP, *CF.WISH_HOOKED}
 
 
 def test_each_stub_goes_on_into_the_stock_routine():

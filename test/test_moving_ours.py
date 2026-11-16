@@ -72,7 +72,8 @@ def test_sample_cells_put_the_line_between_the_widget_and_its_label():
 def test_the_emulator_check_covers_every_page_of_ours_and_the_gate_runs_it():
     emu = _emu()
     names = [n for n, _ in emu.OURS]
-    assert names == ["MACHINEDRUM", "SOPHIE", "PLAITS", "TB303", "DRONE", "ANALOG2", "MONOMACHINE", "ONESHOT", "SLICE"]
+    assert names == ["MACHINEDRUM", "SOPHIE", "PLAITS", "TB303", "DRONE", "ANALOG2", "MONOMACHINE", "ONESHOT", "SLICE",
+                     "JUNO"]                         # 2026-11-13: + JUNO (the moving lines' ours scenario)
     types = dict(emu.OURS)
     from dnfw.perc import program as PP
     from dnfw.sampler import machines as SM

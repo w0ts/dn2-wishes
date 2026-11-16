@@ -25,6 +25,7 @@ int smp_values_held(void) { return 0; }
 void wpop_offer(int slot, const char *label, int n, int cur, const char *(*name)(int, int), const char *(*tag)(int, int), int arg) {}
 void wpop_offer_mv(int slot, const char *label, int n, int cur, const char *(*name)(int, int), const char *(*tag)(int, int), int arg,
                    void (*move)(int, int)) {}   /* (v0.52: the popup's move form; the draw is not run here) */
+const char *const amp_title1 = "ENV1/AMP";    /* csrc/scope/scope.c's (matrix's AMP titles; ins_header names it) */
 extern void ins_set_record(int t, int j, const u8 *f);
 extern void ins_loaded(void);
 extern void ins_words(u32 *w);
