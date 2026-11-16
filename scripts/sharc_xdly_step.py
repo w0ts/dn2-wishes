@@ -32,7 +32,20 @@ PAR, IO = 0x257934, 0x257E6C
 BUF = 0x83F00000                 # the test's own buffers (DDR, used by nothing)
 INL, INR, OUTL, OUTR, PAIRI, PAIRO = (BUF + k * 0x100 for k in range(6))
 MARK = 0x7FC00001
+ALIAS = 0x28000000
+# the stock delay's output pair starts at 0 (2026-11-14, opt-md, measured): with the NaN marker there, the words it
+# wrote came back NaN (it reads the pair before it writes it); XDLY's calls keep the marker (it writes every word)
+STOCK_FILL = 0
 REGS = {f"R{k}": (0x01010101 * (k + 3)) & 0xFFFFFFFF for k in range(16)}
+
+
+def alias(a: int) -> int:
+    """where the emulator puts what the stock delay stores through its modified pointers: the buffer's BASE at the
+    byte-scaled alias 0x28000000 + 4 a, as the stock chorus's (sharc_jsend_step) and the voice chain's
+    (docs/inserts.md); on the unit both are the one place. Measured 2026-11-14 (opt-md): with the pair in DDR, its 32
+    output words landed contiguously at 0x37c00800.. for OUTL 0x83f00200 (word k at alias(OUTL) + 4 k, not at
+    alias(OUTL + 4 k)), and the NaN marker left at OUTL read as "non-finite" in every word"""
+    return (ALIAS + 4 * a) & 0xFFFFFFFF
 
 
 def fb(x) -> int:
@@ -69,15 +82,16 @@ def script(n_stock=40, n_x=200, seed=11):
     return out
 
 
-def call(M5, r0, tw, inl, inr, par, ex=None):
+def call(M5, r0, tw, inl, inr, par, ex=None, fill=MARK):
     m2, fx = M5.m2, M5.fx
     r = r0.fresh_call(SITE, regs={**REGS, "R4": XD.STOCK_STATE, "R8": PAR, "R12": IO})
     m2.poke(r.state, XP.TYPE_WORD, tw & 0xFFFFFFFF)
     for k in range(32):
         m2.poke(r.state, INL + 4 * k, fb(inl[k]))
         m2.poke(r.state, INR + 4 * k, fb(inr[k]))
-        m2.poke(r.state, OUTL + 4 * k, MARK)
-        m2.poke(r.state, OUTR + 4 * k, MARK)
+        for base in (OUTL, OUTR):
+            m2.poke(r.state, base + 4 * k, fill)
+            m2.poke(r.state, alias(base) + 4 * k, fill)
     for a, v in ((IO, 32), (IO + 4, PAIRI), (IO + 12, PAIRO), (PAIRI, INL), (PAIRI + 4, INR),
                  (PAIRO, OUTL), (PAIRO + 4, OUTR)):
         m2.poke(r.state, a, v)
@@ -91,8 +105,13 @@ def call(M5, r0, tw, inl, inr, par, ex=None):
     entry = dict(r.state.uregs)
     before = dict(r.state.overlay)
     how = fx.run(r, 6_000_000, fx.Fixups(), stop_at=[BACK])
-    out = ([m2.word(r.state, OUTL + 4 * k) or 0 for k in range(32)],
-           [m2.word(r.state, OUTR + 4 * k) or 0 for k in range(32)])
+    def word(base, k):
+        w = m2.word(r.state, base + 4 * k) or 0
+        if w != fill:
+            return w
+        v = m2.word(r.state, alias(base) + 4 * k)       # (0 is a value written there: never `or MARK`)
+        return fill if v is None else v
+    out = ([word(OUTL, k) for k in range(32)], [word(OUTR, k) for k in range(32)])
     wrote = {a for a in r.state.overlay if r.state.overlay.get(a) != before.get(a)}
     return r, how, out, entry, wrote
 
@@ -153,8 +172,8 @@ def run(M5, snap, m2mach, m5img, stock_img) -> dict:
     outside, stray, cost_stock, heard_stock = set(), set(), [], F32.Ear()
     for b in range(n_stock):
         tw, inl, inr, par = seq[b]
-        rs, hs, os_, _, ws = call(M5, rs, tw, inl, inr, par)
-        rb, hb, ob, _, wb = call(M5, rb, tw, inl, inr, par)
+        rs, hs, os_, _, ws = call(M5, rs, tw, inl, inr, par, fill=STOCK_FILL)
+        rb, hb, ob, _, wb = call(M5, rb, tw, inl, inr, par, fill=STOCK_FILL)
         ok &= hs[0] == "stop" and hb[0] == "stop"
         same_out &= os_ == ob
         same_regs &= set(rs.state.uregs) == set(rb.state.uregs) and all(
@@ -252,8 +271,8 @@ def run(M5, snap, m2mach, m5img, stock_img) -> dict:
     par = seq[-1][3]
     clear_blocks, silent, after, cost_clear, nz = 0, True, [], [], [-1]
     for b in range(XD.STOCK_WORDS // XD.CHUNK + 40):
-        rb, hb, ob, _, _ = call(M5, rb, 0x100, z, z, par)
-        want = ref.block(0x100, z, z, [np.float32(x) for x in par])
+        want = ref.block(0x100, z, z, [np.float32(x) for x in par])     # (the model first: which fill)
+        rb, hb, ob, _, _ = call(M5, rb, 0x100, z, z, par, fill=MARK if want != "stock" else STOCK_FILL)
         if want != "stock":
             clear_blocks += 1
             silent &= all(w == 0 for w in ob[0] + ob[1])
@@ -266,7 +285,7 @@ def run(M5, snap, m2mach, m5img, stock_img) -> dict:
     rf = M5.init_on(snap, m2mach, stock_img)
     fresh = []
     for b in range(40):
-        rf, hf, of, _, _ = call(M5, rf, 0x100, z, z, par)
+        rf, hf, of, _, _ = call(M5, rf, 0x100, z, z, par, fill=STOCK_FILL)
         fresh.extend(bf(w) for w in of[0] + of[1])
     # NaN in either run fails (M5.V.peak is NaN on any non-finite sample; NaN <= x is False)
     peak_after, fresh_peak = M5.V.peak(after), M5.V.peak(fresh)

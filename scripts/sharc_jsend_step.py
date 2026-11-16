@@ -85,7 +85,10 @@ def call(M5, r0, typ, dpth, spd, inl, inr):
     how = fx.run(r, 6_000_000, fx.Fixups(), stop_at=[BACK])
     def word(a):
         w = m2.word(r.state, a) or 0
-        return w if w != MARK else (m2.word(r.state, ALIAS + 4 * a) or MARK)
+        if w != MARK:
+            return w
+        v = m2.word(r.state, ALIAS + 4 * a)            # (0 is a value written there: never `or MARK`)
+        return MARK if v is None else v
     out = ([word(OUTL + 4 * k) for k in range(32)], [word(OUTR + 4 * k) for k in range(32)])
     wrote = {a for a in r.state.overlay if r.state.overlay.get(a) != before.get(a)}
     return r, how, out, entry, wrote
