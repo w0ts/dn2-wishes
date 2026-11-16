@@ -57,30 +57,49 @@ def _amps():
 AMP_C, AMP_Y1 = _amps()
 
 
-def _tan_fast(p: Prog, d: int, f: int) -> None:
-    """Fd = OnePole::tan<FAST>(Ff). Clobbers R11, R12; d is not f."""
+def _tan_fast(p: Prog, d: int, f: int, kt: K.KTab | None = None) -> None:
+    """Fd = OnePole::tan<FAST>(Ff). Clobbers R11, R12; d is not f. KT: the constants from that pool."""
+    k = kt or K
     p.fop(11, f, "*", f)
-    K.mulk(p, d, 11, FAST_B)
-    K.addk(p, d, d, FAST_A)
+    k.mulk(p, d, 11, FAST_B)
+    k.addk(p, d, d, FAST_A)
     p.fop(d, 11, "*", d)
-    K.addk(p, d, d, PI_F)
+    k.addk(p, d, d, PI_F)
     p.fop(d, f, "*", d)
 
 
-def _h(p: Prog, d: int, r: int, g: int) -> None:
+def _recip_k(p: Prog, d: int, x: int, kt: K.KTab) -> None:
+    """Fd = 1 / Fx as dnfw.perc.machines.recip (the seed 0x7ef311c7 - bits, three Newton steps: the same
+    operations), inline and its constants from the pool (2026-11-14: the coefficients' loop's two a mode were
+    subroutine calls). Clobbers R12-R14."""
+    kt.ld(p, 12, ("i", 0x7EF311C7))
+    p.iop(14, 12, "-", x)
+    for _ in range(3):
+        p.fop(13, x, "*", 14)
+        kt.ld(p, 12, 2.0)
+        p.fop(13, 12, "-", 13)
+        p.fop(14, 14, "*", 13)
+    p.fpass(d, 14)
+
+
+def _h(p: Prog, d: int, r: int, g: int, kt: K.KTab | None = None) -> None:
     """Fd = 1 / (1 + r g + g g). Clobbers R11-R15, I12."""
     p.fop(d, r, "*", g)
-    K.addk(p, d, d, 1.0)
+    (kt or K).addk(p, d, d, 1.0)
     p.fop(11, g, "*", g)
     p.fop(d, d, "+", 11)
-    recip(p, d, d)
+    if kt:
+        _recip_k(p, d, d, kt)
+    else:
+        recip(p, d, d)
 
 
-def _soften(p: Prog, s: int) -> None:
+def _soften(p: Prog, s: int, kt: K.KTab | None = None) -> None:
     """Fs *= Fs < 0 ? 0.93 : 0.98. Clobbers R11, R12."""
-    p.fconst(11, 0.98)
-    p.fconst(12, 0.0)
-    p.if_(s, "LT", 12, lambda: p.fconst(11, 0.93))
+    kc = (lambda d, v: kt.ld(p, d, v)) if kt else (lambda d, v: p.fconst(d, v))
+    kc(11, 0.98)
+    kc(12, 0.0)
+    p.if_(s, "LT", 12, lambda: kc(11, 0.93))
     p.fop(s, s, "*", 11)
 
 
@@ -292,28 +311,32 @@ def half(p: Prog, L) -> None:
     K.ld(p, 8, U_Q)
     K.ld(p, 9, U_QL)
     K.ld(p, 10, U_F0)
+    # 2026-11-14 (plaits16, r52): the 24 modes' constants from a pool in the render scratch (XB row KT_ROW, after the
+    # excitation's and the outputs' rows) through I2: each load rides on the compute before it. The same values.
+    kt = K.KTab(L.XB + 4 * KT_ROW, 2, KT_VALUES)
+    kt.write(p)
 
     def coefs():
         p.fop(4, 1, "*", 2)
-        p.fconst(12, 0.499)
+        kt.ld(p, 12, 0.499)
         p.fop(4, 4, "MIN", 12)                   # mode_frequency
-        _tan_fast(p, 5, 4)
+        _tan_fast(p, 5, 4, kt)
         p.sti(2 * MG, 1, 5)
         p.fop(6, 4, "*", 8)
-        K.addk(p, 6, 6, 1.0)
-        recip(p, 6, 6)                           # r = 1 / (1 + f q)
-        _h(p, 7, 6, 5)
+        kt.addk(p, 6, 6, 1.0)
+        _recip_k(p, 6, 6, kt)                    # r = 1 / (1 + f q)
+        _h(p, 7, 6, 5, kt)
         p.sti(2 * MH, 1, 7)
         p.fop(6, 6, "+", 5)
         p.sti(2 * MRG, 1, 6)
         p.fop(4, 4, "+", 4)
-        p.fconst(12, 1.0)
+        kt.ld(p, 12, 1.0)
         p.fop(4, 12, "-", 4)                     # 1 - 2 f
         p.ldpost(5, 5)
         p.fop(5, 5, "*", 4)
         p.sti(2 * MA, 1, 5)
         p.fop(2, 2, "+", 3)                      # stretch += stiffness; stiffness *= k
-        _soften(p, 3)
+        _soften(p, 3, kt)
         p.fop(1, 1, "+", 10)                     # harmonic += f0
         p.fop(8, 8, "*", 9)                      # q *= q_loss
         # the next mode's coefficients: a pair's two modes interleave (2026-11-12, simd: PEy reads the word after
@@ -347,6 +370,8 @@ def half(p: Prog, L) -> None:
 # Each batch of 4 modes is then summed in Plaits' order, ((((0 + o0) + o1) + o2) + o3), and added into
 # the half's samples at I4: every value the same operation on the same operands, bit for bit as before.
 X_ROW = 0                                        # L.XB + 4 x: the excitation's 16 samples, each twice
+KT_ROW = 128                                     # 2026-11-14: the coefficients' constants (plk.KTab)
+KT_VALUES = (0.499, FAST_B, FAST_A, PI_F, 1.0, 0.98, 0.0, 0.93, ("i", 0x7EF311C7), 2.0)
 O_ROW = 32                                       # the batch's outputs: [2 x sample + lane] a pair, 2 pairs
 
 
