@@ -52,8 +52,8 @@
  *  32 TLM     -> 2026-11-11: the telemetry frame (docs/device-tests.md), 32 words, read only: the build
  *                id, the DSP and ColdFire loads, the heap, the load labels, the insert skips, the
  *                HOLD counters, the A2 filter counts, each slot's cost
- *  33..42    2026-11-11: the test channel (csrc/devtest/devtest.c, docs/remote-ui-protocol.md): BUILDINFO,
- *                SWITCH, PEEK, COUNTERS, TRACE, STATE, SCREEN, ARM, KEY; a test build only
+ *  33..43    2026-11-11: the test channel (csrc/devtest/devtest.c, docs/remote-ui-protocol.md): BUILDINFO,
+ *                SWITCH, PEEK, COUNTERS, TRACE, STATE, SCREEN, ARM, KEY, PROFILE (prof.c); a test build only
  *  27 ENTRY   u8 slot -> v0.35: its 16-byte pool entry (base, frames, rate, format word, little
  *                endian), its 8-byte short name, u32 the pool's DSP address
  *
@@ -3008,7 +3008,7 @@ void smp_rx(const u8 *msg, u32 len, u32 source)
             scan_seq = smp_command(CMD_SCAN, get32(rq + 3), get32(rq + 7), 0, 0);
             rp[r++] = scan_seq >> 8; rp[r++] = scan_seq;
         }
-    } else if (cmd >= 33 && cmd <= 42 && cmd != 39) {   /* 2026-11-11: the test channel (csrc/devtest, a test build) */
+    } else if (cmd >= 33 && cmd <= 43 && cmd != 39) {   /* 2026-11-11: the test channel (csrc/devtest, a test build); 43 PROFILE */
         extern u32 dt_rx(u32 cmd, const u8 *rq, u32 n, u8 *rp, u32 r, u8 *st);
         r = dt_rx(cmd, rq, n, rp, r, &rp[3]);
     } else {

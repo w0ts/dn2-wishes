@@ -2387,6 +2387,23 @@ def main() -> int:
                 r = dt_call(int(parts[2]), bytes.fromhex(parts[3]) if len(parts) > 3 else b"")
                 dt_results.setdefault("raw", []).append({"step": step, "status": None if r is None else r.status,
                                                          "data": None if r is None else r.data.hex()})
+            elif parts[1] == "profile":
+                # remoteui-5, the CPU profiler (scripts/emulib/prof.py): dt:profile:start:SOURCE:RATE,
+                # dt:profile:run:N:SLICE (N slices of SLICE instructions, the timer's interrupt raised after each),
+                # dt:profile:read:NAME (stop, read the ring, check every PC)
+                from emulib.prof import Prof
+                if "prof" not in dt_results:
+                    dt_results["prof"] = Prof(machine, uc, K, panel, dt_call, DP)
+                pr = dt_results["prof"]
+                if parts[2] == "start":
+                    pr.start(int(parts[3]), int(parts[4]))
+                elif parts[2] == "run":
+                    pr.run(int(parts[3]), int(parts[4]))
+                elif parts[2] == "read":
+                    dt_results.setdefault("profiles", {})[parts[3]] = pr.read(parts[3])
+                    del dt_results["prof"]
+                else:
+                    raise SystemExit(f"unknown dt profile step {step!r}")
             elif parts[1] == "state":
                 st, co, tr = dt_call(DP.STATE), dt_call(DP.COUNTERS, DP.args_counters()), dt_call(DP.TRACE, DP.args_trace(0))
                 bi = dt_call(DP.BUILDINFO)

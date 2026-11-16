@@ -77,6 +77,8 @@ def main() -> int:
         "c_chunk": {"load": built["c_chunk"]["load"], "code": built["c_chunk"]["code"].hex()},
         "machines_chunk": {"load": built["machines_chunk"]["load"],
                            "code": built["machines_chunk"]["code"].hex()},
+        # 2026-11-11: the C chunk's functions by address (the CPU profiler's symbolizer, tools/dn2tools)
+        "c_text_symbols": built.get("c_text_symbols", {}),
     }
     if "flt_chunk" in built:                     # 2026-11-10: the A2 filter machines' FLTR list (dnfw.a2f.coldfire)
         from dnfw.a2f import coldfire as FC      # noqa: PLC0415

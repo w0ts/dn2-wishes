@@ -17,7 +17,7 @@ from .unit import NoTestChannel, StatusError, Unit
 
 
 class TestChannel:
-    """the commands 33..42 over a Unit (the real one through mido, or the simulator)"""
+    """the commands 33..43 over a Unit (the real one through mido, or the simulator)"""
 
     __test__ = False                             # pytest: not a test class
 
@@ -129,3 +129,35 @@ class TestChannel:
         """-> events accepted; StatusError 3 not armed, 4 refused, 5 queue full"""
         self.require("KEY")
         return self.unit.call(P.KEY, P.args_key(events))[0]
+
+    # --- the CPU profiler (43) --------------------------------------------------------------------
+    def profile_status(self) -> P.ProfileStatus:
+        self.require("PROFILE")
+        return P.parse_profile_status(self.unit.call(P.PROFILE, P.args_profile_status()))
+
+    def profile_start(self, rate_hz: int = 997, source: str = "timer") -> P.ProfileStatus:
+        """-> the status after START; StatusError 6 (the reason in profile_status().why) if the timer cannot be
+        used, 5 if one already runs"""
+        self.require("PROFILE")
+        src = {"timer": P.PROF_TIMER, "audio": P.PROF_AUDIO}[source]
+        return P.parse_profile_status(self.unit.call(P.PROFILE, P.args_profile_start(src, rate_hz)))
+
+    def profile_stop(self) -> P.ProfileStatus:
+        self.require("PROFILE")
+        return P.parse_profile_status(self.unit.call(P.PROFILE, P.args_profile_stop()))
+
+    def profile_clear(self) -> P.ProfileStatus:
+        self.require("PROFILE")
+        return P.parse_profile_status(self.unit.call(P.PROFILE, P.args_profile_clear()))
+
+    def profile_read(self, since: int = 0, until: int | None = None) -> list[P.Sample]:
+        """-> the samples from SINCE to the end (or UNTIL), 12 a request"""
+        self.require("PROFILE")
+        out: list[P.Sample] = []
+        while True:
+            total, first, got = P.parse_profile_read(self.unit.call(P.PROFILE, P.args_profile_read(since)))
+            end = total if until is None else min(total, until)
+            out += got[:max(0, end - first)]
+            since = first + len(got)
+            if not got or since >= end:
+                return out

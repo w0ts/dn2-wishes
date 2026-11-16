@@ -1,4 +1,4 @@
-"""The test channel (commands 33..42) against the simulator, its wire format against golden bytes, and the
+"""The test channel (commands 33..43) against the simulator, its wire format against golden bytes, and the
 firmware's rules (csrc/devtest) against the host's, read from the C source so the two cannot drift."""
 
 from __future__ import annotations
@@ -53,7 +53,7 @@ def test_reply_decode_golden():
 
 
 def test_the_storage_commands_are_never_encoded():
-    for cmd in (2, 3, 4, 5, 6, 7, 8, 9, 10, 16, 20, 25, 26, 27, 28, 29, 30, 31, 39, 43, 99):
+    for cmd in (2, 3, 4, 5, 6, 7, 8, 9, 10, 16, 20, 25, 26, 27, 28, 29, 30, 31, 39, 44, 99):   # 43: PROFILE since remoteui-5
         with pytest.raises(Refused):
             request(1, cmd)
     for cmd in P.ALLOWED:
@@ -95,6 +95,8 @@ def test_every_reply_fits_the_firmwares_buffer():
     assert 4 + 1 + 12 * 4 + 12 <= 160                          # COUNTERS
     assert 4 + 88 <= 160                                       # STATE
     assert 4 + 4 + 128 <= 160                                  # PEEK
+    assert 4 + 4 + 17 * 4 <= 160                               # PROFILE status
+    assert 4 + 9 + P.PROF_PER_READ * P.PROF_RECORD <= 160      # PROFILE READ
     assert "static u8 rp[160]" in (REPO / "csrc" / "sampler" / "link.c").read_text()
 
 

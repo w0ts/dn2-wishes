@@ -12,6 +12,8 @@
     dn2test --peak --switch-ab HOLD             the same, run twice on one build: switch HOLD at 1 then at 0
     dn2test --bench --label night9 --out bench/ cycles per frame per machine / FX (CSV + md); then --compare A.csv B.csv
     dn2test info | switches | counters | trace | state | peek ADDR [LEN] | smoke | switch NAME VALUE
+    dn2test profile --seconds 20 --label idle --out prof/ [--stock-dis F] [--ours J]   the CPU profiler (PROFILE)
+    dn2test profile --compare prof/idle.json prof/busy.json                              per function, A vs B
 
 Sends notes, all-notes-off, and the test channel's requests. Nothing that could change the unit's storage.
 """
@@ -104,6 +106,11 @@ def run_peak_cli(a, project, unit, params) -> int:
 
 
 def main(argv=None) -> int:
+    import sys
+    args = list(sys.argv[1:] if argv is None else argv)
+    if args[:1] == ["profile"]:                      # remoteui-5: the CPU profiler (profile_cli.py)
+        from . import profile_cli
+        return profile_cli.main(args[1:])
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--port", default="Elektron Digitone II", help="MIDI port name (a part of it); default matches both USB modes: AUDIO+MIDI and OVERBRIDGE")
     ap.add_argument("--project", default=str(DATA / "project.json"), help="the project description (JSON, docs/device-tests.md)")
@@ -131,7 +138,7 @@ def main(argv=None) -> int:
     ap.add_argument("--ins-skip-cap", type=int, default=0, help="insert blocks passed through for time a scenario may add")
     ap.add_argument("--switch-ab", default=None, metavar="NAME", help="--peak: run twice on one build, the runtime switch NAME at 1 then at 0")
     ap.add_argument("command", nargs="*", help="info, switches, switch NAME VALUE, counters [reset], trace, state, peek ADDR [LEN], smoke")
-    a = ap.parse_args(argv)
+    a = ap.parse_args(args)
     if a.command:
         return inspect_cmds.main(a)
     if a.peak_compare:

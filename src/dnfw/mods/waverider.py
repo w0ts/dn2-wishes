@@ -135,7 +135,9 @@ def ram() -> list[Extent]:
             + [Extent(RAM, PG.METER_RAM, PG.METER_BYTES,
                       "the system meter's state: its counters and figures (csrc/meter)")]
             + [Extent(RAM, PG.MOD_RAM, PG.MOD_BYTES,
-                      "modulation's state: the LFO cascade's shadow cells, the moving controls (csrc/modulation)")])
+                      "modulation's state: the LFO cascade's shadow cells, the moving controls (csrc/modulation)")]
+            + [Extent(RAM, PG.PROF_RAM, PG.PROF_BYTES,
+                      "the CPU profiler's state and samples (csrc/devtest/prof.c), while PROFILE runs")])
 
 
 def _main_os(original: bytes) -> bytes:

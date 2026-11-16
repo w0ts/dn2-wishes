@@ -1047,7 +1047,11 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     # bound, slot_to_id, descriptor, curve) composed again for the A2 filter machines 7..11 only
     # (dnfw.a2f.coldfire), in what was PING's chunk; none built: all stock, as v0.45
     from ..a2f import coldfire as flt_cf
-    out = {"content": None, "edits": edits, "layout": layout,
+    # 2026-11-11: every function of the C chunk by name, for the CPU profiler's symbolizer (tools/dn2tools
+    # profile.py); the image does not change with it
+    c_text = {n: a for n, a in sorted(csyms.items(), key=lambda kv: (kv[1], kv[0]))
+              if pages.C_LOAD <= a < csyms["__text_end"] and not n.startswith("__")}
+    out = {"content": None, "edits": edits, "layout": layout, "c_text_symbols": c_text,
            "chunk": {"load": pages.LOAD, "code": chunk},
            "c_chunk": {"load": pages.C_LOAD, "code": cimage},
            "machines_chunk": {"load": MCHUNK, "code": bytes(mchunk)}}

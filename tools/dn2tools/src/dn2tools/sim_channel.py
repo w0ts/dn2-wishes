@@ -1,4 +1,4 @@
-"""The test channel in the simulator: the firmware's commands 33..42 as devtest.c answers them, the same
+"""The test channel in the simulator: the firmware's commands 33..43 as devtest.c (and prof.c) answer them, the same
 statuses, the same arming and blacklist rules, over a toy UI whose screen changes with the keys.
 
 The UI is a MODEL for the tools' tests, not the unit's: a page id drawn as a row of blocks on the top
@@ -6,12 +6,17 @@ band, the selected value as a bar, FUNC+SRC opening a "list" page (a framed box)
 value, YES / NO closing the list. Enough to prove that a press reaches the screen, that a turn moves a
 value, that the mirror shows what was drawn, and that the safety rules hold, without a unit.
 
-Faults: `no_channel` (a telemetry build: 33..42 answer status 2), `torn` (the first copy of each frame
-is torn, the second whole).
+Faults: `no_channel` (a telemetry build: 33..43 answer status 2), `torn` (the first copy of each frame
+is torn, the second whole), `no_dtim0` (PROFILE refuses the timer source: DMA timer 0 not running).
+
+PROFILE's samples are a MODEL too: a fixed mix (the idle spin, the audio interrupt, a UI task, our C chunk)
+drawn from a seeded generator at the asked rate in the simulator's time, so the host's reports and
+comparisons can be tested; the numbers mean nothing about the unit.
 """
 
 from __future__ import annotations
 
+import random
 import struct
 from dataclasses import dataclass, field
 from typing import Callable
@@ -23,6 +28,13 @@ from .screen import H, W, from_rows
 SWITCHES = [("HOLD", 0, 1, 1), ("LABELS", 0, 1, 1), ("ARMTIME", 30, 1800, 300)]
 PAGES = {1: "TRIG", 2: "SRC", 3: "FLTR", 4: "AMP", 5: "FX", 6: "MOD"}
 LIST_PAGE = 100
+
+# PROFILE's model (prof.c): DMA timer 0 at 132 MHz, 1,500 audio frames a second, a 65,536-sample ring
+BUS_HZ, CAP = 132_000_000, 65536
+IDLE_PC, IDLE_TCB, UI_TCB, MIDI_TCB = 0x400CF246, 0x4243D900, 0x4059E1C0, 0x445E7764
+# (pc, sr, tcb, weight): a quiet unit, about as the meter reads it (the audio interrupt about half the CPU)
+PROFILE_MIX = ((IDLE_PC, 0x2000, IDLE_TCB, 44), (0x40025F10, 0x2500, IDLE_TCB, 30), (0x40026200, 0x2500, UI_TCB, 18),
+               (0x40131FE0, 0x2000, UI_TCB, 4), (0x46AC1000, 0x2000, UI_TCB, 2), (0x40121960, 0x2000, MIDI_TCB, 2))
 
 
 @dataclass
@@ -49,6 +61,9 @@ class ChannelSim:
     value: int = 64
     list_pos: int = 0
     events: list[str] = field(default_factory=list)            # what the UI received, in order
+    prof: dict = field(default_factory=lambda: {"state": 0, "source": 0, "why": 0, "rate": 0, "t0": 0.0, "t1": 0.0,
+                                                "samples": [], "starts": 0})
+    profile_mix: tuple = PROFILE_MIX
 
     # --- time ---------------------------------------------------------------------------------
     def tick(self) -> int:
@@ -175,7 +190,7 @@ class ChannelSim:
         self.counters[0] += 1
         sub = a[0] if a else 0xFF
         if cmd == P.BUILDINFO:
-            return P.OK, (b"DTB1" + struct.pack(">HBBIBBBB", 1, 0x01, 0x12, 0x3FF, len(SWITCHES), 128, 64, 8)
+            return P.OK, (b"DTB1" + struct.pack(">HBBIBBBB", 1, 0x01, 0x12, 0x7FF, len(SWITCHES), 128, 64, 8)
                           + b"sim".ljust(16, b"\0") + struct.pack(">I", 1000))
         if cmd == P.SWITCH:
             k = a[1] if len(a) > 1 else 0xFF
@@ -273,6 +288,81 @@ class ChannelSim:
             return st, d + bytes([self.armed, self.destructive]) + struct.pack(">I", self.sw[2])
         if cmd == P.KEY:
             return self._keys(a)
+        if cmd == P.PROFILE:
+            return self._profile(a)
+        return P.ARGS, b""
+
+    # --- PROFILE (prof.c) -------------------------------------------------------------------------
+    def _prof_fill(self) -> None:
+        """the samples the model's timer has taken by now (the ring stops when full)"""
+        pr = self.prof
+        if pr["state"] != 1:
+            return
+        now = self.clock()
+        want = min(CAP, int((now - pr["t0"]) * pr["rate"]))
+        rng = random.Random(pr["starts"] * 7919 + len(pr["samples"]))
+        mix = [m for m in self.profile_mix if pr["source"] == P.PROF_TIMER or m[1] >> 8 & 7 < 5]   # AUDIO: no level 5
+        weights = [m[3] for m in mix]
+        while len(pr["samples"]) < want:
+            pc, sr, tcb, _w = rng.choices(mix, weights)[0]
+            pr["samples"].append((pc + 2 * rng.randrange(0, 8) * (pc != IDLE_PC), tcb, sr, rng.randrange(0, 200)))
+        if len(pr["samples"]) >= CAP:
+            pr["state"], pr["t1"] = 2, pr["t0"] + CAP / pr["rate"]
+
+    def _prof_status(self) -> bytes:
+        pr = self.prof
+        running = pr["state"] == 1
+        t_end = self.clock() if running or not pr["starts"] else pr["t1"]
+        n = len(pr["samples"])
+        period = BUS_HZ // pr["rate"] if pr["rate"] else 0
+        dtmr = 0x0003 | (0x10 if running and pr["source"] == P.PROF_TIMER else 0)
+        if "no_dtim0" in self.faults:
+            dtmr = 0
+        words = (n, CAP, period, int(pr["t0"] * BUS_HZ) & 0xFFFFFFFF, int(t_end * BUS_HZ) & 0xFFFFFFFF,
+                 int(pr["t0"] * 1500), int(t_end * 1500), n * 140 if pr["source"] == P.PROF_TIMER else 0, n, 0,
+                 1200, 0, dtmr << 16 | 2, 0xFFFFFFFF, (6 if running else 0) << 24 | (0 if running else 1) << 16 | pr["starts"],
+                 0x46AC2000 if running else 0x40001252, 0x47100100)
+        return bytes([pr["state"], pr["source"], pr["why"], P.PROF_RECORD]) + struct.pack(">17I", *words)
+
+    def _profile(self, a: bytes) -> tuple[int, bytes]:
+        pr = self.prof
+        self._prof_fill()
+        sub = a[0] if a else 0xFF
+        if sub == P.PROF_STATUS:
+            return P.OK, self._prof_status()
+        if sub == P.PROF_START:
+            if len(a) < 6:
+                return P.ARGS, self._prof_status()
+            if pr["state"] == 1:
+                return P.BUSY, self._prof_status()
+            src, rate = a[1], struct.unpack(">I", a[2:6])[0]
+            if src not in (P.PROF_TIMER, P.PROF_AUDIO):
+                pr["why"] = 7
+                return P.ARGS, self._prof_status()
+            if not 10 <= rate <= (10000 if src == P.PROF_TIMER else 1500):
+                pr["why"] = 6
+                return P.ARGS, self._prof_status()
+            if src == P.PROF_TIMER and "no_dtim0" in self.faults:
+                pr["why"] = 1
+                return P.RANGE, self._prof_status()
+            if src == P.PROF_AUDIO:
+                rate = 1500 // (1500 // rate)
+            pr.update(state=1, source=src, why=0, rate=rate, t0=self.clock(), t1=0.0, samples=[], starts=pr["starts"] + 1)
+            return P.OK, self._prof_status()
+        if sub == P.PROF_STOP:
+            if pr["state"] == 1:
+                pr["state"], pr["t1"] = 3, self.clock()
+            return P.OK, self._prof_status()
+        if sub == P.PROF_CLEAR:
+            if pr["state"] == 1:
+                return P.BUSY, self._prof_status()
+            pr["samples"], pr["state"] = [], 0
+            return P.OK, self._prof_status()
+        if sub == P.PROF_READ and len(a) >= 5:
+            since = min(struct.unpack(">I", a[1:5])[0], len(pr["samples"]))
+            got = pr["samples"][since:since + P.PROF_PER_READ]
+            return P.OK, (struct.pack(">IIB", len(pr["samples"]), since, len(got))
+                          + b"".join(struct.pack(">IIHH", *g) for g in got))
         return P.ARGS, b""
 
     def _keys(self, a: bytes) -> tuple[int, bytes]:

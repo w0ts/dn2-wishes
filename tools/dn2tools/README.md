@@ -7,6 +7,7 @@ Test a Digitone II running a dn2-wishes **test build**, over USB: telemetry, run
     .venv/bin/dn2test smoke          # read only
     .venv/bin/dn2ui snap             # the screen as a PNG
     .venv/bin/dn2ui --sim mirror     # no unit: the simulator
+    .venv/bin/dn2test profile --seconds 30 --label idle --out prof/   # the ColdFire's CPU profile (remoteui-5)
 
 The manual is `docs/remote-ui.md` (quickstart, commands, safety, troubleshooting); the wire format is
 `docs/remote-ui-protocol.md`; the measurement scenarios are `docs/device-tests.md`.

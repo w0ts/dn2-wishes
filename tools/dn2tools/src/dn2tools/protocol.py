@@ -5,7 +5,7 @@ this module is its executable form and the golden tests hold the two together).
     reply    F0 00 20 3C 7D 01 <pack7: u16 seq, u8 cmd | 0x80, u8 status, data> F7
 
 All numbers big-endian. Commands 1 (HELLO) and 32 (TLM) come from the sample link and the telemetry
-build; 33..42 are the test channel (a test build only).
+build; 33..43 are the test channel (a test build only; 43 PROFILE since remoteui-5).
 """
 
 from __future__ import annotations
@@ -27,15 +27,17 @@ STATE = 38
 SCREEN = 40
 ARM = 41
 KEY = 42
+PROFILE = 43
 
 NAMES = {HELLO: "HELLO", TLM: "TLM", BUILDINFO: "BUILDINFO", SWITCH: "SWITCH", PEEK: "PEEK", COUNTERS: "COUNTERS",
-         TRACE: "TRACE", STATE: "STATE", SCREEN: "SCREEN", ARM: "ARM", KEY: "KEY"}
+         TRACE: "TRACE", STATE: "STATE", SCREEN: "SCREEN", ARM: "ARM", KEY: "KEY", PROFILE: "PROFILE"}
 
 # The only commands a host built on this package sends. Everything else on this SysEx channel (the
 # sample link's WRITE, BEGIN, END, FORGET, LOAD, the library, ERASE MOD DATA ...) can change the unit's
 # storage, and is refused before it is encoded (unit.request).
 READ_ONLY = frozenset({HELLO, TLM, BUILDINFO, PEEK, COUNTERS, TRACE, STATE, SCREEN})
-CONTROL = frozenset({SWITCH, ARM, KEY})          # RAM words the firmware whitelists, the arm handshake, keys
+CONTROL = frozenset({SWITCH, ARM, KEY, PROFILE})  # RAM words the firmware whitelists, the arm handshake, keys,
+                                                  # the profiler (its own RAM and DMA timer 0's compare)
 ALLOWED = READ_ONLY | CONTROL
 
 # statuses
@@ -45,7 +47,7 @@ STATUS_TEXT = {OK: "ok", 1: "failed", ARGS: "bad arguments or unknown command", 
 
 # capability bits (BUILDINFO)
 CAPS = {"TLM": 0, "BUILDINFO": 1, "SWITCH": 2, "PEEK": 3, "COUNTERS": 4, "TRACE": 5, "STATE": 6, "SCREEN": 7,
-        "ARM": 8, "KEY": 9}
+        "ARM": 8, "KEY": 9, "PROFILE": 10}
 
 # KEY event kinds
 PRESS, ENCODER, RELEASE = 1, 2, 3
@@ -321,6 +323,95 @@ class ArmState:
 def parse_arm(d: bytes) -> ArmState:
     to, = struct.unpack(">I", d[2:6])
     return ArmState(bool(d[0]), bool(d[1] & 1), to)
+
+
+# --- PROFILE (43): the CPU profiler (csrc/devtest/prof.c) -------------------------------------------------
+
+PROF_STATUS, PROF_START, PROF_STOP, PROF_CLEAR, PROF_READ = 0, 1, 2, 3, 4
+PROF_TIMER, PROF_AUDIO = 1, 2                     # the sources
+PROF_STATES = {0: "off", 1: "running", 2: "full", 3: "stopped"}
+PROF_SOURCES = {0: "none", 1: "timer", 2: "audio"}
+PROF_WHY = {0: "", 1: "DMA timer 0 is not running from the bus clock", 2: "DMA timer 0 restarts at its reference (FRR)",
+            3: "DMA timer 0's reference interrupt or DMA is in use", 4: "its interrupt source is set up or unmasked",
+            5: "vector 96 is not the stock default", 6: "rate out of range (timer 10..10000, audio 10..1500)",
+            7: "unknown source"}
+PROF_RECORD = 12                                  # u32 pc, u32 tcb, u16 sr, u16 late
+PROF_PER_READ = 12                                # records a READ returns at most (9 + 144 bytes)
+
+
+def args_profile_status() -> bytes:
+    return bytes([PROF_STATUS])
+
+
+def args_profile_start(source: int, rate_hz: int) -> bytes:
+    return bytes([PROF_START, source]) + struct.pack(">I", rate_hz)
+
+
+def args_profile_stop() -> bytes:
+    return bytes([PROF_STOP])
+
+
+def args_profile_clear() -> bytes:
+    return bytes([PROF_CLEAR])
+
+
+def args_profile_read(since: int) -> bytes:
+    return bytes([PROF_READ]) + struct.pack(">I", since & 0xFFFFFFFF)
+
+
+@dataclass(frozen=True)
+class ProfileStatus:
+    state: str
+    source: str
+    why: int
+    record_bytes: int
+    samples: int
+    capacity: int
+    period_ticks: int
+    t_start: int                                  # DMA timer 0 (132 MHz, wraps every 32.5 s)
+    t_now: int                                    # now while running, else at the stop
+    f_start: int                                  # audio frames
+    f_now: int
+    isr_ticks: int                                # the timer handler's own time, summed
+    fires: int
+    late: int                                     # samples taken more than a period late
+    late_max: int
+    dropped: int
+    dtim0: int                                    # DTMR0 << 16 | DTXMR0 << 8 | DTER0
+    dtrr0: int
+    intc: int                                     # ICR32 << 24 | IMRH bit 0 << 16 | starts
+    vector96: int
+    ring: int
+
+    @property
+    def why_text(self) -> str:
+        return PROF_WHY.get(self.why, str(self.why))
+
+
+def parse_profile_status(d: bytes) -> ProfileStatus:
+    if len(d) < 72:
+        raise ValueError("not a PROFILE status")
+    w = struct.unpack(">17I", d[4:72])
+    return ProfileStatus(PROF_STATES.get(d[0], str(d[0])), PROF_SOURCES.get(d[1], str(d[1])), d[2], d[3], *w)
+
+
+@dataclass(frozen=True)
+class Sample:
+    pc: int
+    tcb: int
+    sr: int
+    late: int                                     # DMA timer 0 ticks the sample came after it was due (65535: or more)
+
+    @property
+    def ipl(self) -> int:
+        return self.sr >> 8 & 7
+
+
+def parse_profile_read(d: bytes) -> tuple[int, int, list[Sample]]:
+    """-> (samples recorded so far, the first one's index, samples)"""
+    total, first, n = struct.unpack(">IIB", d[:9])
+    out = [Sample(*struct.unpack(">IIHH", d[9 + PROF_RECORD * k:9 + PROF_RECORD * (k + 1)])) for k in range(n)]
+    return total, first, out
 
 
 def fnv1a(data: bytes) -> int:

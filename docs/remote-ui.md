@@ -59,6 +59,7 @@ pass). The upgrade buffer's margin is the binding limit for "every build": 4,937
 | `dn2tools`: protocol, client, screen mirror, key driver, simulator, `dn2ui`, `dn2test` | 46 tests on the simulator, no hardware |
 | Audio scenarios over USB audio, peak / wake-up scenarios | written and simulator-tested (`docs/device-tests.md`), not run on the unit |
 | On the unit | **nothing yet**: waiting for the User to flash the test build |
+| CPU profiler PROFILE (43, `csrc/devtest/prof.c`), `dn2test profile` (remoteui-5) | built, preflight family and the emulator (below); not run on the unit |
 
 ## Quickstart
 
@@ -94,7 +95,11 @@ No unit? Add `--sim` to any command: the simulator answers as the firmware does 
 
 `dn2ui` (screen and keys): `snap [FILE]`, `show`, `mirror [--fps 8] [--window] [--png-dir DIR] [--seconds S]`,
 `arm`, `disarm`, `status`, `press KEY|CHORD...`, `hold KEY MS`, `turn ENC DELTA [--push]`, `seq STEP...`,
-`wait-for FILE.png|--changed`, `run SCENARIO.json`, `keys`. Options: `--port NAME`, `--sim`, `--log FILE`
+`wait-for FILE.png|--changed`, `run SCENARIO.json`, `keys`.
+
+`dn2test profile` (the CPU profiler, below): `--seconds N --label L --out DIR [--rate 997] [--source auto|timer|audio]
+[--stock-dis F | --stock-bin F | --stock-symbols F] [--ours waverider_code.json]`, `--compare A.json B.json`,
+`--report RAW.json`, `--status`, `--stop`. Options: `--port NAME`, `--sim`, `--log FILE`
 (the event log, default `./dn2ui-events.jsonl`), `--allow-destructive` (see Safety).
 
 `dn2test` (measurements): the scenarios (`--only`, `--dry-run`, `--audio`, `--peak`, `--bench`, `--compare`,
@@ -257,6 +262,130 @@ labels (DSP, CPU, RAM and the "!") stay off until 2 s after the last one (`smp_b
 the router, the next screen shows none (readouts `L0`, `L1`). Not verified: a real OS upgrade (the User sees it on the
 next flash; the window cannot be timed in the emulator, whose frame counter stands still). The loadicons branch's "!"
 must test `smp_bulk_recent()` too when it is merged.
+
+## The CPU profiler (remoteui-5)
+
+**What the ColdFire spends its time on, on the unit, by scenario.** PROFILE (SysEx 43,
+`docs/remote-ui-protocol.md`) samples the interrupted PC about a thousand times a second into a ring in our
+own RAM; `dn2test profile` reads it after the run and maps every PC to a function (stock 1.12's from an objdump
+of the user's image, ours from the build's `waverider_code.json`). Disarmed at power-on; nothing runs until a
+START, and the ring stops when full (65,536 samples: 66 s at 997 a second).
+
+    dn2test profile --seconds 30 --label idle --out prof/ --stock-bin section_3_MAIN_OS.bin --ours waverider_code.json
+    dn2test profile --seconds 30 --label dense --out prof/ --stock-symbols prof/stock_symbols.json --ours ...
+    dn2test profile --compare prof/idle.json prof/dense.json
+
+The report: **idle %** (samples at the idle task's spin) and busy %, the meter's C label during the run beside
+it, the top functions, the split by interrupt mask (task code vs inside an interrupt, by level), the tasks (by
+the running TCB, each with its top functions), the samples' lateness, the profiler's own cost and the sample
+rate, all measured. `--compare` puts two runs side by side per function: the owner's question (does stock load
+the ColdFire the same at idle and at full load?) is answered by comparing an idle run with a dense one; the
+headroom for new work is 100 % minus the busy % of the heaviest scenario.
+
+**The build** (UNGATED: the preflight family and the emulator only): `remoteui-5`,
+`DN2mod_v0.47-ours-NOBOOT-1.12-combined-remoteui5-profiler_UNGATED_OS1.12.syx`, sha256 `7e8bf07e…`; packed upgrade
+image 2,093,831 of 2,097,152 B (**3,321 B left**; remoteui-4 2,092,417 B: the profiler costs 1,414 B packed). Its code in the C
+chunk: 2,294 B (`0x46ade1a8..0x46adea9e`, prof.c and prof.S); its RAM (1 MB at `0x47100000`, above the DSP's tables) is not in the image.
+
+### The sampling source (measured in the 1.12 image, 2026-11-11)
+
+Every timer the OS owns is taken: PIT0 the RTOS time slice (vector 205, the switcher re-arms it), PIT1 a
+microsecond delay, PIT2 the timer wheel (vector 207), PIT3 the display (vector 208), DTIM1 a sleep (vector 97),
+DTIM2 counts an external clock (`0x400cedf4` writes its DTMR = 7), DTIM3 the UI's 30 Hz tick (vector 99).
+**DMA timer 0** is the one free interrupt: the OS reads its counter at ten sites (the encoders' time stamps, our
+meter) and **never writes any of its registers** (no code names `0xfc070000`..`0xfc070008`; the boot leaves it
+counting at the bus clock, 132 MHz, the OS's own 10 s test is 1,319,999,999 ticks); its interrupt source (INTC0
+source 32, ICR `0xfc048060`) is never set up and vector 96 (`0x40000180`, VBR `0x40000000`) stays the default
+handler `0x40001252`. So the profiler (source **TIMER**, the default) uses only its **reference compare** in free
+run: the counter is never stopped or reset (every reader of it is unaffected), each sample sets the next
+reference at now + period ± period/16 (a 16-bit LFSR: no lock to the 1,500 Hz audio frames or the 120 Hz wheel),
+at **interrupt level 6**, above the audio interrupt's 5. START refuses (status 6, with the reason) unless the
+timer is exactly as the boot left it and nothing else uses its interrupt; STOP (or a full ring) masks the source
+first, then puts back DTMR0.ORRI, DTRR0, ICR32 and vector 96.
+
+Level 7 would see more but is not safe: it is non-maskable, and the context switch (`0x40000410`) and other
+masked code store below SP; a level-7 frame would overwrite those words.
+
+**Bias, TIMER.** Invisible: everything that runs with the mask at 6 or 7: every `move.w #0x2700,%sr` critical
+section, and the level-6 / level-7 handlers (vectors 66, 168, 170, 209, 221: the ICR writes in the image). A
+sample due inside such a section is taken when it ends, so its time lands on the instruction after the unmask;
+the record's `late` measures that delay for every sample (the report's lateness: median, p95, p99, max).
+Inside the audio interrupt (level 5) is seen: its share of the samples is the audio interrupt's share of the
+CPU, by function.
+
+**Fallback, AUDIO** (`--source audio`, or automatically when the timer is refused): the PC the audio interrupt
+interrupted, read from its exception frame (`0x40025e36: link %fp,#-236`: the frame at `%fp + 4`) in the sample
+link's hook, every k-th frame (1,500 / k a second). Its bias is large: the audio interrupt's own time (about
+half the CPU) and anything at level 5..7 is invisible, and the samples are locked to the audio frames. Disarmed,
+it costs the audio interrupt a load and a compare a frame.
+
+**Cost.** The handler measures itself: the DTIM0 ticks from its first instruction to its last, summed (status
+`isr ticks`; the report's "the profiler's own handler"), the exception entry and `rte` aside. In the emulator it
+is 105 instructions a sample, from the interrupt's delivery to the `rte` (the same for every sample of every run). Each sample writes 12 bytes into the ring (cached DDR at `0x47100100`): about
+one cache line allocated per sample. The host polls STATUS and TLM once a second during the run (two round trips,
+about 3 ms of the MIDI task a second); those show up in the profile as the MIDI task's functions.
+
+**Idle.** The idle task is TCB `0x4243d900`, prio 1, entry `0x400cedfc` (its TASK_CREATE at `0x400ced30` in 1.12):
+after the boot's setup it parks at `0x400cf246: bra.s *` (the CPU never sleeps: no `stop` in the image). The prio-0
+task (`0x400ced18`, TCB `0x424398ac`) creates it and parks at its own `bra.s *` (`0x400ced46`); prio 0 never runs.
+A sample is **idle** when its PC is `0x400cf246` and its mask is 0.
+
+### The meter's C and the profiler's idle %: what each counts
+
+The meter (`csrc/meter`, the C label, TLM word 6) is **1 - (idle - audio ISR in idle) / elapsed**, in DTIM0 ticks
+over half a second: *idle* is the time the idle task held the CPU **parked at its spin**, credited at the context
+switch (`mtr_switch` at `0x40000438`: from the switch in to the switch out, only when it switches out from
+`0x400cf246`); *audio ISR in idle* is the audio interrupt's time from the link hook (`0x40026098`) to its frame
+count (`0x40027b82`) when it interrupted the idle task. So busy = not parked in the idle task, with the audio
+interrupt's measured part taken out of idle. **What it counts as idle that is not:** every other interrupt that
+lands while the idle task is parked (the timers, UART, USB, the eDMA's vector 170, ... and the profiler's own
+handler), and the audio interrupt's entry up to the link hook (its register save and transmit fills).
+
+The profiler's idle % counts **only** samples at the spin with the mask at 0: an interrupt that lands in the idle
+task is sampled as that interrupt (busy). So the two should agree to within (a) those interrupts' time inside idle
+intervals (the profiler's busy % reads higher by it), (b) the sampling error (±1.6 % at 95 % for 4,000 samples
+near 50 %), (c) the profiler's own cost (counted idle by the meter, invisible to the profiler), and (d) the masked
+sections' time, which the profiler moves to the instruction after the unmask (busy either way). A difference larger
+than that is a finding, not noise. Not measured yet: no run on the unit.
+
+### Verified in the emulator (2026-11-11, build sha 7e8bf07e, source 51e60ea3 + docs)
+
+The emulator models neither DMA timer 0 (its counter reads 0, its mode 0) nor INTC SIMR / CIMR, so the
+`dt:profile:*` steps (`scripts/emulib/prof.py`) set DTMR0 to 0x0003 (as the unit's boot leaves it), model SIMR /
+CIMR for source 32 only, and raise vector 96 at level 6 at the end of each run slice when the firmware has armed it
+(and the CPU's mask is below 6), as the timer would. On the build's snapshot (`ui800M-v014` with this build
+installed; the bench container, and the same steps in `scratch/remoteui/farm_ru.sh` for gpufarm):
+
+- START took the timer: vector 96 became `prof_isr`, ICR32 6, the source unmasked, DTMR0 `0x0013` (ORRI set),
+  DTRR0 the next due time. STOP put back every one of them (vector `0x40001252`, ICR 0, masked, DTMR0 `0x0003`,
+  DTRR0 as found). `faults []` in every run.
+- UI alone, 40 slices of 200,000 instructions: 40 interrupts, **40 samples, every PC the one the interrupt was
+  raised at**, all in code: 39 at `idle_spin` (`0x400cf246`), 1 in `isr_vec155` (the panel UART's handler).
+- With the audio interrupt running on its own (`--isr-frame 75000`: 702 frames, 39,711 instructions each on
+  average), 300 slices: 293 interrupts (7 held while the mask was 6 or 7), 293 samples, every PC the raised one,
+  masks 0, 1 and 5: **the timer samples inside the audio interrupt** (`fn_400db28e`, `fn_400db340`, the mirror
+  apply) and the tasks (`fn_40137a06`, `fn_40134770`, our `smp_status`, `rtos_switch`), 245 at `idle_spin`.
+  The shares are the emulator's (samples fall at the harness's slice ends, its time is an instruction count):
+  they say nothing about the unit.
+- AUDIO source: 133 samples from the audio interrupt's own frames (one a frame, the source asked at 1,500 a
+  second), every one at `0x400253ce`, mask 6: the `rte` of the vector-170 callback (`0x40025386`) that forces
+  vector 191. In this emulator the forced interrupt is taken before that `rte`; on the hardware a level-5 request
+  waits until the level-6 handler's `rte` has lowered the mask, so its frame holds the code vector 170
+  interrupted. Called as a function (`isr:3`) the hook records 3 samples (the gate and the ring work; the frame
+  there is not an interrupt's).
+- `late` is meaningless here (the counter stands still): every sample counts as late.
+- **gpufarm** (`scratch/remoteui/farm_ru.sh`, the build's own snapshot: `boot400M` with this build installed, run to
+  800M): booted from reset to 800M instructions with no fault; the earlier test channel steps unchanged (seven
+  screen readouts equal the glass's buffer pixel for pixel, SETTINGS refused, KEY / ARM / PEEK as before); the
+  timer source on the UI alone, 300 slices: 300 samples, every PC the raised one, all at `idle_spin`; with the
+  audio interrupt (`--isr-frame 75000`, 702 frames): 294 samples (6 held by the mask), every PC the raised one,
+  **259 at mask 0 and 35 at mask 5** (inside the audio interrupt: `fn_400db28e`, `fn_400db340`), 250 at
+  `idle_spin`; the audio source 134 samples (as above); 105 instructions a sample; a START while one ran and a
+  CLEAR while it ran were refused with status 5; `faults []` in every run.
+
+Not verifiable without the unit: DTMR0's real value (the emulator's reads 0; the boot's setting is read by START
+and in every status), the sample rate and lateness, the handler's cost in ticks, the idle % and its agreement
+with the meter, the AUDIO source on a running audio interrupt.
 
 ## Troubleshooting
 

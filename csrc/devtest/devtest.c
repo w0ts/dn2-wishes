@@ -65,7 +65,9 @@
 #define CAP_SCREEN   (1u << 7)
 #define CAP_ARM      (1u << 8)
 #define CAP_KEY      (1u << 9)
-#define CAPS (CAP_TLM | CAP_INFO | CAP_SWITCH | CAP_PEEK | CAP_COUNTERS | CAP_TRACE | CAP_STATE | CAP_SCREEN | CAP_ARM | CAP_KEY)
+#define CAP_PROFILE  (1u << 10)                  /* remoteui-5: the CPU profiler (prof.c) */
+#define CAPS (CAP_TLM | CAP_INFO | CAP_SWITCH | CAP_PEEK | CAP_COUNTERS | CAP_TRACE | CAP_STATE | CAP_SCREEN | CAP_ARM | CAP_KEY \
+              | CAP_PROFILE)
 
 /* statuses (the reply's fourth byte) */
 #define ST_OK 0
@@ -86,7 +88,7 @@
 #define TR_RESET 8
 #define TR_TORN 9
 
-static const char build_label[16] = "remoteui-4";
+static const char build_label[16] = "remoteui-5";
 static const u8 wire6[6] = {1, 0, 4, 5, 6, 7};   /* codes 49..54 (LEVEL, VOICE, ARP, PLUS, STACK, MINUS): channel 6's bits */
 
 /* keys that may go down while FUNC is held, unless armed for destructive use: the page keys (TRIG..MOD),
@@ -458,7 +460,7 @@ static u32 keys_in(const u8 *rq, u32 n, u8 *rp, u32 r, u8 *st)   /* KEY: u8 coun
     return r;
 }
 
-/* the commands 33..42 (link.c smp_rx: RQ its N bytes, the reply's data from RP + R, room to 160; ST the
+/* the commands 33..43 (link.c smp_rx: RQ its N bytes, the reply's data from RP + R, room to 160; ST the
  * status byte) -> the reply's length */
 NOJT u32 dt_rx(u32 cmd, const u8 *rq, u32 n, u8 *rp, u32 r, u8 *st)
 {
@@ -631,6 +633,9 @@ NOJT u32 dt_rx(u32 cmd, const u8 *rq, u32 n, u8 *rp, u32 r, u8 *st)
         put32(rp + r, dt_sw[DT_SW_ARMTIME]); r += 4;
     } else if (cmd == 42) {                      /* KEY */
         r = keys_in(rq, n, rp, r, st);
+    } else if (cmd == 43) {                      /* PROFILE (prof.c): the CPU profiler */
+        extern u32 prof_rx(const u8 *rq, u32 n, u8 *rp, u32 r, u8 *st);
+        r = prof_rx(rq, n, rp, r, st);
     } else {
         *st = ST_ARGS;
     }

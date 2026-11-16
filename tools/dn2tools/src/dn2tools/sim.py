@@ -229,7 +229,7 @@ class UnitSim:
             status, body = 0, struct.pack(">HII", 7, 0, 0)
         elif cmd == CMD_TLM:
             status, body = 0, encode(self.snapshot())
-        elif 33 <= cmd <= 42 and cmd != 39:
+        elif 33 <= cmd <= 43 and cmd != 39:
             status, body = self.channel.handle(cmd, args)
         else:
             status, body = 2, b""

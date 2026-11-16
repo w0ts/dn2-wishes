@@ -17,7 +17,7 @@ ranges it reads), dispatched from `csrc/sampler/link.c` `smp_rx`.
 - `seq` is the host's; the reply echoes it. The unit answers every request it understands once, from the
   MIDI input task; it never answers from the audio interrupt.
 - Stock firmware does not answer at all (a timeout). A build without the test channel answers commands
-  33..42 with status 2. Read BUILDINFO first.
+  33..43 with status 2 (a build before remoteui-5 answers 43 with status 2 too). Read BUILDINFO first.
 - The longest reply's data is 156 bytes (the firmware's reply buffer is 160 bytes with the header).
 
 ## Statuses
@@ -34,7 +34,7 @@ ranges it reads), dispatched from `csrc/sampler/link.c` `smp_rx`.
 ## Commands
 
 The channel's other commands (1..31: the sample link's image writes, the +Drive library, ERASE MOD DATA)
-can change the unit's storage. **dn2tools refuses to encode anything but 1, 32 and 33..42.** A client of
+can change the unit's storage. **dn2tools refuses to encode anything but 1, 32 and 33..43.** A client of
 your own should do the same.
 
 ### 1 HELLO, 32 TLM (from the telemetry build)
@@ -51,7 +51,7 @@ args: none → data (36 bytes):
 | 0 | 4 bytes | `DTB1` |
 | 4 | u16 | test channel protocol (1) |
 | 6 | 2 bytes | OS version, BCD (`01 12`) |
-| 8 | u32 | capability bits: 0 TLM, 1 BUILDINFO, 2 SWITCH, 3 PEEK, 4 COUNTERS, 5 TRACE, 6 STATE, 7 SCREEN, 8 ARM, 9 KEY |
+| 8 | u32 | capability bits: 0 TLM, 1 BUILDINFO, 2 SWITCH, 3 PEEK, 4 COUNTERS, 5 TRACE, 6 STATE, 7 SCREEN, 8 ARM, 9 KEY, 10 PROFILE (remoteui-5) |
 | 12 | u8 | number of switches |
 | 13 | u8, u8 | screen width, height (128, 64) |
 | 15 | u8 | screen chunks (8) |
@@ -168,3 +168,38 @@ Key codes: 1 TRIG, 2 SRC, 3 FLTR, 4 AMP, 5 FX, 6 MOD, 7 PRESET, 8 SETTINGS, 9 TE
 and again when due; with FUNC held only 1..6, 11, 13, 14, 15, 20, 21, 22, 41..48 may go down; FUNC may not
 go down while another key outside that set is held. A refusal when due is counted and traced, not
 answered (the message was answered when it was queued).
+
+### 43 PROFILE (remoteui-5)
+
+The CPU profiler (`csrc/devtest/prof.c`; what it measures and its bias: `docs/remote-ui.md`, "The CPU profiler").
+Disarmed at power-on; nothing runs until START. No arming needed (it changes no setting and presses nothing),
+but dn2tools counts it among the control commands.
+
+| sub | args | data |
+|---|---|---|
+| 0 STATUS | `u8 0` | status below |
+| 1 START | `u8 1, u8 source (1 TIMER, 2 AUDIO), u32 rate (samples a second: TIMER 10..10000, AUDIO 10..1500)` | status below; status 5 if one runs, 6 if the timer cannot be used (`why`), 2 bad source or rate |
+| 2 STOP | `u8 2` | status below (the timer's registers and vector 96 put back) |
+| 3 CLEAR | `u8 3` | status below (the samples dropped; status 5 while running) |
+| 4 READ | `u8 4, u32 from` | `u32 samples, u32 from, u8 n (<= 12), n x record` |
+
+Record (12 bytes): `u32 pc` (the interrupted PC), `u32 tcb` (the running task, `0x4664bcdc`), `u16 sr` (the
+interrupted SR: bits 8..10 the interrupt mask), `u16 late` (DMA timer 0 ticks between the sample's due time
+and its handler's first read, clamped to 65535; 0 for AUDIO).
+
+The ring holds 65,536 records and **stops when full** (it never wraps): the TIMER handler then switches its
+interrupt off itself. A READ may run while it records (the records below `samples` are whole).
+
+Status (72 bytes): `u8 state (0 off, 1 running, 2 full, 3 stopped), u8 source (0 none, 1 timer, 2 audio),
+u8 why, u8 record bytes (12)`, then u32 each: `samples, capacity (65,536), period (DTIM0 ticks), DTCN0 at
+START, DTCN0 now (running) or at the stop, audio frames at START, frames now or at the stop, the handler's own
+time (DTIM0 ticks, summed: its entry and rte aside), interrupts taken, samples more than a period late, the
+latest (ticks), dropped (interrupts after the stop or the full ring), DTMR0 << 16 | DTXMR0 << 8 | DTER0, DTRR0,
+ICR32 << 24 | IMRH bit 0 << 16 | starts since power-on, vector 96, the ring's address`.
+
+`why` (START's refusal): 0 none, 1 DMA timer 0 not running from the bus clock, 2 it restarts at its reference
+(FRR), 3 its reference interrupt or DMA in use, 4 its interrupt source set up or unmasked, 5 vector 96 not the
+stock default, 6 rate out of range, 7 unknown source. DMA timer 0 counts at the bus clock (132 MHz, the OS's
+own 10 s test) and wraps every 32.5 s: a host unwraps it from its status polls; elapsed time is the audio
+frames' (1,500 a second).
+

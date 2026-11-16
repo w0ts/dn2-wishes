@@ -659,6 +659,12 @@ MOD_RAM = 0x46AF8000                            # 2026-11-11: csrc/modulation's 
 MOD_BYTES = 0x800                               # shadow cells, written in the audio ISR; the moving controls'
 MOD_CASCADE_BYTES = 0x500                       # cells): RAM above BSS, like the meter's
 assert MDUI_LOAD + 0x8000 <= MOD_RAM and MOD_RAM + MOD_BYTES <= METER_RAM, "MD graphics, modulation, meter"
+# 2026-11-11, remoteui-5: the CPU profiler's state and sample ring (csrc/devtest/prof.c), written only while
+# PROFILE runs. Above the DSP's tables (sampler.machines.TABLE_LOAD 0x47000000, up to 512 KB) and 14 MB under
+# the boot stack's top (0x48000000; the tasks run on their own stacks in BSS, docs/coldfire-tasks.md)
+PROF_RAM = 0x47100000
+PROF_BYTES = 0x100000
+assert 0x47000000 + (512 << 10) <= PROF_RAM and PROF_RAM + PROF_BYTES <= 0x47800000, "tables, profiler, stack"
 MD_FX_NIBBLES = 0x31313311                      # AMD-AMF, EQF-EQG, FLTF-FLTW-FLTQ clipped, as the MD's
 TRACK_LEVEL_ID = 10                             # record 10, "Track Level" / LEV, 0..0x7f00 (read from the 1.11 record table)
 
