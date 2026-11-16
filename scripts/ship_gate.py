@@ -1033,8 +1033,8 @@ def main() -> int:
                      f"mem:{g['trim_s']}:4,spin:7:-3,wait:5,mem:{g['trim_e']}:4,png:t2,spin:5:2,wait:5,png:tz,"
                      f"mem:{g['smp_cmds']}:4,"
                      f"press:17,wait:2,press:10,wait:3,mem:{g['rec_pv_on']}:4,mem:{g['smp_cmds']}:4,"
-                     f"mem:{g['trim_head_x']}:4,png:p0,addl:0x4058f8d4:150,wait:3,mem:{g['trim_head_x']}:4,png:p1,"
-                     f"addl:0x4058f8d4:150,wait:3,mem:{g['trim_head_x']}:4,png:p2,"
+                     f"mem:{g['trim_head_x']}:4,png:p0,addl:0x4058f8d4:150,wait:10,mem:{g['trim_head_x']}:4,png:p1,"
+                     f"addl:0x4058f8d4:150,wait:10,mem:{g['trim_head_x']}:4,png:p2,"
                      f"release:10,wait:3,release:17,wait:3,mem:{g['rec_pv_on']}:4,mem:{g['smp_func_held']}:4,"
                      f"mem:{g['smp_cmds']}:4,mem:{g['trim_head_x']}:4,png:pr,yes,wait:10,mem:{g['rec_phase']}:4,png:n0,"
                      # v0.54: FILE NAME is the DN2's own NAME screen (NameView, docs/name-screen.md),
