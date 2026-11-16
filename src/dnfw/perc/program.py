@@ -730,8 +730,9 @@ def _vel_word(p: Prog, L: M.Layout) -> None:
 
 def vel_latch(p: Prog, L: M.Layout) -> None:
     """2026-11-12: at the slot's trig, its note's velocity (frame slot M.VEL_SLOT, vel x 256; 0: none sent, full level)
-    as the attenuation (127 - vel) / 127, so 127 and none are exactly 0 (the voice bit for bit as before). Clobbers
-    R0, R1, R4, R9..R12, I1."""
+    as the attenuation 127 - vel, an integer (out_guard clamps it to 0..127 and divides: a word left by anything
+    else, garbage or NaN at power-on, is a level in 0..1, the same on the model and the SHARC), so 127 and none are
+    exactly 0 (the voice bit for bit as before). Clobbers R0, R1, R4, R9..R12, I1."""
     C = L.C
 
     def latch():
@@ -743,10 +744,6 @@ def vel_latch(p: Prog, L: M.Layout) -> None:
         p.ifz(4, "EQ", lambda: p.iconst(4, 127))
         p.iop(4, 4, "MIN", 12)
         p.iop(4, 12, "-", 4)                       # 127 - vel
-        p.iconst(12, 0)
-        p.float_(4, 4, 12)
-        p.fconst(12, 1.0 / 127.0)
-        p.fop(4, 4, "*", 12)
         _vel_word(p, L)
         p.sti(0, 1, 4)
     p.ld(0, C["trig"])
@@ -764,8 +761,16 @@ def out_guard(p: Prog, L: M.Layout) -> None:
     by the slot's velocity (vel_latch; F6 = 1 - its attenuation). Uses R0-R2, R5, R6, R9-R14, I1, I2, I4 and fxy
     (a flag, free after the effects)."""
     C = L.C
-    _vel_word(p, L)                            # 2026-11-12: x vel/127 = 1 - the slot's attenuation (vel_latch)
+    _vel_word(p, L)                            # 2026-11-12: x vel/127 = 1 - the slot's attenuation / 127 (vel_latch)
     p.ldi(6, 0, 1)
+    p.iconst(12, 0)                            # held to 0..127 as an integer: any word is a level in 0..1
+    p.iop(6, 6, "MAX", 12)
+    p.iconst(12, 127)
+    p.iop(6, 6, "MIN", 12)
+    p.iconst(12, 0)
+    p.float_(6, 6, 12)
+    p.fconst(12, 1.0 / 127.0)
+    p.fop(6, 6, "*", 12)
     p.fconst(12, 1.0)
     p.fop(6, 12, "-", 6)
     p.iconst(0, 0)
