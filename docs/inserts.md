@@ -123,6 +123,11 @@ on several voices gets it on each; a value past 15 plays nothing); a slot's stat
 whenever its track or M.SEL changes. Until then slot s took track s's values: right only while
 voice s played track s, so mostly on track 1.
 
+**A PARA chord's members (2026-11-15):** a slot that plays as a member of a paraphonic chord, or is dropped
+from one (`dnfw.engines.analog2.para` ROLE, docs/paraphonic.md), writes silence: its chord sounds on its leader.
+Both voice-insert passes (this one and the post pass) play its inserts as OFF (`para_off`): they cost nothing,
+and start from silence when the slot plays again. The leader runs the track's inserts on the whole chord.
+
 Every machine has rendered into its voice slot's buffer (`0x254a60` + 4 s), and the filter, amp and
 pan are still to come.
 So an insert works on the voice before the filter, mono, as a synth's drive does: each note on its

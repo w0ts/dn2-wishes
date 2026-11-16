@@ -172,7 +172,13 @@ The full `mnm` run on the same DSP code: every Monomachine machine's runs bit-ex
 
 ## Not in the pilot (follow-ups)
 
-- **Inserts** still run on members' (silent) slots.
+- **Inserts**: done (2026-11-15, main: inserts on members' silent slots could cost more than PARA saves). The
+  pre and post voice-insert passes read each slot's ROLE word (set by PERC's prepass earlier in the same block) and
+  play a MEMBER's or DROPPED slot's inserts as OFF (`dnfw.inserts.program.para_off`): no cost, and they forget
+  (from silence when the slot plays again). The leader's inserts run on the chord, as before. Checked: the models
+  against the references with those slots off their track (`test/test_para_inserts.py`), and runner step `para`
+  (`scripts/sharc_parains_step.py`, FUZZ pre and CHOR post on the chord's track): every slot after each pass the
+  references', the leader bit-identical to a run with the roles hidden from the passes, the members untouched.
 - **A leader the guard refuses twice** is stolen like any voice: the chord is silent until its next note (the
   reservation makes it rare: its members go first).
 - **WDTH**: the stereo spread comes from the leader's own swarm copies only.

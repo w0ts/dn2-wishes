@@ -1003,11 +1003,9 @@ def slot(p: Prog) -> None:
     p.iop(3, 3, "AND", 12)
     p.st(C["tr"], 3)
     PR.record(p, C)
-    p.iconst(7, 0)
-    for typ in D.POST:
-        p.ld(5, C["sel"])
-        p.iconst(6, typ)
-        p.if_(5, "EQ", 6, lambda: p.iconst(7, 1), kind="i")
+    PR.para_off(p, C)                            # 2026-11-15: a PARA chord's member or dropped slot: as OFF
+    p.ld(5, C["sel"])                            # (2026-11-15, code room: one mask test, not one compare a type)
+    PR.in_types(p, 7, 5, 6, D.POST)
     p.ifz(7, "NE", lambda: run(p), lambda: forget(p))
 
 

@@ -4231,7 +4231,17 @@ def step_para(init, sound, machines) -> dict:
     checks = {"every slot of every PARA run (" + ", ".join(runs) + "), every block, bit-exact to the model":
               all(r["ok"] for r in runs.values()) and all(v[0] > 0 and v[1:] == (0, 0) for v in exact.values())}
     checks.update(para_checks(runs, guards, n))
+    para_inserts(init, sound, machines, checks, n)
     return {"ok": all(checks.values()), "checks": checks, "numbers": n}
+
+
+def para_inserts(init, sound, machines, checks: dict, n: dict) -> None:
+    """2026-11-15 (main): each PARA engine's chord with a pre and a post insert on its track: the members' inserts
+    play as OFF, the leader's unchanged (scripts/sharc_parains_step.py); its checks and numbers into CHECKS, N"""
+    ins = importlib.import_module("sharc_parains_step").run(
+        sys.modules[__name__], init, lambda para, engine: a2_para_frames(sound, machines, para, engine), PARA_ENGINES)
+    checks.update(ins["checks"])
+    n.update(ins["numbers"])
 
 
 def a2_para_guard(init, fb) -> dict:
@@ -4608,6 +4618,7 @@ def step_mnm(init, sound, machines, blocks) -> dict:
         n["a2_glide_periods_between"] = between
         n["a2_glide_periods"] = {k: v[:24] for k, v in periods.items()}
     checks.update(para_checks(runs, para_guard, n))   # 2026-11-15: PARA, each engine
+    para_inserts(init, sound, machines, checks, n)    # 2026-11-15: and its members' inserts skipped (the gate's mnm)
     if "JUNO_held" in runs:                      # 2026-11-12: JUNO's VCF envelope
         jh, jr = perc_series(runs["JUNO_held"], 0), perc_series(runs["JUNO_released"], 0)
         jok = runs["JUNO_held"]["ok"] and runs["JUNO_released"]["ok"]

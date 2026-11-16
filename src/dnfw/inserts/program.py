@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import struct
 
+from ..engines.analog2 import para as PARA
 from ..fdn8 import program as FP
 from ..perc import guard as G
 from ..perc.dsl import Mem, Prog
@@ -1663,6 +1664,7 @@ def track(p: Prog) -> None:
     p.iop(3, 3, "AND", 12)
     p.st(C["tr"], 3)
     record(p, C)
+    para_off(p, C)
     skip_moved(p)
 
     def run():                                   # its state at STATE + 32 i, its ring, the voice's buffer
@@ -1713,6 +1715,30 @@ def in_types(p: Prog, d: int, s: int, w: int, types) -> None:
     p.trunc(d, d)
     p.iconst(12, sum(1 << t for t in types))
     p.iop(d, d, "AND", 12)
+
+
+def para_off(p: Prog, C: dict) -> None:
+    """2026-11-15 (main: "inserts running on members' silent slots can cost more than PARA saves"): voice slot C['t']
+    playing as a PARA chord's MEMBER or DROPPED (dnfw.engines.analog2.para ROLE, set this block by PERC's prepass,
+    which runs before this pass) writes silence; its chord plays on its LEADER, whose inserts run on the chord. So
+    its inserts play as OFF (C['sel'] = 0): no cost, and they forget (start fresh when the slot plays again). A
+    slot with no role (no chord, PARA off, every other engine) is untouched, bit for bit. Clobbers R0, R1, R12, I4"""
+    p.ld(0, C["t"])
+    p.lsh(1, 0, 2)
+    p.iconst(12, PARA.ROLE)
+    p.iop(1, 12, "+", 1)
+    p.seti(4, 1)
+    p.ldi(0, 0, 4)
+    p.lsh(0, 0, 31 - PARA.ROLE_SHIFT)            # MEMBER 1, DROPPED 3: the role's low bit; LEADER 2 and none 0: clear
+    p.lsh(0, 0, -31)                             # (that bit alone: to bit 31, then down to bit 0)
+
+    def off():
+        p.iconst(1, 0)
+        p.st(C["sel"], 1)
+    p.ifz(0, "NE", off)
+
+
+assert PARA.MEMBER & 1 and PARA.DROPPED & 1 and not PARA.LEADER & 1
 
 
 def skip_moved(p: Prog) -> None:
