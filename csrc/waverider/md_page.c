@@ -312,6 +312,12 @@ static const char *unit_text_of(int kind, int curve, int k)
     }
     if (kind == MU_GLID) {                          /* 2026-11-11: GLID up to 5 minutes, exact a knob */
         int e = mnm_glid[curve][k > 127 ? 127 : k], n = 0;
+#if DN2_STOCK_UNITS
+        if (e == 0xFFFF) {                          /* a stock table's "never" (a decay that does not fall) */
+            ub[0] = 'I'; ub[1] = 'N'; ub[2] = 'F'; ub[3] = 0;
+            return ub;
+        }
+#endif
         if (e < 100) {
             n = ucat(ub, 0, e);
             ub[n++] = 'm'; ub[n++] = 's';
@@ -447,6 +453,45 @@ const char *mu_ins(int type, int knob, int k)
         return 0;
     return unit_text_of(ins_unit[type][knob], ins_unit_curve[type][knob], k > 127 ? 127 : k);
 }
+
+#if DN2_STOCK_UNITS
+/* 2026-11-11 (the User: proper values on stock pages too, a build option at first): stock records' value texts
+ * in their units (dnfw.mnm.units STOCK_UNITS). stu_poll (page.c wr_poll, every loop) puts ours on each listed
+ * record whose formatter is stock's own (stu_stock: stock 1.12's address), so a record another part of ours
+ * holds (a machine's, FDN8's) is left to it, and one handed back to stock's later gets ours again. The machines'
+ * own records (STU_MACHINE_LO..HI) carry these texts only on a stock machine's track; on ours stock's text. */
+#define STU_FMT(id) (*(void **)(0x401F83A4u + 60u * (id) + 0x34u))
+extern int wr_track_ours(void);
+
+static void stu_fmt(int w, int v, char *buf)
+{
+    int id = stu_ids[w], k = (v >> 8) & 0xFF;
+    const char *t = 0;
+    if (!(id >= STU_MACHINE_LO && id <= STU_MACHINE_HI && wr_track_ours()))
+        t = unit_text_of(stu_unit[w], stu_unit_curve[w], k > 127 ? 127 : k);
+    if (!t) {
+        ((void (*)(int, char *))stu_stock[w])(v, buf);
+        return;
+    }
+    int n = 0;
+    while (t[n] && n < 7) {
+        buf[n] = t[n];
+        n++;
+    }
+    buf[n] = 0;
+}
+#define STU_DEF(w) static void stu_f##w(int v, char *b) { stu_fmt(w, v, b); }
+STU_FNS(STU_DEF)
+#define STU_REF(w) stu_f##w,
+static void (*const stu_fns[STU_N])(int, char *) = {STU_FNS(STU_REF)};
+
+void stu_poll(void)
+{
+    for (int w = 0; w < STU_N; w++)
+        if ((u32)STU_FMT(stu_ids[w]) == stu_stock[w])
+            STU_FMT(stu_ids[w]) = (void *)stu_fns[w];
+}
+#endif
 
 static int mnm_choice_count(int n)
 {

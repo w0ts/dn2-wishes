@@ -13,7 +13,9 @@ knob 0 reads OFF.
 
 from __future__ import annotations
 
+import json
 import math
+import pathlib
 
 KINDS = ("raw", "pct", "spct", "hz", "hz100", "ms", "c10", "c", "db", "oct", "patn", "rate", "pctc", "mode", "ms10", "voic",
          "glid", "st10")
@@ -215,3 +217,80 @@ def tables(machines, pnames, tops=None) -> tuple[list[list[int]], list[list[int]
         kinds.append(krow)
         at.append(arow)
     return kinds, at, curves or [[0] * 17]
+
+
+# -- stock records (2026-11-11, the User: "proper values every where ... gate it with a compile option"): built only
+# with DN2_STOCK_UNITS set at generation (dnfw.waverider.pages, cpage); without it nothing below reaches the code.
+# record id -> (kind, function of the knob or None, off at 0, stock 1.12's formatter at that record). Phase 1: the
+# plain amounts (levels, sends, mixes, depths, amounts) as a percent of their range, NOT a measured unit; the
+# times, frequencies and gains wait for their measurement in the SHARC runner (phase 2), the numbers that are the
+# value (MIDI, notes, velocity, counts, conditions, waveform positions) stay stock's.
+STOCK_PLAIN = 0x400E3030                      # stock's "%d" of the knob
+_STOCK_PCT = (10, 37, 40, 47, 55, 58, 65, 72, 80, 90, 100, 105, 108, 109, 110, 111, 112, 119, 120, 121, 129, 130,
+              132, 133, 134, 135, 139, 140, 141, 142, 143, 144, 145, 146, 147, 158, 159,
+              206, 214, 215, 218, 219, 235, 236, 237,               # FM TONE
+              241, 245, 252, 256, 260,                              # WaveTone
+              269, 274, 278, 282, 288, 291, 292,                    # FM DRUM
+              295, 298, 299,                                        # SWARMER
+              304, 319)
+STOCK_UNITS: dict[int, tuple] = {r: ("pct", None, False, STOCK_PLAIN) for r in _STOCK_PCT}
+# phase 2, a fitted law (docs/stock-units.md has the points): the Multimode filter's FREQ, its cutoff (the 2-pole
+# low-pass's -90 degree point) = 2^(2.2692 + 0.09521 knob) Hz, measured in the SHARC runner at knobs 32..124 (within
+# +4.3 % at 32, +-1.2 % from 80 on); under 32 (a cutoff below ~40 Hz, under the track's DC blocker) extrapolated
+STOCK_UNITS[36] = ("hz", lambda k: 2.0 ** (2.2692 + 0.09521 * k), False, 0x400E305A)
+# stock 1.12's formatter at the records a measured table may take (the image's record + 0x34; test_stock_units holds them)
+_STOCK_FMT_OF = {44: STOCK_PLAIN, 45: STOCK_PLAIN, 46: 0x400E381A, 48: 0x400E381A,
+                 61: STOCK_PLAIN, 62: STOCK_PLAIN, 63: 0x400E37DC, 64: 0x400E381A, 66: 0x400E381A}
+STOCK_MACHINE_IDS = range(200, 301)           # the machines' own records: their text only on a stock machine's track
+
+# phase 2: what was measured in Elektron's DSP (scripts/stock_units_measure.py, docs/stock-units.md), one entry a
+# quantity: its records, its unit, how it was found, and its value at each knob 0..127 (null: no end, INF). Read
+# exactly a knob (the GLID kind's table), so no curve between measured points
+_MEASURED = pathlib.Path(__file__).with_name("stock_measured.json")
+GLID_INF = 0xFFFF                             # a table's "never" (a decay that does not fall): the page shows INF
+
+
+def stock_measured() -> dict:
+    return json.loads(_MEASURED.read_text()) if _MEASURED.exists() else {}
+
+
+def _stock_table_rows() -> tuple[dict[int, int], list[list[int]]]:
+    """-> (record -> its row among the stock tables, the rows: 128 GLID codes each)"""
+    rows: list[list[int]] = []
+    at: dict[int, int] = {}
+    for q in stock_measured().values():
+        vals = q["values"]
+        if len(vals) != 128:
+            raise ValueError(f"{q['records']}: a table needs every knob 0..127, has {len(vals)}")
+        row = [GLID_INF if v is None else _glid_code(v) for v in vals]
+        for rid in q["records"]:
+            at[rid] = len(rows)
+        rows.append(row)
+    return at, rows
+
+
+def stock_glid_rows() -> list[list[int]]:
+    return _stock_table_rows()[1]
+
+
+def stock_tables(base: int) -> tuple[list[int], list[int], list[int], list[int], list[list[int]]]:
+    """-> (record ids, kinds, curve indices (from BASE), stock formatters, the curves) for STOCK_UNITS"""
+    rows_at, _rows = _stock_table_rows()
+    units = {**STOCK_UNITS, **{r: ("glid", None, False, _STOCK_FMT_OF[r]) for r in rows_at}}
+    ids = sorted(units)
+    curves: list[list[int]] = []
+    kinds, at, stock = [], [], []
+    for rid in ids:
+        kind, fn, off, fmt = units[rid]
+        idx = 0
+        if kind == "glid":
+            idx = len(GLID_TOPS) + rows_at[rid]        # a row of mnm_glid after GLID's own
+        elif fn is not None:
+            c = curve(fn)
+            if c not in curves:
+                curves.append(c)
+            idx = base + curves.index(c)
+        kinds.append(KINDS.index(kind) | (OFF_BIT if off else 0))
+        at.append(idx)
+        stock.append(fmt)
+    return ids, kinds, at, stock, curves

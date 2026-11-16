@@ -88,6 +88,13 @@ static int wr_active(void)
     return m >= 5 && m <= WR_TYPES_LAST ? m - 4 : 0;   /* v0.19: 13 SLICE; v0.26: the Monomachine's 14.. */
 }
 
+#if DN2_STOCK_UNITS
+int wr_track_ours(void)                         /* the active track's machine is ours (md_page.c stu_fmt) */
+{
+    return wr_active() != 0;
+}
+#endif
+
 /* v0.22: the LFOs' destination list (0x4003951e) asks each of the track's 101 slots'
  * record for its modulation mask (0x400dc472) and lists it if the LFO's bit is set. On a
  * track of ours, a WaveTone record our machine does not use (its name made "-" by
@@ -411,6 +418,9 @@ int wr_poll(void *screen)
     wr_names();
 #if FLT_SETS
     flt_names();                                /* the A2 filter machines' FLTR names */
+#endif
+#if DN2_STOCK_UNITS
+    { extern void stu_poll(void); stu_poll(); }    /* stock records' units, a build option (md_page.c) */
 #endif
     extern void rvt_poll(void);
     rvt_poll();                                 /* FDN8: the Reverb page's TYPE and names (csrc/fdn8) */

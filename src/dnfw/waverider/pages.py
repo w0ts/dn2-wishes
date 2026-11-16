@@ -395,6 +395,12 @@ def mnm_c_header() -> str:
     _fk, _fa, _fc = _mnm_units.flt_tables(len(_UNITS[2]))
     _UNITS = (_UNITS[0], _UNITS[1], _UNITS[2] + _fc)
     _ia = [[(x + _base) if k & 127 and x < len(_ic) and _ic else x for x, k in zip(r, kr)] for r, kr in zip(_ia, _ik)]
+    _st = None
+    _glid = [_mnm_units.glid_table(t) for t in _mnm_units.GLID_TOPS]
+    if stock_units_on():
+        _glid += _mnm_units.stock_glid_rows()       # the measured stock tables, exact a knob                         # 2026-11-11: stock records' units, a build option (default off)
+        _st = _mnm_units.stock_tables(len(_UNITS[2]))
+        _UNITS = (_UNITS[0], _UNITS[1], _UNITS[2] + _st[4])
     lines = [
         f"#define MNM_N {len(_mnm.CF_ALL)}",
         # the machine's name in the track box (MACHINE SEL's long name, in capitals; a reserved
@@ -445,13 +451,25 @@ def mnm_c_header() -> str:
         f"static const unsigned char mnm_unit_curve[MNM_N][MNM_J] = {{{arr(_UNITS[1])}}};",
         f"static const short mnm_curves[{len(_UNITS[2])}][17] = {{{arr(_UNITS[2])}}};",
         # 2026-11-11: GLID's time a knob (MU_GLID; ms under 10 s, else 10000 + tenths of a second), a record span each
-        f"static const unsigned short mnm_glid[{len(_mnm_units.GLID_TOPS)}][128] = {{{arr([_mnm_units.glid_table(t) for t in _mnm_units.GLID_TOPS])}}};",
+        f"static const unsigned short mnm_glid[{len(_glid)}][128] = {{{arr(_glid)}}};",
         f"static const unsigned char flt_unit[{len(_fk)}] = {{{', '.join(map(str, _fk))}}};",
         f"static const unsigned char flt_unit_curve[{len(_fk)}] = {{{', '.join(map(str, _fa))}}};",
         f"#define FLT_UNIT_IDS {{{', '.join(map(str, _mnm_units.FLT_IDS))}}}",
         f"static const unsigned char ins_unit[13][8] = {{{arr(_ik)}}};",
         f"static const unsigned char ins_unit_curve[13][8] = {{{arr(_ia)}}};",
     ]
+    if _st is not None:                          # only with DN2_STOCK_UNITS: without it the header is as before
+        ids, kinds, at, stock, _c = _st
+        lines += [
+            f"#define STU_N {len(ids)}",
+            f"static const unsigned short stu_ids[STU_N] = {{{', '.join(map(str, ids))}}};",
+            f"static const unsigned char stu_unit[STU_N] = {{{', '.join(map(str, kinds))}}};",
+            f"static const unsigned char stu_unit_curve[STU_N] = {{{', '.join(map(str, at))}}};",
+            f"static const unsigned int stu_stock[STU_N] = {{{', '.join(hex(a) + 'u' for a in stock)}}};",
+            f"#define STU_MACHINE_LO {_mnm_units.STOCK_MACHINE_IDS.start}",
+            f"#define STU_MACHINE_HI {_mnm_units.STOCK_MACHINE_IDS.stop - 1}",
+            "#define STU_FNS(X) " + " ".join(f"X({k})" for k in range(len(ids))),
+        ]
     return "\n".join(lines + mnm_mono_lines()) + "\n"
 
 
@@ -490,6 +508,13 @@ def mnm_mono_lines() -> list[str]:
         "    return MNM_MONO >= 0 && mi == MNM_MONO ? mnm_mono_place[mnm_mono_engine((w >> 8) & 0xFF)] : mi;",
         "}",
     ]
+
+
+def stock_units_on() -> bool:
+    """2026-11-11 (the User: proper values on stock pages too, "gate it with a compile option at first"): the stock
+    records' units are built only with DN2_STOCK_UNITS set (to anything but 0 or empty) when the code is generated"""
+    import os
+    return os.environ.get("DN2_STOCK_UNITS", "") not in ("", "0")
 
 
 # the Digitakt II's sample machines (types 8..12, docs/sampler.md): one page each, on

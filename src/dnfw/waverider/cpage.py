@@ -142,6 +142,8 @@ def compile_page(header: str, *, base: int) -> tuple[bytes, dict[str, int], int]
                      "BUF_N", "BUF_HALVES", "BUF_ENTRY", "BUF_DIR", "BUF_SLOT0", "BOUNCE_TYPE"):   # v0.44 BOUNCE
             defines[name] = int(getattr(SM, name))
         import os
+        if PG.stock_units_on():
+            defines["DN2_STOCK_UNITS"] = 1            # the stock records' units (md_page.c, page.c): a build option
         if os.environ.get("DNFW_SMP_STORE_TEST"):
             # an emulator-only build: the +Drive region inside the emulator's 15 MB device
             # (never shipped: scripts/gen_waverider_code.py refuses to write it)
