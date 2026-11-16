@@ -70,3 +70,40 @@ multiplier), opcode 0x78 / 0x70, Rn 4, Rx 4, Ry 14, as the PRM's compute-field l
 each, and the gate's SHARC emulator (`compute_mult.py`: the exact product, doubled for signed
 fractional, bits 63..32 or 31..0) runs them; the SHARC runner's `mnm` part holds every Monomachine
 voice's output to the model bit for bit. Neither form keeps state between instructions.
+
+## 3. Toward 16 voices (opt-mnm, 2026-11-12), the same words bit for bit
+
+**Not in the v0.52 merge (main's rule b, 2026-11-13).** v0.51 made these engines lighter its own way (an
+oversampling switch, OS 1 halving DPRO's and WAVE's work; SID/DDRW/DENS/VO-6 re-coded), and upstream's engine
+files won. Everything below was dropped with them: the engines' edits, the decimator (its new form needs F11 set by
+the caller and clobbers I0, which upstream's SID and WAVE do not provide for), and the interpolator's L1 copy
+(upstream's DPRO build does not fill it). It is kept here as the record of what opt-mnm measured on v0.48.
+
+The five MONOMACHINE engines re-scheduled again, every output word the same (`scripts/mnm_identity.py`
+against f649683c: SID 213, WAVE 240, DDRW 198, DENS 183, VO-6 222 runs, 0 differ; the decimator also
+over 400 random cases with NaN, denormal and out-of-range words). One voice, steady block, the engine's
+own part (`scripts/dsp_cost.py`, opt-host's method: instructions + 4 L2 + 10 DDR; the target for 16
+voices with room is about 11,200):
+
+| engine | f649683c | now | what |
+|---|---|---|---|
+| SID 6581 | 26,025 | 11,177 | decimator: constants held, y1 x1 once a sample, the state's shifts as renaming, products and sums on multifunction instructions; TRI/SAW/PULS fused with the phases (a << 8 wraps as AND M24) |
+| DPRO-WAVE | 15,730 | 8,457 | the sample loop in registers; the decimator as SID |
+| DPRO-DENS | 18,310 | 8,650 | build loop in registers, the partner not read at crossfade weight 0; DPRO's interpolator taps on multifunction instructions; dec2's allpass stages fused in pairs; the interpolator's table in L1 (below) |
+| DPRO-DDRW | 31,199 | 15,991 | one Digibank read a sample when no wave change is pending (old + fade (new - old) is old); mix loop in registers; DPRO as DENS |
+| VO-6 | 32,888 | 20,838 | the 24-bit MPY as one SSF (was a 45-instruction subroutine); floor by `IF LT`; ramps held, skipped when the targets hold; the series formants on words |
+
+Where a fast path stands in for the general one (DDRW's steady wave, DENS's weight 0, SID's TRI without
+its MAX), the general path's arithmetic gives the same word there: x - x = +0, and +-0 added to a non-zero
+word or to +0 leaves it; a limit the value is already within. With NaN in the state (the runner's
+garbage step) those paths now give finite words where they gave NaN.
+
+**The interpolator's table in L1.** DDRW and DENS read ~10 words a sample of DPRO's 320-word interpolator
+table; it was in L2 (v0.36). build() now also copies it to L1 `dsp.MNM_INTERP_DM` (0x2e1200..0x2e1700, the
+memory arbiter's allotment after trackbuf.asm, whose span now ends there), and interp reads it there: DDRW
+21,111 -> 15,991, DENS 11,210 -> 8,650 (a 3-PCH chord about -10k).
+
+**What is left is not bit-exact work:** VO-6 (20,838) is mostly the 56300's exact arithmetic (floored
+stores, integer series resonators); DDRW (15,991) its two waves' builds, interpolators and the 2:1
+decimator. The User chose SIMD (voice pairs) before any approximation. PERC's code grew 470 B
+(171,916 of 172,032).
