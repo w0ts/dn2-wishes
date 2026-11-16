@@ -340,6 +340,7 @@ def _apply(args) -> int:
     # mod sees the earlier one's bytes. Disjoint extents make the order
     # irrelevant to the result; it is not relied on.
     payloads: dict[int, bytes] = {}
+    codecs: dict[int, str] = {}
     for mod in chosen:
         staged = _staged(firmware, payloads)
         if mod.ID == "transients":
@@ -355,8 +356,9 @@ def _apply(args) -> int:
         for note in result.notes:
             print(f"  {note}")
         payloads.update(result.payloads)
+        codecs.update(result.codecs)
 
-    reps = {sid: replacement(firmware, sid, payload)
+    reps = {sid: replacement(firmware, sid, payload, codecs.get(sid))
             for sid, payload in payloads.items()}
     out = rebuild(firmware, reps)
     report = verify(load(out))

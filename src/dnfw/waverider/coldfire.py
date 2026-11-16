@@ -515,6 +515,10 @@ HOLD_KEYS_SITE = 0x40026F6A             # lea 0x4002a3a6,%a2: the ISR's "a key i
 HOLD_KEYS_STOCK = "45f94002a3a6"
 HOLD_FINAL_SITE = 0x40027092            # jsr 0x4002b12e after the ISR's note-off word is composed (0x4002708e)
 HOLD_FINAL_STOCK = "4eb94002b12e"
+# 2026-11-11 (lzma-dsp, docs/lzma7.md): the SHARC uploader's (0x400cf4b0) depack of section 7:
+# `jsr 0x40136820` (aPLib depack(src, dst)) -> dn_depack7 (csrc/waverider/lzma7.c), same arguments
+DEPACK7_SITE = 0x400CF73A
+DEPACK7_STOCK = "4eb940136820"
 POLL_SITE = 0x4002E464                  # jsr 0x4011d5d4 (isDirty), its argument the screen
 # v0.38: per-project pools (csrc/sampler/pools.c, hooks.S, docs/project-pools.md): the OS's
 # project LOAD 0x40042E6E (its entry, its success where it sets the slot, its exit) and NEW
@@ -731,6 +735,16 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     edit(POLL_SITE, bytes.fromhex("4eb9") + _long(csyms["wr_poll"]),
          "the UI loop's redraw test: wr_poll asks for a redraw while a modulation marker on "
          "Waverider's page would move, then answers as stock", POLL_STOCK)
+
+    # 2026-11-11: section 7 as LZMA (docs/lzma7.md): the uploader's depack call to dn_depack7
+    _need(content, DEPACK7_SITE - 8, bytes.fromhex("10fc00032f082f04"),
+          "the uploader writes the 0x03 byte, then pushes dst and src")
+    _need(content, DEPACK7_SITE + 6, bytes.fromhex("4fef001424005282"),
+          "... and takes the answer + 1 as the length to push")
+    edit(DEPACK7_SITE, bytes.fromhex("4eb9") + _long(csyms["dn_depack7"]),
+         "the SHARC uploader's depack of section 7: dn_depack7 decodes our LZMA section 7 "
+         "(checked by length and CRC-32; anything else refused into stock's error path) and "
+         "hands stock's aPLib to 0x40136820", bytes.fromhex(DEPACK7_STOCK))
 
     # v0.22: the RECORDER's screen -- its keys and knobs, its draw, FUNC + VOICE
     _need(content, UI_POP_SITE - 6, bytes.fromhex("48794059e214"), "the UI loop pushes its queue")

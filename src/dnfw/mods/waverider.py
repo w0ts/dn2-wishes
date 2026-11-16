@@ -184,7 +184,8 @@ def apply(firmware) -> Result:
               (bspec["aniz_chunk"].encode(), aniz), _label()]
     content = platform.join(bytes(base_os), others + codes)
     area_length = len(content) - platform.STOCK_LENGTH
-    return Result(payloads={MAIN_OS: content, DSP_STREAM: section7},
+    # 2026-11-11 (docs/lzma7.md): section 7 stored as LZMA, decoded by the uploader's dn_depack7
+    return Result(payloads={MAIN_OS: content, DSP_STREAM: section7}, codecs={DSP_STREAM: "lzma7"},
                   extents=extents(firmware, area_length),
                   notes=[f"MACHINE SEL offers {SPEC['names'][0].upper()} after SWARMER "
                          f"(type {SPEC['new_type']}; WaveTone's pages)",

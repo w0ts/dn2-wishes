@@ -10,7 +10,7 @@ everything decided before it, so computing one early silently invalidates it.
 """
 
 from ..container import ele3
-from ..container.section import Section, compress, store_raw
+from ..container.section import Section, compress, compress_lzma7, store_raw
 from ..integrity import checksum, digest
 from ..syx import transport
 from .model import PREAMBLE, Firmware
@@ -20,7 +20,7 @@ class BuildError(ValueError):
     """The rebuild cannot be done safely."""
 
 
-def replacement(firmware: Firmware, section_id: int, content: bytes) -> Section:
+def replacement(firmware: Firmware, section_id: int, content: bytes, codec: str | None = None) -> Section:
     """Wrap new content for `section_id` the way that section is stored.
 
     A section that depacks is recompressed; one that does not is stored raw.
@@ -31,6 +31,13 @@ def replacement(firmware: Firmware, section_id: int, content: bytes) -> Section:
     original = firmware.container.find(section_id)
     if original is None:
         raise BuildError(f"no section id={section_id} in this image")
+    if codec == "lzma7":
+        # docs/lzma7.md: only section 7, and only over a compressed original (the uploader's input)
+        if section_id != 7 or original.unpack() is None:
+            raise BuildError(f"lzma7 is for a compressed section 7, not id={section_id}")
+        return compress_lzma7(section_id, original.dest, content)
+    if codec is not None:
+        raise BuildError(f"unknown codec {codec!r}")
     if original.unpack() is not None:
         return compress(section_id, original.dest, content)
     return store_raw(section_id, original.dest, content)

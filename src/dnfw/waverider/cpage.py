@@ -28,7 +28,8 @@ LINK_SOURCES = [SOURCE.parents[1] / "sampler" / "link.c", SOURCE.parents[1] / "s
                 SOURCE.parents[1] / "sampler" / "lib.c",
                 SOURCE.parents[1] / "sampler" / "pools.c",          # v0.38: per-project pools
                 SOURCE.parents[1] / "sampler" / "erase.c",          # v0.39: ERASE MOD DATA
-                SOURCE.parents[1] / "sampler" / "rectrig.c",        # v0.41: REC trigs, buffers, QREC/QPLAY
+                SOURCE.parents[1, / "sampler" / "rectrig.c",        # v0.41: REC trigs, buffers, QREC/QPLAY
+                SOURCE.parent / "lzma7.c"]                          # 2026-11-11: section 7 as LZMA (docs/lzma7.md)
                 SOURCE.parents[1] / "jump" / "jump.c", SOURCE.parents[1] / "jump" / "hooks.S",   # DIRECT JUMP
                 SOURCE.parents[1] / "slides" / "slide.c", SOURCE.parents[1] / "slides" / "hooks.S",   # parameter slides
                 SOURCE.parents[1] / "meter" / "meter.c", SOURCE.parents[1] / "meter" / "hooks.S",   # the system meter
@@ -79,7 +80,8 @@ INS_ENTRIES = ["ins_pop", "ins_draw", "ins_visible", "ins_words", "ins_gen", "in
                "ins_inst", "ins_edits", "ins_pj_write_hook", "ins_store_poll", "ins_wr_ring", "ins_wr_head",
                "ins_st_writes", "ins_st_loads", "ins_st_fails"]
 HOLD_ENTRIES = ["hold_note_hook", "hold_final_hook", "hold_final", "hold_len", "hold_keys", "hold_poll", "hold_seq", "hold_key", "hold_count", "hold_drops", "hold_rel"]   # DRONE's HOLD (csrc/hold)
-LINK_ENTRIES = LINK_ENTRIES + SLIDE_ENTRIES + METER_ENTRIES + FDN8_ENTRIES + XDLY_ENTRIES + INS_ENTRIES + HOLD_ENTRIES
+LZMA7_ENTRIES = ["dn_depack7", "dn7_status", "dn7_length"]    # 2026-11-11 (docs/lzma7.md)
+LINK_ENTRIES = LINK_ENTRIES + LZMA7_ENTRIES + SLIDE_ENTRIES + METER_ENTRIES + FDN8_ENTRIES + XDLY_ENTRIES + INS_ENTRIES + HOLD_ENTRIES
 
 
 # the list popup (csrc/waverider/popup.c, docs/popups.md): on our machines' and FX's list parameters,

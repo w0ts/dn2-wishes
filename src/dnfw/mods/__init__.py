@@ -33,7 +33,7 @@ before writing. A mod produces section payloads; the build path makes them into
 a firmware the device accepts.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 # The pseudo-section of RAM a mod uses outside the image: an Extent in it is an
@@ -89,6 +89,7 @@ class Result:
     payloads: dict[int, bytes]        # section id -> whole new payload
     extents: list[Extent]
     notes: list[str]
+    codecs: dict[int, str] = field(default_factory=dict)   # section id -> how it is stored, if not as the original
 
 
 def check_compatible(named_extents) -> list[str]:

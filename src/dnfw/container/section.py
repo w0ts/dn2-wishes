@@ -16,11 +16,16 @@ length. Every compressed section of Digitone II OS 1.10D, 1.10E and 1.11 --
 eleven of them -- follows this, with 0 to 3 bytes of padding each. Images
 built without it boot through the normal update path and stall in recovery,
 so it is written here rather than left to chance. See `docs/flashing.md`.
+
+**Section 7 may instead hold our LZMA stream** (2026-11-11, `docs/lzma7.md`): the same 8-byte
+header, then `codec.lzma7`'s 16-byte header (magic `DN7Z`) and a raw LZMA1 stream. Only MAIN OS's
+SHARC uploader reads section 7, and in our builds it decodes this (`csrc/waverider/lzma7.c`).
+`unpack` reads it too, so every tool sees the content whichever way it is stored.
 """
 
 from dataclasses import dataclass
 
-from ..codec import aplib, aplibpack
+from ..codec import aplib, aplibpack, lzma7
 
 HEADER = 8
 STORED_ALIGN = 4  # compressed sections are zero-padded to this
@@ -97,6 +102,11 @@ class Section:
         """
         if len(self.stored) <= HEADER:
             return None
+        if lzma7.is_lzma7(self.stored[HEADER:]):
+            try:
+                return lzma7.unpack(self.stored[HEADER:HEADER + self.declared_length])
+            except lzma7.Lzma7Error:
+                return None
         try:
             out = aplib.depack(self.stored[HEADER:], allow_truncated=True)
         except aplib.DepackError:
@@ -107,6 +117,14 @@ class Section:
 def compress(section_id: int, dest: int, content: bytes) -> Section:
     """Build a compressed section from raw content: header, stream, padding."""
     stream = aplibpack.pack(content)
+    header = len(stream).to_bytes(4, "big") + (sum(stream) & 0xFFFFFFFF).to_bytes(4, "big")
+    padding = bytes(-(HEADER + len(stream)) % STORED_ALIGN)
+    return Section(id=section_id, dest=dest, stored=header + stream + padding)
+
+
+def compress_lzma7(section_id: int, dest: int, content: bytes) -> Section:
+    """Section 7 as our LZMA stream (codec.lzma7), under the same header and padding."""
+    stream = lzma7.pack(content)
     header = len(stream).to_bytes(4, "big") + (sum(stream) & 0xFFFFFFFF).to_bytes(4, "big")
     padding = bytes(-(HEADER + len(stream)) % STORED_ALIGN)
     return Section(id=section_id, dest=dest, stored=header + stream + padding)

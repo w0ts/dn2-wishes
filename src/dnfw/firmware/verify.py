@@ -10,7 +10,7 @@ passing.
 
 from dataclasses import dataclass
 
-from ..codec import limits
+from ..codec import limits, lzma7
 from ..codec.profile import profile
 from ..container import ele3
 from ..container.section import STORED_ALIGN
@@ -96,6 +96,12 @@ def _limits(section) -> Check:
     label = f"section {section.id} ({ele3.name(section.id)}) within Elektron's limits"
     if section.unpack() is None:
         return Check(label, True, "stored raw, nothing to decompress")
+    if lzma7.is_lzma7(section.stream):
+        # docs/lzma7.md: section 7 as our LZMA stream. Only MAIN OS's uploader reads it, through
+        # dn_depack7; unpack() above already decoded it under that decoder's rules (length, CRC)
+        return Check(label, section.id == 7,
+                     "our LZMA stream (docs/lzma7.md): decodes, length and CRC-32 checked"
+                     + ("" if section.id == 7 else "; only section 7 may hold it"))
     p = profile(section.stream)
     detail = (
         f"furthest match {p.max_offset:,} of a {limits.WINDOW:,}-byte window, "
