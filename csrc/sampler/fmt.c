@@ -373,7 +373,13 @@ int smp_quant(u8 *s, int slot, int value, u32 id)
  * the record's place in them, VALUE the word stock is writing -> the word to write */
 int fx_type_quant(u8 *base, int slot, int value, u32 id)
 {
-    if ((id == 131u || id == 122u) && smp_knob_d && *(volatile u32 *)0x4058F8D4u - smp_knob_at <= KNOB_FRESH) {
+    /* the knob G's turn this write comes from: the last knob item was G's, no key pressed since it (a load, a page
+     * change come by keys), within 2 s. (A 100 ms window, as func_kind has, can be missed on the unit when the UI
+     * loop runs late: stock's raw order, 0 = FDN8 / XDLY, then showed through at the knob's left end) */
+    extern int smp_pop_knob;
+    extern u32 smp_knob_seq, smp_key_seq;
+    if ((id == 131u || id == 122u) && smp_knob_d && smp_pop_knob == 7 && smp_knob_seq
+        && (int)(smp_knob_seq - smp_key_seq) > 0 && *(volatile u32 *)0x4058F8D4u - smp_knob_at < 3000u) {
         extern int rvt_step(int old0, int d);
         extern int dlt_step(int old0, int d);
         int old0 = *(volatile u16 *)(base + 2 * slot);
