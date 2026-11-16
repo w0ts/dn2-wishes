@@ -266,7 +266,7 @@ static int mnm_k_shown(void *view, int mi, int j)
 /* 2026-11-10 (the User: no parameter of ours shows a bare 0..127): a control's value in its unit, at most
  * four characters (the cell's label): dnfw.mnm.units, the curve through 17 points 8 knobs apart (the last
  * one at 127). Hz: NNHz, then 0.1k .. 9.9k, NNk; ms: NNms, then 0.1s .. 9.9s, NNs; hundredths of a Hz
- * (BEAT): .NNH, N.NH, then Hz as above; cents NNc, N.Nc; percent NN%, signed +NN% */
+ * (BEAT): .NNH, N.NH, then Hz as above; cents NNc, N.Nc; percent NN%, signed +NN%; semitones +1.5, +12 */
 static int ucat(char *b, int n, int v)                  /* v >= 0, up to 3 digits */
 {
     if (v >= 100) b[n++] = (char)('0' + v / 100 % 10);
@@ -351,6 +351,17 @@ static const char *unit_text_of(int kind, int curve, int k)
             int t = (v + 50) / 100;                 /* tenths of a second */
             n = ucat(ub, 0, t / 10);
             ub[n++] = '.'; ub[n++] = (char)('0' + t % 10); ub[n++] = 's';
+        }
+    } else if (kind == MU_ST10) {                   /* signed semitones in tenths: +1.5, then +12 */
+        int a = v < 0 ? -v : v;
+        ub[n++] = v < 0 ? '-' : '+';
+        if (!a) {
+            ub[n++] = '0';
+        } else if (a < 95) {
+            n = ucat(ub, n, a / 10);
+            ub[n++] = '.'; ub[n++] = (char)('0' + a % 10);
+        } else {
+            n = ucat(ub, n, (a + 5) / 10);
         }
     } else if (kind == MU_PCTC) {
         n = ucat(ub, 0, v);

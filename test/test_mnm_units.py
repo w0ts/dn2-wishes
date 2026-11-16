@@ -16,7 +16,7 @@ from dnfw.mnm import machines as MM
 from dnfw.waverider import pages as WP
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-MINE = ("DRONE", "ANALOG2")
+MINE = ("DRONE", "ANALOG2", "PLAITS", "TB303", "SOPHIE")
 
 
 def _rows():

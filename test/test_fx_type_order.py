@@ -15,6 +15,7 @@ HARNESS = r"""
 #include <stdio.h>
 void wpop_offer(int a, const char *b, int c, int d, const char *(*e)(int, int), const char *(*f)(int, int), int g) {}
 int wpop_slot_of(int x, int y) { return 0; }
+const char *mu_ins(int type, int knob, int k) { return 0; }
 extern int rvt_step(int old0, int d);
 extern int dlt_step(int old0, int d);
 int main(void)

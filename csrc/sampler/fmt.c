@@ -497,12 +497,25 @@ static void f_mtune(int v, char *buf)
         put_num(buf, k);
 }
 
+/* 2026-11-11 (the User: no bare 0..127): LEV, the gain LEV / SMP_LEV_UNITY (dnfw.sampler.program), as a percent
+ * of the sample's own level: 100 % is the sample as recorded, 127 % the top */
+static void f_lev(int v, char *buf)
+{
+    int k = coarse(v, SMP_LEV_REC) * 100 / SMP_LEV_UNITY;
+    put_num(buf, k);
+    int n = 0;
+    while (buf[n])
+        n++;
+    buf[n++] = '%';
+    buf[n] = 0;
+}
+
 /* the records whose text is ours on a sample machine's track; 239, SLCE's and LEN's
  * records only on GRID's (ONESHOT's STRT, LOOP and CFAD are the same records) */
 static const u16 fmt_ids[] = {SMP_PLAY_REC, SMP_MODE_REC, SMP_BARS_REC, SMP_SEG_REC, SMP_GRID_REC,
-                              SMP_SAMP_REC, SMP_SLICE_ID, SMP_SLEN_ID, SMP_BUF_ID, MNM_TUNE_REC};
+                              SMP_SAMP_REC, SMP_SLICE_ID, SMP_SLEN_ID, SMP_BUF_ID, MNM_TUNE_REC, SMP_LEV_REC};
 static void (*const fmt_fns[])(int, char *) = {f_play, f_mode, f_bars, f_seg, f_grid, f_samp,
-                                               f_slce, f_slen, f_buf, f_mtune};   /* (v0.22: the recorder's are a screen's now) */
+                                               f_slce, f_slen, f_buf, f_mtune, f_lev};   /* (v0.22: the recorder's are a screen's now) */
 #define NFMT (int)(sizeof fmt_ids / sizeof fmt_ids[0])
 static void *stock_fmt[NFMT] __attribute__((section(".data")));
 static int fmt_saved __attribute__((section(".data"))) = 0;

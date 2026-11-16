@@ -69,6 +69,31 @@ static void rvt_text(int v, char *buf)
     rvt_put(buf, t == 1 ? "STOCK" : t == 2 ? "LONG" : "FDN8");
 }
 
+/* 2026-11-11 (the User: no bare 0..127): while TYPE is FDN8 or LONG the page's six knobs' value texts are the
+ * FDN8 insert's units (csrc/waverider/md_page.c mu_ins, dnfw.mnm.units INS_UNITS: the same engine and knob / 127):
+ * PRE ms, SIZE %, DAMP %, MOD 0..200 %, HPF / LPF Hz. Ours stay installed from the first poll on and ask, each
+ * call, which TYPE the page shows (rvt_seen, as rvt_poll does); STOCK's text is stock's formatter's, at its fixed
+ * 1.12 address (read from the records 123..128 of stock 1.12). Not a pointer saved at run time: measured in the
+ * emulator, our .data started again (the chunk installed again) while the records still held ours, so the "saved
+ * stock" was ours and the formatter called itself until the stack ran out */
+#define FDN8_TYPE 7                              /* dnfw.inserts.design FDN8 */
+extern const char *mu_ins(int type, int knob, int k);
+static const u16 rvu_ids[6] = {123, 124, 125, 126, 127, 128};
+static const u32 rvu_stock[6] = {0x400E3030u, 0x400E375Eu, 0x400E3030u, 0x400E3030u, 0x400E3030u, 0x400E3030u};
+
+static void rvu(int knob, int v, char *buf)
+{
+    if (!(rvt_seen >= 0 ? rvt_seen != 1 : FRAME_TYPE != 0x100)) {
+        ((void (*)(int, char *))rvu_stock[knob])(v, buf);
+        return;
+    }
+    const char *t = mu_ins(FDN8_TYPE, knob, (v >> 8) & 0xFF);
+    rvt_put(buf, t ? t : "");
+}
+#define RVU(n) static void rvu##n(int v, char *b) { rvu(n, v, b); }
+RVU(0) RVU(1) RVU(2) RVU(3) RVU(4) RVU(5)
+static void (*const rvu_fns[6])(int, char *) = {rvu0, rvu1, rvu2, rvu3, rvu4, rvu5};
+
 void rvt_poll(void)
 {
     int fdn = rvt_seen >= 0 ? rvt_seen != 1 : FRAME_TYPE != 0x100;
@@ -82,6 +107,8 @@ void rvt_poll(void)
         for (int k = 0; k < 3; k++) {
             rvt_stock_long[k] = NAME_LONG(rvt_ids[k]);
         }
+        for (int k = 0; k < 6; k++)
+            RECORD_FMT(rvu_ids[k]) = (void *)rvu_fns[k];
         NAME_LONG(TYPE_REC) = "Reverb Type";
         NAME_SHORT(TYPE_REC) = "TYPE";
         RECORD_FMT(TYPE_REC) = (void *)rvt_text;

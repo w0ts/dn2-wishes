@@ -59,6 +59,28 @@ static void dlt_text(int v, char *buf)
     dlt_put(buf, ((v >> 8) & 0xFF) ? "STOCK" : "XDLY");
 }
 
+/* 2026-11-11 (the User: no bare 0..127): while TYPE is XDLY the five knobs' value texts are the XDLY insert's
+ * units (csrc/waverider/md_page.c mu_ins, dnfw.mnm.units INS_UNITS: the same engine, the same knob scales):
+ * TIME 1 / TIME 2 1 ms .. 10 s, FDBK 0..105 %, MOD %, TONE Hz. Installed once; each call asks which TYPE the page
+ * shows (as dlt_poll does) and gives STOCK's text to stock's formatter, at its fixed 1.12 address (records 113 115
+ * 116 117 118 of stock 1.12; csrc/fdn8/ui.c rvu says why not a pointer saved at run time) */
+#define XDLY_TYPE 8                              /* dnfw.inserts.design XDLY */
+extern const char *mu_ins(int type, int knob, int k);
+static const u32 dlu_stock[N_NAMES] = {0x400E3E7Au, 0x400E3254u, 0x400E37AEu, 0x400E3030u, 0x400E3030u};
+
+static void dlu(int knob, int v, char *buf)
+{
+    if (!(dlt_seen >= 0 ? dlt_seen == 0 : FRAME_TYPE == 0)) {
+        ((void (*)(int, char *))dlu_stock[knob])(v, buf);
+        return;
+    }
+    const char *t = mu_ins(XDLY_TYPE, knob, (v >> 8) & 0xFF);
+    dlt_put(buf, t ? t : "");
+}
+#define DLU(n) static void dlu##n(int v, char *b) { dlu(n, v, b); }
+DLU(0) DLU(1) DLU(2) DLU(3) DLU(4)
+static void (*const dlu_fns[N_NAMES])(int, char *) = {dlu0, dlu1, dlu2, dlu3, dlu4};   /* dlt_ids' order */
+
 void dlt_poll(void)
 {
     int xd = dlt_seen >= 0 ? dlt_seen == 0 : FRAME_TYPE == 0;
@@ -69,8 +91,10 @@ void dlt_poll(void)
     if (xd == dlt_state)
         return;
     if (dlt_state < 0) {                         /* the first call: keep stock's pointers */
-        for (int k = 0; k < N_NAMES; k++)
+        for (int k = 0; k < N_NAMES; k++) {
             dlt_stock_long[k] = NAME_LONG(dlt_ids[k]);
+            RECORD_FMT(dlt_ids[k]) = (void *)dlu_fns[k];
+        }
         NAME_LONG(TYPE_REC) = "Delay Type";
         NAME_SHORT(TYPE_REC) = "TYPE";
         RECORD_FMT(TYPE_REC) = (void *)dlt_text;

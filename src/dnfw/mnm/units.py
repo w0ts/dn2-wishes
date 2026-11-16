@@ -7,7 +7,8 @@ page code interpolates between them).
 
 Kinds: pct (0..100 %), spct (-100..+99 %, 64 is 0), c (cents, the knob itself), c10 (tenths of a cent
 from the curve), hz (Hz from the curve), hz100 (hundredths of a Hz from the curve), ms (milliseconds from
-the curve). `off` after a kind: the knob 0 reads OFF.
+the curve), st10 (signed semitones in tenths from the curve: +1.5, then +12). `off` after a kind: the
+knob 0 reads OFF.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from __future__ import annotations
 import math
 
 KINDS = ("raw", "pct", "spct", "hz", "hz100", "ms", "c10", "c", "db", "oct", "patn", "rate", "pctc", "mode", "ms10", "voic",
-         "glid")
+         "glid", "st10")
 # 2026-11-11: GLID up to 5 minutes (dnfw.mnm.a2glide.ms_of): too steep for a 17-point curve, so read exactly a knob
 # from its own table (`glid_table`), one a record span: ANALOG 2's LEV2 0..127, DRONE's AMD 0..120
 GLID_TOPS = (127, 120)
@@ -29,8 +30,32 @@ def _tone_hz(k: int) -> float:
     return -math.log(1.0 - a) * 44100.0 / (2.0 * math.pi)
 
 
+def _tune10(k: int) -> float:
+    """TB303's and SOPHIE's TUNE: knob x 48 / 128 - 24 semitones (C.par is knob / 128), in tenths"""
+    return (k * 48.0 / 128.0 - 24.0) * 10.0
+
+
 # machine -> control -> (kind, function of the knob 0..127 or None, off at 0)
 UNITS: dict[str, dict[str, tuple]] = {
+    # 2026-11-11 (units session), from the DSP programs (dnfw.mnm.plaits, tb303, sophie): `_unit` is knob / 127
+    "PLAITS": {"HARM": ("pct", None, False), "TIMB": ("pct", None, False), "MORP": ("pct", None, False)},
+    "TB303": {
+        "CUT": ("hz", lambda k: 314.0 * (2394.0 / 314.0) ** (k / 127.0), False),   # 314 Hz .. 2.39 kHz
+        "RES": ("pctc", lambda k: 100.0 * (1.0 - math.exp(-3.0 * k / 127.0)) / (1.0 - math.exp(-3.0)), False),
+        "ENV": ("pct", None, False),
+        "DEC": ("ms", lambda k: 200.0 * 10.0 ** (k / 127.0), False),               # 200 ms .. 2 s
+        "ACC": ("pct", None, True),                                                 # 0: no accent
+        "SLID": ("ms", lambda k: 2.0 + 358.0 * k / 127.0, True),                    # 2 .. 360 ms, 0: no slide
+        "WAVE": ("pct", None, False),                                               # saw 0 % .. square 100 %
+        "TUNE": ("st10", _tune10, False),
+    },
+    "SOPHIE": {
+        "DCAY": ("ms", lambda k: 30.0 * (4.0 / 0.03) ** (k / 127.0), False),       # 30 ms .. 4 s
+        "COLR": ("pct", None, False), "METL": ("pct", None, False), "FBK": ("pct", None, False),
+        "SWEP": ("spct", None, False),                                              # -1 .. +1 of the model's sweep
+        "CRSH": ("pct", None, True),                                                # 0: off
+        "TUNE": ("st10", _tune10, False),
+    },
     "DRONE": {
         "SPRD": ("pct", None, False), "CPL": ("pct", None, False), "CHAR": ("pct", None, False),
         "DRFT": ("c10", lambda k: k * 68.0 / 127.0, False),             # up to +-6.8 cents
@@ -49,6 +74,10 @@ UNITS: dict[str, dict[str, tuple]] = {
 }
 
 
+# XDLY's TIME 1 / TIME 2 (dnfw.xdly.design T_MIN .. T_MAX: 1 ms x 10000^(k / 127), the inserts' and the send's
+# engine alike; 2026-11-11, was percent)
+_XT = lambda k: 10000.0 ** (k / 127.0)     # noqa: E731
+
 # the inserts (csrc/inserts/ins.c, the value readout with SYN held), by type number (dnfw.inserts.design) and
 # knob 0..5, 7 the MIX; the types of the ports session's (SUB DIST GATER RING), after Optimist's: the curves
 # are design.py's (SUB: LEV BAND TONE OCT DRY; DIST: DRIV TONE BIAS LOW LEV; GATER: DPTH PATN RATE SHPE SWNG;
@@ -58,7 +87,7 @@ INS_UNITS: dict[str, dict[int, tuple]] = {
     # the older inserts (dnfw.inserts.design's constants): FUZZ DRIV TONE BIAS PRE GATE LEV; TAPE DRIV WOW WRAT FLUT AGE
     # HISS; FOLD AMNT SYMM SHPE TONE LEV; CHOR DPTH RATE DLY VOIC WDTH FDBK; WIDE WDTH TIME BASS TONE; HARM AMNT FREQ
     # EVEN TONE LEV; FDN8 PRE SIZE DAMP MOD HPF LPF; XDLY TIM1 TIM2 FDBK MOD TONE (a TONE whose range the design does
-    # not give, and XDLY's TIM1 TIM2, read in percent: no physical unit known)
+    # not give reads in percent)
     "FUZZ": {0: ("db", lambda k: 48.0 * k / 127.0, False), 1: ("hz", lambda k: 300.0 * 40.0 ** (k / 127.0), False),
              2: ("pct", None, False), 3: ("pct", None, False), 4: ("pct", None, False), 5: ("pct", None, False)},
     "TAPE": {0: ("db", lambda k: 18.0 * k / 127.0, False), 1: ("pct", None, False),
@@ -76,7 +105,7 @@ INS_UNITS: dict[str, dict[int, tuple]] = {
     "FDN8": {0: ("ms", lambda k: 100.0 * (k / 127.0) ** 2, False), 1: ("pct", None, False), 2: ("pct", None, False),
              3: ("pctc", lambda k: 200.0 * k / 127.0, False), 4: ("hz", lambda k: 20.0 * 100.0 ** (k / 127.0), False),
              5: ("hz", lambda k: 200.0 * 100.0 ** (k / 127.0), False)},
-    "XDLY": {0: ("pct", None, False), 1: ("pct", None, False), 2: ("pctc", lambda k: 105.0 * k / 127.0, False),
+    "XDLY": {0: ("ms", _XT, False), 1: ("ms", _XT, False), 2: ("pctc", lambda k: 105.0 * k / 127.0, False),
              3: ("pct", None, False), 4: ("hz", lambda k: 200.0 * 100.0 ** (k / 127.0), False)},
     "SUB": {0: ("pct", None, False), 1: ("hz", lambda k: 110.0 * 8.0 ** (k / 127.0), False),
             2: ("hz", lambda k: 60.0 * 16.0 ** (k / 127.0), False), 3: ("oct", None, False), 4: ("pct", None, False)},

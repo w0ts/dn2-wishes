@@ -419,7 +419,7 @@ def mnm_c_header() -> str:
         "enum { MW_KNOB, MW_EMPTY, MW_GRID, MW_SLIDE, MW_VU, MW_SWITCH, MW_SEMIS, MW_CENTS };",
         f"static const unsigned char mnm_widget[MNM_N][MNM_J] = {{{arr([[MNM_WIDGET.get((M.NAME, sh), 1 if sh == '---' or sh in MNM_UNPORTED else 0) for sh in mnm_pnames(M)] for M in _mnm.CF_MACHINES])}}};",
         # 2026-11-10: the value readout's units (dnfw.mnm.units): kind (bit 7: 0 reads OFF), curve, the curves
-        "enum { MU_RAW, MU_PCT, MU_SPCT, MU_HZ, MU_HZ100, MU_MS, MU_C10, MU_C, MU_DB, MU_OCT, MU_PATN, MU_RATE, MU_PCTC, MU_MODE, MU_MS10, MU_VOIC, MU_GLID };",
+        "enum { MU_RAW, MU_PCT, MU_SPCT, MU_HZ, MU_HZ100, MU_MS, MU_C10, MU_C, MU_DB, MU_OCT, MU_PATN, MU_RATE, MU_PCTC, MU_MODE, MU_MS10, MU_VOIC, MU_GLID, MU_ST10 };",
         f"static const unsigned char mnm_unit[MNM_N][MNM_J] = {{{arr(_UNITS[0])}}};",
         f"static const unsigned char mnm_unit_curve[MNM_N][MNM_J] = {{{arr(_UNITS[1])}}};",
         f"static const short mnm_curves[{len(_UNITS[2])}][17] = {{{arr(_UNITS[2])}}};",
@@ -610,7 +610,7 @@ def smp_quant_header() -> str:
             f"#define SMP_NQS {len(steps)}\nstatic const struct smp_qs smp_qs[SMP_NQS] = {{\n" + ",\n".join(steps) + "\n};\n"
             f"#define SMP_PLAY_REC {_smp.PLAY_REC}\n#define SMP_MODE_REC {_smp.MODE_REC}\n"
             f"#define SMP_BARS_REC {_smp.BARS_REC}\n#define SMP_SEG_REC {_smp.SEG_REC}\n"
-            f"#define SMP_GRID_REC {_smp.GRID_REC}\n#define SMP_SAMP_REC {_smp.SAMP_REC}\n"
+            f"#define SMP_GRID_REC {_smp.GRID_REC}\n#define SMP_SAMP_REC {_smp.SAMP_REC}\n#define SMP_LEV_REC {_smp.LEV_REC}\n#define SMP_LEV_UNITY {_smp.LEV_UNITY}\n"
             f"#define SMP_SEG_LO {_smp.RECORDS[_smp.SEG_REC][1]}\n"
             f"#define SMP_SEG_SLOT {_smp.RECORDS[_smp.SEG_REC][0]}\n"
             f"#define SMP_SAMP_SLOT {_smp.RECORDS[_smp.SAMP_REC][0]}\n"
