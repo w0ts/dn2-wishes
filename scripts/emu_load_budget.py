@@ -18,7 +18,14 @@ the hook and straight into stock's allocator, and compared:
 5. a heavy voice replacing light ones: one stolen and the next oldest released (load_keyups);
 6. a track with reserved voices: the steal stays inside its own slots;
 7. a chord in one tick: the second note never takes the first's slot;
-8. the interrupt's stack: the deepest our code goes below the hook's entry (load_sp_min).
+8. the interrupt's stack: the deepest our code goes below the hook's entry (load_sp_min);
+2026-11-13 (the unit, r14b: 16 short JUNO notes with a long release piled up to 12 sounding voices; the budget never
+stole, as every voice was released, and judged by a fixed LOAD_AVAIL the unit's stock had long eaten into):
+9. released voices still sounding (the DSP's per-slot cost over LOAD_TAIL), little room reported by the DSP: the note
+   steals a release tail, never a free slot; stock alone takes a free slot;
+10. the same tails with plenty of room reported: stock's result exactly;
+11. no room reported (no packet yet): LOAD_AVAIL decides, as before: the same light tails fit, stock's result;
+12. a voice's measured cost over its table cost: the measure decides (the note that fits by the table steals).
 Exit 0 when every check passes.
 """
 
@@ -40,6 +47,7 @@ ALLOC = 0x4002A6A2
 STAGING, LIVE = 0x4059DA34, 0x4059D96C
 VOICES, HELD, TICK, DUE = 0x40288304, 0x4059DD1C, 0x4059DB04, 0x4059DAFC
 KIT_PTR = 0x800052A0
+KEY_UP = 0x4002B06E                           # stock's one-slot note-off
 STACK, SCRATCH = 0x44700000, 0x44710000
 from unicorn.m68k_const import UC_M68K_REG_A7 as SP_REG  # noqa: E402  (digikit's unicorn: the check's stack)
 OK = []
@@ -190,6 +198,29 @@ class Kit:
         e.w32(sym["load_fx"], 0)
         e.write(sym["load_off"], bytes([off]))
         e.w32(sym["load_sp_min"], 0xFFFFFFFF)
+        # 2026-11-13: no DSP telemetry yet (no room, no slot costs), nothing measured
+        for t in range(16):
+            e.w16(sym["load_meas"] + 2 * t, 0)
+            e.w16(sym["smp_tlm_cost"] + 2 * t, 0)
+        for k in range(4):
+            e.w16(sym["smp_room_now"] + 2 * k, 0xFFFF)
+        for n in ("smp_room_at", "load_busins", "load_pend", "load_pend_at"):
+            e.w32(sym[n], 0)
+
+    def telemetry(self, costs=None, room=None):
+        """the DSP's idle packet as link.c keeps it: COSTS {slot: cycles}, ROOM the bus pass's room (cycles; None: none)"""
+        e, sym = self.e, self.sym
+        for v, c in (costs or {}).items():
+            e.w16(sym["smp_tlm_cost"] + 2 * v, c // 16)
+        if room is not None:
+            e.w16(sym["smp_room_now"] + 2 * 3, (room + (1 << 19)) // 16)
+            e.w32(sym["smp_room_at"], e.r32(sym["smp_periods"]) | 1)
+
+    def release(self, slots):
+        """stock's own key-up of each slot in SLOTS (their voices go on sounding: release tails)"""
+        for v in range(16):
+            if slots & (1 << v):
+                self.e.call(KEY_UP, v)
 
     def play(self, t, n, hook=True, new_tick=True):
         """a note-on on track T, note N, in a new tick (or this one): -> the slots given; they stay held"""
@@ -323,6 +354,58 @@ def main() -> int:
     check("8 the interrupt's stack: the hook path's depth measured, within 256 bytes of stock's",
           deep_hook - deep_stock <= 256, f"hook {deep_hook} B, stock alone {deep_stock} B, more {deep_hook - deep_stock} B")
     res["stack_depth"] = {"hook": deep_hook, "stock": deep_stock}
+    # 9..12 (2026-11-13): release tails and the DSP's room. Track 11 (T12, JUNO on the unit): 11 notes played, then
+    # all released; the DSP reports each still sounding at 10,700 (the unit's measure), the table 9,000
+    def tails(room, measured=10700, table=9000, meas=0):
+        def build():
+            k = Kit(e, sym, [table] * 16)
+            for nn in range(11):
+                k.play(11, 40 + nn, hook=False)
+            k.sounding = e.r32(HELD)
+            k.release(k.sounding)
+            k.telemetry({v: measured for v in range(16) if k.sounding & (1 << v)}, room)
+            if meas:
+                e.w16(sym["load_meas"] + 2 * 11, meas)
+            return k
+        return build
+    for name, room in (("9", 15000), ("10", 200000)):
+        snap = e.save(SPANS)
+        k = tails(room)()
+        snd, held_now = k.sounding, e.r32(HELD)
+        c0 = {n: e.r32(sym[n]) for n in ("load_tails", "load_by_room", "load_over")}
+        base = e.save(SPANS)
+        got = k.play(11, 90, True)
+        c1 = {n: e.r32(sym[n]) for n in ("load_tails", "load_by_room", "load_over")}
+        free_seen = e.r32(sym["load_last_free"])
+        e.restore(base)
+        ref = k.play(11, 90, False)
+        e.restore(snap)
+        res[f"tails_{name}"] = {"sounding": snd, "held_after_release": held_now, "hook": got, "stock": ref,
+                                "free": free_seen - (1 << 32) if free_seen & 0x80000000 else free_seen,
+                                **{n: c1[n] - c0[n] for n in c1}}
+        if name == "9":
+            check("9 release tails, little room: the note steals a sounding tail, stock alone a free slot",
+                  held_now == 0 and got and not (got & ~snd) and ref and not (ref & snd) and c1["load_tails"] == c0["load_tails"] + 1
+                  and c1["load_by_room"] == c0["load_by_room"] + 1,
+                  f"sounding {snd:#06x} (held after release {held_now:#06x}): hook {got:#06x}, stock {ref:#06x}, {res['tails_9']}")
+        else:
+            check("10 the same tails, plenty of room: stock's result exactly",
+                  got == ref and c1["load_over"] == c0["load_over"] and c1["load_by_room"] == c0["load_by_room"] + 1,
+                  f"hook {got:#06x}, stock {ref:#06x}")
+    got, ref, same = twin(e, sym, tails(None), 11, 90)
+    check("11 no room reported: LOAD_AVAIL decides, the light tails fit: stock's result", got == ref and same,
+          f"{got:#06x} / {ref:#06x}")
+    # 12: table 6,000 fits a 25,000 room (6,000 x 1.5 + 6,000 = 15,000); the track measured 15,000 does not (28,500):
+    # it steals (each slot's own last cost 9,000: over LOAD_TAIL, so sounding)
+    snap = e.save(SPANS)
+    k = tails(25000, measured=9000, table=6000, meas=15000)()
+    snd = k.sounding
+    t0 = e.r32(sym["load_tails"])
+    got = k.play(11, 90, True)
+    t1 = e.r32(sym["load_tails"])
+    e.restore(snap)
+    check("12 a voice measured dearer than its table: the measure decides (it steals)",
+          got and not (got & ~snd) and t1 == t0 + 1, f"hook {got:#06x}, sounding {snd:#06x}")
     res["pass"] = all(OK)
     print(("PASS" if all(OK) else "FAIL") + f": {sum(OK)} of {len(OK)} checks")
     if a.json:

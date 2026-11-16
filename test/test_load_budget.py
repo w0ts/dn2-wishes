@@ -45,7 +45,21 @@ def test_stock_tracks_and_the_setting_leave_stocks_allocation_alone():
     pre = re.search(r"void load_pre\(.*?\n}\n", LOAD_C, re.S).group(0)
     assert "if (load_off || a[2] != 1u || a[0] > 15u)" in pre          # off, a note-off, no track: nothing
     assert "if (!one)" in pre                                          # a stock machine's or MIDI's note: nothing
-    assert pre.index("if (sum + one * (u32)n <= LOAD_AVAIL)") < pre.index("LIVE_POOL &= held;")
+    assert pre.index("if (fits_now(sum, one * (u32)n))") < pre.index("LIVE_POOL &= keep;")
+
+
+def test_release_tails_are_stolen_first_and_the_dsp_room_decides():
+    # 2026-11-13 (the unit, r14b: 16 short JUNO notes with a long release, 12 sounding, the budget never stole)
+    pre = re.search(r"void load_pre\(.*?\n}\n", LOAD_C, re.S).group(0)
+    assert "u32 keep = cand & tails ? tails : held;" in pre           # a release tail first, else a held voice
+    assert "smp_tlm_cost[v] > LOAD_TAIL" in pre                       # a tail: the DSP still reports it busy
+    room = re.search(r"static int room_now\(.*?\n}\n", LOAD_C, re.S).group(0)
+    assert "smp_room_now[3]" in room and "ROOM_FRESH" in room          # the bus pass's room, the last packet's
+    assert "- (int)load_busins - (int)load_pend" in room
+    fits = re.search(r"static int fits_now\(.*?\n}\n", LOAD_C, re.S).group(0)
+    assert "return sum + need <= LOAD_AVAIL;" in fits                  # the fallback while no room is reported
+    link = (ROOT / "csrc/sampler/link.c").read_text()
+    assert "smp_room_now[t] = v[58 + t];" in link and "smp_room_at = periods | 1u;" in link
 
 
 def test_the_setting_is_a_personalize_row_default_on():

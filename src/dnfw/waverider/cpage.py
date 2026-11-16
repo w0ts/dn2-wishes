@@ -139,7 +139,10 @@ LIVE_ENTRIES = ["live_menu_hook", "live_label", "live_box", "live_yes", "live_de
                 "msel_poll", "ls_commits", "ls_reverts", "set_bits"]
 # 2026-11-12: the DSP load budget (csrc/load): its hook and the state the emulator check reads
 LOAD_ENTRIES = ["load_alloc_hook", "load_poll", "load_voice", "load_stock", "load_fx", "load_off", "load_checks",
-                "load_over", "load_keyups", "load_sp_min", "load_last_sum", "load_last_need", "load_rows"]
+                "load_over", "load_keyups", "load_sp_min", "load_last_sum", "load_last_need", "load_rows",
+                # 2026-11-13: the budget by the DSP's room, the release tails (the checks set and read them)
+                "load_meas", "load_busins", "load_pend", "load_pend_at", "load_tails", "load_by_room", "load_last_free",
+                "smp_tlm_cost", "smp_room_now", "smp_room_at", "smp_periods"]
 LINK_ENTRIES = LINK_ENTRIES + WISH_ENTRIES + LOAD_ENTRIES + LIVE_ENTRIES + ENG_ENTRIES + DEVTEST_ENTRIES + LZMA7_ENTRIES + MOD_ENTRIES + SLIDE_ENTRIES + METER_ENTRIES + FDN8_ENTRIES + XDLY_ENTRIES + FXP_ENTRIES + INS_ENTRIES + HOLD_ENTRIES
 
 

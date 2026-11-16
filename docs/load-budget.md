@@ -72,3 +72,26 @@ allocator uses, so the check does it at the allocator's twelve BITREV sites. 9 o
   slot, and the guard decides as before.
 - REUSE / mono / retrigger reuse the track's own slots: the need is then over-counted (a voice may be stolen early).
 - A free slot last used by a stock machine still counts that machine's cost when our note takes it (conservative).
+
+## 2026-11-13: release tails and the DSP's room (the unit, r14b)
+
+The unit (T12 JUNO, AMP REL 90, the A2 Diode filter at RES 95; 16 short notes, each released before the next): 12 voices
+sounding at ~10,700 cycles each (~15,000 in a note's block), our frame 32k -> 138k, D 71 -> 87 %, the guard skipping
+voices and inserts from the 11th note; the budget never stole. Measured from the telemetry, D rises about 1 % per
+6,700 cycles of ours, so 100 % is the whole 667k frame: this kit's stock alone took ~66 % of it. Three faults:
+
+- **Only held voices were stolen.** Every note had been released, so "nothing held to steal" let each note take a free
+  slot. Now the candidates are the voices still sounding: released ones the DSP still reports busy (per-slot cost over
+  `LOAD_TAIL`) first, else held ones. Stock's allocator picks among them by its own STEAL mode.
+- **A fixed room.** `LOAD_AVAIL` (310,000 less our fixed work) assumed stock leaves ~310k; this kit left far less. Now,
+  while the DSP reports it (idle packet unit 61: the bus insert pass's room before its deadline, every block; link.c
+  `smp_room_now`, fresh within 150 periods), a note fits when 1.5 x its cost + 6,000 fits in that room, less the bus
+  inserts still to run and what notes took since that packet (`load_pend`). `LOAD_AVAIL` remains the fallback.
+- **Table costs.** JUNO's table cost (8,815 at the default knobs, + its filter) against ~10,700 measured. A voice now
+  costs the larger of its table cost and its track's voices as the DSP measured them (`load_meas`, eased 1/64 a UI loop,
+  reset when the track's machine or variant changes), and a sounding slot the larger of that and its own last cost.
+
+Checked: `scripts/emu_load_budget.py` 13 of 13 (9: released tails and little room: the note steals a tail where stock
+alone takes a free slot; 10: plenty of room: stock's result; 11: no room reported: as before; 12: a measured cost over
+the table decides). Not checked: the coupled emulator run of the unit's 16 notes (it needs a time model: the coupled
+harness has no DSP clock, so no deadline and no room), and the unit.

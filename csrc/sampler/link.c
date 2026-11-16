@@ -370,6 +370,10 @@ volatile u16 smp_ins_tskip[16] __attribute__((section(".data"))) = {0};
  * bus: room = unit x 16 - 2^19 cycles; 0xFFFF none seen), unit 62 the guard's TAIL / 16 (DIAG sends them too) */
 volatile u16 smp_ins_room[4] __attribute__((section(".data"))) = {0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF};
 volatile u16 smp_ins_tail __attribute__((section(".data"))) = 0;
+/* 2026-11-13 (the VOICE BUDGET, csrc/load): the same rooms as the LAST idle packet gave them (not held to the least),
+ * and when (periods | 1; 0 never): the budget's measure of what the DSP can still take */
+volatile u16 smp_room_now[4] __attribute__((section(".data"))) = {0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF};
+volatile u32 smp_room_at __attribute__((section(".data"))) = 0;
 
 int smp_skipped_any(void)                       /* any voice, or an insert block, within the last half second */
 {
@@ -642,9 +646,12 @@ void smp_tdm(u32 h)
         }
         for (int t = 0; t < 16; t++)            /* 2026-11-12: units 42..57, the insert skips per type */
             smp_ins_tskip[t] = v[42 + t];
-        for (int t = 0; t < 4; t++)             /*   58..61, each insert pass's least room (kept: the least */
+        for (int t = 0; t < 4; t++) {           /*   58..61, each insert pass's least room (kept: the least */
             if (v[58 + t] < smp_ins_room[t])    /*   until DIAG reads it) */
                 smp_ins_room[t] = v[58 + t];
+            smp_room_now[t] = v[58 + t];        /* (2026-11-13: and as given, for the VOICE BUDGET) */
+        }
+        smp_room_at = periods | 1u;
         smp_ins_tail = v[62];
         for (int t = 0; t < 16; t++)            /* 2026-11-11: units 24..41, the telemetry frame's */
             smp_tlm_cost[t] = v[24 + t];

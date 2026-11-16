@@ -18,6 +18,19 @@
  * A note on a stock machine's track, a kit that fits, and the setting off (SETTINGS > PERSONALIZE, VOICE BUDGET: the
  * settings sector's flag bit 3) leave stock's allocation exactly as it is. The DSP's frame guard stays the safety net.
  * The per-track costs are computed in the UI loop (load_poll); the interrupt only adds them up.
+ *
+ * 2026-11-13 (the unit, r14b: JUNO with a long release, 16 short notes piled up to 12 sounding voices, the guard then
+ * dropped voices and inserts; the budget never stole). Three things were wrong, all fixed here:
+ *   - the steal took only HELD slots: released voices still sounding (their release tails, as costly as a held voice)
+ *     were never candidates, so a run of short notes always found "nothing held" and took a free slot. Now the
+ *     candidates are the slots still sounding (held, or the DSP's cost over LOAD_TAIL), released ones first;
+ *   - the room was a fixed LOAD_AVAIL (310,000 less our fixed work): the unit's stock took ~66 % of that kit's frame,
+ *     so the guard ran out at ~110,000 of ours. Now, while the DSP reports it (the idle packet's units 58..61, link.c
+ *     smp_room_now: each insert pass's room before its deadline as the last packet gave it), a note fits when its cost
+ *     and a margin fit in the least of those rooms, less the bus inserts still to run and what notes since that packet
+ *     took (load_pend). LOAD_AVAIL stays the fallback while no room is reported;
+ *   - a voice's cost was its table value at the default knobs (JUNO 8,815 + its filter; the unit measured ~10,700 a
+ *     voice, ~15,000 in its note block): now the larger of that and its track's measured voices (load_meas).
  */
 typedef unsigned int u32;
 typedef unsigned short u16;
@@ -51,6 +64,13 @@ typedef unsigned char u8;
 
 extern int set_flag(u32 bit);                   /* jump.c */
 extern volatile u16 smp_tlm_cost[16];           /* link.c: the DSP's cost of each slot / 16, the last idle packet's */
+extern volatile u16 smp_room_now[4];            /* link.c: each insert pass's room before its deadline, the last packet's:
+                                                 * (room + 2^19) / 16, 0xFFFF none (2026-11-13) */
+extern volatile u32 smp_room_at;                /* link.c: when they came (periods | 1), 0 never */
+extern volatile u32 smp_periods;                /* link.c: the periods (audio ISR calls) */
+#define ROOM_FRESH   150u                       /* a room older than 0.1 s is not trusted: LOAD_AVAIL instead */
+#define ROOM_MARGIN  6000u                      /* cycles kept free besides a note's half again (its note block costs
+                                                 * ~1.4 x its steady blocks: JUNO 15,000 / 10,700 on the unit) */
 extern u8 ins_sel[16][2];                       /* ins.c: each track's two insert types */
 extern int rvt_state, dlt_state;                /* fdn8/ui.c, xdly/ui.c: 1 when the send is FDN8 / XDLY */
 extern int fxp_chorus_type(void);               /* fxpage/fxp.c: 1 when the chorus send is JUNO */
@@ -58,6 +78,14 @@ extern int fxp_chorus_type(void);               /* fxpage/fxp.c: 1 when the chor
 u16 load_voice[16] __attribute__((section(".data"))) = {0};   /* a voice of track t (one of ours), cycles; 0 stock, MIDI */
 u16 load_stock[16] __attribute__((section(".data"))) = {0};   /* a slot of track t (a stock machine's), cycles, always */
 u32 load_fx __attribute__((section(".data"))) = 0;            /* the send FX and the bus inserts */
+u32 load_busins __attribute__((section(".data"))) = 0;        /* the bus inserts alone (they run after the rooms' pass) */
+u16 load_meas[16] __attribute__((section(".data"))) = {0};    /* track t's voices as the DSP measured them, cycles, the
+                                                               * largest lately (eased by 1/64 a UI loop) */
+u32 load_pend __attribute__((section(".data"))) = 0;          /* cycles the notes took since the rooms' packet */
+u32 load_pend_at __attribute__((section(".data"))) = 0;       /* ... that packet (smp_room_at) */
+u32 load_tails __attribute__((section(".data"))) = 0;         /* steals made of released voices still sounding */
+u32 load_by_room __attribute__((section(".data"))) = 0;       /* note-ons judged by the DSP's room (not LOAD_AVAIL) */
+int load_last_free __attribute__((section(".data"))) = 0;     /* the last note's room (cycles; LOAD_AVAIL's if none) */
 u8 load_off __attribute__((section(".data"))) = 0;            /* the setting: 1 off */
 /* the checks read these */
 u32 load_checks __attribute__((section(".data"))) = 0;        /* note-ons on our tracks looked at */
@@ -73,6 +101,7 @@ static int hid_t __attribute__((section(".data"))) = -1;
 static u32 need_now __attribute__((section(".data"))) = 0;
 static u32 sum_now __attribute__((section(".data"))) = 0;
 static u16 cost_was[16] __attribute__((section(".data"))) = {0};
+static u16 voice_was[16] __attribute__((section(".data"))) = {0};
 
 /* -- the UI loop: each track's cost ----------------------------------------------------------------------------- */
 
@@ -138,17 +167,35 @@ void load_poll(void)
     if (!KIT)
         return;
     u32 fx = 0;
+    u32 meas[16];
+    for (int t = 0; t < 16; t++)                /* (a loop: no memset in the chunk) */
+        meas[t] = 0;
+    for (int v = 0; v < 16; v++) {              /* the DSP's measure of each sounding voice, by its track */
+        int own = VOICE(v)[1];
+        u32 c = (u32)smp_tlm_cost[v] * 16u;
+        if (own <= 15 && smp_tlm_cost[v] > LOAD_TAIL && c > meas[own])
+            meas[own] = c;
+    }
     for (int t = 0; t < 16; t++) {
         int stock;
         u32 c = track_cost(t, &stock);
+        if (c != voice_was[t])                  /* another machine or variant: its old measure is not its own */
+            load_meas[t] = 0;
+        voice_was[t] = (u16)c;
         load_voice[t] = (u16)(stock ? 0 : c);
         load_stock[t] = (u16)(stock ? c : 0);
+        u32 m = load_meas[t];
+        m -= m >> 6;
+        if (meas[t] > m)
+            m = meas[t];
+        load_meas[t] = (u16)(m > 65535u ? 65535u : m);
         for (int j = 0; j < 2; j++) {
             int y = ins_sel[t][j];
             if (y < 16 && (LOAD_BUS_MASK & (1u << y)))
                 fx += load_bus[y];
         }
     }
+    load_busins = fx;
     fx += rvt_state == 1 ? LOAD_SEND_FDN8 : 0;
     fx += dlt_state == 1 ? LOAD_SEND_XDLY : 0;
     fx += fxp_chorus_type() == 1 ? LOAD_SEND_JUNO : 0;
@@ -169,6 +216,19 @@ int load_fit(u32 c)
 
 /* -- the interrupt: before and after stock's allocator, at a note-on --------------------------------------------- */
 
+/* a voice of track T, cycles: its table cost, or its track's measured voices when dearer (2026-11-13) */
+static u32 voice_cost(int t)
+{
+    u32 c = load_voice[t];
+    return c && load_meas[t] > c ? load_meas[t] : c;
+}
+
+/* slot V sounds: held, or released and the DSP still reports it busy (its release tail) */
+static int sounding(int v)
+{
+    return (HELD & (1u << v)) || smp_tlm_cost[v] > LOAD_TAIL;
+}
+
 static u32 slot_cost(int v)
 {
     int own = VOICE(v)[1];
@@ -176,9 +236,41 @@ static u32 slot_cost(int v)
         return 0;
     if (load_stock[own])
         return load_stock[own];
-    if (HELD & (1u << v) || smp_tlm_cost[v] > LOAD_TAIL)
-        return load_voice[own];
-    return 0;
+    if (!sounding(v))
+        return 0;
+    u32 c = voice_cost(own), m = (u32)smp_tlm_cost[v] * 16u;
+    return m > c ? m : c;                       /* (2026-11-13: what the DSP measured, when dearer) */
+}
+
+/* the DSP's room now (cycles, may be negative), from the last idle packet: 1 when it is reported and fresh */
+static int room_now(int *room)
+{
+    u32 at = smp_room_at;
+    if (!at || (int)(smp_periods - at) > (int)ROOM_FRESH)   /* (signed: at is periods | 1, a period ahead at most) */
+        return 0;
+    u32 m = smp_room_now[3];                    /* the bus pass's: the last of ours in the frame, all our voices and the
+                                                 * earlier insert passes already spent (inserts/bus.py, ins_start 3) */
+    if (m == 0xFFFFu)                           /* no deadline known */
+        return 0;
+    if (load_pend_at != at) {                   /* a new packet: what earlier notes took is in its rooms */
+        load_pend_at = at;
+        load_pend = 0;
+    }
+    *room = (int)(m * 16u) - (1 << 19) - (int)load_busins - (int)load_pend;
+    return 1;
+}
+
+/* the note fits: by the DSP's room while reported (2026-11-13), else by LOAD_AVAIL */
+static int fits_now(u32 sum, u32 need)
+{
+    int room;
+    if (room_now(&room)) {
+        load_by_room++;
+        load_last_free = room;
+        return (int)(need + need / 2u + ROOM_MARGIN) <= room;
+    }
+    load_last_free = (int)LOAD_AVAIL - (int)sum;
+    return sum + need <= LOAD_AVAIL;
 }
 
 /* hooks.S: A the allocator's nine arguments (track, note, event (1 note-on), ...) */
@@ -193,7 +285,7 @@ void load_pre(const u32 *a)
     if (load_off || a[2] != 1u || a[0] > 15u)
         return;
     int t = (int)a[0];
-    u32 one = load_voice[t];
+    u32 one = voice_cost(t);
     if (!one)                                   /* a stock machine's or MIDI's note: stock's allocation */
         return;
     int n = PER_NOTE[t] > 0 ? PER_NOTE[t] : 1;
@@ -206,24 +298,34 @@ void load_pre(const u32 *a)
     load_checks++;
     load_last_sum = sum;
     load_last_need = one * (u32)n;
-    if (sum + one * (u32)n <= LOAD_AVAIL)
+    if (fits_now(sum, one * (u32)n)) {
+        load_pend += one * (u32)n;              /* (the DSP's next packet will show it) */
         return;
+    }
     if (TICK_DUE)                               /* this tick's copy first (the allocator would make it, over ours) */
         TICK_COPY();
-    u32 held = HELD;
+    u32 held = HELD, tails = 0;
+    for (int v = 0; v < 16; v++) {              /* released voices still sounding, of our machines (2026-11-13) */
+        int o = VOICE(v)[1];
+        if (!(held & (1u << v)) && o <= 15 && !load_stock[o] && smp_tlm_cost[v] > LOAD_TAIL)
+            tails |= 1u << v;
+    }
     int own = LIVE_HAS[t] != 0;
     u32 cand = own ? LIVE_MASK[t] : LIVE_POOL;
-    if (!(cand & held))                         /* nothing held to steal: let it take a free slot (the guard decides) */
+    u32 keep = cand & tails ? tails : held;     /* a release tail first, else a held voice */
+    if (!(cand & keep))                         /* nothing sounding to steal: let it take a free slot (the guard decides) */
         return;
+    if (keep == tails)
+        load_tails++;
     load_over++;
     need_now = one * (u32)n;
     sum_now = sum;
     hid_t = t;
-    hid_pool = LIVE_POOL & ~held;
-    LIVE_POOL &= held;
+    hid_pool = LIVE_POOL & ~keep;
+    LIVE_POOL &= keep;
     if (own) {
-        hid_mask = LIVE_MASK[t] & ~held;
-        LIVE_MASK[t] &= held;
+        hid_mask = LIVE_MASK[t] & ~keep;
+        LIVE_MASK[t] &= keep;
     }
 }
 
@@ -235,12 +337,16 @@ void load_post(u32 taken, u8 *fp)
     LIVE_POOL |= hid_pool & ~taken;             /* the hidden free slots back for the tick's other notes */
     if (hid_mask)
         LIVE_MASK[hid_t] |= hid_mask & ~taken;
-    u32 sum = sum_now;
+    u32 sum = sum_now, freed = 0;
     for (int v = 0; v < 16; v++)
-        if (taken & (1u << v))
+        if (taken & (1u << v)) {
             sum -= cost_was[v];                 /* what the stolen voices cost */
+            freed += cost_was[v];
+        }
+    int room, by_room = room_now(&room);
     u32 now = TICK;
-    while (sum + need_now > LOAD_AVAIL) {       /* a heavy note: the next oldest held voices released */
+    while (by_room ? (int)(need_now + need_now / 2u + ROOM_MARGIN) > room + (int)freed
+                   : sum + need_now > LOAD_AVAIL) {   /* a heavy note: the next oldest held voices released */
         int best = -1;
         u32 at = 0;
         for (int v = 0; v < 16; v++) {
@@ -269,9 +375,11 @@ void load_post(u32 taken, u8 *fp)
         GATE_B[best] = 0;
         *(volatile u32 *)(VOICE(best) + 12) = 0;
         sum -= cost_was[best];
+        freed += cost_was[best];                /* (its release still sounds a while: the guard covers that) */
         taken |= b;                             /* (not picked twice) */
         load_keyups++;
     }
+    load_pend += need_now > freed ? need_now - freed : 0;
     hid_t = -1;
 }
 
