@@ -9,6 +9,9 @@ build, block after block.
    and SPD moved, MODE I / II / I+II), through a switch to STOCK and back (a fresh start); every R, I0-I3 and I5
    register the bus left is back at the return; no DDR write outside the send's words and ring (and the test's
    buffers); the instructions per block (the emulator charges every access alike).
+3. STOCK -> JUNO -> STOCK (the User, 2026-11-14: "start fresh"): back on STOCK after noise and a JUNO stretch, the
+   stock chorus on silence gives what one never fed the noise gives (its ring and filter states were zeroed at the
+   switch to JUNO, dnfw.inserts.jsend.stock_fresh), and it sounds again on the noise.
 """
 
 from __future__ import annotations
@@ -104,9 +107,64 @@ def own(a: int) -> bool:
     from dnfw.inserts import post as P
     if D.JS_STATE <= ddr(a) < D.JS_END:
         return True
+    from dnfw.inserts import jsend as JS
+    if any(lo <= ddr(a) < hi for lo, hi in JS.stock_words()):
+        return True
     lo, hi = P.STATE, P.STATE + len(P.state_bytes())
     return any(lo <= x < hi for x in (a, a - dsp.LOAD_ALIAS, (a - ALIAS) // 4))
 
+
+def _f(w: int) -> float:
+    return struct.unpack("<f", struct.pack("<I", w & 0xFFFFFFFF))[0]
+
+
+def _path(M5, snap, m2mach, img, first, knobs, n=40):
+    """an instance: N blocks of STOCK on FIRST (per block), N of JUNO, then N of STOCK on silence -> (its state,
+    its outputs back on STOCK, the stock chorus's struct words after JUNO, every call came back)"""
+    zero = [0.0] * 32
+    r = M5.init_on(snap, m2mach, img)
+    ok = True
+    for b in range(n):
+        r, how, *_ = call(M5, r, D.JS_STOCK, *knobs, first[b], [0.5 * x for x in first[b]])
+        ok &= how[0] == "stop"
+    for b in range(n):
+        r, how, *_ = call(M5, r, D.JS_JUNO, *knobs, zero, zero)
+        ok &= how[0] == "stop"
+    words = {a: M5.m2.word(r.state, a) or 0 for a in range(STATE, STATE + 0x1344, 4)}
+    back = []
+    for b in range(n):
+        r, how, out, _, _ = call(M5, r, D.JS_STOCK, *knobs, zero, zero)
+        ok &= how[0] == "stop"
+        back.append(out)
+    return r, back, words, ok
+
+
+def comeback(M5, snap, m2mach, m5img) -> tuple[dict, dict]:
+    """STOCK -> JUNO -> STOCK (the User, 2026-11-14: "start fresh"): 40 blocks of noise on the stock chorus, 40 of
+    JUNO, then the stock chorus again on silence, against the same path with silence where the noise was (the same
+    LFO and knob smoothing, never fed: it gives exact zeros). Before the fix the ring came back (0.45 for 9 blocks)."""
+    checks, numbers = {}, {}
+    rnd = random.Random(5)
+    noise = [[rnd.uniform(-0.6, 0.6) for _ in range(32)] for _ in range(40)]
+    knobs = (127 << 8, 64 << 8)
+    r, back, fed, ok = _path(M5, snap, m2mach, m5img, noise, knobs)
+    _, quiet, never, ok2 = _path(M5, snap, m2mach, m5img, [[0.0] * 32] * 40, knobs)
+    diff = [max(abs(_f(x) - _f(y)) for cx, cy in zip(o, q) for x, y in zip(cx, cy)) for o, q in zip(back, quiet)]
+    left = [a for a in sorted(fed) if fed[a] != never[a]]
+    numbers["back on STOCK: largest difference from the never-fed path, per block (first 12)"] = [
+        f"{d:.3g}" for d in diff[:12]]
+    numbers["back on STOCK: largest difference over 40 blocks"] = f"{max(diff):.3g}"
+    numbers["stock chorus struct words that differ from the never-fed path after JUNO"] = [
+        (hex(a), hex(fed[a]), hex(never[a])) for a in left[:12]]
+    checks["STOCK -> JUNO -> STOCK: the calls come back to the bus"] = ok and ok2
+    checks["STOCK -> JUNO -> STOCK: back on STOCK on silence, within 1e-6 of a stock chorus never fed the noise "
+           "(40 blocks: not the ring or filter states it held before JUNO)"] = max(diff) <= 1e-6
+    heard = 0
+    for b in range(10):
+        r, how, out, _, _ = call(M5, r, D.JS_STOCK, *knobs, noise[b], noise[b])
+        heard += sum(1 for w in out[0] + out[1] if w & 0x7FFFFFFF and w != MARK)
+    checks["STOCK -> JUNO -> STOCK: the stock chorus sounds again when the noise comes back"] = heard > 200
+    return checks, numbers
 
 def run(M5, snap, m2mach, m5img, stock_img) -> dict:
     checks, numbers = {}, {}
@@ -172,4 +230,7 @@ def run(M5, snap, m2mach, m5img, stock_img) -> dict:
     numbers["JUNO: DDR words written outside its own (first 8)"] = [hex(a) for a in sorted(outside)[:8]]
     numbers["JUNO: instructions per block (the first is a fresh start: the ring cleared): min, mean, max"] = (
         min(cost), round(sum(cost) / len(cost)), max(cost))
+    c, n = comeback(M5, snap, m2mach, m5img)
+    checks.update(c)
+    numbers.update(n)
     return {"ok": all(checks.values()), "checks": checks, "numbers": numbers}

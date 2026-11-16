@@ -87,3 +87,26 @@ def test_juno_send_is_a_chorus_not_a_copy():
             ro = np.array([struct.unpack("<f", struct.pack("<I", w))[0] for w in out[1]])
             side += float(np.abs(lo - ro).sum())
     assert side > 0.5
+
+
+def test_a_switch_to_juno_zeroes_the_stock_choruss_sound_state_only():
+    """the User, 2026-11-14 ("start fresh"): back on STOCK the stock chorus starts from silence, so the switch to
+    JUNO zeroes its ring and filter states (measured in the runner) and no other word of its struct"""
+    m = Mem()
+    setup(m)
+    base, size = J.STOCK_BASE, J.SF.CHORUS_BYTES
+    for a in range(base, base + size, 4):
+        m.put(a, 0x3F000000 | (a & 0xFFFF))
+    zero = [0.0] * 32
+    call(m, D.JS_STOCK, 0, 0, zero, zero, {})
+    assert m.get(base + 4) != 0, "STOCK leaves the stock chorus's state to it"
+    call(m, D.JS_JUNO, 0, 0, zero, zero, {})
+    cleared = {a for lo, hi in J.stock_words() for a in range(lo, hi, 4)}
+    assert len(cleared) == 1092 + 2 * 2 + 6 * 4
+    for a in range(base, base + size, 4):
+        want = 0 if a in cleared else 0x3F000000 | (a & 0xFFFF)
+        assert m.get(a) == want, hex(a)
+    call(m, D.JS_JUNO, 0, 0, zero, zero, {})
+    m.put(base + 4, 7)
+    call(m, D.JS_JUNO, 0, 0, zero, zero, {})
+    assert m.get(base + 4) == 7, "only the switch clears it, not every JUNO block"

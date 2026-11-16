@@ -18,7 +18,8 @@ uses, then
 Its scratch is the post pass's (dnfw.inserts.post.C, WL, WR in L1): the FX bus runs after that pass has ended
 (the pass JUMPs on to the sends, 0x1c1738, which call the bus). Its own words (the six state words, the last TYPE
 it ran) and its ring are in DDR (design.JS_STATE, JS_RING). The stock chorus's own state is never touched, so back
-on STOCK it carries on from where it was.
+on STOCK it starts from silence: the switch to JUNO (its fresh start) zeroes the stock chorus's ring and filter
+states (stock_fresh), which the stock chorus does not touch while JUNO runs.
 """
 
 from __future__ import annotations
@@ -26,10 +27,22 @@ from __future__ import annotations
 from ..perc.dsl import Mem, Prog
 from . import design as D
 from . import post as P
+from ..waverider import stockfx as SF
 
 C = P.C
 CHORUS_SW = 0xB84D5C                 # the stock chorus, as the bus calls it
 WORDS = 8                            # the state words: s0..s5, the last TYPE run (word 6)
+# the stock chorus's sound state (measured in the runner, 2026-11-15: after 40 blocks of noise and 40 of JUNO, the
+# words that differ from the same path never fed): its ring, the 1,092 words after its struct's first; two 2-word
+# filter states (base + 0x1190, + 0x1200); and six filter sections' 4 state words each (base + 0x1224, 0x24 apart,
+# between their 5 coefficients). The LFO and the smoothed knobs are the same either way and are left. In L2 when
+# stockfx moves the struct.
+STOCK_BASE = SF.CHORUS_L2 if SF.ENABLED else SF.CHORUS_DDR
+STOCK_RING, STOCK_RING_WORDS = STOCK_BASE + 4, 1092
+STOCK_PAIRS = (STOCK_BASE + 0x1190, STOCK_BASE + 0x1200)
+STOCK_SECTIONS, STOCK_SECTION_STRIDE, STOCK_SECTION_N = STOCK_BASE + 0x1224, 0x24, 6
+assert STOCK_RING_WORDS % 12 == 0 and STOCK_RING + 4 * STOCK_RING_WORDS <= STOCK_PAIRS[0]
+assert STOCK_SECTIONS + STOCK_SECTION_STRIDE * STOCK_SECTION_N <= STOCK_BASE + SF.CHORUS_BYTES
 
 
 def _knob(p: Prog, word: int, high: bool, dst: str) -> None:
@@ -66,6 +79,40 @@ def fresh(p: Prog) -> None:
         for _ in range(16):
             p.stpost(0, 0)
     p.loop_r(11, D.POST_RING // 16, sixteen)
+    stock_fresh(p)
+
+
+def stock_fresh(p: Prog) -> None:
+    """the stock chorus's sound state zeros (the User, 2026-11-14: back on STOCK, from silence; it does not run
+    while JUNO does, so its next block starts from here). F0 = 0.0; clobbers R1, R11-R14, I0"""
+    p.iconst(1, STOCK_RING)
+    p.seti(0, 1)
+
+    def twelve():
+        for _ in range(12):
+            p.stpost(0, 0)
+    p.loop_r(11, STOCK_RING_WORDS // 12, twelve)
+    for at in STOCK_PAIRS:
+        p.iconst(1, at)
+        p.seti(0, 1)
+        p.stpost(0, 0)
+        p.stpost(0, 0)
+    p.iconst(13, STOCK_SECTIONS)
+    p.iconst(14, STOCK_SECTION_STRIDE)
+
+    def section():
+        p.seti(0, 13)
+        for _ in range(4):
+            p.stpost(0, 0)
+        p.iop(13, 13, "+", 14)
+    p.loop_r(11, STOCK_SECTION_N, section)
+
+
+def stock_words() -> list[tuple[int, int]]:
+    """the byte ranges stock_fresh zeroes"""
+    return ([(STOCK_RING, STOCK_RING + 4 * STOCK_RING_WORDS)] + [(a, a + 8) for a in STOCK_PAIRS]
+            + [(STOCK_SECTIONS + STOCK_SECTION_STRIDE * k, STOCK_SECTIONS + STOCK_SECTION_STRIDE * k + 16)
+               for k in range(STOCK_SECTION_N)])
 
 
 def block(p: Prog) -> None:
