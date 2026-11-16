@@ -248,6 +248,21 @@ static int mnm_k(void *view, int j)             /* knob 0..127, as the DSP and p
     return (v * 254 + top) / (2 * top);
 }
 
+/* the knob as the page shows control J: page 2's choices as the DSP takes them, trunc(v / top x n) (the
+ * knob's 128ths differ), as a knob whose (k n) >> 7 is that choice; the page and its popup both read this */
+static int mnm_k_shown(void *view, int mi, int j)
+{
+    int k = mnm_k(view, j), n = mnm_choices[mi][j];
+    if (j >= 8 && n && n != MNM_PCH) {
+        u8 fl;
+        int v = (GET_VALUE(view, mnm_rid[j], &fl) >> 8) - mnm_lo[j], top = mnm_top[j];
+        v = v < 0 ? 0 : v > top ? top : v;
+        k = (((v * n) / top) * 128 + 64) / n;
+        if (k > 127) k = 127;
+    }
+    return k;
+}
+
 /* 2026-11-10 (the User: no parameter of ours shows a bare 0..127): a control's value in its unit, at most
  * four characters (the cell's label): dnfw.mnm.units, the curve through 17 points 8 knobs apart (the last
  * one at 127). Hz: NNHz, then 0.1k .. 9.9k, NNk; ms: NNms, then 0.1s .. 9.9s, NNs; hundredths of a Hz
@@ -475,16 +490,16 @@ static int mnm_retired_at(int mi, int j)        /* the retired choice, or -1 */
     return -1;
 }
 
-static const char *mnm_pop_name(int i, int arg)     /* arg: mi * 8 + j; i: a place in the list */
+static const char *mnm_pop_name(int i, int arg)     /* arg: mi * MNM_J + j; i: a place in the list */
 {
-    int mi = arg >> 3, j = arg & 7, r = mnm_retired_at(mi, j);
+    int mi = arg / MNM_J, j = arg % MNM_J, r = mnm_retired_at(mi, j);
     int c = r >= 0 && i >= r ? i + 1 : i;
     return mnm_value_text(mi, j, c);
 }
 
-static const char *mnm_pop_tag(int i, int arg)      /* 2026-11-11: the tag beside a choice, as PERC's TYPE list */
-{
-    int mi = arg >> 3, j = arg & 7, r = mnm_retired_at(mi, j);
+static const char *mnm_pop_tag(int i, int arg)      /* 2026-11-11: the tag beside a choice, as PERC's TYPE list; */
+{                                                   /* arg as mnm_pop_name's: mi * MNM_J + j */
+    int mi = arg / MNM_J, j = arg % MNM_J, r = mnm_retired_at(mi, j);
     int c = r >= 0 && i >= r ? i + 1 : i;
     for (int k = 0; k < MNM_TAG_LISTS; k++)
         if (mnm_tag_list[k][0] == mi && mnm_tag_list[k][1] == j) {
@@ -494,15 +509,20 @@ static const char *mnm_pop_tag(int i, int arg)      /* 2026-11-11: the tag besid
     return 0;
 }
 
-void mnm_pop_offer(void *view, int mi)
+/* PAGE's knobs (2026-11-11, the User: "on analog2, page 2, E and A are mixed up... popup shows for the
+ * wrong knobs": this offered page 1's controls on every page, so on page 2 knob A opened WAVE's list
+ * and page 2's own lists never opened) */
+void mnm_pop_offer(void *view, int mi, int page)
 {
     if (mi < 0 || mi >= MNM_N)
         return;
+    int base = page > 0 && page < mnm_npages[mi] ? 8 * page : 0;
     for (int s = 0; s < 8; s++) {
-        if (!mnm_listed(mi, s))
+        int j = base + s;
+        if (!mnm_listed(mi, j))
             continue;
-        int n = mnm_choices[mi][s], cnt = mnm_choice_count(n), ch = mnm_choice_of(n, mnm_k(view, s));
-        int r = mnm_retired_at(mi, s);
+        int n = mnm_choices[mi][j], cnt = mnm_choice_count(n), ch = mnm_choice_of(n, mnm_k_shown(view, mi, j));
+        int r = mnm_retired_at(mi, j);
         if (ch > cnt - 1)
             ch = cnt - 1;
         if (r >= 0) {                           /* the list without it; the knob there shows the one before */
@@ -510,7 +530,7 @@ void mnm_pop_offer(void *view, int mi)
             if (ch >= r)
                 ch--;
         }
-        wpop_offer(s, mnm_labels[mi][s], cnt, ch, mnm_pop_name, mnm_pop_tag, mi * 8 + s);
+        wpop_offer(s, mnm_labels[mi][j], cnt, ch, mnm_pop_name, mnm_pop_tag, mi * MNM_J + j);
     }
 }
 
@@ -549,14 +569,7 @@ int mnm_page_draw(void *view, void *c, int mi, int page)
         const char *name = mnm_labels[mi][j];
         if (w == MW_EMPTY || (name[0] == '-' && !name[1]))
             continue;
-        int k = mnm_k(view, j), n = mnm_choices[mi][j];
-        if (j >= 8 && n && n != MNM_PCH) {     /* page 2: as the DSP, trunc(v / top x n) (the knob's 128ths differ) */
-            u8 fl;
-            int v = (GET_VALUE(view, mnm_rid[j], &fl) >> 8) - mnm_lo[j], top = mnm_top[j];
-            v = v < 0 ? 0 : v > top ? top : v;
-            k = (((v * n) / top) * 128 + 64) / n;   /* a knob whose (k n) >> 7 is that choice */
-            if (k > 127) k = 127;
-        }
+        int k = mnm_k_shown(view, mi, j), n = mnm_choices[mi][j];
         char vb[8];
         extern int smp_values_held(void);
         if (smp_values_held()) {                   /* v0.35: SYN held: the value (O14): a knob's */

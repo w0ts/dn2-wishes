@@ -718,8 +718,8 @@ void wr_page_draw(void *view, void *canvas)
             if (wr_ids[page][s] == PERC_TYPE_ID)
                 wpop_offer(s, "TYPE", PERC_N, perc_seen, perc_name, perc_tag, 0);
     if (mnm) {                                  /* MODL ..: the list popup (md_page.c) */
-        extern void mnm_pop_offer(void *view, int mi);
-        mnm_pop_offer(view, mi);
+        extern void mnm_pop_offer(void *view, int mi, int page);
+        mnm_pop_offer(view, mi, page);
     }
     if (kind == 1) {                            /* v0.20: the Machinedrum's own screen */
         extern int md_page_draw(void *view, void *canvas, int page, int type);
