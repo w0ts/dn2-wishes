@@ -34,6 +34,17 @@ C = {n: SCRATCH + 4 * k for k, n in enumerate(_NAMES)}
 SCRATCH_BYTES = 4 * len(_NAMES)
 SENDS_SW = 0x1C1738              # the FX sends, the call's stock target
 MASK = D.POST_RING - 1
+# 2026-11-12 (opt-inserts): a tap's reads in a block lie in one span of its ring that the block does not write
+# (the ring is written after the taps; design asserts every read is of an earlier block's samples). When the
+# span does not wrap and fits, it is copied once to LINE (L1, transient: nothing in it outlives the tap) and
+# the tap reads it there: its inner loop is unchanged, only the ring's base it adds moves. The same words, so
+# the same output; 0: every read from the ring (DDR) as before. LINE is the Monomachine render scratch's IN
+# (dnfw.waverider.dsp.MNM_RENDER_DM; the arbiter, juno-engine, 2026-11-12: 0x2e5400..0x2e5600 for this pass):
+# every Monomachine-style voice rewrites it each render and none keeps state there, and this pass (and the
+# JUNO send, jsend, at the same FX-sends call) runs after every voice has rendered. Nothing here may expect
+# it to hold anything at the next block.
+LINE = 0x2E5400
+LINE_WORDS = 48
 assert D.POST_RING_STRIDE == (1 << 12) + (1 << 4)       # run(): i << 12 + i << 4
 
 
@@ -430,6 +441,8 @@ def chor_voice(p: Prog) -> None:
     p.iconst(7, 4)
     p.ld(15, C["pos"])
     p.lsh(15, 15, 2)
+    if LINE:
+        span(p)                                  # y0, y1 (the span reaches two words further back: copied, unread)
 
     def one():
         p.fop(0, 0, "+", 1)                      # d
@@ -635,6 +648,8 @@ def juno_tap(p: Prog) -> None:
     p.lsh(15, 15, 2)
     p.ld(4, C["v"])
     p.seti(0, 4)
+    if LINE:
+        span(p)                                  # y0 .. y3: the word read and the three before it
 
     def one():
         p.fop(0, 0, "+", 1)                      # d
@@ -679,6 +694,77 @@ def juno_tap(p: Prog) -> None:
         p.st(C[dst], 0)
     p.iconst(0, WR)
     p.st(C["v"], 0)
+
+
+SPAN_BACK = 3                    # the words before the one read that a tap reads (JUNO 3; CHOR 1, the span is one longer)
+
+
+def span(p: Prog) -> None:
+    """(one copy: a leaf subroutine) -- see _span"""
+    p.call("span", lambda: _span(p, SPAN_BACK))
+
+
+def _span(p: Prog, back: int) -> None:
+    """2026-11-12: before a tap's block (R0 d, R1 step, R6 the ring's base, R15 4 x its first read's pos): the
+    words it will read, 4 (pos - i) - 4 BACK .. 4 (pos - i) for pos = first .. first + 31 and i = trunc(d) as d
+    moves by step, copied to LINE when they lie inside the ring unwrapped and fit; then R6 = LINE's base for
+    them. i is bounded by d's first and last values (the last by a multiply, so one more each side for the
+    rounding of the sum). Clobbers R8, R9, R11-R14, I3, I4; leaves R0-R7, R10, R15, I0-I2."""
+    p.fop(8, 0, "+", 1)                          # d after the first step
+    p.fconst(12, float(D.BLOCK))
+    p.fop(9, 1, "*", 12)
+    p.fop(9, 0, "+", 9)                          # .. after the last
+    p.fop(13, 8, "MIN", 9)
+    p.fop(14, 8, "MAX", 9)
+    p.trunc(13, 13)
+    p.trunc(14, 14)
+    p.iconst(12, 1)
+    p.iop(14, 14, "+", 12)                       # i at most
+    p.iop(13, 13, "-", 12)                       # i at least
+    p.lsh(14, 14, 2)
+    p.iop(8, 15, "-", 14)
+    p.iconst(12, 4 * back)
+    p.iop(8, 8, "-", 12)                         # the span's first word (its offset from the ring, bytes)
+    p.lsh(13, 13, 2)
+    p.iop(9, 15, "-", 13)
+    p.iconst(12, 4 * (D.BLOCK - 1))
+    p.iop(9, 9, "+", 12)                         # its last word
+
+    def up():                                    # all of it before the ring's first word: the AND puts it a
+        p.iconst(12, 4 * D.POST_RING)            # ring's length up, in one run (a span across 0 is two)
+        p.iop(8, 8, "+", 12)
+        p.iop(9, 9, "+", 12)
+    p.ifz(9, "LT", up)
+    p.iconst(13, 0)                              # R13 = 1: it lies inside the ring (or its mirror) and fits
+    p.iconst(12, -4 * back)
+
+    def inside():
+        p.iconst(12, 4 * MASK)
+
+        def below_end():
+            p.iop(11, 9, "-", 8)
+            p.iconst(12, 4 * (LINE_WORDS - 1))
+            p.if_(11, "LE", 12, lambda: p.iconst(13, 1), kind="i")
+        p.if_(9, "LE", 12, below_end, kind="i")
+    p.if_(8, "GE", 12, inside, kind="i")
+
+    def copy():
+        p.iop(11, 8, "+", 6)
+        p.seti(3, 11)                            # the ring's span
+        p.iop(11, 9, "-", 8)
+        p.lsh(11, 11, -2)
+        p.iconst(12, 1)
+        p.iop(11, 11, "+", 12)                   # its words
+        p.iconst(12, LINE)
+        p.seti(4, 12)
+        p.iop(14, 12, "-", 8)
+        p.ipass(6, 14)                           # the base that maps the span's first word to LINE
+
+        def word():
+            p.ldpost(14, 3)
+            p.stpost(4, 14)
+        p.loop_r(11, None, word)
+    p.ifz(13, "NE", copy)
 
 
 def juno_lp(p: Prog) -> None:

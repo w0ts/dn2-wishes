@@ -493,6 +493,17 @@ the voices' LIMIT from the next frame on (and a sudden one could run past the fr
   (about three FDN8 at their bound), more when they do not. An FDN8 left out of a block is a gap in its
   tail (a click): the price of never costing a voice.
 
+## JUNO's and CHOR's taps through L1 (2026-11-12)
+
+A tap's reads in a block (JUNO's four a sample, CHOR's two) lie in one span of its ring that the block does not
+write (the ring is written after the taps). When that span does not wrap and fits, `post.span` (a leaf
+subroutine) copies it once to `post.LINE`, 0x2e5400 (the Monomachine render scratch's IN: the arbiter's
+transient 512 B, dead during this pass), and points the tap's ring base there: its inner loop is unchanged, the
+same words are read, so the same output (`test_inserts_post`, `test_jsend` against the references; the runner's
+inspost, jsend and insall steps). The JUNO send (jsend) takes the same path. Model, shared scale (instructions +
+4 L2 + 10 DDR), one voice / 16: JUNO 8,197 -> 6,680 / 104,212 -> 79,990; CHOR 5,546 -> 5,326 / 61,796 ->
+58,226. WIDE reads each word once: unchanged.
+
 ## Cost, two slots (2026-11-10)
 
 The SHARC runner, each pass called alone (instructions a block; every access charged alike, so DDR's

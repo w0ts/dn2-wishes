@@ -991,6 +991,10 @@ def regions() -> list[tuple[str, int, int, str]]:
         area("the sample reader's taps line (SMP_LINE_DM - 8)", SMP_LINE_DM - 8, 0x2E0100 - (SMP_LINE_DM - 8))
     area("the bus FDN8 instances' stores (inserts.bus.FD_L1)", ins_bus.FD_L1, ins_d.FDN8_INSTANCES * ins_bus.FD_L1_BYTES)
     area("the Monomachine render scratch", MNM_RENDER_DM, MNM_RENDER_BYTES)
+    from ..inserts import post as ins_post        # opt-inserts: its IN, transient in the post pass (the arbiter's 512 B)
+    if ins_post.LINE:
+        area("the post pass's taps line (inserts.post.LINE, transient)", ins_post.LINE, 4 * ins_post.LINE_WORDS,
+             "the Monomachine render scratch")
     # L2: the loaded code and state, then the run-time areas
     for what, at, payload in l2_spans():
         area(what, at, len(payload))

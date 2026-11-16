@@ -202,3 +202,11 @@ def _golden():
     g = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(g)
     return g, np.load(root / "test" / "data" / "juno_cho_golden.npz")
+
+
+def test_the_taps_line_is_the_arbiters_transient_l1():
+    # 2026-11-12: JUNO's and CHOR's taps read a block's span from LINE, the start of the Monomachine render
+    # scratch's IN (the arbiter's 512 B, dead during the post pass)
+    from dnfw.waverider import dsp
+    assert P.LINE == dsp.MNM_RENDER_DM == 0x2E5400
+    assert 4 * P.LINE_WORDS <= 0x200
