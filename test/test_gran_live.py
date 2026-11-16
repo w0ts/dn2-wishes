@@ -99,4 +99,5 @@ def test_every_generated_asm_is_what_its_generator_writes_now():
         built = built[0] if isinstance(built, tuple) else built
         assert norm(built) == norm((SHARC / f"{name}.asm").read_text(encoding="utf-8")), name
     import gen_perc_asm                                 # v0.11: PERC (osc 2 went with Waverider)
-    assert norm(gen_perc_asm.build()) == norm((SHARC / "perc.asm").read_text(encoding="utf-8"))
+    for name, text in gen_perc_asm.build().items():     # 2026-11-12 (perc-layout): perc, perc2a, perc2b
+        assert norm(text) == norm((SHARC / f"{name}.asm").read_text(encoding="utf-8")), name

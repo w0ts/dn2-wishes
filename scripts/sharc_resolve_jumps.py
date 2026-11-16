@@ -69,6 +69,40 @@ def resolve(src: str, load_sw: int, work: pathlib.Path) -> tuple[str, bytes, lis
     raise SystemExit("jump targets did not settle")
 
 
+def resolve_many(srcs: dict[str, tuple[str, int]], work: pathlib.Path) -> dict[str, tuple[str, bytes, list[int]]]:
+    """2026-11-12 (perc-layout): resolve() over several sources that jump into each other (PERC's spans):
+    NAME -> (text, load_sw); one label map over all of them, rebuilt each pass until no literal changes."""
+    import sharc_waverider_m3 as m3  # noqa: PLC0415  (WSL + selas)
+    srcs = dict(srcs)
+    labs = {name: labels(text) for name, (text, _sw) in srcs.items()}
+    for _ in range(6):
+        built, addr = {}, {}
+        for name, (text, sw) in srcs.items():
+            (work / f"{name}.asm").write_text(text, encoding="utf-8", newline="\n")
+            be, offs = m3._selas(work / f"{name}.asm", work)
+            built[name] = (be, offs)
+            for lab, k in labs[name].items():
+                if k < len(offs):
+                    if lab in addr:
+                        raise SystemExit(f"label {lab!r} in two sources")
+                    addr[lab] = sw + offs[k] // 2
+
+        def fix(m, minus=0):
+            name = m.group(4)
+            if name not in addr:
+                raise SystemExit(f"no label {name!r}")
+            tail = m.group(0)[m.end(3) - m.start(0):]
+            return f"{m.group(1)}{addr[name] - minus:#x}{m.group(3)}{tail}"
+        changed = False
+        for name, (text, sw) in list(srcs.items()):
+            new = RET.sub(lambda m: fix(m, 1), JUMP.sub(lambda m: fix(m), text))
+            changed |= new != text
+            srcs[name] = (new, sw)
+        if not changed:
+            return {name: (text, *built[name]) for name, (text, _sw) in srcs.items()}
+    raise SystemExit("jump targets did not settle")
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("source", type=pathlib.Path)

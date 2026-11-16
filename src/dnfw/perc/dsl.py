@@ -20,6 +20,7 @@ loops, no CALL; every integer add has R8..R15 as its first operand.
 
 from __future__ import annotations
 
+import contextlib
 import math
 import re
 import sys
@@ -93,6 +94,9 @@ class Prog:
         assert mode in ("emit", "run")
         self.mode, self.mem = mode, mem or Mem()
         self.lines: list[str] = []
+        # 2026-11-12 (perc-layout): code placed in other L2 spans (span(name)): name -> its lines. The main span's
+        # lines are self.lines whenever no span() is open
+        self.spans: dict[str, list[str]] = {}
         self.r = [0] * 16                 # R0..R15 (F aliases R)
         self.i = [0] * 8                  # I0..I7 (byte addresses)
         self.n_label = 0
@@ -213,6 +217,26 @@ class Prog:
     def label(self, stem: str) -> str:
         self.n_label += 1
         return f"wr_{self.prefix}_{stem}_{self.n_label}"
+
+    @contextlib.contextmanager
+    def span(self, name: str | None):
+        """2026-11-12 (perc-layout): emit what the block writes into the L2 span NAME (its own .asm, resolved
+        with the main one: every jump between spans is a 48-bit absolute JUMP already); None: the main span.
+        Run mode ignores it. Code can only be entered from another span at a label: the block must start with
+        a place() and leave by a jump."""
+        if self.run or name is None:
+            yield
+            return
+        main = self.lines
+        self.lines = self.spans.setdefault(name, [])
+        self._mg = self._mv = None
+        self.known.clear()
+        try:
+            yield
+        finally:
+            self.lines = main
+            self._mg = self._mv = None
+            self.known.clear()
 
     def place(self, name: str) -> None:
         self._mg = self._mv = None
@@ -844,22 +868,28 @@ class Prog:
         self._mg = self._mv = None
         self.lines.append(f"      R{d} = 0x0;".ljust(40) + f"// return address - 1: {label}. - 1")
 
-    def emit_subs(self) -> None:
+    def emit_subs(self, spans: dict[str, str] | None = None) -> None:
+        """every subroutine called, once; SPANS: subroutine -> the span() it goes in (else the main one)"""
         for name, body in list(self.subs.items()):
-            self.place(f"wr_{self.prefix}_sub_{name}")
-            self.in_sub = True
-            at = len(self.lines)
-            body()
-            self.in_sub = False
-            for ln in self.lines[at:]:
-                assert not (name in self.loop0_subs and re.search(r"\b[RF]0\b", ln.split("//")[0])), \
-                    f"loop0: subroutine {name} uses R0: {ln.strip()} (called from {self.loop0_subs[name]})"
-            # not delayed: the delayed form, JUMP (M14, I12) (DB), is the compiler's
-            # function return, and the SHARC runner holds that form to its call stack
-            self.e("JUMP (M14, I12);")
+            with self.span((spans or {}).get(name)):
+                self.place(f"wr_{self.prefix}_sub_{name}")
+                self.in_sub = True
+                at = len(self.lines)
+                body()
+                self.in_sub = False
+                for ln in self.lines[at:]:
+                    assert not (name in self.loop0_subs and re.search(r"\b[RF]0\b", ln.split("//")[0])), \
+                        f"loop0: subroutine {name} uses R0: {ln.strip()} (called from {self.loop0_subs[name]})"
+                # not delayed: the delayed form, JUMP (M14, I12) (DB), is the compiler's
+                # function return, and the SHARC runner holds that form to its call stack
+                self.e("JUMP (M14, I12);")
 
     def text(self) -> str:
         return "\n".join(_zero_scale(self.lines)) + "\n"
+
+    def span_texts(self) -> dict[str, str]:
+        """2026-11-12 (perc-layout): each other span's text (span name -> its lines, as text() does)"""
+        return {name: "\n".join(_zero_scale(lines)) + "\n" for name, lines in self.spans.items()}
 
 
 # -- 2026-11-10 (shrink): constant loads only some forms read ----------------------------------

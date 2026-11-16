@@ -47,6 +47,9 @@ def ranges() -> list[tuple[int, int, str]]:
            (dsp.IDLE_SW, dsp.IDLE_SW + len(obj["idle_load"]) // 2, "idle_load.asm"),
            (dsp.COUNT_SW, dsp.COUNT_SW + len(obj["block_count"]) // 2, "block_count.asm"),
            (dsp.EMARK_SW, dsp.EMARK_SW + len(obj["entry_mark"]) // 2, "entry_mark.asm")]
+    for name, (_at, _span, sw) in dsp.PERC_SPANS.items():   # 2026-11-12 (perc-layout): PERC's event code
+        if name in obj:
+            out.append((sw, sw + len(obj[name]) // 2, f"{name}.asm"))
     if "a2f" in obj:                             # 2026-11-10: the A2 filter machines' pass
         out.append((dsp.A2F_SW, dsp.A2F_SW + len(obj["a2f"]) // 2, "a2f.asm"))
     for name, sw in (("the entry JUMP", dsp.ENTRY_SW), ("the machine lookup's base", dsp.LOOKUP_SITE_SW),

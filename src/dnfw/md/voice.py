@@ -70,6 +70,13 @@ def _same_code(step: str) -> dict[int, int]:
 _PROBE_L = K.Layout(0x100000, 0x80000, 0x200000)
 
 
+# 2026-11-12 (perc-layout, scratch/perc-layout/README.md): the steps that run only on events (a knob change, a
+# note; measured on the SHARC runner: not one of their instructions in a steady block, 88 cases) are emitted into
+# PERC's other L2 spans (dnfw.waverider.dsp PERC2A / PERC2B), leaving PERC's own span to the code every block runs.
+# Their dispatch reaches them by the table's 48-bit JUMPs and they leave by one: no instruction changes.
+STEP_SPAN = {"host": "perc2a", "init": "perc2b"}
+
+
 def _each(p: Prog, L: K.Layout, step: str) -> None:
     """STEP of the machine whose index is in VW['mach'] (>= 0; an index past the last, or below 0,
     the last machine's, as the compare chain this replaces gave it): emit mode jumps through a
@@ -102,14 +109,15 @@ def _each(p: Prog, L: K.Layout, step: str) -> None:
     bias3 = p.ibias.get(3)
     for k, M in enumerate(ALL):
         if same[k] == k:
-            p.comment(f"---- {M.NAME} {step} ----")
-            p.place(body[k])
-            getattr(M, step)(p, L)
-            # 2026-11-11: each machine's code, emitted one after another, must end with I3 as it
-            # found it (the voice's biased slot: shrink's I3_BIAS), or the next one's offsets and
-            # the code after the dispatch are off by the bias
-            assert p.ibias.get(3) == bias3, f"{M.NAME} {step} leaves I3's bias {p.ibias.get(3)}, not {bias3}"
-            p.jump("", end)
+            with p.span(STEP_SPAN.get(step)):
+                p.comment(f"---- {M.NAME} {step} ----")
+                p.place(body[k])
+                getattr(M, step)(p, L)
+                # 2026-11-11: each machine's code, emitted one after another, must end with I3 as it
+                # found it (the voice's biased slot: shrink's I3_BIAS), or the next one's offsets and
+                # the code after the dispatch are off by the bias
+                assert p.ibias.get(3) == bias3, f"{M.NAME} {step} leaves I3's bias {p.ibias.get(3)}, not {bias3}"
+                p.jump("", end)
     p.place(end)
 
 

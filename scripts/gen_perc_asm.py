@@ -7,6 +7,9 @@ model the SHARC runner holds the assembled code to (scripts/sharc_waverider_m5.p
 3). This writes its assembly text, then fills in every branch target with selas's own
 layout at PERC's load address (scripts/sharc_resolve_jumps.py), unless --no-resolve.
 Assemble it with `scripts/gen_waverider_sharc.py --assemble`.
+
+2026-11-12 (perc-layout): also perc2a.asm and perc2b.asm, PERC's code that only events run, in its other L2
+spans (dnfw.waverider.dsp PERC_SPANS); the three are resolved together (they jump into each other).
 """
 
 from __future__ import annotations
@@ -27,23 +30,31 @@ from dnfw.waverider import dsp            # noqa: E402
 OUT = ROOT / "csrc" / "waverider" / "sharc" / "perc.asm"
 
 
-def build() -> str:
-    return P.program(PL.layout(), dsp.SMP_SW)     # on to the sample machines (v0.13)
+def build() -> dict[str, str]:
+    return P.program_spans(PL.layout(), dsp.SMP_SW)     # on to the sample machines (v0.13)
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--no-resolve", action="store_true")
     a = ap.parse_args(argv)
-    text = build()
+    texts = build()
+    sws = {"perc": dsp.PERC_SW, **{name: sw for name, (_at, _span, sw) in dsp.PERC_SPANS.items()}}
+    if set(texts) - set(sws):
+        raise SystemExit(f"spans with no place in dnfw.waverider.dsp: {sorted(set(texts) - set(sws))}")
     if not a.no_resolve:
         import sharc_resolve_jumps as R  # noqa: PLC0415  (selas)
         with tempfile.TemporaryDirectory() as tmp:
-            text, be, offs = R.resolve(text, dsp.PERC_SW, pathlib.Path(tmp))
-        print(f"resolved at sw {dsp.PERC_SW:#x}: {len(offs)} instructions, {len(be)} bytes")
-    OUT.write_text(text, encoding="utf-8", newline="\n")
-    n = sum(1 for ln in text.splitlines() if ln.startswith("      ") and not ln.strip().startswith("//"))
-    print(f"wrote {OUT.relative_to(ROOT)}: {n} instructions")
+            done = R.resolve_many({name: (text, sws[name]) for name, text in texts.items()}, pathlib.Path(tmp))
+        texts = {}
+        for name, (text, be, offs) in done.items():
+            texts[name] = text
+            print(f"{name}: resolved at sw {sws[name]:#x}: {len(offs)} instructions, {len(be)} bytes")
+    for name, text in texts.items():
+        out = OUT.with_name(f"{name}.asm")
+        out.write_text(text, encoding="utf-8", newline="\n")
+        n = sum(1 for ln in text.splitlines() if ln.startswith("      ") and not ln.strip().startswith("//"))
+        print(f"wrote {out.relative_to(ROOT)}: {n} instructions")
     return 0
 
 

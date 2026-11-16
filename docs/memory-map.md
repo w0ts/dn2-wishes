@@ -299,5 +299,7 @@ the sample reader, `docs/dsp-cost.md`):
 | L1 `0x2e0080..0x2e0094` | the reader's decimator coefficients and LEV make-up gain | `SMP_DTAB_DM` |
 | L1 `0x2df7f4..0x2df7fc` | the recorder's GAIN index and factor (v0.50; at 0x2e0080 until the v0.52 merge): the sample machines' scratch words `rgain`, `rgfac` | `sampler.machines.REC_GAIN` |
 | L1 `0x2ddff0..0x2ddffc` | the guard's later insert words (INS_DLP, INS_BUSEND, REST_OUT; v0.52 merge: v0.49's words filled the block at 0x2de000), after PERC's scratch (to 0x2ddfe8) | `perc.guard.INS_LO` |
+| L2 `0x2009b400..0x200a0000` | PERC's span 2a: the machines' `host` (knob scaling) bodies, `trx_coefs`, `md_idiv` (perc-layout) | `PERC2A_L2_LOAD` |
+| L2 `0x200a2800..0x200a4000` | PERC's span 2b: the machines' `init` bodies, `vo6_bqx` (perc-layout) | `PERC2B_L2_LOAD` |
 | L1 `0x2e0098..0x2e0100` | the taps' line: its switch, its tag, then 24 words (to `sampler.program.RELATCH`) | `SMP_LINE_DM` |
 | DDR `0x81218000..0x81219824` | freed (the reader's coefficients until 2026-11-12) | `SMP_TABLES_DDR` |

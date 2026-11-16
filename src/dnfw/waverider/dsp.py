@@ -191,6 +191,17 @@ JSEND_SW = 0xB80000 + (JSEND_L2_LOAD - 0x20000000) // 2       # 0xbd0c00
 CHORUS_SITE_SW = 0x1C1BE1                    # the FX bus: CALL 0xb84d5c (DB), then its two pushes
 CHORUS_SITE_STOCK = bytes.fromhex("0418b8005c4d")
 assert JSEND_L2_LOAD + JSEND_L2_SPAN <= MNM_SCRATCH_L2
+# 2026-11-12 (perc-layout, scratch/perc-layout/README.md; claimed with the DSP memory arbiter, dsp-claims): PERC's code
+# that only events run (the machines' knob scaling `host` and `init` steps, and three subroutines: dnfw.md.voice
+# STEP_SPAN, dnfw.perc.program SUB_SPAN; on the SHARC runner, 88 cases, not one of their instructions ran in a steady
+# block) in the last free L2 inside the floor, so PERC's own span keeps the code every block runs. The same L2 SRAM
+# and I-cache as PERC's span: the same cost. name -> (load address, span, sw address)
+PERC2A_L2_LOAD, PERC2A_L2_SPAN = 0x2009B400, 0x4C00          # to 0x200a0000 (SMP_TABLES_L2): host bodies
+PERC2B_L2_LOAD, PERC2B_L2_SPAN = 0x200A2800, 0x1800          # after JSEND's, to MNM_SCRATCH_L2: init bodies
+PERC_SPANS = {name: (at, span, 0xB80000 + (at - 0x20000000) // 2)
+              for name, at, span in (("perc2a", PERC2A_L2_LOAD, PERC2A_L2_SPAN),
+                                     ("perc2b", PERC2B_L2_LOAD, PERC2B_L2_SPAN))}
+assert JSEND_L2_LOAD + JSEND_L2_SPAN <= PERC2B_L2_LOAD and PERC2B_L2_LOAD + PERC2B_L2_SPAN <= MNM_SCRATCH_L2
 ROUTE_SITE_SW = 0x1C1FEF                     # the routing, after its per-track loop: R2 = DM(0x257980)
 ROUTE_SITE_STOCK = bytes.fromhex("021025008079")
 ROUTE_RESUME_SW = 0x1C1FF2
@@ -228,6 +239,7 @@ SMP_POOL_DDR = 0x84000000                    # the pool's directory, then its fr
 # below RELATCH, free since v0.28)
 SMP_TABLES_DDR = 0x81218000                             # until 2026-11-12
 SMP_TABLES_L2 = 0x200A0000                              # 6,144 B, to 0x200a1800 (MNM_SCRATCH_L2 is 0x200a4000)
+assert PERC2A_L2_LOAD + PERC2A_L2_SPAN <= SMP_TABLES_L2   # perc-layout's span 2a ends where these start
 SMP_DEC_DM = SMP_LINK_DM + 0x500                        # 16 x 48 bytes, to 0x2e0080 (W2_RND_DM is 0x2e0100)
 SMP_DTAB_DM = SMP_DEC_DM + 16 * 48                      # 0x2e0080: 20 B (sampler.program.RELATCH is 0x2e0100)
 # 2026-11-12: the reader's taps through an L1 line (sampler.program.LINE_WORDS, 24 words), its tag the word
@@ -384,7 +396,7 @@ def objects() -> dict[str, bytes]:
     """The committed SHARC objects: PERC, the entry JUMP, the stubs, the filters, the machines."""
     spec = _code()
     return {name: sharc_object.load_bytes(bytes.fromhex(spec[name]["object_parcels_be"]))
-            for name in ("perc", "smp", "entry_jump", "idle_load", "idle_jump", "block_count",
+            for name in ("perc", "perc2a", "perc2b", "smp", "entry_jump", "idle_load", "idle_jump", "block_count",
                          "entry_mark", "emark_jump", "lookup_ptr", "ping", "trackbuf",
                          "pvmix", "pvmix_jump", "fdn8", "xdly", "inserts", "inspost", "insbus", "insbus_jump", "a2f",
                          "jsend")
@@ -630,6 +642,8 @@ def l2_spans() -> list[tuple[str, int, bytes]]:
     obj = objects()
     out = []
     for what, name, at, span in (("perc.asm (wr_perc), in L2", "perc", PERC_L2_LOAD, PERC_L2_SPAN),
+                                 *((f"{n}.asm (PERC's event code), in L2", n, a, sp)
+                                   for n, (a, sp, _sw) in PERC_SPANS.items() if n in obj),
                                  ("smp.asm (wr_smp), in L2", "smp", SMP_L2_LOAD, SMP_L2_SPAN)):
         code = obj[name]
         if name == "smp":                       # v0.25: wr_pvmix in the span's last 1 KB
@@ -743,6 +757,11 @@ def _check_l2(stock: bytes, span_list) -> None:
     for b in blocks:
         if 0x20000000 <= b.target < 0x20100000 and b.target + b.count > L2_IMAGE_END:
             raise DspError(f"the stock block at {b.target:#x} ends past L2_IMAGE_END")
+    # 2026-11-12 (perc-layout): and ours clear of each other (PERC's three code spans sit between others' spans)
+    ours = sorted((at, at + len(payload), what) for what, at, payload in span_list)
+    for (_l0, h0, w0), (l1, _h1, w1) in zip(ours, ours[1:]):
+        if l1 < h0:
+            raise DspError(f"{w0} and {w1} overlap")
 
 
 def _gran_tables() -> bytes:

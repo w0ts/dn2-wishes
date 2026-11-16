@@ -280,9 +280,11 @@ def test_perc_code_is_in_l2_above_the_stock_image_and_below_the_uncached_window(
     # nothing reads or writes L2 above the image's end, 0x2008823c
     # v0.13: the sample machines' code follows PERC's span
     spans = dsp.l2_spans()
-    data = spans[2:]                             # v0.32: the voices' state, zeros, below the code
-    spans = spans[:2]
+    names = ("perc", *dsp.PERC_SPANS, "smp")     # 2026-11-12 (perc-layout): PERC's event code in its own spans
+    data = spans[len(names):]                    # v0.32: the voices' state, zeros, below the code
+    spans = spans[:len(names)]
     assert [(at, len(pl)) for _, at, pl in spans] == [(dsp.PERC_L2_LOAD, dsp.PERC_L2_SPAN),
+                                                      *((a, sp) for a, sp, _sw in dsp.PERC_SPANS.values()),
                                                       (dsp.SMP_L2_LOAD, dsp.SMP_L2_SPAN)]
     for _w, at, payload in data:
         assert dsp.L2_IMAGE_END + 0x10000 <= at and at + len(payload) <= dsp.PERC_L2_LOAD
@@ -291,7 +293,7 @@ def test_perc_code_is_in_l2_above_the_stock_image_and_below_the_uncached_window(
     # 2026-11-09: the sample machines' code below PERC's, after FDN8's (until then after PERC's span)
     assert dsp.FDN8_L2_LOAD + dsp.FDN8_L2_SPAN <= dsp.SMP_L2_LOAD
     assert dsp.SMP_L2_LOAD + dsp.SMP_L2_SPAN <= dsp.PERC_L2_LOAD
-    for (what, at, payload), name in zip(spans, ("perc", "smp")):
+    for (what, at, payload), name in zip(spans, names):
         code = dsp.objects()[name]
         if name == "smp":                        # v0.25: wr_pvmix in the span's last 1 KB
             pv, room = dsp.pvmix_object(), dsp.PVMIX_L2_LOAD - at
@@ -309,6 +311,9 @@ def test_perc_code_is_in_l2_above_the_stock_image_and_below_the_uncached_window(
             assert b.target + b.count <= dsp.L2_IMAGE_END
     assert dsp.PERC_SW == 0xBDF100 and dsp.l2_sw_to_load(dsp.PERC_SW) == dsp.PERC_L2_LOAD
     assert dsp.SMP_SW == 0xBDB000 and dsp.l2_sw_to_load(dsp.SMP_SW) == dsp.SMP_L2_LOAD
+    assert {n: sw for n, (_a, _s, sw) in dsp.PERC_SPANS.items()} == {"perc2a": 0xBCDA00, "perc2b": 0xBD1400}
+    for _n, (a, _s, sw) in dsp.PERC_SPANS.items():
+        assert dsp.l2_sw_to_load(sw) == a
 
 
 def test_the_region_is_written_end_to_end_and_code_is_nop_padded():
@@ -492,13 +497,17 @@ def test_every_branch_to_a_label_lands_inside_its_own_code():
     # (the gate's runner caught it): a `JUMP 0x.. // -> label.` lands in its own object
     import json
     import re
-    for name in ("perc", "smp", "ping", "pvmix", "block_count"):
+    # (2026-11-12, perc-layout: PERC's three spans are one program: a jump of any of them lands in one of them)
+    def span(name):
         spec = json.loads((SHARC / f"{name}.json").read_text(encoding="utf-8"))
         lo = int(spec["load_sw"], 16) if isinstance(spec["load_sw"], str) else spec["load_sw"]
-        hi = lo + len(bytes.fromhex(spec["object_parcels_be"])) // 2
+        return lo, lo + len(bytes.fromhex(spec["object_parcels_be"])) // 2
+    perc = ("perc", *dsp.PERC_SPANS)
+    for name in (*perc, "smp", "ping", "pvmix", "block_count"):
+        ranges = [span(n) for n in (perc if name in perc else (name,))]
         src = (SHARC / f"{name}.asm").read_text(encoding="utf-8")
         for m in re.finditer(r"JUMP\s+(0x[0-9a-fA-F]+);\s*//\s*->\s*\w+\.", src):
-            assert lo <= int(m.group(1), 16) < hi, (name, m.group(0))
+            assert any(lo <= int(m.group(1), 16) < hi for lo, hi in ranges), (name, m.group(0))
 
 
 def test_the_voice_order_lives_in_the_monomachine_scratch_tail():

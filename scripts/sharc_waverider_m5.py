@@ -421,6 +421,29 @@ def perc_links_ok() -> bool:
             and _ins_tail_ok())
 
 
+def perc_span_links_ok() -> bool:
+    """2026-11-12 (perc-layout): PERC's spans jump into each other by address: every `JUMP 0x..; // -> label.` and
+    `= 0x..; // return address - 1: label. - 1` of perc.asm, perc2a.asm and perc2b.asm holds that label's address
+    (its source's offsets from selas, at its span's sw), whichever span defines it"""
+    import sharc_resolve_jumps as R                      # noqa: PLC0415
+    names = {"perc": dsp.PERC_SW, **{n: sw for n, (_a, _s, sw) in dsp.PERC_SPANS.items()}}
+    addr, texts = {}, {}
+    for name, sw in names.items():
+        texts[name] = (SHARC / f"{name}.asm").read_text(encoding="utf-8")
+        offs = json.loads((SHARC / f"{name}.json").read_text(encoding="utf-8"))["instruction_offsets"]
+        for lab, k in R.labels(texts[name]).items():
+            if k < len(offs):
+                addr[lab] = sw + offs[k] // 2
+    for text in texts.values():
+        for m in R.JUMP.finditer(text):
+            if addr.get(m.group(4)) != int(m.group(2), 16):
+                return False
+        for m in R.RET.finditer(text):
+            if addr.get(m.group(4)) is None or addr[m.group(4)] - 1 != int(m.group(2), 16):
+                return False
+    return True
+
+
 def _ins_tail_ok() -> bool:
     """inserts.asm's last JUMP: to the A2 filter machines' pass when it is built (2026-11-09), which
     JUMPs on to PING; else straight to PING"""
@@ -454,7 +477,8 @@ def gran_links_ok() -> bool:
 def decode_check(dk, image: Image, work: pathlib.Path, use_selmap: bool) -> dict:
     res = {}
     for name, load_sw in (("perc", dsp.PERC_SW), ("smp", dsp.SMP_SW), ("block_count", dsp.COUNT_SW),
-                          ("ping", dsp.PING_SW)):                          # v0.28: GRAN removed
+                          ("ping", dsp.PING_SW),                           # v0.28: GRAN removed
+                          *((n, sw) for n, (_a, _s, sw) in dsp.PERC_SPANS.items())):   # 2026-11-12: perc-layout
         spec = json.loads((SHARC / f"{name}.json").read_text(encoding="utf-8"))
         code = sharc_object.load_bytes(bytes.fromhex(spec["object_parcels_be"]))
         lines = [ln for ln in (SHARC / f"{name}.asm").read_text(encoding="utf-8").splitlines()
@@ -500,8 +524,8 @@ def decode_check(dk, image: Image, work: pathlib.Path, use_selmap: bool) -> dict
     res["entry"] = {"type": entry.type_name, "fields": {k: v for k, v in fields.items()},
                     "len": entry.length_bytes, "nop": nop.type_name, "after": nxt.type_name}
     ok = all(not res[n]["disagreements"] and res[n]["source_sha256_matches"]
-             for n in ("perc", "smp", "block_count", "ping")) \
-        and perc_links_ok() and no_gran_link() and entry.type_name.startswith("8a") \
+             for n in ("perc", "smp", "block_count", "ping", *dsp.PERC_SPANS)) \
+        and perc_links_ok() and perc_span_links_ok() and no_gran_link() and entry.type_name.startswith("8a") \
         and entry.length_bytes == 6 and nop.length_bytes == 2
     return {"ok": ok, "detail": res}
 
@@ -574,7 +598,7 @@ def main(argv=None):
             s1["ok"] = all(s1["checks"].values())
             results["1_decode"] = s1
             show(s1)
-            for n in ("perc", "smp", "block_count", "ping"):
+            for n in ("perc", "smp", "block_count", "ping", *dsp.PERC_SPANS):
                 for d in s1["detail"][n]["disagreements"][:20]:
                     print("     ", n, d)
 

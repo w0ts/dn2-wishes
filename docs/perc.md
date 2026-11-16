@@ -101,6 +101,17 @@ the startup's non-cacheable window `0x200fa000..0x200fdfff`. Its voices' state (
 bytes, `0x2de180`) and scratch (`0x2dde80`) are in L1, its tables (6 KB, `0x81216000`)
 in DDR beside the others, and it reads SHFT's sine table.
 
+**Two more spans for the code only events run** (2026-11-12, perc-layout, `scratch/perc-layout/README.md`). Counted
+per address on the SHARC runner (every engine and mode, 88 cases: a note, steady blocks, a knob move, a retrigger),
+not one instruction of the machines' `host` (the Machinedrum knob scaling: it runs on a knob change or a trig) and
+`init` bodies ran in a steady block. They are emitted into **`perc2a.asm`** (L2 `0x2009b400`, sw `0xbcda00`: the
+`host` bodies, `trx_coefs`, `md_idiv`) and **`perc2b.asm`** (L2 `0x200a2800`, sw `0xbd1400`: the `init` bodies,
+`vo6_bqx`): `dnfw.md.voice.STEP_SPAN`, `dnfw.perc.program.SUB_SPAN`, `Prog.span()`. The dispatch tables reach every
+body by a 48-bit absolute JUMP and each body leaves by one, so not one instruction changes; the three files are one
+program, resolved together (`sharc_resolve_jumps.resolve_many`), and the runner's `decode` checks every cross-span
+target (`perc_span_links_ok`). Same L2 SRAM, same I-cache: the same cost. PERC's own span keeps the code every block
+runs (24.3 KB less: 151,968 B on 2026-11-12).
+
 **Entry and exit.** The block counter (`block_count.asm`), which the entry JUMP at
 `0x1c9448` reaches every block, now jumps to `0xbdf100` (`0xbe0000` until 2026-11-12). PERC saves R0-R15, I0-I5, I12
 and M0-M4 at `0x2dde00` exactly as Waverider's loop did, renders every type-5 track, and
