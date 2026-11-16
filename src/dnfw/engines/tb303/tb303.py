@@ -41,11 +41,12 @@ PNAMES = ("CUT", "RES", "ENV", "DEC", "ACC", "SLID", "WAVE", "TUNE")
 DEFAULTS = (64, 64, 64, 64, 0, 0, 0, 64)
 
 SR = 44100.0
-# build option DN2_TB303_2X (2026-11-12, the User: "2X with a build option"): set (not empty, not 0) when the code is
-# generated, the voice runs 2x oversampled (88.2 kHz: the oscillator, the high-pass and the ladder at half the
-# work), Open303's elliptic decimator moved to 88.2 kHz (the same equiripple shape; scratch ell2x.py's transform)
-# and, on the plain path (VSCHED False), the control every 2nd sample (CTL2). Off: the 4x voice, unchanged.
-TB303_2X = __import__("os").environ.get("DN2_TB303_2X", "") not in ("", "0")
+# build option DN2_TB303_2X (2026-11-12, the User: "2X with a build option"): on, the voice runs 2x oversampled
+# (88.2 kHz: the oscillator, the high-pass and the ladder at half the work), Open303's elliptic decimator moved to
+# 88.2 kHz (the same equiripple shape; scratch ell2x.py's transform) and, on the plain path (VSCHED False), the
+# control every 2nd sample (CTL2). ON by default since 2026-11-13 (the User: "use the cheaper version"); empty or 0
+# when the code is generated: the 4x voice, unchanged.
+TB303_2X = __import__("os").environ.get("DN2_TB303_2X", "1") not in ("", "0")
 OS = 2 if TB303_2X else 4
 OSR = SR * OS                                    # 176.4 kHz (88.2 with DN2_TB303_2X)
 K_SQ = 69.9841996002273                          # dB2amp(36.9): the square's tanh drive
