@@ -980,6 +980,8 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
         layout[name] = csyms[name]
     for name in ("hold_seq", "hold_count", "hold_len", "hold_keys", "hold_poll", "hold_final", "hold_rel"):   # DRONE's HOLD (csrc/hold)
         layout[name] = csyms[name]
+    for name in ("scope_up", "scope_taps", "scope_ring", "scope_pos", "smp_rx_sh"):   # AMP page 2's scope (csrc/scope)
+        layout[name] = csyms[name]
     layout["mtr_ram"] = pages.METER_RAM      # the system meter's state block (csrc/meter/meter.c MTR_*)
     # v0.45: PING removed (owner, 2026-11-08). 2026-11-10: its mechanism (the FLTR list, names, LOAD
     # bound, slot_to_id, descriptor, curve) composed again for the A2 filter machines 7..11 only

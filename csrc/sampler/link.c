@@ -419,9 +419,13 @@ static int rt_take(volatile u32 *w, volatile u32 *gen, u32 *seen)
     return 1;
 }
 
+u32 smp_rx_sh __attribute__((section(".data"))) = 0;   /* the receive slots' justification (scope.c) */
+
 void smp_tdm(u32 h)
 {
     periods++;
+    extern void scope_tap(u32 h);
+    scope_tap(h);                               /* AMP page 2's oscilloscope (csrc/scope): reads only */
     u32 cw[CMD_WORDS];
     if (smp_blank_req != blank_seen) {
         blank_seen = smp_blank_req;
@@ -527,6 +531,7 @@ void smp_tdm(u32 h)
     }
     if ((u16)sum != v[63])
         return;
+    smp_rx_sh = sh;
     if (v[0] == POS_MAGIC) {                    /* v0.25: idle, the voices' play positions */
         smp_pos_in(v + 1);
         for (int t = 0; t < 16; t++)            /* v0.30: the slots the DSP's guard skipped */

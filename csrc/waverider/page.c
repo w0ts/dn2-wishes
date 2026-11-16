@@ -320,11 +320,19 @@ void wr_screen(void *screen, void *canvas)
         extern int ins_visible(void);
         extern void ins_draw(void *canvas);
         extern void ins_dots(void *canvas);
+        extern int scope_visible(void);
+        extern void scope_draw(void *canvas);
+        extern void scope_dots(void *canvas);
         if (ins_visible()) {                    /* the per-track inserts' page (csrc/inserts) */
             wpop_begin();                       /* (the stock page under it offers nothing of ours) */
             ins_draw(canvas);
-        } else
+        } else if (scope_visible()) {           /* AMP page 2, the oscilloscope (csrc/scope) */
+            wpop_begin();
+            scope_draw(canvas);
+        } else {
             ins_dots(canvas);                   /* stock's FX page: FX 1/2's dots */
+            scope_dots(canvas);                 /* stock's AMP page: AMP 1/2's dots */
+        }
         wpop_draw(canvas);                      /* the list popup, over the page */
     }
     extern void mtr_draw(void *canvas);
@@ -343,6 +351,7 @@ int wr_poll(void *screen)
     extern void smp_er_poll(void);
     extern void mtr_poll(void *screen);
     mtr_poll(screen);                           /* the system meter: FUNC held, every page (csrc/meter) */
+    { extern void scope_poll(void *screen); scope_poll(screen); }   /* AMP page 2's scope, 25 a second */
     extern void wpop_poll(void *screen);
     wpop_poll(screen);                          /* the list popup's redraws (popup.c) */
     smp_er_poll();                              /* v0.39: ERASE MOD DATA, a step a pass (erase.c) */

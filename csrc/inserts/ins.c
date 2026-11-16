@@ -290,6 +290,11 @@ static u32 view_of(u32 cls)                     /* the screen's view of class CL
     return 0;
 }
 
+u32 ins_view_of(u32 cls)                        /* csrc/scope/scope.c: the AMP page's view */
+{
+    return view_of(cls);
+}
+
 static void *title(void)                        /* the title bar's message line, or 0 */
 {
     u32 v = view_of(TITLE_VTABLE);
@@ -311,6 +316,11 @@ static void say(const char *text, int slide)    /* slide: as stock's switch; els
     else
         STR_SET((u8 *)m + 0x48, str);
     STR_FREE(str);
+}
+
+void ins_say(const char *text, int slide)       /* csrc/scope/scope.c: "AMP (2/2)" */
+{
+    say(text, slide);
 }
 
 static const char *const PAGE_NAME[PAGES] = {"FX (1/3)", "FX (2/3)", "FX (3/3)"};
