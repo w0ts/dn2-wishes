@@ -536,7 +536,7 @@ def main(argv=None):
     p.add_argument("--frame-be", help="a frame as the ColdFire holds it at 0x80005e60 (16-bit BE)")
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
-    p.add_argument("--steps", default="decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,flexlevel,mainrec,recwhole,pvmix,fdn8,xdly,inserts,insall,a2f,inspost,insbus,mainmix,tdm,twin,stock,mnm,frame")   # v0.27: shft, gran removed; v0.45: ping removed   # voice: PERC
+    p.add_argument("--steps", default="decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,flexlevel,mainrec,recwhole,pvmix,fdn8,xdly,inserts,insall,a2f,inspost,insbus,mainmix,insorder,tdm,twin,stock,mnm,frame")   # v0.27: shft, gran removed; v0.45: ping removed   # voice: PERC
     p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
@@ -779,6 +779,12 @@ def main(argv=None):
             mm_step = importlib.import_module("sharc_mainmix_step")
             results["3k3_mainmix"] = mm_step.run(sys.modules[__name__], snap, m2mach, m5, sound, machines)
             show(results["3k3_mainmix"])
+        if "insorder" in steps:
+            print("\n-- step 3k4: the two insert slots' order, every kind of pair (2026-11-11) --")
+            io_step = importlib.import_module("sharc_insorder_step")
+            results["3k4_insorder"] = io_step.run(sys.modules[__name__], snap, m2mach, m5, sound, machines)
+            gc.collect()
+            show(results["3k4_insorder"])
         if "insdl" in steps:
             print("\n-- step 3k2: the insert guard's deadline on a moving clock (2026-11-11) --")
             dl_step = importlib.import_module("sharc_insdl_step")

@@ -52,32 +52,37 @@ class Ref:
             tr = t if route is None else route[t] & 0xFFFF
             if tr > 15:
                 continue
-            v = par[8 * (2 * tr + j):8 * (2 * tr + j) + 8]
-            sel = v[0] & ((1 << D.TYPE_BITS) - 1)
-            if sel not in D.BUILT:
+            if j == 1 and D.moved(par, tr):     # 2026-11-11: the bus pass runs it (dnfw.inserts.busref)
                 continue
-            if (sel, tr) != self.last[i]:
-                self.st[i] = [F(0)] * D.STATE_WORDS
-                self.last[i] = (sel, tr)
-                if sel == D.TAPE:
-                    self.ring[i][:] = 0
-            p = [F(b) * F(1 / 127) for b in v[1:8]]
-            if sel == D.FUZZ:
-                self.fuzz(self.st[i], p, bufs[t])
-            elif sel == D.TAPE:
-                self.tape(i, self.st[i], p, bufs[t])
-            elif sel == D.FOLD:
-                self.fold(self.st[i], p, bufs[t])
-            elif sel == D.HARM:
-                self.harm(self.st[i], p, bufs[t])
-            elif sel == D.SUB:
-                self.sub(self.st[i], p, bufs[t])
-            elif sel == D.DIST:
-                self.dist(self.st[i], p, bufs[t])
-            elif sel == D.GATER:
-                self.gater(self.st[i], p, bufs[t])
-            elif sel == D.RING:
-                self.ring_mod(self.st[i], p, bufs[t])
+            self.one(i, tr, par[8 * (2 * tr + j):8 * (2 * tr + j) + 8], bufs[t])
+
+    def one(self, k: int, tr: int, v: bytes, buf) -> None:
+        """record V (played by track TR) over BUF in place, with state / ring K (program.one)"""
+        sel = v[0] & ((1 << D.TYPE_BITS) - 1)
+        if sel not in D.BUILT:
+            return
+        if (sel, tr) != self.last[k]:
+            self.st[k] = [F(0)] * D.STATE_WORDS
+            self.last[k] = (sel, tr)
+            if sel == D.TAPE:
+                self.ring[k][:] = 0
+        p = [F(b) * F(1 / 127) for b in v[1:8]]
+        if sel == D.FUZZ:
+            self.fuzz(self.st[k], p, buf)
+        elif sel == D.TAPE:
+            self.tape(k, self.st[k], p, buf)
+        elif sel == D.FOLD:
+            self.fold(self.st[k], p, buf)
+        elif sel == D.HARM:
+            self.harm(self.st[k], p, buf)
+        elif sel == D.SUB:
+            self.sub(self.st[k], p, buf)
+        elif sel == D.DIST:
+            self.dist(self.st[k], p, buf)
+        elif sel == D.GATER:
+            self.gater(self.st[k], p, buf)
+        elif sel == D.RING:
+            self.ring_mod(self.st[k], p, buf)
 
     def fuzz(self, s, p, buf) -> None:
         mod, drv, tone, bias, pre, gate, lev = p

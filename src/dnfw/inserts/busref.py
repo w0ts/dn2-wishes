@@ -20,6 +20,7 @@ from ..fdn8.ref import F
 from ..xdly import ref as XR
 from . import bus as B
 from . import design as D
+from . import ref as R
 
 
 class BusRef:
@@ -27,12 +28,27 @@ class BusRef:
         self.fd = [FR.Ref() for _ in range(D.FDN8_INSTANCES)]
         self.xd = [XR.Ref() for _ in range(D.XDLY_INSTANCES)]
         self.owner = [0] * (D.FDN8_INSTANCES + D.XDLY_INSTANCES)
+        self.mv = R.Ref()                        # the moved slot 2s: state / ring 2 t (L), 2 t + 1 (R)
 
-    def block(self, par: bytes, left, right) -> None:
+    def moved(self, t: int, v: bytes, left, right, tempo: int, clk: int) -> None:
+        """2026-11-11 (design.MOVERS): track T's slot 2 V, a BUILT type, on its block x G_IN, L then R
+        (dnfw.inserts.ref.Ref.one, as program.one), then x G_OUT back"""
+        self.mv.tempo, self.mv.clk = tempo & 0xFFFF, clk & 0xFFFFFFFF
+        for side, buf in ((0, left), (1, right)):
+            x = [F(s) * F(B.G_IN) for s in buf]
+            self.mv.one(2 * t + side, t, v, x)
+            for k in range(D.BLOCK):
+                buf[k] = F(x[k]) * F(B.G_OUT)
+
+    def block(self, par: bytes, left, right, tempo: int = 0, clk: int = 0) -> None:
+        """TEMPO, CLK: as dnfw.inserts.ref.Ref.block's (a moved GATER's)"""
         for i in range(D.RECORDS):
             t = i >> 1
             v = par[8 * i:8 * i + 8]
             sel, inst = v[0] & ((1 << D.TYPE_BITS) - 1), v[0] >> D.TYPE_BITS
+            if i & 1 and D.moved(par, t):
+                self.moved(t, v, left[t], right[t], tempo, clk)
+                continue
             if sel == D.FDN8 and inst < D.FDN8_INSTANCES:
                 eng, slot, scales = self.fd[inst], inst, B.FDN8_PAR
             elif sel == D.XDLY and inst < D.XDLY_INSTANCES:

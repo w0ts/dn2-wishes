@@ -73,10 +73,34 @@ FLAG_WORDS = 3
 assert FLAGS + 4 * FLAG_WORDS <= 0x2E3A40
 
 
+# 2026-11-11 (the User: "DSP: always run in slot order"): the passes run by stage (pre, post, bus), so a
+# slot 1 of a POST or BUS type with a slot 2 of a BUILT type ran slot 2 first. In that pair slot 2 moves:
+# the pre pass leaves it out and the bus pass runs it on the track's block (L and R, each its own state)
+# after slot 1, so it acts on the summed voices after the filter, amp and pan. Every other pair as before.
+MOVERS = POST + BUS                              # slot 1's types that move a BUILT slot 2 to the bus
+INS_ONE_SW = 0xBD6D03                            # the pre pass's one insert (dnfw.inserts.program.one), after
+                                                 # its entry's 48-bit JUMP (dnfw.waverider.dsp.INS_SW + 3)
+MV_RING_DDR = 0x82540000                         # a moved TAPE's rings: 32 x 2 KB (track t, L 2 t, R 2 t + 1),
+                                                 # after the post rings (0x82510000 + 32 x 4,104 B)
+MV_INSTANCES = 2 * TRACKS
+
+
+def field0(table: bytes | list[int], r: int) -> int:
+    return int(table[FIELDS * r]) & ((1 << TYPE_BITS) - 1)
+
+
+def moved(table: bytes | list[int], t: int) -> bool:
+    """track T's slot 2 runs on the bus, after slot 1 (MOVERS)"""
+    return field0(table, 2 * t) in MOVERS and field0(table, 2 * t + 1) in BUILT
+
+
 def flags(table: bytes | list[int]) -> list[int]:
-    """the FLAGS words for the unpacked records TABLE (32 x 8 fields): any BUILT, any POST, any BUS"""
-    types = {int(table[FIELDS * r]) & ((1 << TYPE_BITS) - 1) for r in range(RECORDS)}
-    return [int(bool(types & set(g))) for g in (BUILT, POST, BUS)]
+    """the FLAGS words for the unpacked records TABLE (32 x 8 fields): any BUILT, any POST, any BUS
+    (or a moved slot 2: the bus pass runs it)"""
+    types = {field0(table, r) for r in range(RECORDS)}
+    out = [int(bool(types & set(g))) for g in (BUILT, POST, BUS)]
+    out[2] |= int(any(moved(table, t) for t in range(TRACKS)))
+    return out
 # the routing's per-track blocks (docs/link-research.md §5, §7: 0x1c1f1e sums each voice slot's stereo
 # block, x 14.125, into the block of the track the slot plays): L 32 floats at + 0x100 t, R at + 0x80
 BUS_BLOCKS = 0x258F68
@@ -220,6 +244,7 @@ STEREO_R = 0x80
 POST_RING = 1024                                  # samples a voice slot (21.3 ms), CHOR's or WIDE's
 POST_RING_DDR = 0x82510000                        # 32 x (4 KB + 8), after TAPE's rings (post.py: a mirror word, then the ring)
 POST_RING_STRIDE = 4 * POST_RING + 8              # perf 2026-11-11: CHOR's second tap of a read at the ring's first word
+assert MV_RING_DDR >= POST_RING_DDR + RECORDS * POST_RING_STRIDE    # a moved TAPE's rings after them
 
 # WIDE: K1 WDTH, K2 TIME, K3 BASS, K4 TONE. Mid and side; the side times 2 WDTH, plus the mid delayed by
 # TIME (0.5 .. 20 ms), high-passed at BASS (40 .. 640 Hz: the lows stay mono) and TONE'd, times WDTH.

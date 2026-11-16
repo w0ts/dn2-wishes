@@ -14,6 +14,11 @@ slot j (i = 2 s + j, slot 1 before slot 2): the track s plays, its record 2 tr +
 type, its state (8 words at STATE + 32 i, zeros when the type or the track changed), the insert run over
 the voice's buffer in place. OFF (and a type this pass does not run) costs a load and a compare.
 
+2026-11-11 (the User: "DSP: always run in slot order", docs/inserts.md "Slot order across the stages"): a
+slot 2 under a slot 1 of design.MOVERS is left out here (skip_moved); the bus pass runs it on the track's
+L and R after slot 1. The insert itself (one) is a callable at design.INS_ONE_SW, after the entry's JUMP,
+so both passes run the same code.
+
 SUB, DIST, GATER, RING (types 9..12, either slot): ported from Optimist (GPL-3.0-only, the User's own),
 firmware/src/fx/insfx/insfx.c, fx.c, insfx/gater.c (dnfw.inserts.ref, docs/inserts.md). DIST shares
 FUZZ's loop (fz_loop, emitted once). Each is a builder part (design.PART): left out, it is not emitted
@@ -37,7 +42,8 @@ _NAMES = ["t", "i", "j", "rec", "w1", "sa", "buf", "gn"] + [f"p{k}" for k in ran
     "g", "c", "b", "y0", "k", "thr", "cnt",
     "gd", "step", "lvl", "d", "rb", "sel", "tr",
     # SUB DIST GATER RING (ports3, 2026-11-09): FUZZ's loop's values (DIST shares it), GATER's block values
-    "pa", "rel", "a1", "lv", "kl", "fz", "inv", "inc", "sl", "nsl", "pat", "nx", "b1", "h0", "h1"]
+    "pa", "rel", "a1", "lv", "kl", "fz", "inv", "inc", "sl", "nsl", "pat", "nx", "b1", "h0", "h1",
+    "ret"]                       # one's return address - 1 (2026-11-11: the bus pass calls it too)
 C = {n: SCRATCH + 4 * k for k, n in enumerate(_NAMES)}
 assert len(C) == len(_NAMES)
 SCRATCH_BYTES = 4 * len(_NAMES)
@@ -298,12 +304,7 @@ def tape(p: Prog) -> None:
     p.fop(0, 0, "*", 0)
     p.fconst(1, D.TP_HISS_MAX)
     p.fop(0, 0, "*", 1)
-    p.st(C["lvl"], 0)
-    p.ld(0, C["i"])
-    p.lsh(1, 0, 11)                              # 2 KB a voice slot and insert slot
-    p.iconst(12, D.TP_RING_DDR)
-    p.iop(1, 12, "+", 1)
-    p.st(C["rb"], 1)
+    p.st(C["lvl"], 0)                            # (the ring: C['rb'], the caller's)
     p.ld(4, C["buf"])
     p.seti(0, 4)
     p.seti(1, 4)
@@ -893,58 +894,19 @@ def track(p: Prog) -> None:
     p.iop(3, 3, "AND", 12)
     p.st(C["tr"], 3)
     record(p, C)
+    skip_moved(p)
 
-    def run():
+    def run():                                   # its state at STATE + 32 i, its ring, the voice's buffer
         p.ld(0, C["i"])
         p.lsh(1, 0, 5)
         p.iconst(12, STATE)
         p.iop(2, 12, "+", 1)
         p.st(C["sa"], 2)
-        p.seti(4, 2)
-        p.ldi(7, D.STATE_WORDS - 1, 4)           # the last M.SEL
-        p.ldi(6, D.STATE_WORDS - 2, 4)           # the last track
-        p.ld(5, C["sel"])
-        p.ld(8, C["tr"])
-
-        def fresh():
-            p.ld(2, C["sa"])
-            p.seti(4, 2)
-            p.iconst(9, 0)
-            for k in range(D.STATE_WORDS - 2):
-                p.sti(k, 4, 9)
-            p.ld(8, C["tr"])
-            p.ld(5, C["sel"])
-            p.sti(D.STATE_WORDS - 2, 4, 8)
-            p.sti(D.STATE_WORDS - 1, 4, 5)
-
-            def fresh_ring():                    # TAPE starts from a silent ring
-                p.ld(0, C["i"])
-                p.lsh(1, 0, 11)
-                p.iconst(12, D.TP_RING_DDR)
-                p.iop(1, 12, "+", 1)
-                p.seti(1, 1)
-                p.fconst(0, 0.0)
-
-                def sixteen():
-                    for _ in range(16):
-                        p.stpost(1, 0)
-                p.loop_r(11, D.TP_RING // 16, sixteen)
-            if D.TAPE in D.BUILT:                # dnfw.builder: no ring without TAPE
-                p.iconst(6, D.TAPE)
-                p.if_(5, "EQ", 6, fresh_ring, kind="i")
-        p.iconst(9, 0)
-
-        def differs():
-            p.iconst(9, 1)
-        p.if_(7, "NE", 5, differs, kind="i")
-        p.if_(6, "NE", 8, differs, kind="i")
-        p.ifz(9, "NE", fresh)
-        p.ld(2, C["sa"])
-        p.seti(4, 2)
-        for k in range(D.STATE_WORDS):
-            p.ldi(8, k, 4)
-            p.st(C[f"s{k}"], 8)
-        values(p, C)
+        if D.TAPE in D.BUILT:
+            p.lsh(1, 0, 11)                      # 2 KB a voice slot and insert slot
+            p.iconst(12, D.TP_RING_DDR)
+            p.iop(1, 12, "+", 1)
+            p.st(C["rb"], 1)
         p.ld(0, C["t"])
         p.lsh(1, 0, 2)
         p.iconst(12, D.BUFFERS)
@@ -952,23 +914,125 @@ def track(p: Prog) -> None:
         p.seti(4, 2)
         p.ldi(3, 0, 4)
         p.st(C["buf"], 3)
-        fzd = D.FUZZ in D.BUILT or D.DIST in D.BUILT
-        if fzd:                                  # FUZZ and DIST (when the guard admits them) set it:
-            p.iconst(0, 0)                       # their shared loop, emitted once, runs after
-            p.st(C["fz"], 0)
-        _by_type(p, [(typ, (lambda fn, typ: lambda p: G.ins_admit(p, D.COST[typ], lambda: fn(p)))(fn, typ))
-                     for typ, fn in ((D.FUZZ, fuzz), (D.TAPE, tape), (D.FOLD, fold), (D.HARM, harm),
-                                     (D.SUB, sub), (D.DIST, dist), (D.GATER, gater), (D.RING, ring))
-                     if typ in D.BUILT])         # dnfw.builder: only the inserts this build runs
-        if fzd:
-            p.ld(0, C["fz"])
-            p.ifz(0, "NE", lambda: fz_loop(p))
+        call_one(p, lambda: p.jump("", ONE))
+    _is_built(p, run)
+
+
+ONE = "wr_in_one"                                # one's label (design.INS_ONE_SW)
+
+
+def call_one(p: Prog, go) -> None:
+    """one(): run mode runs it here; emit mode puts the return address - 1 in C['ret'] and GO() jumps to
+    it (one calls the leaf subroutines, so it cannot be one itself). Clobbers what one does"""
+    if p.run:
+        one(p)
+        return
+    ret = p.label("oret")
+    p.ret_addr(12, ret)
+    p.st(C["ret"], 12)
+    go()
+    p.place(ret)
+
+
+def in_types(p: Prog, d: int, s: int, w: int, types) -> None:
+    """Rd nonzero when Rs (a type, 0..15) is one of TYPES: bit min(Rs, 15) of their mask. Clobbers Rw, R12"""
+    assert max(types) < 15
+    p.iconst(12, 15)
+    p.iop(w, s, "MIN", 12)
+    p.iconst(d, 1)
+    p.float_(d, d, w)
+    p.trunc(d, d)
+    p.iconst(12, sum(1 << t for t in types))
+    p.iop(d, d, "AND", 12)
+
+
+def skip_moved(p: Prog) -> None:
+    """2026-11-11 (the User: "always run in slot order"): a slot 2 (C['j'] 1) whose slot 1 is of
+    design.MOVERS is left out here (C['sel'] = 0): the bus pass runs it after slot 1 (dnfw.inserts.bus).
+    Clobbers R0, R2, R3, R5-R7, R12, I4"""
+    def check():
+        p.ld(2, C["rec"])
+        p.iconst(12, 4 * D.FIELDS)
+        p.iop(2, 2, "-", 12)                     # slot 1's record
+        p.seti(4, 2)
+        p.ldi(3, 0, 4)
+        p.iconst(12, (1 << D.TYPE_BITS) - 1)
+        p.iop(3, 3, "AND", 12)
+        in_types(p, 7, 3, 6, D.MOVERS)
+
+        def leave():
+            p.iconst(5, 0)
+            p.st(C["sel"], 5)
+        p.ifz(7, "NE", leave)
+    p.ld(0, C["j"])
+    p.ld(5, C["sel"])
+    p.ifz(0, "NE", lambda: p.ifz(5, "NE", check))     # (C['rec'] is the record's only when it plays)
+
+
+def one(p: Prog) -> None:
+    """one insert: the record at C['rec'] (type C['sel'], a BUILT one, played by track C['tr']) over the 32
+    floats at C['buf'], in place; its state the 8 words at C['sa'] (zeros when the type or the track changed
+    since it last ran there), TAPE's ring at C['rb']. The pre pass runs it for each voice slot's insert; the
+    bus pass for a moved slot 2 on the track's L and R (2026-11-11)"""
+    p.ld(2, C["sa"])
+    p.seti(4, 2)
+    p.ldi(7, D.STATE_WORDS - 1, 4)               # the last M.SEL
+    p.ldi(6, D.STATE_WORDS - 2, 4)               # the last track
+    p.ld(5, C["sel"])
+    p.ld(8, C["tr"])
+
+    def fresh():
         p.ld(2, C["sa"])
         p.seti(4, 2)
+        p.iconst(9, 0)
         for k in range(D.STATE_WORDS - 2):
-            p.ld(8, C[f"s{k}"])
-            p.sti(k, 4, 8)
-    _is_built(p, run)
+            p.sti(k, 4, 9)
+        p.ld(8, C["tr"])
+        p.ld(5, C["sel"])
+        p.sti(D.STATE_WORDS - 2, 4, 8)
+        p.sti(D.STATE_WORDS - 1, 4, 5)
+
+        def fresh_ring():                        # TAPE starts from a silent ring
+            p.ld(1, C["rb"])
+            p.seti(1, 1)
+            p.fconst(0, 0.0)
+
+            def sixteen():
+                for _ in range(16):
+                    p.stpost(1, 0)
+            p.loop_r(11, D.TP_RING // 16, sixteen)
+        if D.TAPE in D.BUILT:                    # dnfw.builder: no ring without TAPE
+            p.iconst(6, D.TAPE)
+            p.if_(5, "EQ", 6, fresh_ring, kind="i")
+    p.iconst(9, 0)
+
+    def differs():
+        p.iconst(9, 1)
+    p.if_(7, "NE", 5, differs, kind="i")
+    p.if_(6, "NE", 8, differs, kind="i")
+    p.ifz(9, "NE", fresh)
+    p.ld(2, C["sa"])
+    p.seti(4, 2)
+    for k in range(D.STATE_WORDS):
+        p.ldi(8, k, 4)
+        p.st(C[f"s{k}"], 8)
+    values(p, C)
+    fzd = D.FUZZ in D.BUILT or D.DIST in D.BUILT
+    if fzd:                                      # FUZZ and DIST (when the guard admits them) set it:
+        p.iconst(0, 0)                           # their shared loop, emitted once, runs after
+        p.st(C["fz"], 0)
+    _by_type(p, [(typ, (lambda fn, typ: lambda p: G.ins_admit(p, D.COST[typ], lambda: fn(p)))(fn, typ))
+                 for typ, fn in ((D.FUZZ, fuzz), (D.TAPE, tape), (D.FOLD, fold), (D.HARM, harm),
+                                 (D.SUB, sub), (D.DIST, dist), (D.GATER, gater), (D.RING, ring))
+                 if typ in D.BUILT])             # dnfw.builder: only the inserts this build runs
+    if fzd:
+        p.ld(0, C["fz"])
+        p.ifz(0, "NE", lambda: fz_loop(p))
+    p.ld(2, C["sa"])
+    p.seti(4, 2)
+    for k in range(D.STATE_WORDS - 2):
+        p.ld(8, C[f"s{k}"])
+        p.sti(k, 4, 8)
 
 
 def _is_built(p: Prog, run) -> None:
@@ -1073,11 +1137,11 @@ def unpack(p: Prog, C: dict) -> None:
 
 
 def set_flags(p: Prog) -> None:
-    """D.FLAGS from the records just unpacked (design.flags), 2026-11-10 (perf). Clobbers R0, R1,
-    R5-R7, R11, R12, I4"""
+    """D.FLAGS from the records just unpacked (design.flags), 2026-11-10 (perf); 2026-11-11: the bus
+    pass's flag for a moved slot 2 too (design.moved). Clobbers R0-R8, R11, R12, I4"""
     p.iconst(1, TABLE)
     p.seti(4, 1)
-    for r in (5, 6, 7):
+    for r in (2, 3, 5, 6, 7):                    # R2 the last record's type, R3 1 on a slot 2
         p.iconst(r, 0)
 
     def rec():
@@ -1088,6 +1152,18 @@ def set_flags(p: Prog) -> None:
             for typ in group:
                 p.iconst(12, typ)
                 p.if_(0, "EQ", 12, lambda r=r: p.iconst(r, 1), kind="i")
+
+        def slot2():
+            in_types(p, 4, 0, 8, D.BUILT)
+
+            def built():
+                in_types(p, 4, 2, 8, D.MOVERS)
+                p.ifz(4, "NE", lambda: p.iconst(7, 1))
+            p.ifz(4, "NE", built)
+        p.ifz(3, "NE", slot2)
+        p.ipass(2, 0)
+        p.iconst(12, 1)
+        p.iop(3, 12, "-", 3)
         p.geti(1, 4)
         p.iconst(12, 4 * D.FIELDS)
         p.iop(1, 12, "+", 1)
@@ -1156,6 +1232,14 @@ def program(next_sw: int, prefix: str = "in") -> str:
     p.raw("")
     p.raw(".GLOBAL wr_ins.;")
     p.raw("wr_ins.:")
+    main = "wr_in_main"
+    p.jump("", main)                             # (48 bits: one is at INS_SW + 3, design.INS_ONE_SW)
+    p.place(ONE)                                 # 2026-11-11: one insert, a callable for the bus pass too
+    one(p)
+    p.ld(12, C["ret"])
+    p.e("I12 = R12;")
+    p.e("JUMP (M14, I12);", "back to the caller (the walk here, or dnfw.inserts.bus)")
+    p.place(main)
     body(p)
     G.ins_end(p)
     p.jump_abs("", next_sw, "ping.asm's wr_ping (it returns to the stock chain)")

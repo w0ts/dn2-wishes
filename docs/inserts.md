@@ -7,9 +7,28 @@ TAPE, FOLD, CHOR, WIDE, HARM (2026-11-09), **FDN8 and XDLY** (2026-11-10: the se
 delay's engines, per track), then **SUB, DIST, GATER and RING** (2026-11-10, ported from Optimist: below,
 "SUB, DIST, GATER, RING"). FUZZ, TAPE, FOLD, HARM, SUB, DIST, GATER and RING run on the mono voice before the filter, CHOR and
 WIDE on the voice in stereo after the pan (below, "After the pan"), FDN8 and XDLY on the track's own bus
-after the routing (below, "On the track's bus"). Within each of those stages slot 1 runs before slot 2;
-across them the stage decides (a CHOR in slot 1 and a FUZZ in slot 2: the FUZZ, before the filter, is
-heard first).
+after the routing (below, "On the track's bus"). Within each of those stages slot 1 runs before slot 2.
+
+**Slot order across the stages** (2026-11-11, the User: "i have the feeling insert 2 is BEFORE insert 1",
+then "DSP: always run in slot order"). Until then the stage decided: a CHOR, WIDE, FDN8 or XDLY in slot 1
+with a voice insert in slot 2 ran slot 2 first (measured in the SHARC runner on the unit's build and on
+main 65edf070: e.g. XDLY | DIST entered DIST in the pre pass, XDLY after the routing). Now, in exactly that
+pair (`design.MOVERS` in slot 1, a `design.BUILT` type in slot 2), **slot 2 moves to the track's bus**: the
+pre pass leaves it out (`program.skip_moved`) and the bus pass runs it right after slot 1, on the track's
+block x 1/14.125, L and R each with its own state (`bus.MV_STATE`, L2, zeros at power-on) and, for TAPE,
+its own ring (`design.MV_RING_DDR`, 32 x 2 KB), then x 14.125 back. **The moved insert then acts on the
+summed voices after the filter, amp and pan** (a chord distorted as a whole, not voice by voice; once a
+track, not once a voice), as an insert after a reverb or chorus would in a studio chain. Every other pair
+runs as before, bit for bit. Still by stage: slot 1 FDN8/XDLY with slot 2 CHOR/WIDE (CHOR/WIDE, after the
+pan, runs before the bus; not part of the User's choice, left as it was).
+
+The code is shared, not copied: the pre pass's one insert (`program.one`, the state load, the type's code,
+the state store) is a callable at `design.INS_ONE_SW` (`INS_SW + 3`, after the pass's entry `JUMP`), entered
+by the pre pass for each voice and by the bus pass for a moved slot 2, its return address in a scratch
+word (it calls the leaf subroutines itself). inserts.asm grew to 6,850 B (span 0x1b00 -> 0x1c00, in the
+L2 the pass's old state left free), insbus.asm to 3,742 B. The runner's `insorder` step
+(`scripts/sharc_insorder_step.py`) holds the order of every kind of pair and both passes to their
+references; `test/test_inserts_order.py` holds the models.
 
 A type keeps its number for good (OFF 0, FUZZ 1 .. HARM 6, FDN8 7, XDLY 8, SUB 9, DIST 10, GATER 11,
 RING 12): the saved records name types by number, and a build that does not know a number reads it as

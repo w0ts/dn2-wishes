@@ -145,7 +145,7 @@ STOCK_DELAY_SW = 0xB8482C
 # the range proven on units; XDLY's branch ends its span here), their state after the code. smp.asm's
 # tail JUMPs to wr_ins, which JUMPs on to PING.
 INS_L2_LOAD = 0x200ADA00                     # 2026-11-10 (0x200AE000 until the four ports)
-INS_L2_SPAN = 0x1B00                         # the code; then the state (dnfw.inserts.program.STATE; 0x1800 until
+INS_L2_SPAN = 0x1C00                         # the code (0x1b00 until 2026-11-11: one, the bus pass's moved inserts); 0x1800 until
                                              # 2026-11-10: two slots' state and the unpacked records need the room)
 INS_SW = 0xB80000 + (INS_L2_LOAD - 0x20000000) // 2          # 0xbd7000
 INS_STATE_DM = 0x2E3000                                      # 2026-11-11 (perf): L1, in the zeros after the shared tail (was L2 0x200af400)
@@ -646,6 +646,11 @@ def l2_spans() -> list[tuple[str, int, bytes]]:
     assert (_ins().FDN8_SW, _ins().XDLY_SW, _ins().BUS_STATE) == (FDN8_SW, XDLY_SW, INSBUS_STATE_L2)
     out.append(("the bus inserts' head: each instance's owner (zeros), the engines' I/O descriptor",
                 INSBUS_STATE_L2, ins_bus.state_bytes()))
+    # 2026-11-11: a moved slot 2's state (dnfw.inserts.bus.MV_STATE), zeros at power-on (a fill block): its
+    # first run then starts fresh; and its entry, the pre pass's one insert after the pass's 48-bit JUMP
+    assert _ins().INS_ONE_SW == INS_SW + 3
+    out.append(("the moved inserts' state (zeros), in L2", ins_bus.MV_STATE,
+                bytes(ins_bus.MV_END - ins_bus.MV_STATE)))
     if "a2f" in obj:                             # 2026-11-09: the A2 filter machines' pass (dnfw.a2f)
         from ..a2f import program as a2f_program
         code = obj["a2f"]

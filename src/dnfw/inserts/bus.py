@@ -26,6 +26,11 @@ put back at the end), MODE set to 1, and wr_fdn8 / wr_xdly entered as a leaf cal
 own DDR (design.FDN8_RING_DDR, XDLY_LINES_DDR); the ColdFire gives a slot an instance (field 0's high
 bits) and keeps it while the slot keeps the type; an instance whose slot or type changed (OWNER) starts
 fresh. Input: the track's block x G_IN; MIX blends the wet x G_OUT in: x' = x + (wet - x) MIX.
+
+**A moved slot 2** (2026-11-11, design.MOVERS: slot 1 CHOR, WIDE, FDN8 or XDLY, slot 2 a voice insert): the
+pre pass left it out; here, right after slot 1, the pre pass's own insert code (program.one, called at
+design.INS_ONE_SW) runs it on the track's block x G_IN, L and R each with its own state (MV_STATE), then
+x G_OUT back (moved). The bus pass's flag is set for such a pair too (program.set_flags).
 """
 
 from __future__ import annotations
@@ -71,6 +76,13 @@ FD_L1_BYTES = 4 * FD_WORDS
 FD_STORE = FD_L1
 assert FD_L1 >= 0x2E4044 and FD_L1 + D.FDN8_INSTANCES * FD_L1_BYTES <= 0x2E5400
 assert END <= D.BUS_STATE_END, f"the bus pass's state runs past its room: {END:#x}"
+# 2026-11-11 (design.MOVERS): a moved slot 2's state, 8 words for each of the track's L (2 t) and R (2 t + 1),
+# as the pre pass's (program.one: the last type and track in its last two words, zeros at power-on)
+MV_STATE = END
+MV_END = MV_STATE + 4 * D.STATE_WORDS * D.MV_INSTANCES
+assert MV_END <= D.BUS_STATE_END, f"the moved inserts' state runs past the bus pass's room: {MV_END:#x}"
+# the guard's bound for a moved insert: the dearest BUILT type, twice (L and R; the unit's cost unmeasured)
+MV_COST = 2 * max(D.COST[t] for t in D.BUILT)
 SITE_SW = 0x1C1FEF                                # the routing, after its per-track loop: JUMP wr_inbus here
 DISPLACED = "R2 = DM(0x257980);"                  # .. in place of this (stock's, 48 bits), done on the way back
 RESUME_SW = 0x1C1FF2                              # the routing's next instruction: the main bus is summed after
@@ -364,6 +376,67 @@ def slot(p: Prog) -> None:
     p.iconst(7, D.XDLY)
     p.if_(5, "EQ", 6, fdn8, lambda: (p.ld(5, C["sel"]), p.iconst(7, D.XDLY),
                                      p.if_(5, "EQ", 7, xdly, kind="i")), kind="i")
+    p.ld(0, C["i"])
+    p.iconst(12, 1)
+    p.iop(0, 0, "AND", 12)
+    p.ifz(0, "NE", lambda: moved(p))
+
+
+def moved(p: Prog) -> None:
+    """2026-11-11 (the User: "always run in slot order"): record C['rec'], a slot 2 of a BUILT type under a
+    slot 1 of design.MOVERS (the pre pass left it out, program.skip_moved): the pre pass's one insert
+    (program.one, called at design.INS_ONE_SW) on the track's block x G_IN, L then R, each with its own state
+    (MV_STATE) and TAPE ring (design.MV_RING_DDR), then x G_OUT back. MIX is the insert's own (its p0)"""
+    def run():
+        block_ptrs(p)
+        take_input(p)
+        for side, buf in ((0, XL), (1, XR)):
+            p.ld(0, C["t"])
+            p.lsh(0, 0, 1)
+            if side:
+                p.iconst(12, 1)
+                p.iop(0, 12, "+", 0)             # k = 2 t + side
+            p.lsh(1, 0, 5)
+            p.iconst(12, MV_STATE)
+            p.iop(1, 12, "+", 1)
+            p.st(PR.C["sa"], 1)
+            if D.TAPE in D.BUILT:
+                p.lsh(1, 0, 11)
+                p.iconst(12, D.MV_RING_DDR)
+                p.iop(1, 12, "+", 1)
+                p.st(PR.C["rb"], 1)
+            p.iconst(1, buf)
+            p.st(PR.C["buf"], 1)
+            for name in ("t", "sel", "rec"):
+                p.ld(1, C[name])
+                p.st(PR.C["tr" if name == "t" else name], 1)
+            PR.call_one(p, lambda: p.jump_abs("", D.INS_ONE_SW, "the pre pass's one insert (program.one)"))
+        for src, x in (("lp", XL), ("rp", XR)):
+            p.iconst(0, x)
+            p.seti(0, 0)
+            p.ld(0, C[src])
+            p.seti(1, 0)
+            p.fconst(2, G_OUT)
+
+            def one():
+                p.ldpost(0, 0)
+                p.fop(0, 0, "*", 2)
+                p.stpost(1, 0)
+            p.loop_r(11, D.BLOCK, one)
+
+    def built():
+        p.ld(2, C["rec"])
+        p.iconst(12, 4 * D.FIELDS)
+        p.iop(2, 2, "-", 12)                     # slot 1's record
+        p.seti(4, 2)
+        p.ldi(3, 0, 4)
+        p.iconst(12, (1 << D.TYPE_BITS) - 1)
+        p.iop(3, 3, "AND", 12)
+        PR.in_types(p, 4, 3, 8, D.MOVERS)
+        p.ifz(4, "NE", lambda: G.ins_admit(p, MV_COST, run))
+    p.ld(3, C["sel"])
+    PR.in_types(p, 4, 3, 8, D.BUILT)
+    p.ifz(4, "NE", built)
 
 
 def body(p: Prog) -> None:
