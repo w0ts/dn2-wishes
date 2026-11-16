@@ -3179,9 +3179,12 @@ def step_flexlevel(init, sound, machines) -> dict:
         f"v0.54.3: the take with its entry as a save writes it (int16, no mark) plays {head_db:.2f} dB under the "
         f"marked take (within 0.1 dB): a saved take is played as stored":
             unity is not None and saved is not None and abs(saved["out_db"] - unity["out_db"] + head_db) <= 0.1,
-        "v0.56.1 (FLEXPOOL): the GAIN 0 take played on a STRETCH track at its level on ONESHOT (out of the amp, "
-        "within 1 dB): STRETCH's renderer applies the take's mark too":
-            unity is not None and st_unity is not None and abs(st_unity["out_db"] - unity["out_db"]) <= 1.0,
+        # (STRETCH plays this take 1.92 dB under ONESHOT with or without the mark, its unmarked copy too: measured
+        # 2026-11-16, STRETCH's own level, not the mark's; so the mark's part is compared, each machine against itself)
+        "v0.56.1 (FLEXPOOL): the GAIN 0 take on a STRETCH track against ONESHOT, out of the amp, as their unmarked "
+        "(saved) copies are (within 0.1 dB): STRETCH's renderer applies the take's mark as ONESHOT's does":
+            None not in (unity, saved, st_unity, st_saved)
+            and abs((st_unity["out_db"] - unity["out_db"]) - (st_saved["out_db"] - saved["out_db"])) <= 0.1,
         f".. and on STRETCH the saved take (no mark) plays {head_db:.2f} dB under the marked one (within 0.1 dB)":
             st_unity is not None and st_saved is not None
             and abs(st_saved["out_db"] - st_unity["out_db"] + head_db) <= 0.1,

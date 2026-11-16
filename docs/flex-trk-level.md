@@ -85,8 +85,26 @@ Measured on the fixed runner, step 3f:
 | saved (plain int16) entry: 18.06 dB under the marked take | 0 dB, FAIL | -18.06, PASS |
 
 A hot track's take plays louder than its source, because its VOL, SUS, LEVEL and LEV count once more. GAIN 0 is the
-source's level at the init sound. STRETCH's renderer (`render_stretch`) does not apply the mark. Only FLEX tracks
-reach the buffers, and FLEX plays through `render()`.
+source's level at the init sound.
+
+### v0.56.1: STRETCH applies the mark too
+
+Since upstream v0.55 (FLEXPOOL), every sample machine can play the FLEX buffers, so a take can reach STRETCH, which
+renders through `render_stretch()`. That renderer now multiplies LEV by `TAKE_HEAD` for a marked take, as `render()`
+does. It needs no make-up gain: its two-tap reads sum to 1.
+
+Measured on the runner, step 3f (the GAIN 0 take, out of the amp, against its source):
+
+| playback | v0.54.3 | v0.56.1 |
+|---|---|---|
+| ONESHOT, marked take | +1.77 dB | +1.77 dB |
+| ONESHOT, saved (unmarked) | -16.29 dB | -16.29 dB |
+| STRETCH, marked take | -18.20 dB (mark ignored) | -0.14 dB |
+| STRETCH, saved (unmarked) | -18.20 dB | -18.20 dB |
+
+STRETCH plays this take 1.92 dB under ONESHOT whether it is marked or not. That is STRETCH's own level against
+ONESHOT's, not the mark, so step 3f compares the mark's part: STRETCH against ONESHOT, marked and saved, within 0.1 dB.
+The cause of the 1.92 dB is not measured.
 
 ## For upstream
 
