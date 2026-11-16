@@ -21,6 +21,7 @@ import math
 from . import plk as K
 from .plaits_string import (FAST_A, FAST_B, PI_F, ACC_K, exp2, recip)
 from ..perc.dsl import Prog, f32
+from ..perc import msched as MS
 
 MODEL = "MDAL"
 N_MODES, BATCH, MW = 24, 4, 8
@@ -379,43 +380,49 @@ def _render(p: Prog, L) -> None:
             p.stpost(5, 0)
 
         def mode():
-            # 2026-11-10 (poly16): the loads and the store on computes, the 16 samples unrolled
-            # (every F register taken): 12 instructions a sample, not 12+3. (Multifunction pairs
-            # were tried: selmap reads selas's float multiply as MRF + x y: dsl.par refuses them.)
-            # F0 g, F1 rg, F2 h, F3 gain, F5 s1, F12 s2; F4 bp, F6 t, F8 gb, F9 the batch's sum,
-            # F10 lp, F11 u / hp, F13 o, F14 x, F15 g hp. The same operations in the same order.
+            # 2026-11-12 (plaits-opt): the 16 samples' operations as before (poly16's order, below), placed by
+            # dnfw.perc.msched into multifunction instructions (a multiply beside an add) with the loads and
+            # stores on them: about 9 instructions a sample, not 12. Registers: F0 g, F1 gain, F2 rg, F3 h
+            # (the multiplier's groups), F7 s1, F12 s2, F14 t, F8 x / u, F4 u2 / hp, F9 g hp, F15 bp / o,
+            # F6 bp (a second add of the same operands, for the multiplies), F10 gb, F11 the batch's sum,
+            # F13 lp. Every value the same operation on the same operands: the output is bit for bit as before.
             p.ld(9, L.W["bs"])                  # this mode's coefficients
             p.seti(1, 9)
             p.ldi(0, MG, 1)
-            p.ldi(1, MRG, 1)
-            p.ldi(2, MH, 1)
-            p.ldi(3, MA, 1)
+            p.ldi(2, MRG, 1)
+            p.ldi(3, MH, 1)
+            p.ldi(1, MA, 1)
             p.iconst(12, 4 * MW)
             p.iop(9, 12, "+", 9)
             p.st(L.W["bs"], 9)
-            p.ldi(5, 0, 0)                       # s1
+            p.ldi(7, 0, 0)                       # s1
             p.ldi(12, S2_OFF, 0)                 # s2
             p.iconst(13, xr)
             p.seti(1, 13)
             p.iconst(13, br)
             p.seti(2, 13)                        # (I2: a compute's move goes through I0..I3)
-            p.ldpost(14, 1)                      # x
-            p.fop(6, 1, "*", 5)                  # t = rg s1
+            p.fop(14, 2, "*", 7)                 # t = rg s1
+            ops = []
             for k in range(K.HALF):
-                p.fop(11, 14, "-", 6)            # u = x - t
-                p.fop(11, 11, "-", 12)           # - s2
-                p.par(("op", 11, 11, "*", 2), ("ldk", 9, 0, 2))   # hp; the batch's sum
-                p.fop(15, 0, "*", 11)            # g hp
-                p.fop(4, 15, "+", 5)             # bp
-                p.fop(13, 3, "*", 4)             # o = gain bp
-                p.fop(5, 15, "+", 4)             # s1
-                p.fop(8, 0, "*", 4)              # gb = g bp
-                p.fop(9, 9, "+", 13)             # B += o
-                p.fop(6, 1, "*", 5)              # the next t = rg s1
-                p.par(("op", 10, 8, "+", 12), ("ld", 14, 1))     # lp = gb + s2; the next x
-                p.par(("op", 12, 8, "+", 10), ("st", 2, 9))       # s2; B out
+                ops += [("mov", "ld", ("F8",), (), "I1"),                       # x
+                        ("alu", "-", ("F8",), ("F8", "F14"), None),            # u = x - t
+                        ("alu", "-", ("F4",), ("F8", "F12"), None),            # - s2
+                        ("mul", "*", ("F4",), ("F3", "F4"), None),             # hp
+                        ("mul", "*", ("F9",), ("F0", "F4"), None),             # g hp
+                        ("alu", "+", ("F15",), ("F9", "F7"), None),            # bp
+                        ("alu", "+", ("F6",), ("F9", "F7"), None),             # bp (for the multiplies)
+                        ("alu", "+", ("F7",), ("F9", "F15"), None),            # s1
+                        ("mul", "*", ("F15",), ("F1", "F6"), None),            # o = gain bp
+                        ("mul", "*", ("F10",), ("F0", "F6"), None),            # gb = g bp
+                        ("mov", "ldk", ("F11",), (), ("I2", 0)),               # the batch's sum
+                        ("alu", "+", ("F11",), ("F11", "F15"), None),          # B += o
+                        ("mov", "st", (), ("F11",), "I2"),                     # B out
+                        ("alu", "+", ("F13",), ("F10", "F12"), None),          # lp = gb + s2
+                        ("alu", "+", ("F12",), ("F10", "F13"), None),          # s2
+                        ("mul", "*", ("F14",), ("F2", "F7"), None)]            # the next t = rg s1
+            MS.emit(p, ops)
             p.sti(S2_OFF, 0, 12)
-            p.stpost(0, 5)                       # the next mode's
+            p.stpost(0, 7)                       # the next mode's
         p.loop(L.W["inner"], BATCH, mode)
         p.iconst(0, br)
         p.seti(5, 0)

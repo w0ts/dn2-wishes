@@ -79,9 +79,7 @@ def init(p: Prog, L: C.Layout) -> None:
     the buffer's clear deferred (plk.defer_clear), so a voice's start block is not 8,192 DDR
     stores; 2026-11-11 (plaits16): just in time instead (_jit: each word zeroed before the half
     that first reads it), so the voice sounds from its first half."""
-    p.iconst(0, 0)
-    for k in range(NU_USED):
-        K.sv(p, K.U0 + k, 0)
+    K.zero_state(p, K.U0, NU_USED)
     p.fconst(0, 0.5)
     K.sv(p, Y0, 0)
     p.fconst(0, LFO_Y1)

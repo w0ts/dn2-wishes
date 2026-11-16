@@ -199,8 +199,8 @@ def init_tail(p: Prog, L) -> None:
         rec_at(p, 4, 0)
         p.seti(1, 4)
         p.iconst(0, 0)                          # 2026-11-10: the state words, in the slot now
-        for k in range(STW):
-            p.sti(k, 1, 0)
+        p.loop_r(12, STW, lambda: p.stpost(1, 0))   # (2026-11-12: a loop, for PERC's code room)
+        p.seti(1, 4)
         p.fconst(0, 100.0)
         p.sti(DLY, 1, 0)
         p.fconst(0, 0.01)

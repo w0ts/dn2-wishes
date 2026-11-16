@@ -111,6 +111,17 @@ def sv(p: Prog, k: int, s: int) -> None:
     C.sts(p, k, s)
 
 
+def zero_state(p: Prog, k0: int, n: int) -> None:
+    """state words k0 .. k0 + n - 1 = 0 by a loop (2026-11-12, plaits-opt: an engine's init, where n stores in a
+    row cost PERC's code room and nothing in time matters). Leaves R0 = 0; clobbers R8, R12, I1."""
+    p.iconst(8, p.ioff(3, 4 * (K.S0 + k0)))
+    p.geti(12, 3)
+    p.iop(8, 12, "+", 8)
+    p.seti(1, 8)
+    p.iconst(0, 0)
+    p.loop_r(12, n, lambda: p.stpost(1, 0))
+
+
 def big_at(p: Prog, L: C.Layout, d: int) -> None:
     """Rd = this voice's DDR words. Clobbers R12."""
     p.ld(d, L.md.C["mdb"])

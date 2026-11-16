@@ -139,9 +139,7 @@ def tan_dirty(p: Prog, d: int, f: int) -> None:
 def init(p: Prog, L: C.Layout) -> None:
     """NoiseEngine::Init: the clocked noise at phase 0 (its frequency 0.001), the filter's state
     and the interpolators at 0."""
-    p.iconst(0, 0)
-    for k in range(NU_USED):
-        K.sv(p, K.U0 + k, 0)
+    K.zero_state(p, K.U0, NU_USED)
     p.fconst(0, 0.001)
     K.sv(p, CF, 0)
 
