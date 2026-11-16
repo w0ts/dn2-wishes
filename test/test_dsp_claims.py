@@ -34,7 +34,8 @@ CLAIMS = [
     ("entry_mark code", 0x2DED00, 0x2DEE00, ("dnfw.waverider.dsp.EMARK_DM",), True),
     ("machine lookup", 0x2DEE00, 0x2DEF00, ("dnfw.waverider.dsp.LOOKUP16_DM",), True),
     ("sample machines' state", 0x2DEF00, 0x2DF700, ("dnfw.waverider.dsp.SMP_STATE_DM",), True),
-    ("sample machines' scratch", 0x2DF700, 0x2DF800, ("dnfw.waverider.dsp.SMP_SCRATCH_DM",), True),
+    ("sample machines' scratch", 0x2DF700, 0x2DF800,     # v0.52 merge: the recorder's GAIN words rgain/rgfac too
+     ("dnfw.waverider.dsp.SMP_SCRATCH_DM", "dnfw.waverider.dsp.REC_GAIN_DM", "dnfw.sampler.machines"), True),
     ("recorder staging", 0x2DF800, 0x2DF880, ("dnfw.sampler.machines", "dnfw.waverider.dsp.SMP_STAGE_DM"), True),
     ("fast link", 0x2DF880, 0x2DFD80, ("dnfw.sampler.machines", "dnfw.waverider.dsp.SMP_LINK_DM"), True),
     ("decimators", 0x2DFD80, 0x2E0080, ("dnfw.waverider.dsp.SMP_DEC_DM",), True),
