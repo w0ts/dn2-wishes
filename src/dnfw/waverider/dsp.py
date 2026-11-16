@@ -96,12 +96,11 @@ PERC_STATE_DM, PERC_STATE_STRIDE = 0x2DE180, 128             # 16 voices x 32 wo
 PERC_TABLES_DDR = 0x81216000                 # dnfw.perc.machines.tables_bytes
 # 2026-11-12 (perf, opt-synths; docs/memory-map.md's DSP claims, holes F1 and F3): L1 copies of what PERC's voices
 # look up every sample, which the program reads instead of the DDR originals (those stay, as does the link's
-# shipping): exp2 (513 words) in F1, tan (514) in F3. The holes were zeros in the upload already (spans() pads),
-# so the upload is the same size. The sine is stock's own L1 sine S1 (STOCK_SINE_DM: 257 f32, sin(2 pi k / 256),
+# shipping): exp2 (513 words) in F1. The hole was zeros in the upload already (spans() pads), so the upload is the
+# same size. (tan stays in DDR: F3 is the bus FDN8 instances' stores, dnfw.inserts.bus.FD_L1 0x2E4050..0x2E53D0.) The sine is stock's own L1 sine S1 (STOCK_SINE_DM: 257 f32, sin(2 pi k / 256),
 # loaded by stock's boot stream into block 0 and never written at run time, the runner's write-watch): the User's
 # merge of SHFT's sine into it, 26 of its words one ulp apart.
 PERC_EXP2_DM = 0x2E0640                      # .. 0x2E0E44
-PERC_TAN_DM = 0x2E4080                       # .. 0x2E4888
 STOCK_SINE_DM, STOCK_SINE_N = 0x25D980, 257
 # the Machinedrum machines (v0.17, docs/md.md): their tables (the sine, which the DSP fills
 # itself, then the host's and DSP2's tables, read from the owner's MD firmware at build
@@ -479,7 +478,6 @@ def spans() -> list[tuple[str, int, bytes]]:
         ("the stock track buffers in L1 (zeros; 256 B extra block, then 16 x 128 B)", TRACKAUX_DM,
          bytes(TRACKAUX_BYTES + TRACKBUF_BYTES)),
         *_ins_state_spans(),
-        ("PERC's tan table, its L1 copy (2026-11-12)", PERC_TAN_DM, _perc_tan()),
         ("FDN8 state: its words, the LFOs' phases, the stock buffers' chunk table", FDN8_STATE_DM, _fdn8_state()),
         ("XDLY state: its words (zeros)", XDLY_STATE_DM, _xdly_state()),
         ("Machinedrum / Monomachine voices: 16 slots x 1 KB (zeros; L2 until 2026-11-10)", MD_STATE_DM,
@@ -501,14 +499,6 @@ def _perc_exp2() -> bytes:
     data, at = PM.tables_bytes()
     out = data[at["exp2"]:at["tan"]]
     assert PERC_EXP2_DM + len(out) <= TRACKBUF_CODE_DM
-    return out
-
-
-def _perc_tan() -> bytes:
-    from ..perc import machines as PM
-    data, at = PM.tables_bytes()
-    out = data[at["tan"]:]
-    assert PERC_TAN_DM + len(out) <= 0x2E4888          # F3's claim (docs/memory-map.md)
     return out
 
 

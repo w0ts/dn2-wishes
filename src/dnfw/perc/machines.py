@@ -187,7 +187,7 @@ class Layout:
                 k = [x for x, _ in TABLES].index(n)
                 at_ += 4 * len(TABLES[k][1]())
             self.sin = at_
-        # 2026-11-12 (perf): the L1 copies (dnfw.waverider.dsp PERC_EXP2_DM, PERC_TAN_DM) read instead, and the sine
+        # 2026-11-12 (perf): an L1 copy read instead (dnfw.waverider.dsp PERC_EXP2_DM; l1_tan none since), and the sine
         # at SIN_AT (stock's L1 sine, dsp.STOCK_SINE_DM: sin_ reads within one turn, its 257 points suffice)
         self.l1_exp2, self.l1_tan, self.sin_at = l1_exp2, l1_tan, sin_at
         if l1_exp2 is not None:

@@ -548,8 +548,7 @@ def test_every_table_perc_reads_is_loaded_by_a_span():
     sdata, at = SL.tables_bytes()
     pdata, pat = PM.tables_bytes()
     sine, tan, exp2 = sdata[at["sin"]:at["pow2"]], pdata[pat["tan"]:], pdata[:pat["tan"]]
-    # 2026-11-12 (perf): the program reads L1 copies of exp2 and tan (dsp.PERC_EXP2_DM, PERC_TAN_DM), loaded by REGION
-    # spans, and stock's own L1 sine (dsp.STOCK_SINE_DM, loaded by stock's stream); the DDR originals and the link's
+    # 2026-11-12 (perf): the program reads an L1 copy of exp2 (dsp.PERC_EXP2_DM), loaded by a REGION span, and stock's own L1 sine (dsp.STOCK_SINE_DM, loaded by stock's stream); the DDR originals and the link's
     # shipping stay
     l1 = [(a, a + len(b), b) for _, a, b in dsp.spans()]
 
@@ -566,7 +565,7 @@ def test_every_table_perc_reads_is_loaded_by_a_span():
     assert L.sin == dsp.STOCK_SINE_DM and len(dsp.stock_sine()) == 4 * 257, "PERC's sine is not stock's S1"
     s1 = struct.unpack("<257f", dsp.stock_sine())
     assert max(abs(x - math.sin(2 * math.pi * k / 256)) for k, x in enumerate(s1)) < 1e-6, "S1 is not a sine"
-    assert in_l1(L.T["tan"], tan), "PERC's tan is not in its L1 copy"
+    assert L.T["tan"] == base_sin - len(tan), "PERC's tan is not read where it is shipped"
     assert in_l1(L.T["exp2"], exp2), "PERC's exp2 is not in its L1 copy"
 
 

@@ -36,8 +36,7 @@ def layout(state=None, scratch=None, tables=None, sin=None) -> M.Layout:
                     mnm_dt=dsp.MNM_DT_L2, mnm_render=dsp.MNM_RENDER_DM,
                     md_shipped=dsp.SMP_POOL_DDR + SM.TABLE_AREA,
                     md_ready=dsp.SMP_POOL_DDR + SM.TABLE_READY,
-                    l1_exp2=dsp.PERC_EXP2_DM, l1_tan=dsp.PERC_TAN_DM,
-                    sin_at=dsp.STOCK_SINE_DM)
+                    l1_exp2=dsp.PERC_EXP2_DM, sin_at=dsp.STOCK_SINE_DM)
 
 
 def table_words(L: M.Layout) -> dict[int, int]:
