@@ -16,12 +16,25 @@ mod_mask_hook:
         rts
 
 | 0x400272d4 (was: jsr 0x40137a06, the LFO evaluator, its seven arguments on the stack):
-| mod_eval_pre, then on into the evaluator with the stack as the caller left it. The caller
-| treats d0-d1/a0-a1 as the evaluator's scratch.
+| mod_eval_pre, then the evaluator with the caller's seven arguments pushed again, then the
+| matrix's routes (csrc/matrix mx_eval(B), B the first argument, still on the stack: the
+| evaluator writes only its own locals). The caller treats d0-d1/a0-a1 as the evaluator's
+| scratch.
         .globl  mod_eval
 mod_eval:
         jsr     mod_eval_pre
-        jmp     0x40137a06
+        lea     -28(%sp), %sp
+        move.l  32(%sp), (%sp)
+        move.l  36(%sp), 4(%sp)
+        move.l  40(%sp), 8(%sp)
+        move.l  44(%sp), 12(%sp)
+        move.l  48(%sp), 16(%sp)
+        move.l  52(%sp), 20(%sp)
+        move.l  56(%sp), 24(%sp)
+        jsr     0x40137a06
+        jsr     mx_eval
+        lea     28(%sp), %sp
+        rts
 
 | 0x40137d7a, the evaluator's write of one LFO into its DEST cell (was: movea.l 52(%sp),%a0 ;
 | mvs.w 82(%a4),%d1, 8 bytes; now jsr here + nop). d7 is DEST (0..100, bound-checked), a5 the

@@ -875,7 +875,8 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     _need(content, MOD_EVAL_SITE + 6, bytes.fromhex("4fef001c"), "... and pops its seven arguments")
     edit(MOD_EVAL_SITE, bytes.fromhex("4eb9") + _long(csyms["mod_eval"]),
          "the frame's LFO evaluator: the lower LFOs' last writes into higher LFOs' controls added "
-         "into the mirror first (mod_eval_pre), then stock's 0x40137a06", MOD_EVAL_STOCK)
+         "into the mirror first (mod_eval_pre), then stock's 0x40137a06, then the matrix's routes (mx_eval)",
+         MOD_EVAL_STOCK)
     _need(content, MOD_WB_SITE - 0x10, bytes.fromhex("752c004a72647f4225470068b2876538"),
           "the write: DEST = mvs.b 74(%a4) into d7, bound-checked against 100")
     _need(content, MOD_WB_SITE + 8, bytes.fromhex("4df07a00"), "... the cell: lea (%a0,%d7.l*2),%fp")
@@ -1078,8 +1079,10 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
                  "wish_loads", "wish_links_in", "wish_saves", "wish_links_out", "wish_reentered", "wish_full",
                  "wish_copies", "wish_carries", "wish_clears", "wish_get", "wish_put", "wish_find",
                  "wish_pend_head", "wish_pend_tail", "wish_cells_written", "wish_resolved", "wish_missing",
-                 "wish_wants", "wish_io_fails"):
+                 "wish_wants", "wish_io_fails", "wish_edits"):
         layout[name] = csyms[name]              # 2026-11-11: the wishes record (csrc/wishes): the checks read them
+    for name in ("mx_poll", "mx_eval", "mx_lay", "mx_compiles"):
+        layout[name] = csyms[name]              # 2026-11-12: the matrix (csrc/matrix): the checks call them
     for name in ("mod_mask_hook", "mod_lfo_mask", "mod_eval", "mod_eval_pre", "mod_wb", "mod_wb_cell",
                  "mv_begin", "mv_cell", "mv_poll", "sl_lastv", "wr_screen"):
         layout[name] = csyms[name]              # 2026-11-11: csrc/modulation (the checks call them)

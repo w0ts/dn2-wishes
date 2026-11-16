@@ -82,12 +82,14 @@ struct wish {
 /* Tags (tlv.c). Bit 15 must understand, bit 14 tied to the stock part; the rest the field's number, never reused. */
 #define WT_MUST 0x8000u
 #define WT_MACHINE 0x4000u
+#define WT_MX_ROUTES 0x0010u           /* the matrix's routes (csrc/matrix/matrix.c, docs/matrix.md) */
 
 /* table.c */
 extern u8 wish_busy;
 extern u32 wish_n, wish_ready, wish_reentered, wish_full;
 extern u32 wish_wants;
 extern u32 wish_loads, wish_links_in, wish_saves, wish_links_out, wish_copies, wish_carries, wish_clears;
+extern volatile u32 wish_edits;        /* any entry's record changed (made, copied, cleared, put, read): the matrix re-reads */
 void wish_init(void);
 int wish_take(void);
 void wish_give(void);

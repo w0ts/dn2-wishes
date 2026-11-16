@@ -136,6 +136,8 @@ def ram() -> list[Extent]:
                       "the system meter's state: its counters and figures (csrc/meter)")]
             + [Extent(RAM, PG.WISH_RAM, PG.WISH_BYTES,
                       "the wishes record: the sounds' records, their index and the cells for the +Drive (csrc/wishes)")]
+            + [Extent(RAM, PG.MX_RAM, PG.MX_BYTES,
+                      "the matrix: each track's routes laid out for the audio frame (csrc/matrix)")]
             + [Extent(RAM, PG.MOD_RAM, PG.MOD_BYTES,
                       "modulation's state: the LFO cascade's shadow cells, the moving controls (csrc/modulation)")]
             + [Extent(RAM, PG.PROF_RAM, PG.PROF_BYTES,

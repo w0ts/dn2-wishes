@@ -97,11 +97,12 @@ def main() -> int:
     machine, state = harness(a, disk)
     uc = machine.uc
     from unicorn import UC_PROT_ALL, UcError
-    for page, n in ((WISH_RAM, WISH_MAP), (SCRATCH, 0x10000)):
-        try:
-            uc.mem_map(page, n, UC_PROT_ALL)
-        except UcError:
-            pass
+    for at, n in ((WISH_RAM, WISH_MAP), (SCRATCH, 0x10000)):
+        for page in range(at & ~0xFFFFF, at + n, 0x100000):     # page by page: a snapshot may hold one of them
+            try:                                                # already (the matrix's UI pass reads MX_RAM)
+                uc.mem_map(page, 0x100000, UC_PROT_ALL)
+            except UcError:
+                pass
     count = Counter(uc)
 
     def i32(name):

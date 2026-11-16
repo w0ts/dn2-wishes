@@ -257,5 +257,6 @@ int wish_put(u32 sound, u32 tag, const u8 *v, u32 vlen)
     if (len < 0)
         return -4;
     w->len = (u16)len;
+    wish_edits++;
     return 0;
 }

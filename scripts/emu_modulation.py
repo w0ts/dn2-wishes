@@ -375,6 +375,9 @@ def eval_cost(build, snapshot, sym, dests, frames=8):
     for _ in range(frames):
         m.call(SMOOTHER, SRC)
         _, n = m.cost(caller, OUT, rate, 0xFFFF, 0, o1, o2, 0)
+        if build and "mx_eval" in sym:          # the matrix's share (csrc/matrix, its own constant cost and gate
+            _, k = m.cost(sym["mx_eval"], OUT)  # step emu_matrix.py): not the cascade's
+            n -= k
         worst = max(worst, n)
     return worst
 

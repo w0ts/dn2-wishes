@@ -32,6 +32,7 @@ u32 wish_reentered D_ = 0, wish_full D_ = 0;
 u32 wish_loads D_ = 0, wish_links_in D_ = 0, wish_saves D_ = 0, wish_links_out D_ = 0;
 u32 wish_wants D_ = 0;                  /* entries made from a link alone since store.c last looked */
 u32 wish_copies D_ = 0, wish_carries D_ = 0, wish_clears D_ = 0;
+volatile u32 wish_edits D_ = 0;
 
 void wish_init(void)
 {
@@ -98,6 +99,7 @@ static void copy_entry(struct wish *to, const struct wish *from)
 
     for (k = 0; k < words; k++)
         d[k] = s[k];
+    wish_edits++;
 }
 
 static void clear_entry(struct wish *w)
@@ -106,6 +108,7 @@ static void clear_entry(struct wish *w)
     w->len = 0;
     w->flags = 0;
     w->pad = 0;
+    wish_edits++;
 }
 
 /* -> 1 with the lock, 0 (counted) when another caller holds it: an interrupt's copy, or a task this one interrupted */

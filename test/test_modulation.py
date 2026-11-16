@@ -57,15 +57,21 @@ def _chunk(va: int, n: int) -> bytes:
     return code[va - c["load"]:va - c["load"] + n]
 
 
-def test_the_frames_evaluator_call_goes_through_the_pre_pass_into_stocks():
+def test_the_frames_evaluator_call_goes_through_the_pre_pass_into_stocks_then_the_matrix():
     from dnfw.waverider import coldfire as CF
     e = _edit(CF.MOD_EVAL_SITE)
     assert bytes.fromhex(e["stock"]) == CF.MOD_EVAL_STOCK == bytes.fromhex("4eb940137a06")
     new = bytes.fromhex(e["new"])
     lay = _spec()["layout"]
     assert new == bytes.fromhex("4eb9") + struct.pack(">I", lay["mod_eval"])
-    stub = _chunk(lay["mod_eval"], 12)
-    assert stub == bytes.fromhex("4eb9") + struct.pack(">I", lay["mod_eval_pre"]) + bytes.fromhex("4ef940137a06")
+    want = (bytes.fromhex("4eb9") + struct.pack(">I", lay["mod_eval_pre"])
+            + bytes.fromhex("4fefffe4")                                # lea -28(%sp),%sp
+            + bytes.fromhex("2eaf0020")                                # move.l 32(%sp),(%sp): the first argument again
+            + b"".join(bytes.fromhex("2f6f") + struct.pack(">HH", 32 + 4 * k, 4 * k) for k in range(1, 7))
+            + bytes.fromhex("4eb940137a06")                            # stock's evaluator, the seven arguments in place
+            + bytes.fromhex("4eb9") + struct.pack(">I", lay["mx_eval"])   # then the matrix (csrc/matrix), B still first
+            + bytes.fromhex("4fef001c4e75"))                           # lea 28(%sp),%sp ; rts
+    assert _chunk(lay["mod_eval"], len(want)) == want
 
 
 def test_the_evaluators_write_keeps_its_two_instructions():

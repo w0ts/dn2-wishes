@@ -52,6 +52,7 @@ LINK_SOURCES = [SOURCE.parents[1] / "sampler" / "link.c", SOURCE.parents[1] / "s
                 SOURCE.parents[1] / "wishes" / "tlv.c",
                 SOURCE.parents[1] / "wishes" / "store.c",
                 SOURCE.parents[1] / "wishes" / "hooks.S",
+                SOURCE.parents[1] / "matrix" / "matrix.c",          # the matrix's routes (docs/matrix.md)
                 SOURCE.parents[1] / "modulation" / "cascade.c",       # LFOs on the LFOs above them (2026-11-11)
                 SOURCE.parents[1] / "modulation" / "hooks.S",
                 SOURCE.parents[1] / "modulation" / "moving.c",        # controls that move (2026-11-11)
@@ -107,7 +108,8 @@ WISH_ENTRIES = ["wish_memcpy_stub", "wish_memset_stub", "wish_load_stub", "wish_
                 "wish_loads", "wish_links_in", "wish_saves", "wish_links_out", "wish_copies", "wish_carries",
                 "wish_clears", "wish_cells_written", "wish_cells_found", "wish_cells_read", "wish_resolved",
                 "wish_missing", "wish_pend_head", "wish_pend_tail", "wish_pend_lost", "wish_io_fails",
-                "wish_get", "wish_put", "wish_find"]
+                "wish_get", "wish_put", "wish_find", "wish_edits",
+                "mx_poll", "mx_eval", "mx_lay", "mx_compiles"]     # the matrix (csrc/matrix)
 LINK_ENTRIES = LINK_ENTRIES + WISH_ENTRIES + DEVTEST_ENTRIES + LZMA7_ENTRIES + MOD_ENTRIES + SLIDE_ENTRIES + METER_ENTRIES + FDN8_ENTRIES + XDLY_ENTRIES + FXP_ENTRIES + INS_ENTRIES + HOLD_ENTRIES
 
 
@@ -136,6 +138,8 @@ def compile_page(header: str, *, base: int) -> tuple[bytes, dict[str, int], int]
         from . import pages as PG
         defines["METER_RAM"] = hex(PG.METER_RAM)      # the system meter's block (csrc/meter)
         defines["WISH_AREA"] = hex(PG.WISH_RAM) + "u"  # the wishes record's RAM (csrc/wishes/wish.h)
+        defines["MX_RAM"] = hex(PG.MX_RAM) + "u"      # the matrix's tables (csrc/matrix/matrix.c)
+        defines["MX_BYTES"] = PG.MX_BYTES
         defines["WR_LOAD_BOUND"] = PG.TYPES_LAST + 2   # the stored-sound LOAD's machine bound (csrc/wishes/hooks.S replays it)
         defines["MOD_RAM"] = hex(PG.MOD_RAM) + "u"    # csrc/modulation's state (2026-11-11)
         defines["MOD_CASCADE_BYTES"] = PG.MOD_CASCADE_BYTES

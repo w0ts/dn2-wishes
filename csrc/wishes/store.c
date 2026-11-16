@@ -193,6 +193,7 @@ static void fill(u32 h0, u32 h1, int found)
             w->rec[b] = IO[HEAD + b];
         w->flags = W_DISK | (wish_tlv_locked(w->rec, w->len) ? W_LOCKED : 0);
         wish_cache_put(w);
+        wish_edits++;
     }
     wish_give();
 }

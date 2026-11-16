@@ -53,7 +53,11 @@ failure:
    memcpy and memset through the four hooks, on a Python +Drive at the driver: every byte outside the link's
    lane as stock saves it, the link and the cell as the host reference spells them, a record copied, carried,
    dropped, written once 0.5 s on, read back from a cell; nothing written under ERASE's lock; no fault.
-6s. **DIRECT JUMP** (`emu_jump.py`, docs/jump.md): the sequencer ticked through stock's own ISR;
+6x. **the matrix** (2026-11-12, `emu_matrix.py`, docs/matrix.md): the frame's parameter path called by hand,
+   stock's route 1 on every voice row against the same route in the row's sound's record: the heard slot the same
+   every frame (one route a row; then three into one slot, clamped in stock's order); the matrix's instructions the
+   same with no route and with every route, under its bound.
+6s.**DIRECT JUMP** (`emu_jump.py`, docs/jump.md): the sequencer ticked through stock's own ISR;
    off is stock's state every tick; on, every track goes on from its own step (Elektron's rule); a cue
    that is not the PTN view's stays stock's; the setting persists in its sector.
 6q. **UI fuzz** (v0.33, `emu_fuzz_ui.py`): the sample pages driven at random, two seeds.
@@ -185,7 +189,7 @@ TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platfo
          "test/test_inserts_post.py",                         # the post inserts (CHOR, WIDE): the same
          "test/test_inserts_bus.py",                          # the bus inserts (FDN8, XDLY per track): the same
          "test/test_inserts_c.py",                            # the ColdFire's packed values against design.pack
-         "test/test_wishes.py", "test/test_wishes_c.py"]      # the wishes record: its stubs, its C on the host
+         "test/test_wishes.py", "test/test_wishes_c.py", "test/test_matrix_c.py"]      # the wishes record: its stubs, its C on the host
 HIT = re.compile(r"^\s+([0-9a-f]{8}):", re.M)
 
 # v0.38 (owner, 2026-11-01): the steps by name, for --only and --list, in the order a full run
@@ -243,6 +247,7 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("pools", "per-project pools (ColdFire)"),
        ("erase", "ERASE MOD DATA (ColdFire)"),
        ("wishes", "the wishes record through stock's SAVE, LOAD, memcpy, memset (ColdFire)"),
+       ("matrix", "the matrix's routes heard as stock's route 1, at a constant cost (ColdFire)"),
        ("engine", "engine + LOAD/SAVE"),
        ("boot", "boot from reset"),
        ("fuzz", "UI fuzz, two seeds, the audio interrupt at its real rate (ColdFire)"),
@@ -874,6 +879,26 @@ def main() -> int:
             later("wishes", "the wishes record through stock's SAVE, LOAD, memcpy, memset (ColdFire)",
                   "the wishes record through stock's SAVE, LOAD, memcpy, memset (ColdFire)",
                   [wi_cmd, sorted(EMU_ENV.items())], wi_body)
+
+        # 6x. 2026-11-12: the matrix's routes (csrc/matrix, docs/matrix.md; scripts/emu_matrix.py): every voice row's
+        # route of ours heard frame by frame as stock's route 1 at the same depth (one a row, then three into one
+        # slot), and the frame's cost the same with no route and with every route, under its bound
+        if "mx_eval" in lay:
+            mx_js = work / "matrix.json"
+            mx_cmd = [a.venv, "-u", "scripts/emu_matrix.py", "--build", a.build, "--snapshot", snap, "--json", mx_js]
+
+            def mx_body(tdir):
+                rc, out = run("matrix", mx_cmd, logs, env=EMU_ENV, trace=tdir)
+                last = out.strip().splitlines()[-1] if out.strip() else ""
+                if rc != 0 or not last.startswith("PASS"):
+                    return False, "\n".join(l for l in out.splitlines() if "FAIL" in l)[-900:] or out[-900:]
+                r = json.loads(mx_js.read_text()) if mx_js.exists() else {}
+                return True, (f"{last[6:]}: every row's route heard as stock's route 1 every frame "
+                              f"({r.get('exact', {}).get('one_route')}), three into one slot too; cost "
+                              f"{r.get('cost')}")[:800]
+            later("matrix", "the matrix's routes heard as stock's route 1, at a constant cost (ColdFire)",
+                  "the matrix's routes heard as stock's route 1, at a constant cost (ColdFire)",
+                  [mx_cmd, sorted(EMU_ENV.items())], mx_body)
 
         # 6c. the RECORDER screen (v0.22): FUNC+VOICE opens it over any page, its knobs
         # change the recorder and never the track's sound, NO closes it, and the UI keeps
