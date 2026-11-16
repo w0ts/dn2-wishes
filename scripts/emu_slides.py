@@ -611,41 +611,6 @@ def main() -> int:
               r["D0"] == 0x12345678 and r["A4"] == 3 and r["D2"] == 3 and r["D3"] == 5 and r["A0"] == rec
               and r["D4"] == 0x44 and r["A2"] == 0xA2 and r["A5"] == 0xA5)
 
-        # ---- 11. velocity on our voices (2026-11-12, slide.c sl_vel): the track's VELOCITY cell, latched at the
-        # note (sl_pre), in the voice's frame slot SL_VEL_SLOT every frame for our machine types only; a stock
-        # sound's slot (FM TONE's KSA) is the smoother's, as stock leaves it ---------------------------------
-        vel_cell, vel_slot = 0x8000DD40 + 2 * T, 62
-        vs_was = machine.long(VSOUND + 4 * V)
-        type_at = snd + 0xDE
-        type_was = machine.read(type_at, 1)
-        put32(VSOUND + 4 * V, snd)
-
-        def vel_word():
-            return machine.word(CF_FRAME + 218 + 146 * V + 2 * (vel_slot - 25))
-        call(SYNC, snd, V)
-        put16(vel_cell, 80 << 8)
-        trig(0, f0 + 2600)
-        frame(), frame()
-        w_stock, src_stock = vel_word(), machine.word(SRC + 2 * idx(V, vel_slot))
-        machine.write(type_at, bytes([5]))
-        trig(0, f0 + 2700)
-        frame(), frame()
-        w_ours = vel_word()
-        put16(vel_cell, 20 << 8)                         # the track's next note's velocity, no note on this voice
-        frame(), frame()
-        w_kept = vel_word()
-        trig(0, f0 + 2800)
-        frame(), frame()
-        w_new = vel_word()
-        machine.write(type_at, type_was)
-        put32(VSOUND + 4 * V, vs_was)
-        check("velocity: a stock (FM TONE) voice's frame slot 62 is the smoother's, untouched",
-              w_stock == src_stock and w_stock != 80 << 8, f"{w_stock:#x} (source {src_stock:#x})")
-        check("velocity: our voice's frame slot 62 is the note's velocity, latched at the note",
-              w_ours == 80 << 8 and w_kept == 80 << 8 and w_new == 20 << 8,
-              f"{w_ours:#x}, kept {w_kept:#x}, next note {w_new:#x}")
-        report["velocity_words"] = [w_stock, w_ours, w_kept, w_new]
-
         samp_lock_checks(machine, call, frame, trig, table, snd, lay, put16, put32)
 
     # ---- the stored form of a stock pattern loads the same here as on stock ----------------
@@ -751,6 +716,42 @@ def main() -> int:
         panel.settle(20_000_000)
         report["trig2_frame"] = bytes(panel.capture.frames[-1]).hex() if panel.capture.frames else None
         panel.screen("stock_trig2_idle")
+
+    if build:
+        # ---- 11. velocity on our voices (2026-11-12, slide.c sl_vel; last: its trigs must not disturb the checks above): the track's VELOCITY cell, latched at the
+        # note (sl_pre), in the voice's frame slot SL_VEL_SLOT every frame for our machine types only; a stock
+        # sound's slot (FM TONE's KSA) is the smoother's, as stock leaves it ---------------------------------
+        vel_cell, vel_slot = 0x8000DD40 + 2 * T, 62
+        vs_was = machine.long(VSOUND + 4 * V)
+        type_at = snd + 0xDE
+        type_was = machine.read(type_at, 1)
+        put32(VSOUND + 4 * V, snd)
+
+        def vel_word():
+            return machine.word(CF_FRAME + 218 + 146 * V + 2 * (vel_slot - 25))
+        call(SYNC, snd, V)
+        put16(vel_cell, 80 << 8)
+        trig(0, f0 + 2600)
+        frame(), frame()
+        w_stock, src_stock = vel_word(), machine.word(SRC + 2 * idx(V, vel_slot))
+        machine.write(type_at, bytes([5]))
+        trig(0, f0 + 2700)
+        frame(), frame()
+        w_ours = vel_word()
+        put16(vel_cell, 20 << 8)                         # the track's next note's velocity, no note on this voice
+        frame(), frame()
+        w_kept = vel_word()
+        trig(0, f0 + 2800)
+        frame(), frame()
+        w_new = vel_word()
+        machine.write(type_at, type_was)
+        put32(VSOUND + 4 * V, vs_was)
+        check("velocity: a stock (FM TONE) voice's frame slot 62 is the smoother's, untouched",
+              w_stock == src_stock and w_stock != 80 << 8, f"{w_stock:#x} (source {src_stock:#x})")
+        check("velocity: our voice's frame slot 62 is the note's velocity, latched at the note",
+              w_ours == 80 << 8 and w_kept == 80 << 8 and w_new == 20 << 8,
+              f"{w_ours:#x}, kept {w_kept:#x}, next note {w_new:#x}")
+        report["velocity_words"] = [w_stock, w_ours, w_kept, w_new]
 
     # ---- the TRIG page, driven as a person would (the build only, last: it changes the UI) ---
     if build and a.png_dir:
