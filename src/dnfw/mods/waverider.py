@@ -123,11 +123,14 @@ def _md_ui() -> tuple[int, bytes, str] | None:
 
 def ram() -> list[Extent]:
     from ..sampler import machines as SM
+    from ..waverider import pages as PG
     from . import bootscreen as B
     return ([Extent(RAM, load, len(code), what) for load, code, what in _chunks()]
             + B.ram()
             + [Extent(RAM, SM.MIRROR, SM.MIRROR_BYTES,
-                      "the sample link's mirror of the pool (csrc/sampler/link.c, v0.14)")])
+                      "the sample link's mirror of the pool (csrc/sampler/link.c, v0.14)")]
+            + [Extent(RAM, PG.METER_RAM, PG.METER_BYTES,
+                      "the system meter's state: its counters and figures (csrc/meter)")])
 
 
 def _main_os(original: bytes) -> bytes:

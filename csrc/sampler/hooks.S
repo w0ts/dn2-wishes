@@ -54,6 +54,8 @@ smp_quant_hook:
 smp_tdm_hook:
         lea     -20(%sp), %sp
         movem.l %d0-%d2/%a0-%a1, (%sp)
+        move.l  0xfc07000c, %d0         | the system meter (csrc/meter): the ISR's time from here
+        move.l  %d0, METER_RAM + 4      | mtr_t_in (its entry 0x40025e36..here is Overbridge's path: untouched)
         move.l  -56(%fp), -(%sp)
         jsr     smp_tdm
         addq.l  #4, %sp

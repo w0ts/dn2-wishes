@@ -522,6 +522,27 @@ PJ_END_STOCK = bytes.fromhex("10044cd7043c4fef0024")
 PJ_NEW_SITE = 0x40042AF0                # move.l 12(%fp),(%sp) ; move.l %a2,-(%sp) ; jsr 0x4003eb62
 PJ_NEW_STOCK = bytes.fromhex("2eae000c2f0a4ebac06a")
 POLL_STOCK = bytes.fromhex("4eb94011d5d4")
+# the system meter (csrc/meter/hooks.S, docs/meter.md): the ColdFire's load from the idle
+# task's parked time (usbprobe's method, docs/usbprobe.md): the context switch and the audio
+# ISR's frame count, each one whole 6-byte instruction replayed by the routine it calls. The
+# ISR's start is taken in the link's existing hook (TDM_SITE): its code from 0x40025e36 up to
+# there is Overbridge's path and stays stock's (gate_overbridge.py; v0.41).
+# OS 1.12: the sites are 1.11's unchanged; FRAMES (the ISR_OUT operand) is BSS, +0x1000
+METER_SITES = (
+    (0x40000438, "203cffffdfff", "mtr_switch", "the context switch, interrupts masked: move.l #0xffffdfff,%d0"),
+    (0x40027B82, "52b94058f8d4", "mtr_isr_out", "the audio ISR's frame count before its rte: addq.l #1,0x4058f8d4"),
+)
+METER_GUARDS = (                         # read, never written: what the hooks rely on
+    (0x40000410, "46fc2700", "meter: the switch masks interrupts"),
+    (0x40000452, "4ce8ffff000c4e73", "meter: ... and reloads every register from the incoming TCB"),
+    (0x40025E36, "4e56ff1448d73fff", "meter: the audio ISR's register save"),
+    (0x40027BBE, "4cee3fffff144e5e4e73", "meter: ... and its only rte"),
+    (0x400CF246, "60fe", "meter: the idle task's spin (IDLE_PC, 1.11 0x400cf0e2)"),
+    (0x400CF24E, "4eb94002e8d0", "meter: ... in its loop (digihealth's 1.12 site)"),
+    (0x40001608, "2f0a2f02246f000c", "meter: the mutex take the heap walk calls"),
+    (0x4000172A, "2f0a2f02246f000c", "meter: ... and the give"),
+    (0x4012014A, "4879445e2e404eb940001608", "meter: the allocator locks the heap mutex 0x445e2e40"),
+)
 
 
 def _cave_free(content: bytes, cave: tuple[int, int]) -> None:
@@ -761,6 +782,13 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     for va, want, why in SLIDE_DRAW_GUARDS:
         _need(content, va, bytes.fromhex(want), why)
 
+    # the system meter (csrc/meter): FUNC held, DSP %, CPU % and the free heap on every page
+    for va, want, why in METER_GUARDS:
+        _need(content, va, bytes.fromhex(want), why)
+    for va, stock_hex, sym, what in METER_SITES:
+        edit(va, bytes.fromhex("4eb9") + _long(csyms[sym]),
+             f"the system meter: {what} -> {sym}, which replays it", bytes.fromhex(stock_hex))
+
     # DIRECT JUMP (csrc/jump, docs/jump.md): off unless PTN + YES turns it on
     for va, want, why in JUMP_GUARDS:
         _need(content, va, bytes.fromhex(want), why)
@@ -876,8 +904,11 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
                  "slc_pop", "slc_poll", "slc_stock_asked", "slc_fails", "slc_linked", "smp_norm_state",
                  "smp_pl_quiesce", "smp_analysis_slot", "smp_slot_frames", "wr_draws", "smp_pos_in", "smp_playhead",
                  # v0.40: folders inside folders
-                 "smp_lib_fpar", "smp_fb_titletext", "smp_fb_delete"):   # the sample link's state (v0.15)
+                 "smp_lib_fpar", "smp_fb_titletext", "smp_fb_delete",
+                 # the system meter (csrc/meter): its hooks and the figures the checks read
+                 "mtr_isr_out", "mtr_switch", "mtr_poll", "mtr_draw"):   # the sample link's state (v0.15)
         layout[name] = csyms[name]
+    layout["mtr_ram"] = pages.METER_RAM      # the system meter's state block (csrc/meter/meter.c MTR_*)
     # v0.45: PING removed (owner, 2026-11-08): its chunk (the FLTR list's 'Ping', the filter
     # names, the LOAD bound, slot_to_id, the descriptor, the curve) is no longer composed, so
     # all of those stay stock and a sound saved with filter 6 loads as Multi-Mode

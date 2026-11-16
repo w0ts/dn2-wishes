@@ -1,17 +1,10 @@
 /* PERC's pages drawn as the Machinedrum's main screen (docs/md.md, "The page", v0.20).
  *
- * Under the DN2's header (its title, and the value of a knob as it turns), the MD's main
- * screen, as its own screen code draws it (0x229dd2 and the routines beside it, run in an
- * m68k emulator, dnfw.md.ui), eight rows shorter: the MD's screen has no header.
+ * Under the DN2's header (its title, and the value of a knob as it turns): v0.20..v0.43 drew
+ * the Machinedrum's main screen here (the MD's knobs, the tempo, the machine line); v0.44
+ * lays the page out as the DN2's own SYN pages are, bigger (see "v0.44" below).
  *
- *   right, x 48..127: the eight parameters in two rows of four cells 20 wide, each its
- *     name above a knob; dotted lines between the cells and under the names, a solid line
- *     along the bottom; a "clip" over two cells whose parameters belong together.
- *   left: the level bar (LEV); the kit box (inverted), here the track and the machine;
- *     a line under it, here PERC and the page; the machine line at the bottom, inverted:
- *     TRX > BD > SYNT (page 1) or TFX (page 2, the track effects).
- *
- * The knob, its 128 pointers, the clip and the three fonts are the Machinedrum's own,
+ * The small and symbol fonts are the Machinedrum's own,
  * read from the owner's MD OS when the build is made (dnfw.md.ui) and placed in RAM at
  * MDUI_LOAD by the mod; none of it is in this source. Without them (MDUI_LOAD does not
  * hold the blob) md_page_draw returns 0 and page.c draws the page as before.
@@ -30,8 +23,6 @@ typedef unsigned char u8;
 #define RECORD(id) ((const int *)(0x401F83A4u + 60u * (id)))
 #define FRAMES (*(volatile u32 *)0x4058F8D4u)                      /* 1,500 a second */
 #define UI_TRACK (*(volatile u8 *)0x42432A6Cu)
-#define CTL_FRAME ((volatile u16 *)0x80005E60u)
-#define TEMPO_WORD 108                                             /* BPM x 120 */
 #define MDUI ((const u8 *)MDUI_LOAD)
 #define NAME_SHORT_OF(id) (*(const char **)(0x401F83A4u + 60u * (id) + 0x30u))
 
@@ -42,8 +33,6 @@ static int ok(void)
     return MDUI[0] == 'M' && MDUI[1] == 'D' && MDUI[2] == 'U' && MDUI[3] == 'I'
            && (MDUI[4] << 8 | MDUI[5]) == MDUI_VERSION;
 }
-
-static u16 be16(const u8 *p) { return (u16)(p[0] << 8 | p[1]); }
 
 static void put(void *c, int x, int y, int on)
 {
@@ -56,22 +45,6 @@ static void fill(void *c, int x0, int y0, int x1, int y1, int on)
     for (int y = y0; y <= y1; y++)
         for (int x = x0; x <= x1; x++)
             put(c, x, y, on);
-}
-
-/* a bitmap of columns (data, mask), bit r = row r up from Y: the mask's pixels cleared,
- * then the data's set, as the MD's blit (0x21124c) */
-static void blit(void *c, int x, int y, int cols, int rows, const u8 *p, int wide)
-{
-    for (int k = 0; k < cols; k++) {
-        u32 d = wide ? be16(p + 4 * k) : p[2 * k];
-        u32 m = wide ? be16(p + 4 * k + 2) : p[2 * k + 1];
-        for (int r = 0; r < rows; r++) {
-            if (d >> r & 1)
-                put(c, x + k, y + r, 1);
-            else if (m >> r & 1)
-                put(c, x + k, y + r, 0);
-        }
-    }
 }
 
 static const u8 *glyph(int font, int ch)
@@ -182,30 +155,136 @@ static void invert(void *c, int x0, int y0, int x1, int y1)
                 bits[x * cv[3] + (y >> 5)] ^= 0x80000000u >> (y & 31);
 }
 
-/* the rows, under the header (y 54..63): the MD's, closed up by eight */
-#define LINE_Y 0                /* the solid line along the bottom (MD 0) */
-#define KNOB_B 3                /* the bottom row's knobs (MD 5) */
-#define DOT_B 18                /* dotted, over the bottom row's knobs (MD 21) */
-#define NAME_B 20               /* the bottom row's names (MD 24) */
-#define DOT_M 27                /* dotted, between the rows (MD 31) */
-#define KNOB_A 29               /* the top row's knobs (MD 36) */
-#define DOT_A 44                /* dotted, under the top row's names (MD 53) */
-#define NAME_A 46               /* the top row's names (MD 56) */
-#define SEP_TOP 51              /* the cells' dotted separators end here (MD 61) */
-#define CLIP_UP 10              /* the clip over a knob's top (MD 47 - 36, 15 - 5) */
+/* v0.44 (owner, 2026-11-08: "bigger knobs, a bigger value font; no BPM, no >MNM, no
+ * machine line"): the pages laid out as the DN2's own SYN pages are, for reading at a
+ * glance. Under the DN2's header (y 54..63, its title: stock's, untouched):
+ *
+ *   left, x 0..30: the track box (inverted: TRK:nn and the machine's name) over LEV;
+ *   right, x 32..127: two rows of four cells 24 wide, each its control (a knob of
+ *     radius 8, or a choice's picture and its value) over its name, both names and values
+ *     in stock's own grid font (0x4011573c with the font page.c's grid uses).
+ *
+ * A row is 27 high: the name at its bottom (from base + 2), the control above it (the
+ * knob centred at base + 18). The top row's base is 27, the bottom row's 0. The FUNC-held
+ * readout (DSP %, CPU %, free heap) is the system meter's, in the title bar's corner
+ * (csrc/meter): drawn over stock's header while FUNC is held, never here. */
+#define TEXT ((void (*)(void *, u32, int, int, int, const char *, ...))0x4011573C)   /* (1.11: 0x4011545c) */
+#define FONT 0x44508ED8u                /* the grid's label font (page.c's FONT) */
+#define CENTRED 2
+#define CELL_X 32                       /* the first cell's left edge */
+#define CELL_W 24
+#define ROW_H 27                        /* a row: the top row's base is ROW_H, the bottom's 0 */
+#define KNOB_R 8
+#define KNOB_DY 18                      /* the knob's centre over its row's base */
+#define NAME_DY 2                       /* the name's y over its row's base (stock's font reaches 2 below its y) */
 
-static void grid(void *c)
+static int cell_x(int s) { return CELL_X + CELL_W * (s & 3); }
+static int row_base(int s) { return s < 4 ? ROW_H : 0; }
+
+/* sin of 0..90 degrees, x 127 */
+static const u8 SIN90[91] = {
+    0, 2, 4, 7, 9, 11, 13, 15, 18, 20, 22, 24, 26, 29, 31, 33, 35, 37, 39, 41, 43, 46, 48,
+    50, 52, 54, 56, 58, 60, 62, 64, 65, 67, 69, 71, 73, 75, 76, 78, 80, 82, 83, 85, 87, 88,
+    90, 91, 93, 94, 96, 97, 99, 100, 101, 103, 104, 105, 107, 108, 109, 110, 111, 112, 113,
+    114, 115, 116, 117, 118, 119, 119, 120, 121, 121, 122, 123, 123, 124, 124, 125, 125, 125,
+    126, 126, 126, 127, 127, 127, 127, 127, 127};
+
+static int isin(int deg)                /* sin(deg) x 127, any degree */
 {
-    for (int x = 67; x <= 107; x += 20)
-        for (int y = 1; y <= SEP_TOP; y += 2)
-            put(c, x, y, 1);
-    for (int x = 49; x <= 125; x += 2) {
-        put(c, x, DOT_A, 1);
-        put(c, x, DOT_M, 1);
-        put(c, x, DOT_B, 1);
+    deg %= 360;
+    if (deg < 0) deg += 360;
+    if (deg <= 90) return SIN90[deg];
+    if (deg <= 180) return SIN90[180 - deg];
+    if (deg <= 270) return -SIN90[deg - 180];
+    return -SIN90[360 - deg];
+}
+
+static void line(void *c, int x0, int y0, int x1, int y1);
+
+static void circle(void *c, int cx, int cy, int r)
+{
+    for (int x = 0, y = r, e = 1 - r; x <= y; x++) {
+        put(c, cx + x, cy + y, 1); put(c, cx - x, cy + y, 1); put(c, cx + x, cy - y, 1); put(c, cx - x, cy - y, 1);
+        put(c, cx + y, cy + x, 1); put(c, cx - y, cy + x, 1); put(c, cx + y, cy - x, 1); put(c, cx - y, cy - x, 1);
+        if (e < 0) e += 2 * x + 3;
+        else { e += 2 * (x - y) + 5; y--; }
     }
-    for (int x = 48; x <= 126; x++)
-        put(c, x, LINE_Y, 1);
+}
+
+/* a knob of radius 8: its ring, a thick pointer from the centre (7 o'clock at 0, 5 o'clock
+ * at 127, as stock's dials turn), a dot at the centre */
+static void big_knob(void *c, int cx, int cy, int v)
+{
+    circle(c, cx, cy, KNOB_R);
+    int deg = -135 + (v * 270 + 63) / 127;     /* 0 = straight up, clockwise */
+    int dx = (isin(deg) * (KNOB_R - 2) + 63) / 127, dy = (isin(deg + 90) * (KNOB_R - 2) + 63) / 127;
+    line(c, cx, cy, cx + dx, cy + dy);
+    line(c, cx + (dy ? 1 : 0), cy + (dy ? 0 : 1), cx + dx + (dy ? 1 : 0), cy + dy + (dy ? 0 : 1));
+    fill(c, cx - 1, cy - 1, cx + 1, cy + 1, 1);
+}
+
+static void cell_name(void *c, int s, const char *name)
+{
+    TEXT(c, FONT, cell_x(s) + CELL_W / 2, row_base(s) + NAME_DY, CENTRED, "%.4s", name);
+}
+
+static void cell_lit(void *c, int s)    /* p-locked: the cell inverted, as stock lights it */
+{
+    int b = row_base(s);
+    invert(c, cell_x(s), b, cell_x(s) + CELL_W - 1, b + ROW_H - 1);
+}
+
+/* the left column: the track box (TRK:nn, the machine's name on one or two lines, or the
+ * guard's V<n><where> while FUNC is held just after it wiped a voice) and LEV under it */
+static void left_panel(void *view, void *c, const char *name)
+{
+    int t = UI_TRACK;
+    fill(c, 0, 29, 30, 53, 1);
+    char b[8] = {'T', 'R', 'K', ':', 0, 0, 0, 0};
+    b[4] = (char)('0' + (t + 1) / 10);
+    b[5] = (char)('0' + (t + 1) % 10);
+    text(c, SMALL, (31 - text_w(SMALL, b, 6)) / 2, 46, b, 6, 0);
+    extern int smp_func_held;
+    char v[4];
+    if (smp_func_held && blown_text(v)) {
+        text(c, SMALL, (31 - text_w(SMALL, v, 3)) / 2, 38, v, 3, 0);
+    } else {
+        int len = slen(name, 12), cut = len;
+        if (text_w(SMALL, name, len) > 29)     /* two lines, at the last space that fits */
+            for (int k = len - 1; k > 0; k--)
+                if (name[k] == ' ' && text_w(SMALL, name, k) <= 29) {
+                    cut = k;
+                    break;
+                }
+        if (cut == len) {
+            text(c, SMALL, (31 - text_w(SMALL, name, len)) / 2, 38, name, len, 0);
+        } else {
+            const char *n2 = name + cut + 1;
+            int l2 = len - cut - 1;
+            text(c, SMALL, (31 - text_w(SMALL, name, cut)) / 2, 39, name, cut, 0);
+            text(c, SMALL, (31 - text_w(SMALL, n2, l2)) / 2, 32, n2, l2, 0);
+        }
+    }
+    /* LEV: the track's level, a bar between two rows of ticks; "CPU" in its place while
+     * the DSP leaves voices out for time (v0.30) */
+    extern int smp_skipped_any(void);
+    if (smp_skipped_any()) {
+        fill(c, 1, 20, 17, 26, 1);
+        text(c, SMALL, 3, 21, "CPU", 3, 0);
+    } else {
+        text(c, SMALL, 3, 21, "LEV", 3, 1);
+    }
+    for (int y = 1; y <= 17; y += 4) {
+        put(c, 2, y, 1); put(c, 3, y, 1);
+        put(c, 15, y, 1); put(c, 16, y, 1);
+    }
+    u8 flag;
+    const int *r = RECORD(TRACK_LEVEL_ID);
+    int span = r[3] - r[2], lv = GET_VALUE(view, TRACK_LEVEL_ID, &flag) - r[2];
+    int h = span > 0 ? lv * 17 / span : 0;
+    if (h > 17) h = 17;
+    if (h > 0)
+        fill(c, 6, 1, 12, h, 1);
 }
 
 /* PAGE 0: the machine's eight; PAGE 1: AMD AMF EQF EQG / FLTF FLTW FLTQ TYPE */
@@ -217,15 +296,10 @@ int md_page_draw(void *view, void *c, int page, int type)
     u32 nib = (u32)mach[0] << 24 | (u32)mach[1] << 16 | (u32)mach[2] << 8 | mach[3];
     if (page == 1)
         nib = MD_FX_NIBBLES;
-    int t = UI_TRACK;
     fill(c, 0, 0, 127, 53, 0);
-
-    /* the right: the eight cells */
-    grid(c);
     for (int s = 0; s < 8; s++) {
-        int col = s & 3, row = s >> 2, n = nib >> (28 - 4 * s) & 15;
+        int n = nib >> (28 - 4 * s) & 15, x0 = cell_x(s), base = row_base(s);
         u32 id = wr_ids[page][s];
-        int x0 = 48 + 20 * col, ny = row ? NAME_B : NAME_A, ky = row ? KNOB_B : KNOB_A;
         if (!(n & 1) || !id)
             continue;
         const char *name = NAME_SHORT_OF(id);
@@ -235,84 +309,18 @@ int md_page_draw(void *view, void *c, int page, int type)
             fmt_int(vb, knob(view, id), 0);
             name = vb;
         }
-        int len = slen(name, 4);
-        text(c, SMALL, x0 + (20 - text_w(SMALL, name, len)) / 2, ny, name, len, 1);
+        cell_name(c, s, name);
         if (id == PERC_TYPE_ID) {                       /* TYPE: the machine, not a knob */
             const char *syn = (const char *)mach + 4, *m = (const char *)mach + 7;
-            text(c, SMALL, x0 + (20 - text_w(SMALL, syn, 3)) / 2, ky + 7, syn, 3, 1);
-            text(c, SYM, x0 + (20 - text_w(SYM, m, 2)) / 2, ky + 1, m, 2, 1);
-            if (locked(view, id))               /* v0.27: p-locked, as stock lights it */
-                invert(c, x0 + 1, row ? 1 : DOT_M + 1, x0 + 19, row ? DOT_M - 1 : 53);
-            continue;
+            TEXT(c, FONT, x0 + CELL_W / 2, base + 20, CENTRED, "%.3s", syn);
+            text(c, SYM, x0 + (CELL_W - text_w(SYM, m, 2)) / 2, base + 11, m, 2, 1);
+        } else {
+            big_knob(c, x0 + CELL_W / 2, base + KNOB_DY, knob(view, id));
         }
-        int v = knob(view, id);
-        blit(c, x0 + 4, ky, MDUI_KNOB_COLS, 13, MDUI + MDUI_KNOB, 1);
-        blit(c, x0 + 6, ky + 2, MDUI_PTR_COLS, 7, MDUI + MDUI_PTR + 2 * MDUI_PTR_COLS * v, 0);
-        if ((n & 2) && col < 3)
-            blit(c, x0 + 16, ky + CLIP_UP, MDUI_CLIP_COLS, 16, MDUI + MDUI_CLIP, 1);
-        if (locked(view, id))                   /* v0.27: p-locked, as stock lights it */
-            invert(c, x0 + 1, row ? 1 : DOT_M + 1, x0 + 19, row ? DOT_M - 1 : 53);
+        if (locked(view, id))                           /* v0.27: p-locked, as stock lights it */
+            cell_lit(c, s);
     }
-
-    /* the left: the tempo */
-    {
-        u32 bpm120 = CTL_FRAME[TEMPO_WORD];
-        char b[8];
-        int n = fmt_int(b, (int)(bpm120 / 120u), 0);
-        b[n++] = '.';
-        b[n++] = (char)('0' + (bpm120 % 120u) / 12u);
-        b[n] = 0;
-        extern int smp_skipped_any(void);       /* v0.30: the DSP left a voice out for time */
-        extern int smp_func_held, smp_dsp_load(void);
-        int ld = smp_func_held ? smp_dsp_load() : -1;
-        if (ld >= 0 && blown_text(b)) {         /* v0.34: a voice the guard just wiped: V<n><where> */
-            text(c, BIG, 1, 41, b, 3, 1);
-        } else if (ld >= 0) {                   /* v0.32: FUNC held: the DSP's load, percent */
-            char d[6];
-            int m = fmt_int(d, ld > 999 ? 999 : ld, 0);
-            d[m++] = '%';
-            d[m] = 0;
-            text(c, BIG, 1, 41, d, m, 1);
-        } else if (smp_skipped_any())
-            text(c, BIG, 1, 41, "CPU", 3, 1);
-        else if (bpm120 >= 1200u)
-            text(c, BIG, 1, 41, b, n, 1);
-    }
-    /* the level bar: the track's LEVEL */
-    text(c, SMALL, 33, 48, "LEV", 3, 1);
-    for (int y = 34; y <= 46; y += 3) {
-        put(c, 33, y, 1); put(c, 34, y, 1);
-        put(c, 43, y, 1); put(c, 44, y, 1);
-    }
-    {
-        u8 flag;
-        const int *r = RECORD(TRACK_LEVEL_ID);
-        int span = r[3] - r[2], v = GET_VALUE(view, TRACK_LEVEL_ID, &flag) - r[2];
-        int h = span > 0 ? v * 13 / span : 0;
-        if (h > 13) h = 13;
-        if (h > 0)
-            fill(c, 37, 34, 40, 33 + h, 1);
-    }
-    /* the kit box: the track and the machine */
-    fill(c, 2, 18, 45, 31, 1);
-    {
-        char b[8] = {'T', 'R', 'K', ':', 0, 0, 0, 0};
-        b[4] = (char)('0' + (t + 1) / 10);
-        b[5] = (char)('0' + (t + 1) % 10);
-        text(c, SMALL, 2 + (44 - text_w(SMALL, b, 6)) / 2, 25, b, 6, 0);
-        const char *w = perc_what_upper[type];
-        int len = slen(w, 11);
-        text(c, SMALL, 2 + (44 - text_w(SMALL, w, len)) / 2, 19, w, len, 0);
-    }
-    /* the line under it: what this is, and the page */
-    text(c, SYM, 3, 11, page ? ">PERC 2" : ">PERC 1", 7, 1);
-    /* the machine line: TRX > BD > SYNT / TFX, inverted */
-    fill(c, 1, 2, 45, 6, 1);
-    text(c, SMALL, 1, 2, (const char *)mach + 4, 3, 0);
-    text(c, SYM, 13, 2, ">", 1, 0);
-    text(c, SMALL, 17, 2, (const char *)mach + 7, 2, 0);
-    text(c, SYM, 25, 2, ">", 1, 0);
-    text(c, SMALL, 29, 2, page ? "TFX " : "SYNT", 4, 0);
+    left_panel(view, c, perc_what_upper[type]);
     return 1;
 }
 
@@ -329,12 +337,9 @@ int md_page_draw(void *view, void *c, int page, int type)
  * An unused place (---, DENS's chorus) is left empty. */
 /* Sized by their contents, checked against MNM_N: a machine added without its names would
  * otherwise leave a null pointer here, read as text (SOPHIE did, found in the emulator). */
-static const char *const mnm_family[] = {"SID", "DIGIPRO", "DIGIPRO", "DIGIPRO", "VO", "SOPHIE"};
-static const char *const mnm_fam_short[] = {"SID", "DPRO", "DPRO", "DPRO", "VO", "SOPH"};
-static const char *const mnm_mach_short[] = {"6581", "WAVE", "DDRW", "DENS", "VO-6", "DRUM"};
-_Static_assert(sizeof mnm_family / sizeof *mnm_family == MNM_N, "mnm_family: one per machine");
-_Static_assert(sizeof mnm_fam_short / sizeof *mnm_fam_short == MNM_N, "mnm_fam_short: one per machine");
-_Static_assert(sizeof mnm_mach_short / sizeof *mnm_mach_short == MNM_N, "mnm_mach_short: one per machine");
+/* v0.44: the machine's name in the track box (MACHINE SEL's, in capitals) */
+static const char *const mnm_name_upper[] = {"SID 6581", "DPRO WAVE", "DPRO DDRW", "DPRO DENS", "VO-6", "SOPHIE"};
+_Static_assert(sizeof mnm_name_upper / sizeof *mnm_name_upper == MNM_N, "mnm_name_upper: one per machine");
 
 static int mnm_k(void *view, int j)             /* knob 0..127, as the DSP and page.c read it */
 {
@@ -426,12 +431,9 @@ int mnm_page_draw(void *view, void *c, int mi)
 {
     if (!ok() || mi < 0 || mi >= MNM_N)
         return 0;
-    int t = UI_TRACK;
     fill(c, 0, 0, 127, 53, 0);
-    grid(c);
     for (int s = 0; s < 8; s++) {
-        int col = s & 3, row = s >> 2;
-        int x0 = 48 + 20 * col, ny = row ? NAME_B : NAME_A, ky = row ? KNOB_B : KNOB_A;
+        int x0 = cell_x(s), base = row_base(s);
         int w = mnm_widget[mi][s];
         const char *name = mnm_labels[mi][s];
         if (w == MW_EMPTY || (name[0] == '-' && !name[1]))
@@ -448,78 +450,18 @@ int mnm_page_draw(void *view, void *c, int mi)
                 name = mnm_value_text(mi, s, ch > cnt - 1 ? cnt - 1 : ch);
             }
         }
-        int len = slen(name, 4);
-        text(c, SMALL, x0 + (20 - text_w(SMALL, name, len)) / 2, ny, name, len, 1);
+        cell_name(c, s, name);
         if (w == MW_KNOB || !n) {
-            blit(c, x0 + 4, ky, MDUI_KNOB_COLS, 13, MDUI + MDUI_KNOB, 1);
-            blit(c, x0 + 6, ky + 2, MDUI_PTR_COLS, 7, MDUI + MDUI_PTR + 2 * MDUI_PTR_COLS * k, 0);
-        } else {
+            big_knob(c, x0 + CELL_W / 2, base + KNOB_DY, k);
+        } else {                                /* a choice: its picture over its value */
             int count = mnm_choice_count(n), ch = mnm_choice_of(n, k);
             if (ch > count - 1) ch = count - 1;
-            mnm_widget_draw(c, w, x0, ky, ch, count);
-            const char *v = mnm_value_text(mi, s, ch);
-            int vl = slen(v, 4);
-            text(c, SMALL, x0 + (20 - text_w(SMALL, v, vl)) / 2, ky, v, vl, 1);
+            mnm_widget_draw(c, w, x0 + 2, base + 11, ch, count);
+            TEXT(c, FONT, x0 + CELL_W / 2, base + 11, CENTRED, "%.4s", mnm_value_text(mi, s, ch));
         }
         if (locked(view, perc_param_ids[s]))   /* p-locked, as stock lights it */
-            invert(c, x0 + 1, row ? 1 : DOT_M + 1, x0 + 19, row ? DOT_M - 1 : 53);
+            cell_lit(c, s);
     }
-
-    /* the left: the tempo, LEV, the kit box, the line under it, the machine line */
-    {
-        u32 bpm120 = CTL_FRAME[TEMPO_WORD];
-        char b[8];
-        int n = fmt_int(b, (int)(bpm120 / 120u), 0);
-        b[n++] = '.';
-        b[n++] = (char)('0' + (bpm120 % 120u) / 12u);
-        b[n] = 0;
-        extern int smp_skipped_any(void);       /* v0.30: the DSP left a voice out for time */
-        extern int smp_func_held, smp_dsp_load(void);
-        int ld = smp_func_held ? smp_dsp_load() : -1;
-        if (ld >= 0 && blown_text(b)) {         /* v0.34: a voice the guard just wiped: V<n><where> */
-            text(c, BIG, 1, 41, b, 3, 1);
-        } else if (ld >= 0) {                   /* v0.32: FUNC held: the DSP's load, percent */
-            char d[6];
-            int m = fmt_int(d, ld > 999 ? 999 : ld, 0);
-            d[m++] = '%';
-            d[m] = 0;
-            text(c, BIG, 1, 41, d, m, 1);
-        } else if (smp_skipped_any())
-            text(c, BIG, 1, 41, "CPU", 3, 1);
-        else if (bpm120 >= 1200u)
-            text(c, BIG, 1, 41, b, n, 1);
-    }
-    text(c, SMALL, 33, 48, "LEV", 3, 1);
-    for (int y = 34; y <= 46; y += 3) {
-        put(c, 33, y, 1); put(c, 34, y, 1);
-        put(c, 43, y, 1); put(c, 44, y, 1);
-    }
-    {
-        u8 flag;
-        const int *r = RECORD(TRACK_LEVEL_ID);
-        int span = r[3] - r[2], v = GET_VALUE(view, TRACK_LEVEL_ID, &flag) - r[2];
-        int h = span > 0 ? v * 13 / span : 0;
-        if (h > 13) h = 13;
-        if (h > 0)
-            fill(c, 37, 34, 40, 33 + h, 1);
-    }
-    fill(c, 2, 18, 45, 31, 1);
-    {
-        char b[8] = {'T', 'R', 'K', ':', 0, 0, 0, 0};
-        b[4] = (char)('0' + (t + 1) / 10);
-        b[5] = (char)('0' + (t + 1) % 10);
-        text(c, SMALL, 2 + (44 - text_w(SMALL, b, 6)) / 2, 25, b, 6, 0);
-        const char *f = mnm_family[mi];
-        int len = slen(f, 8);
-        text(c, SMALL, 2 + (44 - text_w(SMALL, f, len)) / 2, 19, f, len, 0);
-    }
-    text(c, SYM, 3, 11, ">MNM", 4, 1);
-    fill(c, 0, 1, 46, 7, 1);                    /* a row clear above and below the letters */
-    {
-        const char *f = mnm_fam_short[mi], *m = mnm_mach_short[mi];
-        int x = 1 + text(c, SMALL, 1, 2, f, slen(f, 4), 0);
-        x += text(c, SYM, x, 2, ">", 1, 0);
-        text(c, SMALL, x + 1, 2, m, slen(m, 4), 0);
-    }
+    left_panel(view, c, mnm_name_upper[mi]);
     return 1;
 }

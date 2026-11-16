@@ -201,6 +201,8 @@ void wr_screen(void *screen, void *canvas)
         smp_fb_draw(canvas, smp_samp_of(UI_TRACK));
     else if (smp_list_visible())                /* v0.25: the sample list, over the title bar too */
         smp_list_draw(canvas);
+    extern void mtr_draw(void *canvas);
+    mtr_draw(canvas);                           /* the system meter's corner, over everything */
 }
 
 /* the UI loop's redraw test, as stock (and the names kept current, once a loop; and
@@ -213,6 +215,8 @@ int wr_poll(void *screen)
     extern int rec_visible(void);
     extern void jmp_poll(void);
     extern void smp_er_poll(void);
+    extern void mtr_poll(void *screen);
+    mtr_poll(screen);                           /* the system meter: FUNC held, every page (csrc/meter) */
     smp_er_poll();                              /* v0.39: ERASE MOD DATA, a step a pass (erase.c) */
     smp_boot();
     jmp_poll();                                 /* DIRECT JUMP's setting, read and written (csrc/jump) */

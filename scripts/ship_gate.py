@@ -2020,7 +2020,8 @@ def main() -> int:
 
         # 6n. v0.32: the DSP load meter. smp_dsp_load gives the last half second's peak (the
         # idle packets' unit 18, permille) in percent, rounded, and -1 when none came in the last
-        # second; a PERC page with FUNC held draws it in the tempo's place
+        # second; v0.32..v0.43 a PERC page with FUNC held drew it in the tempo's place, v0.44 the
+        # system meter draws it (D, with C and H) in the title bar's corner on every page
         if "smp_dsp_load" in lay:
             kit = 0x4210D08C
             ms = ["wait:3", f"poke:{kit + 52 + 0xDE:#x}:05", "wait:20", "png:tempo",
@@ -2045,7 +2046,9 @@ def main() -> int:
                     shots = {k: pathlib.Path(v).read_bytes() for k, v in r["screens"].items()}
                     facts = {"628 permille reads 63 %": d0[:1] == [63],
                              "none in the last second reads -1": d0[1:2] == [-1],
-                             "FUNC held draws something else in the tempo's place": shots.get("tempo") != shots.get("load")}
+                             # v0.44: no tempo on these pages; FUNC held draws the system meter's corner
+                             # in the title bar (csrc/meter) instead of the DSP % in the tempo's place
+                             "FUNC held draws the meter's corner": shots.get("tempo") != shots.get("load")}
                     good = len(d0) == 2 and all(facts.values())
                     why = f"{facts} d0={d0}"
                 return good, ("the DSP load meter: the half second's peak in percent, none when the DSP is "
