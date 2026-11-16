@@ -180,6 +180,7 @@ def run(M5, snap, m2mach, m5img, stock_img) -> dict:
         min(c[1] for c in cost_stock), max(c[1] for c in cost_stock))
     numbers["stock delay: words it wrote in its DDR state outside the sample area (offsets)"] = (
         [hex(o) for o in sorted(outside)[:24]], len(outside))
+    numbers["stock delay: output words (finite nonzero, non-finite)"] = repr(heard_stock)
     numbers["stray words (first 8)"] = [hex(a) for a in sorted(stray)[:8]]
     numbers["stock delay: the highest offset it wrote past the area"] = hex(max(outside, default=0))
     # (measured: control words from +0x400008, and one word at +0x5fff04: the same on both images,
@@ -221,6 +222,7 @@ def run(M5, snap, m2mach, m5img, stock_img) -> dict:
     checks["TYPE XDLY: the lines' written words as the reference's"] = lines_ok
     checks["TYPE XDLY: no DDR write outside its two lines (and the test's buffers)"] = not xd_out
     numbers["XDLY: DDR words written outside its lines (first 8)"] = [hex(a) for a in sorted(xd_out)[:8]]
+    numbers["XDLY: output words (finite nonzero, non-finite)"] = repr(heard)
     numbers["XDLY: first mismatch"] = first_bad
     numbers["XDLY: instructions per block while running: min, mean, max"] = (
         min(cost), round(sum(cost) / len(cost)), max(cost))
@@ -248,7 +250,7 @@ def run(M5, snap, m2mach, m5img, stock_img) -> dict:
     # 3. the switches, on silence
     z = [0.0] * 32
     par = seq[-1][3]
-    clear_blocks, silent, peak_after, cost_clear, nz = 0, True, 0.0, [], [-1]
+    clear_blocks, silent, after, cost_clear, nz = 0, True, [], [], [-1]
     for b in range(XD.STOCK_WORDS // XD.CHUNK + 40):
         rb, hb, ob, _, _ = call(M5, rb, 0x100, z, z, par)
         want = ref.block(0x100, z, z, [np.float32(x) for x in par])
@@ -260,15 +262,17 @@ def run(M5, snap, m2mach, m5img, stock_img) -> dict:
                 nz = [k for k in range(0, XD.STOCK_WORDS, 61)
                       if (M5.m2.word(rb.state, XD.LINE_A + 4 * k) or 0) != 0]
         else:
-            peak_after = max([peak_after] + [abs(bf(w)) for w in ob[0] + ob[1]])
+            after.extend(bf(w) for w in ob[0] + ob[1])
     rf = M5.init_on(snap, m2mach, stock_img)
-    fresh_peak = 0.0
+    fresh = []
     for b in range(40):
         rf, hf, of, _, _ = call(M5, rf, 0x100, z, z, par)
-        fresh_peak = max([fresh_peak] + [abs(bf(w)) for w in of[0] + of[1]])
+        fresh.extend(bf(w) for w in of[0] + of[1])
+    # NaN in either run fails (M5.V.peak is NaN on any non-finite sample; NaN <= x is False)
+    peak_after, fresh_peak = M5.V.peak(after), M5.V.peak(fresh)
     checks["switch to stock: silent while its sample area clears"] = silent
     checks["switch to stock: 256 clearing blocks, then no old tail (the peak on silence as a fresh "
-           "stock delay's)"] = clear_blocks == XD.STOCK_WORDS // XD.CHUNK and peak_after <= fresh_peak
+           "stock delay's), finite"] = clear_blocks == XD.STOCK_WORDS // XD.CHUNK and peak_after <= fresh_peak
     checks["switch to stock: the sample area is 0 when the clear ends (every 61st word read)"] = not nz
     numbers["switch to stock: words of the area not 0 after the clear (first 8 word indices)"] = nz[:8]
     numbers["switch to stock: clearing blocks; the stock delay's peak on silence after (build, fresh)"] = (
