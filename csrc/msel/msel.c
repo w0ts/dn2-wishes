@@ -14,6 +14,13 @@
  *
  * FUNC + SYN (SRC) while it is up: stock closes MACHINE SEL; here it switches the page instead, by handing
  * stock its own RIGHT (to the filters) or LEFT (back), FUNC's bit taken off (msel_key, from rec.c smp_ui_pop).
+ *
+ * FUNC + turn G on the FLTR page (2026-11-11, the User: "we could switch filter one type with FUNCT + G (with list
+ * popup)", "FUNC + turn G opens the list"): the filter types in a list (popup.c wpop_modal), FILTER SEL's rows and
+ * names, the track's own lit. The first turn opens it, each further turn moves it (stopping at the ends); FUNC let
+ * go, YES or G pushed picks, NO or any other key or knob leaves the type as it was. The pick is what MACHINE SEL's
+ * filter page does on YES (0x4005bbbe): the stock commit, only when the type changes. It replaces stock's FUNC + turn
+ * on G of the FLTR page only (flt_pop, from rec.c smp_ui_pop); FUNC + push G is stock's while the list is shut.
  */
 typedef unsigned int u32;
 typedef unsigned char u8;
@@ -39,6 +46,20 @@ typedef unsigned char u8;
 #define K_LEFT    13
 #define K_RIGHT   15
 #define F_FUNC    0x02                          /* an item's flag while FUNC is held (rec.c) */
+/* the FLTR page's view class, measured in the 1.12 emulator (2026-11-11, the screen's view list on [FLTR];
+ * SYN's is 0x401D4DB0, AMP's 0x401E2320) */
+#define FLTR_VTABLE 0x401E24C4u
+/* MACHINE SEL's model (the view's +132) is the UI owner's +0xF4 (rec.c smp_assign); its filter page reads the type
+ * with getFilterType(model, track) and commits with (model, track, type, 1, 1), measured in the 1.12 image */
+#define FILTER_GET    ((int (*)(u32, int))0x400313A6u)
+#define FILTER_COMMIT ((u32 (*)(u32, int, int, int, int))0x40031A56u)
+#define IT_KEY    0
+#define IT_KNOB   1
+#define K_YES     10
+#define K_NO      12
+#define K_FUNC    17
+#define KNOB_G    7
+#define K_PUSH_G  47                            /* encoder G pushed (K_ENC_A + 6) */
 
 #define ROWS      6                             /* a column's cells */
 #define CELLS     (2 * ROWS)                    /* a screen */
@@ -160,5 +181,93 @@ int msel_key(u8 *it, u32 code, int down)
     it[11] &= (u8)~F_FUNC;
     if (!down)
         took = 0;
+    return 1;
+}
+
+/* FUNC + turn G on the FLTR page: the filter type's list */
+extern void wpop_modal(const char *label, int n, int cur, const char *(*name)(int, int), int arg);
+extern int smp_fb_open, smp_lst_open;           /* the folder browser, the sample list (over the page) */
+
+static int fp_open __attribute__((section(".data"))) = 0;
+static int fp_at __attribute__((section(".data"))) = 0;      /* the lit row of msel_frows */
+static int fp_was __attribute__((section(".data"))) = 0;     /* the track's type when it opened */
+static u32 fp_eat __attribute__((section(".data"))) = 0;     /* YES, NO, G pushed: taken, their repeats and release too */
+
+static const char *fp_name(int i, int arg)
+{
+    (void)arg;
+    return msel_fname[msel_frows[i]];
+}
+
+static int fp_track(void)
+{
+    return TRK_INDEX(TRK_OBJ(TRK_CUR()));
+}
+
+static u32 fp_model(void)
+{
+    return TRK_CUR() + 0xF4u;
+}
+
+static void fp_close(int pick)
+{
+    int type = msel_frows[fp_at];
+    fp_open = 0;
+    wpop_modal(0, 0, 0, 0, 0);
+    if (pick && type != fp_was)
+        FILTER_COMMIT(fp_model(), fp_track(), type, 1, 1);
+}
+
+static u32 fp_bit(u32 code)
+{
+    return code == K_YES ? 1u : code == K_NO ? 2u : code == K_PUSH_G ? 4u : 0u;
+}
+
+/* from rec.c smp_ui_pop, every item while no screen of ours is up: -> 1 when the item is the list's (dropped) */
+int flt_pop(const u8 *it, u32 code, int down, int func_held)
+{
+    if (it[0] == IT_KEY) {
+        u32 b = fp_bit(code);
+        if (fp_eat & b) {                       /* a key the list took: its repeats and its release */
+            if (!down)
+                fp_eat &= ~b;
+            return 1;
+        }
+        if (!fp_open || (!down && code != K_FUNC))
+            return 0;
+        if (code == K_FUNC) {                   /* FUNC let go: the pick (FUNC goes on to stock) */
+            if (!down)
+                fp_close(1);
+            return 0;
+        }
+        if (b) {
+            fp_eat |= b;
+            fp_close(code != K_NO);
+            return 1;
+        }
+        fp_close(0);                            /* another key: it does what it does */
+        return 0;
+    }
+    if (it[0] != IT_KNOB)
+        return 0;
+    if (code != KNOB_G) {
+        if (fp_open)
+            fp_close(0);
+        return 0;
+    }
+    if (!fp_open) {
+        if (!func_held || smp_fb_open || smp_lst_open || msel_visible() || !ins_view_of(FLTR_VTABLE))
+            return 0;
+        fp_was = FILTER_GET(fp_model(), fp_track());
+        fp_at = 0;
+        for (int i = 0; i < MSEL_FROWS; i++)
+            if (msel_frows[i] == fp_was)
+                fp_at = i;
+        fp_open = 1;
+    } else {
+        fp_at += (signed char)it[8];
+        fp_at = fp_at < 0 ? 0 : fp_at >= MSEL_FROWS ? MSEL_FROWS - 1 : fp_at;
+    }
+    wpop_modal("FLT1", MSEL_FROWS, fp_at, fp_name, 0);
     return 1;
 }

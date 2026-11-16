@@ -13,7 +13,12 @@
  *   - it goes POP_HOLD after the last turn, or at once on any key press (a page key, TRK, a
  *     trig ...);
  *   - a trig held: the page shows the trig's p-lock, and so does the popup (the value it is
- *     given is the one the page draws).
+ *     given is the one the page draws);
+ *   - the turn that opens it moves nothing (2026-11-11, the User: "for all list popup that open
+ *     on knob twist for first knob twist only open the popup"): rec.c smp_ui_pop asks
+ *     wpop_first_turn before it notes the turn, and takes one detent off that item (the item
+ *     goes when it held one); the turns after it, a fast turn's next items included, move the
+ *     value as before.
  *
  * Stock OS 1.12 has no such popup (its lists, MachineListView, ModDestListView, are modal menus
  * opened with a key), so it is drawn here, over the page, with stock's own text and pixel
@@ -62,6 +67,8 @@ static struct {
     wpop_name_fn name, tag;
 } pop __attribute__((section(".data")));
 static int pop_offered __attribute__((section(".data"))) = 0;    /* in this draw */
+static u32 pop_listing __attribute__((section(".data"))) = 0;    /* the places offered as lists in this draw */
+static u32 pop_listed __attribute__((section(".data"))) = 0;     /* ... in the last draw the popup could show on */
 static int pop_shown __attribute__((section(".data"))) = 0;      /* drawn in the last draw */
 static u32 pop_knob_seen __attribute__((section(".data"))) = 0;  /* smp_knob_seq at the last poll */
 
@@ -75,13 +82,28 @@ static int pop_live(void)
 void wpop_begin(void)
 {
     pop_offered = 0;
+    pop_listing = pop_listed = 0;                       /* a screen that never reaches wpop_draw lists none */
+}
+
+/* rec.c smp_ui_pop, a turn of KNOB (1..8: A..H) before it is noted: -> 1 when the turn opens the
+ * popup (the page's place there is a list, and its popup is not up: another knob turned last, or
+ * POP_HOLD gone, or a key pressed since) */
+int wpop_first_turn(int knob)
+{
+    if (knob < 1 || knob > 8 || !(pop_listed >> (knob - 1) & 1u))
+        return 0;
+    return !(smp_pop_knob == knob && pop_live());
 }
 
 /* a page draws place SLOT (0..7, knob A..H) as a list of N names, CUR the value (0..N-1, as the
  * page shows it); NAME(i, ARG) the i-th's text, TAG(i, ARG) an optional second column */
 static void offer(int slot, const char *label, int n, int cur, wpop_name_fn name, wpop_name_fn tag, int arg)
 {
-    if (slot != smp_pop_knob - 1 || n < WPOP_MIN || !name || !pop_live())   /* (WPOP_MIN: cpage.py POPUP_MIN) */
+    if (n < WPOP_MIN || !name)                          /* (WPOP_MIN: cpage.py POPUP_MIN) */
+        return;
+    if (slot >= 0 && slot < 8)
+        pop_listing |= 1u << slot;
+    if (slot != smp_pop_knob - 1 || !pop_live())
         return;
     pop.label = label;
     pop.n = n;
@@ -136,39 +158,80 @@ static void invert(void *c, int x0, int y0, int x1, int y1)
                 bits[x * cv[3] + (y >> 5)] ^= 0x80000000u >> (y & 31);
 }
 
-void wpop_draw(void *c)
+/* the box, LABEL and the place in the list in its header, five rows round CUR (NAME_FMT: the
+ * names' width) */
+static void draw_list(void *c, const char *label, int n, int cur, wpop_name_fn name, wpop_name_fn tag,
+                      int arg, const char *name_fmt)
 {
-    pop_shown = pop_offered && pop_live();
-    if (!pop_shown)
-        return;
     fill(c, BOX_X0, 0, BOX_X1, BOX_Y1, 0);
     fill(c, BOX_X0, 0, BOX_X0, BOX_Y1, 1);              /* the frame */
     fill(c, BOX_X1, 0, BOX_X1, BOX_Y1, 1);
     fill(c, BOX_X0, 0, BOX_X1, 0, 1);
     fill(c, BOX_X0, BOX_Y1, BOX_X1, BOX_Y1, 1);
-    TEXT(c, FONT, NAME_X - 2, HEAD_Y, 0, "%.6s", pop.label);
-    TEXT(c, FONT, COUNT_X, HEAD_Y, 0, "%d/%d", pop.cur + 1, pop.n);
+    TEXT(c, FONT, NAME_X - 2, HEAD_Y, 0, "%.6s", label);
+    TEXT(c, FONT, COUNT_X, HEAD_Y, 0, "%d/%d", cur + 1, n);
     for (int x = BOX_X0 + 2; x <= BOX_X1 - 2; x += 2)   /* the rule under the header, dotted */
         SET_PIXEL(c, x, RULE_Y, 1);
     for (int r = 0; r < 2 * POP_HALF + 1; r++) {
-        int i = pop.cur - POP_HALF + r;                 /* the top row first */
+        int i = cur - POP_HALF + r;                     /* the top row first */
         int y = ROWS_Y0 + (2 * POP_HALF - r) * ROW_H;
-        if (i < 0 || i >= pop.n)
+        if (i < 0 || i >= n)
             continue;                                   /* past an end: blank */
-        const char *nm = pop.name(i, pop.arg);
-        TEXT(c, FONT, NAME_X, y + 1, 0, "%.8s", nm ? nm : "");
-        const char *tg = pop.tag ? pop.tag(i, pop.arg) : 0;
+        const char *nm = name(i, arg);
+        TEXT(c, FONT, NAME_X, y + 1, 0, name_fmt, nm ? nm : "");
+        const char *tg = tag ? tag(i, arg) : 0;
         if (tg && tg[0])
             TEXT(c, FONT, TAG_X, y + 1, 0, "%.11s", tg);
-        if (i == pop.cur)                               /* the value: its row lit */
+        if (i == cur)                                   /* the value: its row lit */
             invert(c, BOX_X0 + 2, y, BOX_X1 - 2, y + ROW_H - 1);
     }
+}
+
+/* A list the user moves through (2026-11-11, msel.c's filter type on FUNC + G): drawn in the same
+ * box, over the knob's popup, until it is closed (LABEL 0); its names up to 12 characters (no tag
+ * column). Closing it ends the knob's popup too, as a key press does: the knob's own list does not
+ * follow it onto the page. */
+static struct {
+    const char *label;
+    int n, cur, arg;
+    wpop_name_fn name;
+} modal __attribute__((section(".data")));
+static int modal_dirty __attribute__((section(".data"))) = 0;
+extern u32 smp_ui_seq;                                  /* rec.c */
+
+void wpop_modal(const char *label, int n, int cur, wpop_name_fn name, int arg)
+{
+    if (!label && modal.label)
+        smp_key_seq = ++smp_ui_seq;
+    modal.label = label;
+    modal.n = n;
+    modal.cur = cur;
+    modal.name = name;
+    modal.arg = arg;
+    modal_dirty = 1;
+}
+
+void wpop_draw(void *c)
+{
+    pop_listed = pop_listing;
+    if (modal.label) {
+        draw_list(c, modal.label, modal.n, modal.cur, modal.name, 0, modal.arg, "%.12s");
+        return;
+    }
+    pop_shown = pop_offered && pop_live();
+    if (!pop_shown)
+        return;
+    draw_list(c, pop.label, pop.n, pop.cur, pop.name, pop.tag, pop.arg, "%.8s");
 }
 
 /* page.c wr_poll, once a UI loop: a redraw on a knob's turn (so the popup opens even where the
  * value did not move: a list's end), and one when it goes */
 void wpop_poll(void *screen)
 {
+    if (modal_dirty) {                                  /* the list the user moves: opened, moved, closed */
+        modal_dirty = 0;
+        SET_DIRTY(screen);
+    }
     if (smp_knob_seq != pop_knob_seen) {
         pop_knob_seen = smp_knob_seq;
         SET_DIRTY(screen);

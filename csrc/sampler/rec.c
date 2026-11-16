@@ -1901,7 +1901,10 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
     if (!it)
         return (u32)it;
     u32 code = (u32)it[4] << 24 | (u32)it[5] << 16 | (u32)it[6] << 8 | it[7];
+    int pop_first = 0;                          /* 2026-11-11: this turn opens a list popup (popup.c) */
     if (it[0] == IT_KNOB && code >= 1 && code <= 8) {           /* A..H */
+        extern int wpop_first_turn(int knob);
+        pop_first = wpop_first_turn((int)code);
         smp_knob_d = (signed char)it[8];
         smp_knob_at = *(volatile u32 *)0x4058F8D4u;
         smp_knob_code = (int)code;
@@ -2018,6 +2021,25 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
             enc_eaten &= ~b;
             it[0] = IT_DROP;
             return (u32)it;
+        }
+    }
+    if (!rec_overlay) {                         /* FUNC + turn G on the FLTR page: the filter type's list (csrc/msel) */
+        extern int flt_pop(const u8 *it, u32 code, int down, int func_held);
+        if (flt_pop(it, code, down, smp_func_held)) {
+            it[0] = IT_DROP;
+            return (u32)it;
+        }
+    }
+    if (!rec_overlay && pop_first && it[0] == IT_KNOB) {   /* 2026-11-11 (the User): "for first knob twist only
+                                                         * open the popup": one detent taken, the rest moves */
+        extern int sl_page_up;                  /* (TRIG page 2's slides take E and F themselves) */
+        int d = (signed char)it[8];
+        if (!(sl_page_up && (code == 5 || code == 6))) {
+            if (d >= -1 && d <= 1) {
+                it[0] = IT_DROP;
+                return (u32)it;
+            }
+            it[8] = (u8)(d > 0 ? d - 1 : d + 1);
         }
     }
     if (!rec_overlay) {                         /* the per-track inserts' page (csrc/inserts) */

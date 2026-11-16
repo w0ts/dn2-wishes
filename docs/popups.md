@@ -10,6 +10,13 @@ message box), so it is drawn by our code over the page: `csrc/waverider/popup.c`
 
 - Opens on the knob's turn, on the page that draws that knob's place as a list. The knob sets
   the value as before; the popup only shows it.
+- The turn that opens it moves nothing (2026-11-11, the User: "for all list popup that open on
+  knob twist for first knob twist only open the popup"): `rec.c` smp_ui_pop asks
+  `wpop_first_turn` before noting the turn and takes one detent off that item (a one-detent item
+  goes); every later item, a fast turn's included, moves as before. "Opens" means the place was
+  offered as a list in the last draw that reached `wpop_draw` and its popup is not up (another
+  knob turned last, 1.5 s gone, or a key pressed since). Lists with no popup (POPUP_MIN) are not
+  touched; TRIG page 2's slides (E, F) keep their own detents.
 - Five rows: the value lit in the middle, its neighbours above and below. The list stops at its
   ends (blank rows past them). The header: the parameter's label and the place, "9/12".
 - Goes 1.5 s after the last turn, or at once on any key press except FUNC and an encoder's push.
@@ -45,6 +52,24 @@ Random: 3, none with POPUP_MIN 4), LFO WAVE (TRI SINE SQR SAW EXPO RAMP RAND), L
 alone: two-way switches (TBL1/2, AMP MODE, FX PRE/POST), numbers (FM algorithm, MULT, speeds),
 the multimode filter's TYPE (a continuous record), LFO DEST (stock's own modal list, unchanged).
 Pages stock draws without its cell routine (if any) are not reached.
+
+## A list to pick from: the filter type on FUNC + G (2026-11-11)
+
+The User: "we could switch filter one type with FUNCT + G (with list popup)", "FUNC + turn G opens
+the list". On the FLTR page (stock's view class `0x401E24C4`, measured), FUNC held and knob G turned
+opens a list of the filter types in the same box (`wpop_modal`, `csrc/msel/msel.c` `flt_pop`):
+
+- FILTER SEL's rows and names (`dnfw.waverider.msel`: MULTI-MODE, LOWPASS 4, LEGACY LP/HP, COMB -,
+  COMB +, EQUALIZER, ANALOG SVF .. ANALOG MS-20 as the build carries them), names up to 12
+  characters, the header `FLT1` and the place; the track's own type lit when it opens.
+- The first turn opens it; each further turn moves it, stopping at the ends.
+- FUNC let go, YES or G pushed: that type. NO, another key or another knob: the type stays. The
+  key the list took (YES, NO, G pushed) is the list's down to its release.
+- The pick is MACHINE SEL's filter page's YES (`0x4005bbbe`): stock's commit
+  `0x40031a56(model, track, type, 1, 1)`, only when the type changes, with the model MACHINE SEL
+  holds (the UI owner's +0xF4) and the current track.
+- Only G of the FLTR page: FUNC + turn on any other knob or page is stock's, as is FUNC + push G
+  while the list is shut. Closing it ends the knob popup too, as a key press does.
 
 ## Plumbing
 
