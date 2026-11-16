@@ -31,6 +31,7 @@ MEASURED = {
     "SOPHIE": ("hit", -21.1, -34.9), "TB303": ("hit", -22.7, -35.4), "PLAITS MDAL": ("hit", -19.5, -33.3),
     "PLAITS SD": ("hit", -19.9, -35.6), "PLAITS HH": ("hit", -21.3, -37.0), "PLAITS PART": ("hit", -17.9, -37.5),
     "PLAITS BD": ("hit", -27.0, -38.0), "PLAITS STRG": ("hit", -27.0, -38.9),
+    "JUNO": ("held", -18.0, -25.3),      # 2026-11-12, on r11f (e0868f63) at MD_LEVEL: in band, no LEVEL_DB entry
 }
 # 2026-11-12, the User on r11f ("bring it back how it was, apply the correction only to the melodic synths"): the drums
 # and percussion keep the level they had, whatever their band says

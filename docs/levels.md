@@ -38,6 +38,7 @@ An engine already in its band keeps its level (bit for bit); one outside moves t
 | PLAITS STRG | hit | peak -27.0 | +8.4 | -18.6 ¹ |
 | SID 6581, PLAITS FM, ADD, VA, NOIS, DRONE, VO-6 | held | RMS -24.7 .. -28.4 | 0 | in band |
 | PLAITS PART | hit | peak -17.9 | 0 | in band |
+| JUNO ³ | held | RMS -25.3 (peak -18.0) | 0 | in band (+1.1) |
 
 ¹ In its band, short of the middle: at the middle the engine's loudest setting (every knob 127, the runner's `tops`
 run) went past the runner's 4.0 bound on a track buffer (TB-303 4.29, DPRO-DENS 4.42 at +5.4 / +6.6 dB; PLAITS STRG 4.52 at +9.7 dB, its start when the runner's MODL walk turns to it); at these it
@@ -47,6 +48,10 @@ stays near 3.6.
 melodic synths". The drums and percussion (SOPHIE, PLAITS BD, SD, HH) are at their levels from before this work, bit
 for bit; the melodic synths (ANALOG 2, TB-303, PLAITS WS, SWRM, MDAL, STRG, DPRO-WAVE, DDRW, DENS) keep their
 corrections; the Machinedrum is as it was.
+
+³ JUNO (type 23, 2026-11-12), measured after this table on r11f (v0.48 round 11) as the others: RMS -25.3 dB, 1.1 dB
+over WaveTone's -26.4, so inside the band and left bit for bit (no LEVEL_DB entry); its machine tap peaks at 1.12
+(WaveTone 1.00, ANALOG 2 0.92).
 
 ## The Machinedrum machines (all 34, peak at the amp stage, 53 ms; 2026-11-12)
 

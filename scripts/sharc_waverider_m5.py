@@ -140,6 +140,7 @@ def init_on(snap, m2mach, image: Image, warm: bool = False):
     for k in range(0, len(shipped), 4):
         m2.poke(runner.state, Lm.T[MDK.SHIPPED] + k, struct.unpack_from("<I", shipped, k)[0])
     m2.poke(runner.state, Lm.ready, SM.TABLE_MAGIC)
+    m2.poke(runner.state, Lm.ready + SM.TABLE_SUM_AT, MDK.table_sum())   # 2026-11-12: and this build's checksum
     _twin_copy(runner.state, image)            # 2026-11-10: as entry_mark.asm leaves B (step_twin checks it)
     _chorus_copy(runner.state, image)          # 2026-11-12: as the build's FX init leaves the chorus (in L2)
     if warm:
