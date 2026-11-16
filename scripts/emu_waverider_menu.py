@@ -2050,23 +2050,26 @@ def main() -> int:
     popups: list[list] = []
     screen_obj = json.loads((root / "src/dnfw/mods/waverider_code.json").read_text())["layout"].get("wr_screen_obj")
 
-    def view_up(vt: int) -> bool:
-        """a view of class VT in the screen's list (as smp_question_up walks it: node +0 the next, +8 the view;
-        the sentinel at screen + 20, the first node at screen + 28)"""
+    def view_of(vt: int) -> int:
+        """the view of class VT in the screen's list, or 0 (as smp_question_up walks it: node +0 the next, +8 the
+        view; the sentinel at screen + 20, the first node at screen + 28)"""
         def ok(a):
             return 0x40000000 <= a < 0x48000000 and not a & 3
         scr = machine.long(screen_obj) if screen_obj else 0
         if not ok(scr):
-            return False
+            return 0
         node = machine.long(scr + 28)
         for _ in range(32):
             if not ok(node) or node == scr + 20:
-                return False
+                return 0
             v = machine.long(node + 8)
             if ok(v) and machine.long(v) == vt:
-                return True
+                return v
             node = machine.long(node)
-        return False
+        return 0
+
+    def view_up(vt: int) -> bool:
+        return view_of(vt) != 0
     until: list[list] = []
     uc.hook_add(UC_HOOK_CODE, lambda uc_, ad, sz, us: msel_view.__setitem__("view", arg(4) & 0xFFFFFFFF),
                 begin=MSEL_FOLLOW, end=MSEL_FOLLOW)
@@ -2309,6 +2312,11 @@ def main() -> int:
                     break
             until.append([parts[1], want, rounds, got])
             print(f"  until {parts[1]}() == {want}: {rounds} x 10 M, d0 = {got}")
+        elif step.startswith("view-words:"):
+            # view-words:VT:N -- the first N longs of the view of class VT now up (none: []), into the JSON's popups
+            _, vt_, n_ = step.split(":")
+            v_ = view_of(int(vt_, 0))
+            popups.append([step, v_ and f"{v_:#x}", [machine.long(v_ + 4 * k) for k in range(int(n_))] if v_ else []])
         elif step.startswith(("poke-ret:", "yes-while:", "until-class:")):
             # (2026-11-14, the 1.12 gate: question walks stock's popups by state, whatever the project shows)
             # poke-ret:FN:OFF:HEX -- HEX at FN() + OFF (an object only a stock call gives, the project, say);
