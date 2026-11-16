@@ -20,9 +20,12 @@
 </header>
 
 <div class="note">
-  <p><strong>Read this before you flash anything.</strong> These tools produce
-  firmware images. They do not send anything to an instrument, and they never will —
-  putting an image on your device is a step you take deliberately, with your own eyes open.</p>
+  <p><strong>Read this before you flash anything.</strong> What each page does: the mod
+  tools below build firmware images for you to download. <a href="samples.html">Sample Transfer</a>
+  sends samples over USB to a Digitone&nbsp;II running the sampler mod. The
+  <a href="https://de-pattern.github.io/dn2mk2/patcher.html">DN2 Mod Patcher</a> builds the
+  sampler mod's firmware from your own stock OS files. Putting firmware on your device is a
+  step you take deliberately, with your own eyes open.</p>
   <p><strong>Prove your way back first.</strong> The Early Start-up Menu can reflash
   stock firmware over MIDI. Do that once, with an unmodified image, <em>before</em> you
   flash a modified one. If that route does not work on your device, nothing here is safe to use.
@@ -416,6 +419,22 @@ dnfw mods apply firmware.syx --mod midiarp --mod arpmodes -o modded.syx</pre>
   </p>
   <p style="margin-top:1.2rem">
     <a class="cta" href="bench.html">Open the LFO Shape Bench &#8594;</a>
+  </p>
+</article>
+
+<article class="mod">
+  <div class="mod-head">
+    <h3>Sample transfer</h3>
+    <span class="mod-id">samples</span>
+    <span class="tag untested">Sends to the instrument</span>
+  </div>
+  <p>
+    Send your own samples over USB to a Digitone&nbsp;II running the sampler mod: into the
+    +Drive library, or into a project's SAMP slots, with the memory they take shown before
+    you send. De-Pattern's sample import tool, restyled for this site.
+  </p>
+  <p style="margin-top:1.2rem">
+    <a class="cta" href="samples.html">Open Sample Transfer &#8594;</a>
   </p>
 </article>
 

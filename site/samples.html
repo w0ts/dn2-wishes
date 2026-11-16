@@ -1,0 +1,332 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sample Transfer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<meta name="description" content="Send your samples to a Digitone II running the sampler mod, over USB MIDI, from your browser.">
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/tool.css">
+<style>
+  /* Page-specific. The page script (js/app/samples-page.js) is upstream's,
+   * unchanged: it sets the ids and class names below (pill ok/bad, note
+   * bad/warn, lib-mode/proj-mode, over, sel, dragging) and paints the memory
+   * bar with var(--rec), var(--new) and var(--yours). Everything inside .sx is
+   * that tool, mapped onto base.css's tokens. */
+  :root { --bad: #b8321f; --rec: #2f6db0; --new: #e9b98f; --yours: var(--accent); }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bad: #e5604f; --rec: #6aa8e8; --new: #ffd0ad; }
+  }
+  :root[data-theme="dark"] { --bad: #e5604f; --rec: #6aa8e8; --new: #ffd0ad; }
+
+  .wrap.wide { max-width: 78rem; }
+
+  .panel, #xfer {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 1rem 1.1rem; margin-top: .8rem;
+  }
+
+  /* upstream's small grey notes, not base.css's call-out box */
+  .sx .note {
+    border: 0; background: none; border-radius: 0; padding: 0;
+    margin: .7rem 0 0; color: var(--ink-soft); font-size: .86rem; max-width: none;
+  }
+  .sx .note.warn { color: var(--warn); }
+  .sx .note.bad { color: var(--bad); }
+
+  .sx .row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+  .sx select, .sx input[type=text], .sx input[type=number] {
+    font: inherit; font-size: .88rem; color: var(--ink); background: var(--bg);
+    border: 1px solid var(--rule); border-radius: 6px; padding: .35rem .55rem;
+  }
+  .sx label { font-size: .88rem; color: var(--ink-soft); }
+  .sx button { font-size: .86rem; }
+
+  .pill {
+    display: inline-block; padding: .1rem .55rem; border-radius: 999px;
+    border: 1px solid var(--rule); font-family: var(--mono); font-size: .72rem;
+    letter-spacing: .04em; color: var(--ink-soft);
+  }
+  .pill.ok { color: var(--ok); border-color: var(--ok); }
+  .pill.bad { color: var(--bad); border-color: var(--bad); }
+  .pill.warn { color: var(--warn); border-color: var(--warn); }
+
+  .sx table { margin: 0; font-variant-numeric: tabular-nums; font-size: .86rem; }
+  .sx th, .sx td { padding: .35rem .45rem; vertical-align: middle; }
+  .sx th { font-size: .68rem; }
+  .sx td.num, .sx th.num { text-align: right; white-space: nowrap; }
+  .sx td input[type=number] { padding: .15rem .35rem; font-family: var(--mono); }
+  .sx td input[type=text] { width: 7.5em; padding: .15rem .35rem; font-family: var(--mono); text-transform: uppercase; }
+  .sx tr[draggable=true] { cursor: grab; }
+  .sx tr.dragging { opacity: .4; }
+  .sx .slot { font-family: var(--mono); }
+
+  .scrollbox { max-height: 340px; overflow: auto; border: 1px solid var(--rule); border-radius: 8px; background: var(--bg); }
+  .scrollbox thead th { position: sticky; top: 0; z-index: 1; background: var(--bg); box-shadow: inset 0 -1px 0 var(--rule); }
+  .scrollbox tr:last-child td { border-bottom: 0; }
+  .scrollbox:has(tbody:empty) { display: none; }
+
+  /* the memory bar (id "bar"), not tool.css's sticky build bar */
+  .sx .bar {
+    position: relative; height: 22px; padding: 0; margin: 0; gap: 0;
+    border-radius: 6px; background: var(--bg); border: 1px solid var(--rule);
+    overflow: hidden; display: flex; flex-wrap: nowrap;
+  }
+  .sx .bar > div { height: 100%; }
+  .legend { display: flex; flex-wrap: wrap; gap: 1rem; margin-top: .5rem; color: var(--ink-soft); font-size: .8rem; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .6rem; margin-top: .8rem; }
+  .stat { background: var(--bg); border: 1px solid var(--rule); border-radius: 8px; padding: .5rem .7rem; }
+  .stat b { display: block; font: 500 1.05rem/1.3 var(--mono); }
+  .stat span { color: var(--ink-soft); font-size: .78rem; }
+  .sx progress { width: 100%; height: 10px; accent-color: var(--accent); margin-top: .6rem; }
+  #log { font: .76rem/1.5 var(--mono); color: var(--ink-soft); white-space: pre-wrap; max-height: 160px; overflow: auto; margin: .6rem 0 0; }
+  #diagOut { white-space: pre-wrap; min-height: 3em; margin: .6rem 0 0; font-size: .78rem; }
+  .sx .x { background: none; border: none; color: var(--ink-soft); padding: .1rem .4rem; }
+  .sx .x:hover { color: var(--bad); }
+
+  /* the transfer: this computer on the left, the instrument on the right */
+  .tabs { display: inline-flex; border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; }
+  .sx .tab { border: 0; border-radius: 0; background: var(--bg); color: var(--ink-soft); padding: .4rem .9rem; }
+  .sx .tab + .tab { border-left: 1px solid var(--rule); }
+  .sx .tab[aria-selected=true] { background: var(--accent); color: #fff; font-weight: 600; }
+  :root[data-theme="dark"] .sx .tab[aria-selected=true] { color: #16181c; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .sx .tab[aria-selected=true] { color: #16181c; }
+  }
+  /* tool.css turns a hovered button's text to the accent, which vanishes on an accent fill */
+  .sx button.primary:hover, .sx .tab[aria-selected=true]:hover { filter: brightness(1.08); color: #fff; }
+  :root[data-theme="dark"] .sx button.primary:hover,
+  :root[data-theme="dark"] .sx .tab[aria-selected=true]:hover { color: #16181c; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .sx button.primary:hover,
+    :root:not([data-theme="light"]) .sx .tab[aria-selected=true]:hover { color: #16181c; }
+  }
+  .panes { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: .6rem; margin-top: .8rem; align-items: stretch; }
+  .pane { display: flex; flex-direction: column; border: 1px solid var(--rule); border-radius: 8px; background: var(--bg); min-width: 0; transition: border-color .15s, background .15s; }
+  .pane.over { border-color: var(--accent); background: var(--accent-dim); }
+  .pane-head, .pane-foot { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; padding: .5rem .6rem; }
+  .pane-head { border-bottom: 1px solid var(--rule); }
+  .pane-foot { border-top: 1px solid var(--rule); min-height: 38px; margin-top: auto; }
+  .pane-head b { font: 500 .72rem/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+  .sx .pane-head button, .sx .pane-foot button { padding: .2rem .55rem; font-size: .8rem; }
+  .spacer { flex: 1; }
+  .pane-body { flex: none; overflow: auto; height: 420px; min-height: 200px; resize: vertical; }
+  .pane-body thead th { position: sticky; top: 0; z-index: 1; background: var(--bg); box-shadow: inset 0 -1px 0 var(--rule); }
+  .pane-body .empty { color: var(--ink-soft); text-align: center; padding: 60px 16px; font-size: .9rem; }
+  #drop .pane-body:has(#dropHint:not([style*="none"])) { border: 2px dashed var(--rule); border-radius: 8px; margin: 8px; }
+  .sx .pane-foot .note { margin: 0; }
+  .navline { display: flex; gap: .5rem; align-items: baseline; padding: .35rem .6rem; border-bottom: 1px solid var(--rule); background: var(--accent-dim); }
+  .sx .navline .x { color: var(--accent); padding: 0; font-size: .82rem; }
+  .navline .here { font: 500 .82rem/1.3 var(--mono); }
+  .sx .navline .note { margin: 0; }
+  .crumb { font: 500 .72rem/1 var(--mono); color: var(--ink); }
+  .crumb a { color: var(--accent); cursor: pointer; text-decoration: none; }
+  tr.up b.here { color: var(--ink); font-family: var(--mono); }
+  .mid { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: .5rem; width: 120px; text-align: center; }
+  .sx .mid .note { margin: 0; font-size: .78rem; }
+  .sx .mid button.primary { padding: .55rem 1rem; }
+  .sx th.ck, .sx td.ck { width: 28px; padding-right: 0; }
+  .sx tr.sel td { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  .sx tr.folder td { cursor: pointer; }
+  .sx tr.folder:hover td, .sx tr.up:hover td { background: color-mix(in srgb, var(--ink) 6%, transparent); }
+  .sx tr.up td { cursor: pointer; color: var(--ink-soft); background: var(--bg); box-shadow: inset 0 -1px 0 var(--rule); }
+  .ico { display: inline-block; width: 1.3em; color: var(--accent); }
+  #modeSel, #sliceSel { max-width: 100%; }
+  label.proj-only { max-width: 100%; }
+  #list td input.longIn { width: 100%; min-width: 9em; }
+  #list td input.folderIn { width: 100%; min-width: 6em; }
+  .lib-mode .proj-only, .proj-mode .lib-only { display: none !important; }
+  .st-ok { color: var(--ok); } .st-bad { color: var(--bad); } .st-run { color: var(--accent); }
+  @media (max-width: 640px) { .hide-sm { display: none; } .sx td input[type=text] { width: 6em; } }
+  @media (max-width: 860px) {
+    #list td input.longIn { min-width: 6em; } #list td input.folderIn { min-width: 4.5em; }
+    .panes { grid-template-columns: minmax(0, 1fr); }
+    .mid { flex-direction: row; width: auto; justify-content: flex-start; }
+    .pane-body { height: 300px; }
+  }
+</style>
+
+<div class="wrap wide">
+
+<header class="top">
+  <p class="eyebrow"><a href="index.html">Digitone II Mods</a> / sample transfer</p>
+  <h1>Sample Transfer</h1>
+  <p class="lede">
+    Send your own samples to a Digitone&nbsp;II running the sampler mod: into the
+    +Drive library, or straight into a project's SAMP slots. Pick the instrument's
+    MIDI ports, drop WAV, AIFF, FLAC, MP3, OGG or M4A files, see how much memory
+    they take, and send them over USB.
+  </p>
+</header>
+
+<div class="note">
+  <p><strong>This page talks to your instrument.</strong> It sends samples as SysEx over
+  USB to a Digitone&nbsp;II that already runs the sampler mod (v0.22 or later; the +Drive
+  library: v0.31 or later). Your audio files are read in this tab and go only to the instrument; there is no
+  server to upload them to.</p>
+  <p><strong>Before you start.</strong> Chrome or Edge (Web MIDI with SysEx; allow it when
+  asked). On the instrument, USB CONFIG set to USB MIDI or Overbridge. Close Elektron
+  Transfer first. Back up your +Drive: sending to the project slots replaces the samples
+  you sent before.</p>
+</div>
+
+<div class="sx">
+
+<section class="step">
+  <div class="step-head"><span class="step-num">1</span><h2>Instrument</h2></div>
+  <div class="panel">
+    <div class="row">
+      <label>to <select id="outSel" aria-label="MIDI output"></select></label>
+      <label>from <select id="inSel" aria-label="MIDI input"></select></label>
+      <button id="connectBtn" class="primary">Connect</button>
+      <span id="connState" class="pill">not connected</span>
+    </div>
+    <p id="devInfo" class="note">Allow MIDI (with SysEx) when the browser asks. Two ports, both named Digitone II: the one this page sends to, and the one it listens on (USB MIDI has one of each).</p>
+  </div>
+</section>
+
+<section class="step">
+  <div class="step-head"><span class="step-num">2</span><h2>Transfer</h2></div>
+  <div id="xfer" class="lib-mode">
+    <div class="row">
+      <div class="tabs" role="tablist">
+        <button id="tabLib" class="tab" role="tab" aria-selected="true">+Drive library</button>
+        <button id="tabProj" class="tab" role="tab" aria-selected="false">Project slots (SAMP 1–122)</button>
+      </div>
+      <label class="proj-only">Slots:
+        <select id="modeSel">
+          <option value="fill">Replace all · SAMP 1, 2, 3… in list order</option>
+          <option value="pick">Replace all · choose each slot</option>
+          <option value="add">Add · keep what's on the instrument, choose each slot</option>
+        </select></label>
+      <label class="proj-only">Slices for SLICE:
+        <select id="sliceSel">
+          <option value="cue">the WAV's cue points</option>
+          <option value="grid:4">grid of 4</option><option value="grid:8">grid of 8</option>
+          <option value="grid:16">grid of 16</option><option value="grid:32">grid of 32</option>
+          <option value="onsets">hits (onsets)</option><option value="none">none</option>
+        </select></label>
+    </div>
+    <p id="modeNote" class="note"></p>
+    <div class="panes">
+      <div class="pane" id="drop">
+        <div class="pane-head"><b>This computer</b><span class="spacer"></span>
+          <button id="browseBtn">Add files…</button> <button id="folderBtn" title="Your system's folder dialog shows folders only; every audio file inside the one you pick is added, subfolders included">Add a folder…</button>
+          <input id="fileIn" type="file" accept="audio/*,.wav,.wave,.aif,.aiff,.aifc,.flac,.mp3,.ogg,.oga,.opus,.m4a,.aac,.caf" multiple hidden>
+          <input id="dirIn" type="file" webkitdirectory multiple hidden>
+        </div>
+        <div class="pane-body">
+          <table id="list">
+            <thead><tr><th class="ck"><input type="checkbox" id="listAll" aria-label="Select all"></th><th class="proj-only">Slot</th><th>Name</th><th>Folder</th><th class="num hide-sm">Length</th><th class="num proj-only hide-sm">Slices</th><th class="num">Size</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+          <div class="empty" id="dropHint">Drop audio files or folders here<br><span style="font-size:.78rem">WAV, AIFF, FLAC, MP3, OGG, M4A</span></div>
+        </div>
+        <div class="pane-foot"><span id="listNote" class="note"></span><span class="spacer"></span>
+          <button id="removeSelBtn" disabled>Remove selected</button> <button id="clearBtn">Clear</button></div>
+      </div>
+      <div class="mid">
+        <button id="sendBtn" class="primary" disabled>Send →</button>
+        <p id="intoNote" class="note"></p>
+      </div>
+      <div class="pane" id="rightPane">
+        <div class="pane-head"><b>Digitone II</b> <span id="crumb" class="crumb"></span><span class="spacer"></span>
+          <button id="newFolderBtn" class="lib-only" disabled>New folder</button>
+          <button id="delSelBtn" class="lib-only" disabled>Delete selected</button>
+          <button id="reloadBtn" title="Read the instrument again" disabled>↻</button>
+        </div>
+        <div id="libNav" class="navline lib-only" style="display:none"><button id="upBtn" class="x" title="Back to all folders">‹ All folders</button><span class="note">/</span><b class="here"></b><span class="note" id="navCount"></span></div>
+        <div class="pane-body">
+          <table id="libT" class="lib-only"><thead><tr><th class="ck"><input type="checkbox" id="libAll" aria-label="Select all"></th><th>Name</th><th class="num">Size</th><th></th></tr></thead><tbody></tbody></table>
+          <table id="dev" class="proj-only"><thead><tr><th>Slot</th><th>Name</th><th class="num">Length</th><th>Kind</th></tr></thead><tbody></tbody></table>
+          <div class="empty" id="rightEmpty">Connect to see the instrument.</div>
+        </div>
+        <div class="pane-foot"><span id="libNote" class="note lib-only"></span><span id="devNote" class="note proj-only"></span></div>
+      </div>
+    </div>
+    <datalist id="folderList"></datalist>
+    <p class="note">Select samples on the left and press Send, or drag them onto the right; audio files dropped straight onto the +Drive go into the folder that is open. Names: the instrument's list shows the whole name (up to 35 characters); the seven letters under it are its short name. A dropped folder's samples get its name as their folder, and its folders stay folders inside it (v0.40 or later on the instrument; six levels at most, deeper files go into the sixth; before v0.40, each path is one folder). Ticked folders are deleted with their samples (v0.35 or later on the instrument; before that, empty folders go on the instrument: +DRIVE, RIGHT). Moving and renaming: on the instrument.</p>
+  </div>
+</section>
+
+<section class="step">
+  <div class="step-head"><span class="step-num">3</span><h2>Memory</h2></div>
+  <div class="panel">
+    <div class="bar" id="bar"></div>
+    <div class="legend">
+      <span><i style="background:var(--rec)"></i>recordings (kept)</span>
+      <span><i style="background:var(--new)"></i>what you send</span>
+    </div>
+    <div class="stats">
+      <div class="stat"><b id="sCap">–</b><span id="lCap">room for yours</span></div>
+      <div class="stat"><b id="sNow">–</b><span id="lNow">yours on it now</span></div>
+      <div class="stat"><b id="sSend">–</b><span>to send</span></div>
+      <div class="stat"><b id="sLeft">–</b><span>free after sending</span></div>
+      <div class="stat"><b id="sRec">–</b><span>recordings (kept)</span></div>
+      <div class="stat"><b id="sTime">–</b><span>transfer time (estimate)</span></div>
+    </div>
+    <p id="memNote" class="note"></p>
+  </div>
+</section>
+
+<section class="step">
+  <div class="step-head"><span class="step-num">4</span><h2>Transfers</h2></div>
+  <div class="panel">
+    <div class="row"><span id="sendState" class="pill">idle</span></div>
+    <p id="sendNote" class="note"></p>
+    <progress id="prog" value="0" max="1"></progress>
+    <div class="scrollbox" style="margin-top:.6rem"><table id="queue"><thead><tr><th>Sample</th><th>Into</th><th class="num">Size</th><th>Status</th></tr></thead><tbody></tbody></table></div>
+    <div id="log"></div>
+  </div>
+</section>
+
+<section class="step">
+  <div class="step-head"><span class="step-num">5</span><h2>Firmware</h2></div>
+  <div class="panel">
+    <p class="note" style="margin-top:0">The mod itself (the sample machines, the recorder, PERC and the rest) is a Digitone II OS 1.11 update file, <span class="slot">DN2mod_vX.Y_NAME_OS1.11.syx</span>.
+      Every build is checked by the project's ship gate before it is published, and only that exact file (its sha256) is cleared.
+      Flash it as any Digitone II OS update (Elektron Transfer, or the instrument's SysEx receive), after backing up the +Drive.
+      <b><a href="https://de-pattern.github.io/dn2mk2/patcher.html">The DN2 Mod Patcher</a></b> builds it in your browser from your own copies of Elektron's stock OS files (Digitone II 1.11, Digitakt II 1.17, Machinedrum UW 1.63), and lets you save it only if it is byte for byte the cleared file.
+      Each version's notes and tests: <a href="https://github.com/De-Pattern/dn2mk2-firmware/blob/builds/README.md" target="_blank" rel="noopener">FIRMWARE.md</a>.</p>
+  </div>
+</section>
+
+<section class="step">
+  <div class="step-head"><span class="step-num">6</span><h2>Diagnostics</h2></div>
+  <div class="panel">
+    <p class="note" style="margin-top:0">For bug reports: asks the instrument what its DSP has seen (needs v0.34 or later, connected above). It only reads. Run it right after power-on, again right after a note goes silent, and once more after a minute with nothing playing; press Copy each time and paste the results into your report.</p>
+    <div class="row" style="margin-top:.7rem"><button id="diagBtn" disabled>Run diagnostics</button> <button id="diagCopy" disabled>Copy</button> <span id="diagState" class="pill">idle</span></div>
+    <pre id="diagOut" class="scrollbox"></pre>
+  </div>
+</section>
+
+<section class="step">
+  <div class="step-head"><span class="step-num">7</span><h2>Erase mod data</h2></div>
+  <div class="panel">
+    <p class="note" style="margin-top:0">Before going back to stock firmware (needs v0.39 or later, connected above): erases everything the mod keeps on the +Drive (the samples in the pool, the projects' sample lists, the +Drive library, the mod's settings) and nothing of Elektron's (projects, sounds, presets are untouched). Then restart the instrument. The same is on the instrument: in the sample browser, +DRIVE, RIGHT, ERASE MOD DATA.</p>
+    <div class="row" style="margin-top:.7rem"><button id="eraseBtn" disabled>Erase mod data…</button> <span id="eraseState" class="pill">idle</span></div>
+  </div>
+</section>
+
+</div>
+
+<footer>
+  <p>
+    The transfer tool is De-Pattern's <em>DN2 Sample Import</em>, from
+    <a href="https://github.com/De-Pattern/dn2mk2-firmware/blob/5b26e21d0f5d5aeb67fde8374739c553967f6495/tools/web/index.html">dn2mk2-firmware, tools/web/index.html</a>
+    (also served at <a href="https://de-pattern.github.io/dn2mk2/">de-pattern.github.io/dn2mk2</a>),
+    AGPL-3.0-or-later. Its code is copied unchanged into
+    <code>js/samples-core.js</code> and <code>js/app/samples-page.js</code>; only the
+    page around it is restyled to match this site.
+  </p>
+  <p>
+    Part of <a href="https://github.com/angellinares/dn2_firmware_explore">dn2_firmware_explore</a>,
+    AGPL-3.0-or-later. Not affiliated with or endorsed by Elektron.
+  </p>
+</footer>
+
+</div>
+
+<script src="js/samples-core.js"></script>
+<script src="js/app/samples-page.js"></script>
