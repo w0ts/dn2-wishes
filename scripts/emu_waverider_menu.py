@@ -2047,6 +2047,26 @@ def main() -> int:
     # MACHINE SEL's view, as UP / DOWN hand it to the scroll-follow (the down-to: step)
     msel_view: dict[str, int] = {}
     down_to: list[list] = []
+    popups: list[list] = []
+    screen_obj = json.loads((root / "src/dnfw/mods/waverider_code.json").read_text())["layout"].get("wr_screen_obj")
+
+    def view_up(vt: int) -> bool:
+        """a view of class VT in the screen's list (as smp_question_up walks it: node +0 the next, +8 the view;
+        the sentinel at screen + 20, the first node at screen + 28)"""
+        def ok(a):
+            return 0x40000000 <= a < 0x48000000 and not a & 3
+        scr = machine.long(screen_obj) if screen_obj else 0
+        if not ok(scr):
+            return False
+        node = machine.long(scr + 28)
+        for _ in range(32):
+            if not ok(node) or node == scr + 20:
+                return False
+            v = machine.long(node + 8)
+            if ok(v) and machine.long(v) == vt:
+                return True
+            node = machine.long(node)
+        return False
     until: list[list] = []
     uc.hook_add(UC_HOOK_CODE, lambda uc_, ad, sz, us: msel_view.__setitem__("view", arg(4) & 0xFFFFFFFF),
                 begin=MSEL_FOLLOW, end=MSEL_FOLLOW)
@@ -2289,6 +2309,33 @@ def main() -> int:
                     break
             until.append([parts[1], want, rounds, got])
             print(f"  until {parts[1]}() == {want}: {rounds} x 10 M, d0 = {got}")
+        elif step.startswith(("poke-ret:", "yes-while:", "until-class:")):
+            # (2026-11-14, the 1.12 gate: question walks stock's popups by state, whatever the project shows)
+            # poke-ret:FN:OFF:HEX -- HEX at FN() + OFF (an object only a stock call gives, the project, say);
+            # yes-while:VT[:MOST] -- YES while a view of class VT is on the screen (each question answered);
+            # until-class:VT:WANT[:MOST] -- 10 M at a time until a view of class VT is up (1) or not (0).
+            # The views as smp_question_up walks them (csrc/sampler/rec.c). The JSON's popups: [step, rounds, up]
+            parts = step.split(":")
+            if parts[0] == "poke-ret":
+                guest_call(int(parts[1], 0))
+                at_ = (returned["d0"] + int(parts[2], 0)) & 0xFFFFFFFF
+                machine.write(at_, bytes.fromhex(parts[3]))
+                popups.append([step, 0, f"{at_:#x}"])
+            else:
+                vt, rounds = int(parts[1], 0), 0
+                if parts[0] == "yes-while":
+                    most = int(parts[2]) if len(parts) > 2 else 5
+                    while rounds < most and view_up(vt):
+                        panel.tap(KEYS["yes"])
+                        panel.settle(20_000_000)
+                        rounds += 1
+                else:
+                    want, most = bool(int(parts[2], 0)), int(parts[3]) if len(parts) > 3 else 100
+                    while rounds < most and view_up(vt) != want:
+                        panel.settle(10_000_000)
+                        rounds += 1
+                popups.append([step, rounds, view_up(vt)])
+                print(f"  {step}: {rounds} rounds, up {view_up(vt)}")
         elif step.startswith("down-to:"):
             # down-to:TYPE[:MOST] (2026-11-14, the 1.12 gate): DOWN in MACHINE SEL until the cursor's row is TYPE,
             # read as stock reads it (0x4005b162(view)), at most MOST presses; not a count of rows, which is the
@@ -2722,7 +2769,7 @@ def main() -> int:
               "setter_writes": writes,
               "mirror_type_writes": mirror_writes, "type_writes": type_writes,
               "direct_calls": calls_made,
-              "frames": frames, "memory": mems, "down_to": down_to, "until": until, "labels": labels, "pixel_callers": pixels, "access": access, "counts": counts,
+              "frames": frames, "memory": mems, "down_to": down_to, "until": until, "popups": popups, "labels": labels, "pixel_callers": pixels, "access": access, "counts": counts,
               "screen_frames": panel.frames() - frames_at_reset[0],
               "panel_writers": panel_writers, "items": items,
               "alive": alive, "fault_reports": reported, "stack_frees": stack_frees[:10],

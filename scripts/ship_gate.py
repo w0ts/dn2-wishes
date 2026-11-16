@@ -2002,16 +2002,25 @@ def main() -> int:
         if "smp_question_up" in lay:
             kit = 0x4210D08C
             Q, H, S = lay["smp_question_up"], lay["smp_held_lo"], lay["slc_state"]
-            qs = (f"wait:3,poke:{kit + 52 + 0xDE:#x}:0c,wait:4,tap:2,wait:6,call:{Q:#x},press:25,wait:2,yes,"
+            # (2026-11-14, the 1.12 gate: stock's popups waited for by state, not time, whatever the snapshot's project
+            # and card show: the project's per-slot write protection cleared (stock's own project, 0x4018e0a8; 1.12's
+            # per-build snapshot holds the factory PRESETS, slot 0 protected, so the save said WRITE PROTECTED), a
+            # further question (OVERWRITE '...'? when the card holds the project) answered YES, and each view
+            # waited for: SAVING (0x4020734c) and the message after it (0x40207294, ERROR without a card)
+            QV, PV, MV, PROJ = 0x4020671C, 0x4020734C, 0x40207294, 0x4018E0A8
+            qs = (f"wait:3,poke-ret:{PROJ:#x}:0x1de79:00,poke:{kit + 52 + 0xDE:#x}:0c,wait:4,tap:2,wait:6,call:{Q:#x},"
+                  f"press:25,wait:2,yes,"
                   f"wait:4,mem:{H:#x}:4,release:25,wait:6,mem:{S:#x}:4,mem:{H:#x}:4,press:17,wait:2,tap:8,"
-                  f"wait:2,release:17,wait:20,png:q,call:{Q:#x},yes,wait:30,mem:{S:#x}:4,call:{Q:#x},tap:2,"
+                  f"wait:2,release:17,wait:20,png:q,call:{Q:#x},yes,wait:30,mem:{S:#x}:4,call:{Q:#x},"
+                  f"yes-while:{QV:#x}:5,until-class:{MV:#x}:1:300,until-class:{MV:#x}:0:300,tap:2,"
                   f"wait:6,yes,wait:6,png:m,mem:{S:#x}:4,no,wait:6,mem:{S:#x}:4,"
                   # v0.41 (the owner, v0.40: "YES opens the slice menu, sometimes" while saving):
                   # FUNC + SETTINGS, YES, and a YES while SAVING is drawn (its view 0x4020734c at
                   # the list's end), then one on the message after it (0x40207294): both stock's,
                   # no menu; smp_question_up sees both up; the message's YES takes it down
-                  f"press:17,wait:2,tap:8,wait:2,release:17,wait:20,yes,wait:3,png:s,call:{Q:#x},yes,wait:3,"
-                  f"mem:{S:#x}:4,wait:15,png:e,call:{Q:#x},yes,wait:6,mem:{S:#x}:4,call:{Q:#x}")
+                  f"press:17,wait:2,tap:8,wait:2,release:17,wait:20,yes,wait:3,yes-while:{QV:#x}:5,"
+                  f"until-class:{PV:#x}:1:50,png:s,call:{Q:#x},yes,wait:3,"
+                  f"mem:{S:#x}:4,until-class:{MV:#x}:1:300,png:e,call:{Q:#x},yes,wait:6,mem:{S:#x}:4,call:{Q:#x}")
             qjs = work / "question.json"
             q_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
                      "--snapshot", snap, "--set-d0-at", "0x4005f5c6:0", "--steps", qs,
