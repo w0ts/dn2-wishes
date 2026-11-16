@@ -81,7 +81,7 @@ STATE_DM, STATE_BYTES = 0x2DDE00, 0x380      # save area, PERC's scratch, idle_l
 # 0x200fa000..0x200fdfff; the I-cache (enabled by the startup, docs/waverider-dsp-silence.md)
 # serves it. Its voices' state and scratch stay in L1, its tables in DDR.
 PERC_L2_LOAD = 0x200C0000
-PERC_L2_SPAN = 0x28000                       # 148 KB (v0.45 + b4, 2026-11-09: 150,710 B of code, BOUNCE's type and v0.45's PERC changes; 147 KB PLAITS VA+FM+ADD+SWARM+NOISE+PART+STRING+MODAL+BD+SD+HH, 2026-11-09: 149,892 B of code; VA 131,794; TB303: 128,282 B; PLAITS 123,128; 118,986 without SID, the DPRO machines and VO-6, 2026-11-08;
+PERC_L2_SPAN = 0x2A000                       # 168 KB (2026-11-11: 169,538 B of code with SID, the DPRO machines and VO-6 back; its end is the L2 ceiling 0x200ea000); 160 KB (v0.45 + b4, 2026-11-09: 150,710 B of code, BOUNCE's type and v0.45's PERC changes; 147 KB PLAITS VA+FM+ADD+SWARM+NOISE+PART+STRING+MODAL+BD+SD+HH, 2026-11-09: 149,892 B of code; VA 131,794; TB303: 128,282 B; PLAITS 123,128; 118,986 without SID, the DPRO machines and VO-6, 2026-11-08;
                                              # 142 KB SOPHIE, 140 KB v0.24..v0.42, 80 KB v0.17..v0.23). The span is zero-padded into
                                              # the DSP upload, so it is kept to the code
 PERC_SW = 0xB80000 + (PERC_L2_LOAD - 0x20000000) // 2       # 0xbe0000
@@ -109,8 +109,7 @@ MD_STATE_L2 = 0x200A0000                     # until 2026-11-10: now MD_STATE_DM
 MD_STATE_DM = 0x2E7000
 MNM_SCRATCH_L2 = 0x200A4000
 MNM_SCRATCH_BYTES = 0x4000
-# v0.36..v0.43: the DPRO tables' room (gone with DPRO-DDRW and -DENS, 2026-11-08; the address stays
-# so the main tap after it stays where it is). Before: (DDRW's and DENS's busiest DDR reads: 976
+# v0.36: the DPRO tables (DDRW's and DENS's busiest DDR reads, dnfw.mnm.core DP_TABLES: 976
 # words), copied here from the Monomachine tables by the Digibank build, once
 MNM_DT_L2 = MNM_SCRATCH_L2 + MNM_SCRATCH_BYTES        # 0x200A8000
 MNM_DT_BYTES = 0x1000
@@ -293,7 +292,8 @@ SMP_ENGINE_SLOT = 5                          # the engine slot the sample machin
 SMP_TYPES = _smp_types.TYPES                 # ONESHOT WERP STRETCH REPITCH GRID SLICE (v0.19); v0.44 BOUNCE (17)
 ENGINES = {5: "PERC", 8: "ONESHOT", 12: "GRID"}   # types with an engine of ours
 MNM_TYPES = _mnm_types.TYPES                 # v0.26: the Monomachine machines (PERC's voice, so PERC's slot)
-RESERVED_TYPES = tuple(_mnm_types.RESERVED)   # the removed machines' (2026-11-08): the MIDI engine's slot, silent
+RESERVED_TYPES = tuple(_mnm_types.RESERVED)   # a machine this build leaves out (dnfw.builder; the five removed
+                                             # 2026-11-08 until 2026-11-11): the MIDI engine's slot, silent
 MIDI_ENGINE_SLOT = 4                         # stock's MIDI machine: the DSP renders nothing for it
 
 IDLE_SITE_SW = 0xB88ABB                      # prvIdleTask's back edge: jump (pc,-0x10)
@@ -520,9 +520,28 @@ def _perc_tables() -> bytes:
     return perc_machines.stream_tables()
 
 
+def _digibank_room() -> None:
+    """DDRW's and DENS's Digibank stand-in (built by the DSP, never shipped: dnfw.mnm.core DIGI)
+    must lie past the Machinedrum and Monomachine tables and before the P-I delay lines."""
+    from ..mnm import core as MNC
+    mdc = _md_core()
+    at = MD_TABLES_DDR + mdc.TABLE_LAYOUT["mnm"][0] + MNC.DIGI_OFF
+    end = at + 4 * MNC.DIGI_WORDS
+    if at < MD_TABLES_DDR + mdc.TABLE_LAYOUT["_end"][0] or end > MD_DELAY_DDR:
+        raise DspError(f"the Digibank stand-in {at:#x}..{end:#x} overlaps the tables or the delay lines")
+
+
+def _dpro_on() -> bool:
+    """DPRO-DDRW or -DENS in this build (2026-11-11: back): the Digibank stand-in and the DPRO
+    tables' L2 room"""
+    return bool({"DPRO-DDRW", "DPRO-DENS"} & set(_mnm_types.NAMES))
+
+
 def ddr_spans() -> list[tuple[str, int, bytes]]:
     """(what, load address, payload) of each DDR span (load address = address): the
     machines' and filters' state (zeros, so fill blocks) and tables."""
+    if _dpro_on():
+        _digibank_room()
     return [
         # (v0.45: "PING tables" at PING_TABLES_DDR dropped with PING)
         # v0.31: PERC's amp modulation (AMD) reads SHFT's sine here (dnfw.perc.live.layout).
@@ -591,6 +610,9 @@ def l2_spans() -> list[tuple[str, int, bytes]]:
     # v0.32: the voices' working state (zeros)
     out.append(("Monomachine scratch and the voice order, in L2 (zeros; v0.32; ANALOG2's mix tables)",
                 MNM_SCRATCH_L2, _mnm_scratch()))
+    if _dpro_on():
+        out.append(("the DPRO tables' room in L2 (zeros, filled by the build; v0.36)", MNM_DT_L2,
+                    bytes(MNM_DT_BYTES)))
     out.append(("the main mix's tap for the recorder's MAIN, in L2 (zeros; v0.37)", MAIN_TAP_L2,
                 bytes(MAIN_TAP_BYTES)))
     code = obj["fdn8"]

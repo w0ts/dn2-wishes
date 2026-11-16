@@ -21,9 +21,11 @@ the instrument's own DSP and sitting in MACHINE SEL beside the stock ones:
   your WAVs sent over USB and kept on the +Drive.
 - **PERC, the Machinedrum**: the MD's TRX, EFM, GND and P-I machines (34 of them) from the
   Machinedrum's own firmware, with its track effects.
-- **Monomachine-style synth machines, polyphonic**: SOPHIE (this fork). The ports of the
-  Monomachine's own SID 6581, DPRO WAVE, DPRO DDRW, DPRO DENS and VO-6 were removed in this
-  fork (2026-11-08) to make room; a project track on one renders nothing (as a MIDI track).
+- **The Monomachine, polyphonic**: SID 6581, DPRO WAVE, DPRO DDRW, DPRO DENS and VO-6,
+  from the Monomachine's own firmware, drawn as the Monomachine draws them, and SOPHIE
+  (this fork). The Monomachine played one note per track; here every note gets its own
+  voice, so they play chords. (The five were out of this fork from 2026-11-08 to make room,
+  and are back since 2026-11-11.)
 
 Everything else on the instrument works as stock: the stock machines, the sequencer,
 projects, presets and kits.
@@ -74,14 +76,18 @@ TYPE is p-lockable.
 
 ### The Monomachine
 
-**This fork (2026-11-08):** SID 6581, DPRO WAVE, DPRO DDRW, DPRO DENS and VO-6 are removed
-(their code, tables and the Monomachine OS input); their machine types stay reserved, so a
-project track on one loads, shows an empty page and renders nothing (on the DSP it is a MIDI
-track). SOPHIE (`docs/sophie.md`) keeps
-the Monomachine-style page. The build no longer needs the Monomachine's OS file.
+SID 6581, DPRO WAVE, DPRO DDRW, DPRO DENS and VO-6, each its own machine type, ported
+from the Monomachine's firmware (you supply its OS file). Their pages are drawn as the
+Monomachine's, choice knobs move one choice a few detents, and each is levelled to sit
+beside the stock machines. SOPHIE (`docs/sophie.md`) has the Monomachine-style page too.
+(This fork removed the five on 2026-11-08, their types reserved meanwhile, and brought them
+back on 2026-11-11 with the same types.)
 
-**Polyphonic.** Each note takes its own voice from the DN2's 16 (VOICE SETUP as for any
-track). How many sound at once is set by DSP time.
+**Polyphonic.** The Monomachine was monophonic: six tracks, one note each. Here a
+Monomachine track is a Digitone II track, so each note takes its own voice from the DN2's
+16 (VOICE SETUP as for any track): chords and overlapping notes on SID, the DigiPROs and
+VO-6. How many sound at once is set by DSP time; VO-6, the heaviest, costs about 7 % of it
+a voice.
 
 ### Under the hood
 

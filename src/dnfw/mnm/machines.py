@@ -7,27 +7,37 @@ machine there has (host, init, trig, render), around each machine module's own
 - render: the machine's own pitch (`pitch`, from VW pitch), then two of its 16-frame blocks
   into the stream at OUT0.
 
-Removed (2026-11-08, the User, to make room for PLAITS and the 303): the five machines ported
-from the Monomachine's own DSP code, SID 6581, DPRO-WAVE, DPRO-DDRW, DPRO-DENS and VO-6, with
-their tables, the Digibank stand-in and the Monomachine kernel's pitch words (F, A, pre) only
-they read. Their machine types stay RESERVED (never reused): the DSP's lookup makes a track on
-one the MIDI machine's slot (nothing renders it: a stock MIDI track, bit for bit) and its page
-is empty.
+The five machines ported from the Monomachine's own DSP code (SID 6581, DPRO-WAVE, DPRO-DDRW,
+DPRO-DENS, VO-6; types 6, 7, 14, 15, 16) were removed on 2026-11-08 to make room for PLAITS and
+the 303, and came back on 2026-11-11 (the User: LZMA gave the USB image room). They render after
+the Monomachine kernel's pitch words (`_pitch`, theirs only):
+
+F = note x 2048 / 12 + TUNE x 683 / 128 (TUNE 64: in tune), 0..0x5800; A = 2^(F / 2048) x
+0x1D22A / 2^14 (the kernel's exp table and scaling, in float); pre, the previous slot's F
+(PRCH, MSRC). Their tables come from the User's Monomachine OS (dnfw.mnm.tables, dnfw.mnm.rom).
 """
 
 from __future__ import annotations
 
 from . import core as C
-from . import analog2, drone, plaits, sophie, tb303
+from . import analog2, ddrw, dens, drone, plaits, sid, sophie, tb303, vo6, wave
 from ..md import core as K
 from ..perc.dsl import Prog
 from ..builder import selection as _sel
 
-ALL_MODULES = (sophie, plaits, tb303, drone, analog2)   # their types: ALL_TYPE_SLOTS below (20, 18, 19, 21, 22)
+# in the order of PERC's machine index (dnfw.perc.program MNM_TYPES): the Monomachine's own five
+# after the others (2026-11-11), so every machine already here keeps its index
+ALL_MODULES = (sophie, plaits, tb303, drone, analog2, sid, wave, ddrw, dens, vo6)
+# their types: ALL_TYPE_SLOTS below (20, 18, 19, 21, 22, 6, 7, 14, 15, 16)
 # the builder (docs/builder.md): a machine left out of this build is emitted nowhere and its type
-# is RESERVED below, as the removed machines' are
-PART = {"SOPHIE": "MNM_SOPHIE", "PLAITS": "MNM_PLAITS", "TB303": "MNM_TB303", "DRONE": "MNM_DRONE", "ANALOG2": "MNM_ANALOG2"}
+# is RESERVED below
+PART = {"SOPHIE": "MNM_SOPHIE", "PLAITS": "MNM_PLAITS", "TB303": "MNM_TB303", "DRONE": "MNM_DRONE",
+        "ANALOG2": "MNM_ANALOG2",
+        "SID 6581": "MNM_SID", "DPRO-WAVE": "MNM_DPRO_WAVE", "DPRO-DDRW": "MNM_DPRO_DDRW",
+        "DPRO-DENS": "MNM_DPRO_DENS", "VO-6": "MNM_VO6"}
 MODULES = tuple(M for M in ALL_MODULES if _sel.on(PART[M.NAME]))
+# the Monomachine's own machines (the kernel's pitch words F, A, pre: `_pitch`)
+MNM_OS_NAMES = ("SID 6581", "DPRO-WAVE", "DPRO-DDRW", "DPRO-DENS", "VO-6")
 F_TOP = 0x5800
 
 
@@ -90,6 +100,56 @@ def _host_ddrw(p: Prog, L: K.Layout) -> None:
     p.st(W["gl"], 3)
 
 
+# v0.26: semitones added to the DN2's note, so each machine's note 60 is 261.6 Hz as the
+# DN2's own: on the Monomachine, for the same pitch, DPRO-WAVE sounds an octave under SID,
+# DDRW, DENS and VO-6
+TRANSPOSE = {"DPRO-WAVE": 12}
+
+
+def _pitch(p: Prog, L: K.Layout, transpose: int = 0) -> None:
+    """VW F, A and pre from VW pitch and TUNE (the Monomachine kernel's, for its own machines:
+    28eb110's parent, unchanged). Clobbers R0-R3, R12-R15, I1, I12."""
+    from ..perc import machines as PM
+    C.vw(p, 1, "pitch")
+    if transpose:
+        p.fconst(12, float(transpose))
+        p.fop(1, 1, "+", 12)
+    p.fconst(12, 2048.0 / 12.0)
+    p.fop(1, 1, "*", 12)
+    C.knob(p, 2, 7)
+    p.iconst(12, 0)
+    p.float_(2, 2, 12)
+    p.fconst(12, 683.0 / 128.0)
+    p.fop(2, 2, "*", 12)
+    p.trunc(2, 2)
+    p.iconst(12, 0)
+    p.float_(2, 2, 12)
+    p.fop(1, 1, "+", 2)
+    p.fconst(12, 0.0)
+    p.fop(1, 1, "MAX", 12)
+    p.fconst(12, float(F_TOP))
+    p.fop(1, 1, "MIN", 12)
+    p.trunc(1, 1)
+    C.vws(p, "F", 1)
+    p.iconst(12, 0)
+    p.float_(1, 1, 12)
+    p.fconst(12, 1.0 / 2048.0)
+    p.fop(1, 1, "*", 12)
+    PM.exp2(p, L.mnm.perc, 1, 1)
+    p.fconst(12, 0x1D22A / 2.0 ** 14)
+    p.fop(1, 1, "*", 12)
+    C.vws(p, "A", 1)
+    # the previous slot's F (slot 15's for slot 0): PRCH, MSRC
+    p.ld(1, L.C["mdb"])
+    p.iconst(12, -K.MD_STRIDE)
+    p.iop(1, 12, "+", 1)
+    p.iconst(12, L.state)
+    p.if_(1, "LT", 12, lambda: (p.iconst(12, 16 * K.MD_STRIDE), p.iop(1, 12, "+", 1)), kind="i")
+    p.seti(1, 1)
+    p.ldi(2, C.VW["F"], 1)
+    C.vws(p, "pre", 2)
+
+
 def _render(M):
     def render(p: Prog, L: K.Layout) -> None:
         mL = L.mnm
@@ -99,6 +159,8 @@ def _render(M):
         if p.run:
             p.r[0] = p.i[4]
         p.st(mL.W["i4s"], 0)
+        if M.NAME in MNM_OS_NAMES:              # the Monomachine's own machines read F, A, pre
+            _pitch(p, L, TRANSPOSE.get(M.NAME, 0))
         M.pitch(p, mL)
         p.iconst(0, 0)
         p.st(mL.W["half"], 0)
@@ -155,21 +217,32 @@ DEFAULTS = {M.NAME: M.DEFAULTS for M in MODULES}
 # ColdFire (dnfw.waverider.coldfire, pages), the DSP's lookup (dnfw.waverider.dsp) and PERC's
 # voice (dnfw.perc.program).
 # v0.45 (2026-11-09, the User: keep upstream dn2mk2's numbers): BOUNCE is upstream's type 17, so
-# SOPHIE moved 17 -> 20; PLAITS and TB303 keep 18 and 19
-ALL_TYPE_SLOTS = (20, 18, 19, 21, 22)     # 20: SOPHIE (docs/sophie.md), 18: PLAITS, 19: TB303, 2026-11-10: 21 DRONE, 22 ANALOG2
+# SOPHIE moved 17 -> 20; PLAITS and TB303 keep 18 and 19. 2026-11-11: the Monomachine's five keep
+# their own 6, 7, 14, 15, 16 (CZ's and RESONATOR's former types, then the ones after the sample
+# machines), reserved while they were out
+ALL_TYPE_SLOTS = (20, 18, 19, 21, 22, 6, 7, 14, 15, 16)   # 20: SOPHIE (docs/sophie.md), 18: PLAITS, 19: TB303,
+                                                          # 2026-11-10: 21 DRONE, 22 ANALOG2
 TYPE_SLOTS = tuple(t for M, t in zip(ALL_MODULES, ALL_TYPE_SLOTS) if M in MODULES)   # each machine keeps its type
 TYPES = TYPE_SLOTS[:len(MACHINES)]
-# the removed machines' types (2026-11-08): reserved, never reused, so every other machine keeps
-# its number and a project's track on one stays on it (silent, its page empty)
-RESERVED = {6: "SID 6581", 7: "DPRO-WAVE", 14: "DPRO-DDRW", 15: "DPRO-DENS", 16: "VO-6"}
-# the machines this build leaves out (dnfw.builder): reserved the same way, for this build only
+# MACHINE SEL's order (dnfw.waverider.coldfire LIST_NEW): the Monomachine's five first, as before
+# their removal (SOPHIE after VO-6), then the others in TYPES' order
+LIST_TYPES = (tuple(t for t, n in zip(TYPES, NAMES) if n in MNM_OS_NAMES)
+              + tuple(t for t, n in zip(TYPES, NAMES) if n not in MNM_OS_NAMES))
+# the machines this build leaves out (dnfw.builder): their types are reserved, never reused, so
+# every other machine keeps its number and a project's track on one stays on it (silent, its
+# page empty). None in the full build.
 LEFT_OUT = {t: M.NAME for M, t in zip(ALL_MODULES, ALL_TYPE_SLOTS) if M not in MODULES}
-RESERVED.update(LEFT_OUT)
+RESERVED = dict(LEFT_OUT)
 assert not set(RESERVED) & set(TYPES)
+assert len(set(ALL_TYPE_SLOTS)) == len(ALL_TYPE_SLOTS), "two machines of ours on one type"
 from ..sampler import machines as _smp  # noqa: E402
 assert not set(_smp.TYPES) & (set(TYPES) | set(RESERVED)), "a machine type of ours is a sample machine's (v0.44 BOUNCE: 17)"
 # MACHINE SEL's names (long, short), as the DN2 lists its own
-LIST_NAMES = {"SOPHIE": ("Sophie", "SOP"), "PLAITS": ("Plaits", "PLT"), "TB303": ("TB-303", "303"), "DRONE": ("Drone", "DRN"), "ANALOG2": ("Analog 2", "AN2")}
+LIST_NAMES = {"SOPHIE": ("Sophie", "SOP"), "PLAITS": ("Plaits", "PLT"), "TB303": ("TB-303", "303"),
+              "DRONE": ("Drone", "DRN"), "ANALOG2": ("Analog 2", "AN2"),
+              "SID 6581": ("SID 6581", "SID"), "DPRO-WAVE": ("DPRO Wave", "DPW"),
+              "DPRO-DDRW": ("DPRO Ddrw", "DDW"), "DPRO-DENS": ("DPRO Dens", "DNS"),
+              "VO-6": ("VO-6", "VO6")}
 REMOVED_NAMES = ("Removed", "---")       # a reserved type's name (MACHINE SEL never lists it)
 
 

@@ -142,22 +142,66 @@ MNM_LONG = {"TUNE": "Tune", "---": "Unused",
             # ANALOG2 (docs/analog2.md)
             "DTN": "Detune", "MIX": "Osc Mix", "NOIS": "Noise", "DRV": "Drive", "KTR": "Key Track",
             "SWRM": "Swarm", "SEMI": "Osc2 Semi", "SDTN": "Swarm Spread", "SYNC": "Hard Sync",
-            "WAV2": "Osc2 Wave", "FLT": "Filter"}
+            "WAV2": "Osc2 Wave", "FLT": "Filter",
+            # SID 6581, DPRO WAVE / DDRW / DENS, VO-6 (v0.26; removed 2026-11-08, back 2026-11-11):
+            # their names as at 28eb110's parent (MIX, SYNC, WAV2, WAVE: below, by machine)
+            "PW": "Pulse Width", "PWAD": "PW Sweep", "PWRS": "PW Restart",
+            "MOD": "Modulation", "MSRC": "Mod Source", "MFRQ": "Mod Freq",
+            "WP": "Wave Position", "WPM": "WP Mod", "WPRS": "WP Restart",
+            "SFRQ": "Sync Freq",
+            "WAV1": "Wave 1", "TIME": "Fade Time",
+            "BR1": "Bit Reduce 1", "WID": "Detune Width", "BR2": "Bit Reduce 2",
+            "PCH2": "Pitch 2", "PCH3": "Pitch 3", "PCH4": "Pitch 4",
+            "VOC1": "Vocal Freq 1", "VOC2": "Vocal Freq 2", "V-SW": "Vowel Switch",
+            "VOIC": "Voice Type", "CONS": "Consonant", "CLEN": "Cons Length", "CVOL": "Cons Volume"}
 # a name one machine means otherwise (MNM_LONG is by short name across machines)
-MNM_LONG_BY = {("ANALOG2", "WAVE"): "Waveform"}
+MNM_LONG_BY = {("ANALOG2", "WAVE"): "Waveform",
+               ("SID 6581", "WAVE"): "Waveform", ("DPRO-WAVE", "WAVE"): "Waveform", ("DPRO-DENS", "WAVE"): "Waveform",
+               ("DPRO-DDRW", "MIX"): "Wave Mix", ("DPRO-DDRW", "WAV2"): "Wave 2", ("DPRO-WAVE", "SYNC"): "Sync"}
 # parameters the port does not run (DENS's chorus is the Monomachine's effect after the
 # machine): drawn as "-", as an unused one
 MNM_UNPORTED = {"CHRL", "CHRW"}
 
 
 def _pch_names() -> tuple[tuple[int, ...], tuple[str, ...]]:
-    """DENS's PCH2..4 choices by table (MNM_PCH) went with DPRO-DENS (removed 2026-11-08); the
-    page code's table stays, unused (no control is MNM_PCH)"""
-    return tuple(0 for _ in range(128)), ()
+    """DENS's PCH2..4: the knob -> its choice (the ROM's ratio table runs, 33 of them),
+    and their names as the Monomachine's: semitones -12..+12, OFF for 1.0, else the ratio.
+    Without DPRO-DENS in this build (dnfw.builder) the page code's table stays, unused (no
+    control is MNM_PCH)."""
+    import fractions
+    import itertools
+    import math
+    if "DPRO-DENS" not in _mnm.NAMES:
+        return tuple(0 for _ in range(128)), ()
+    from ..mnm import rom as mrom
+    if not mrom.available():
+        return tuple(range(128)), tuple(str(k) for k in range(128))
+    t = mrom.words(*mrom.PCH)
+    idx, names = [], []
+    for v, g in itertools.groupby(t):
+        r = v / 0x200000
+        st = 12 * math.log2(r)
+        if abs(st - round(st)) < 1e-3:
+            n = "OFF" if round(st) == 0 else f"{round(st):+d}"
+        else:
+            f = fractions.Fraction(r).limit_denominator(6)
+            n = f"{f.numerator}/{f.denominator}"
+        idx += [len(names)] * len(list(g))
+        names.append(n)
+    return tuple(idx), tuple(names)
 
 
 # the enumerated parameters: their choices by name, as the Monomachine shows them (0: a knob)
 MNM_CHOICES = {
+    "SID 6581": {"PWRS": ("OFF", "ON"), "WAVE": ("TRI", "SAW", "PULS", "MIX", "NOIS"),
+                 "MOD": ("OFF", "RING", "SYNC", "R+S"), "MSRC": ("MFRQ", "PRCH")},
+    "DPRO-WAVE": {"WAVE": 32, "WPRS": ("OFF", "ON"), "SYNC": ("OFF", "SFRQ", "PRCH")},
+    # the Digibank's 64 (here the ROM's 32, twice: S01..S32) and DENS's pitches (by table)
+    "DPRO-DDRW": {"WAV1": 64, "WAV2": 64},
+    "DPRO-DENS": {"WAVE": 64, "PCH2": "pch", "PCH3": "pch", "PCH4": "pch"},
+    # VO-6: its manual's names (Appendix A); V-SW below 64 ends the vowel
+    "VO-6": {"V-SW": ("OFF", "ON"), "CONS": ("-", "B", "D", "F", "G", "H", "J", "K", "L", "M", "N",
+                                            "P", "R", "RR", "S", "SJ", "T", "TJ", "TH", "V", "Z")},
     "SOPHIE": {"MODL": ("FUSE", "STAK", "SPLT", "SHRD", "PIPE", "BOOM", "KICK")},
     "ANALOG2": {"WAVE": ("SAW", "SQR", "TRI", "SIN", "PWM"), "WAV2": ("=1", "SAW", "SQR", "TRI", "SIN", "PWM"),
                 "SYNC": ("OFF", "ON"), "SWRM": ("OFF", "1", "2", "3", "4", "5", "6"), "SEMI": 49,
@@ -173,6 +217,14 @@ MNM_CHOICES = {
 # needle at the bottom moving left or right, 5 a knob switch pointing at its position (the
 # removed machines used 2..4; md_page.c keeps their drawing)
 MNM_WIDGET = {("SOPHIE", "MODL"): 5, ("PLAITS", "MODL"): 5,
+              # the Monomachine's own (back 2026-11-11, as at 28eb110's parent): DPRO-WAVE's WAVE and
+              # VO-6's CONS a grid, DDRW's WAV1 / WAV2 and DENS's WAVE a bar, DENS's PCH2..4 a needle
+              ("DPRO-WAVE", "WAVE"): 2, ("VO-6", "CONS"): 2,
+              ("DPRO-DDRW", "WAV1"): 3, ("DPRO-DDRW", "WAV2"): 3, ("DPRO-DENS", "WAVE"): 3,
+              ("DPRO-DENS", "PCH2"): 4, ("DPRO-DENS", "PCH3"): 4, ("DPRO-DENS", "PCH4"): 4,
+              ("SID 6581", "PWRS"): 5, ("SID 6581", "WAVE"): 5, ("SID 6581", "MOD"): 5,
+              ("SID 6581", "MSRC"): 5, ("DPRO-WAVE", "WPRS"): 5, ("DPRO-WAVE", "SYNC"): 5,
+              ("VO-6", "V-SW"): 5,
               ("DRONE", "TOPO"): 5, ("ANALOG2", "WAVE"): 5, ("ANALOG2", "WAV2"): 5, ("ANALOG2", "SYNC"): 5,
               ("ANALOG2", "SWRM"): 5, ("ANALOG2", "FLT"): 5, ("ANALOG2", "SEMI"): 6, ("DRONE", "GLTY"): 5, ("DRONE", "HOLD"): 5, ("DRONE", "OCT"): 5,
               # 2026-11-09: 6 MW_SEMIS, the step - n / 2 as +7 / -12 / 0 (the User, build #3: semitones,
@@ -186,7 +238,7 @@ MNM_PCH = 255                       # mnm_choices' mark: the choice by mnm_pch_i
 # the Monomachine's machines (v0.26; kinds 2 and 3 were RESONATOR's and CZ's until v0.25):
 # is_wr's kind is the type - 4, so 2, 3 (types 6, 7) and 10.. (types 14..); one page of
 # PERC's eight records each, labelled per machine
-MNM_KINDS = tuple(t - 4 for t in _mnm_types.CF_TYPES)   # the reserved types' too (empty pages)
+MNM_KINDS = tuple(t - 4 for t in _mnm_types.CF_TYPES)   # a reserved type's too (an empty page)
 MNM_PAGE = PARAM_IDS
 # 2026-11-09: a machine with PNAMES2 (DRONE, ANALOG 2) has a second page on PERC's page-2 records (the
 # Machinedrum's track-FX records and TYPE, which PERC applies only to its own machines): 16 controls

@@ -139,6 +139,7 @@ def _half(p: Prog, L: C.Layout) -> None:
     p.st(W["rate"], 2)
     p.iconst(0, 0)
     p.st(W["bit"], 0)
+    b3 = p.ibias.get(3)                          # the voice's I3 bias (2026-11-11, shrink: program.I3_BIAS)
 
     def wave():
         p.ld(1, L.md.C["mdb"])
@@ -178,7 +179,10 @@ def _half(p: Prog, L: C.Layout) -> None:
         p.trunc(5, 5)                           # the wave chosen (knob >> 1)
         p.lsh(3, 2, 4)
         D.addr(p, 3, 1, 3)
-        p.seti(3, 3)                            # I3: the slot + 4 n words: the wave's S0..S3
+        if b3:                                  # the voice's bias kept (the state words' offsets)
+            p.iconst(12, 4 * b3)
+            p.iop(3, 12, "+", 3)
+        p.seti(3, 3, bias=b3)                   # I3: the slot + 4 n words: the wave's S0..S3
         C.st(p, 7, S_NEW)
         C.st(p, 8, S_FD)
 
@@ -327,7 +331,10 @@ def _half(p: Prog, L: C.Layout) -> None:
         D.addr(p, 3, 3, 2)
         C.sts(p, S_U, 3)
         p.ld(1, L.md.C["mdb"])
-        p.seti(3, 1)                            # I3: the slot again
+        if b3:
+            p.iconst(12, 4 * b3)
+            p.iop(1, 12, "+", 1)
+        p.seti(3, 1, bias=b3)                   # I3: the slot again (biased as the voice set it)
         p.ld(2, W["bit"])
         p.iconst(12, 1)
         p.iop(2, 12, "+", 2)

@@ -298,8 +298,12 @@ def _puls(p: Prog, L: C.Layout) -> None:
 
 def _mix(p: Prog, L: C.Layout) -> None:
     """48 rounds of four samples: T[X[4j] >> 12] twice, T[X[4j + 2] >> 12] twice, with
-    j = max(round - 1, 0) (the 56300's lagging pipeline: the first pair comes twice)."""
+    j = max(round - 1, 0) (the 56300's lagging pipeline: the first pair comes twice).
+    I3 walks the table and is put back on the slot at the end, with its bias (2026-11-11: until
+    then it was left on the table, so the render's second half and the voice after it read and
+    wrote the slot's words there; the bench runs one half and never saw it)."""
     W = L.W
+    b3 = p.ibias.get(3)                          # the voice's I3 bias (shrink: program.I3_BIAS)
     p.iconst(12, 0)
     p.st(W["c"], 12)
 
@@ -330,6 +334,11 @@ def _mix(p: Prog, L: C.Layout) -> None:
         p.iop(6, 12, "+", 13)
         p.st(W["c"], 6)
     p.loop(W["n4"], N // 4, one)
+    p.ld(8, L.md.C["mdb"])                       # I3: the slot again, biased as the voice set it
+    if b3:
+        p.iconst(12, 4 * b3)
+        p.iop(8, 12, "+", 8)
+    p.seti(3, 8, bias=b3)
 
 
 def _rol(p: Prog, r: int) -> None:

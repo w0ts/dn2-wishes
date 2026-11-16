@@ -149,6 +149,10 @@ def init_on(snap, m2mach, image: Image, warm: bool = False):
             if L.tables <= a < L.T[MDK.SHIPPED]:
                 m2.poke(runner.state, a, w)
         m2.poke(runner.state, L.C["fill"], MDK.Z_N)
+        # v0.26: and the Digibank stand-in DENS and DDRW read, built (8 s after the tables)
+        from dnfw.mnm import dpro as MNP
+        for a, w in MNP.bench_words(L.mnm).items():
+            m2.poke(runner.state, a, w)
     return runner
 
 
@@ -222,6 +226,8 @@ def run_blocks(init, frames, blocks: int, extra_hooks=None):
             fp = _Prog("run", mem=filled)
             fp.spill = PERC_L.md.C["ash"]
             MDK.table_fill(fp, PERC_L.md)
+            from dnfw.mnm import dpro as MNP           # v0.26: and the Digibank stand-in's build
+            MNP.build(fp, PERC_L.md.mnm)
             filled.put(PERC_L.C["mcost"], 0)           # and the Monomachine voices' cost, carried slot to slot
             PP.mnm_ages(fp, PERC_L)                    # v0.29: and their ages (the newest first)
             for t in range(16):
@@ -1270,8 +1276,8 @@ def step_stress(init, sound, machines) -> dict:
     K standing for what a DN2 cycle costs an instruction (memory stalls: the unit's load is
     several times its instruction count; K = 3 here, past what v0.27..v0.31 were measured
     at). Scenario A (depaffect's): sixteen PERC voices, EFM-SD, a new note on the next voice
-    each block (dynamic allocation). B: four Monomachine voices (the machines in turn; VO-6,
-    DDRW, DENS and SID until they were removed, 2026-11-08) and four PERC. Each block must end, our voices done by 0.8 P (the guard checks before each
+    each block (dynamic allocation). B: four Monomachine voices (VO-6, DDRW, DENS, SID) and
+    four PERC. Each block must end, our voices done by 0.8 P (the guard checks before each
     voice; one voice may run past LIMIT by its own cost), the newest note heard, voices
     left out (and counted) when time is short, nothing non-finite."""
     from dnfw.perc import guard as G
@@ -1341,7 +1347,7 @@ def step_stress(init, sound, machines) -> dict:
         f.trigger(b % 16)
         return f.to_bytes()
     ra, sa, ea, la = scenario("A", 20, a_frame)
-    names = tuple(MMx.NAMES[t % len(MMx.NAMES)] for t in range(4))   # (VO-6, DDRW, DENS, SID until 2026-11-08)
+    names = ("VO-6", "DPRO-DDRW", "DPRO-DENS", "SID 6581")
 
     def b_frame(b):
         f = base_frame(sound, machines, overrides=perc_words(td), trigger=False,
@@ -1360,8 +1366,8 @@ def step_stress(init, sound, machines) -> dict:
 
     # v0.33, the worst cases (the owner's list): C, sixteen P-I voices (the heaviest
     # Machinedrum family), a new note on the next voice every block with every control
-    # moving (p-locks on every step); D, sixteen Monomachine voices (the two first machines
-    # in turn; VO-6 and DENS until 2026-11-08), the same; E, one track retriggered every block (zuzsw's RTRG at 1/80 and
+    # moving (p-locks on every step); D, sixteen Monomachine voices (VO-6 and DENS in
+    # turn), the same; E, one track retriggered every block (zuzsw's RTRG at 1/80 and
     # faster) beside fifteen sounding EFM voices
     import random as _rr
     rnd = _rr.Random(80)
@@ -1379,7 +1385,7 @@ def step_stress(init, sound, machines) -> dict:
         f.trigger(b % 16)
         return f.to_bytes()
     rc, sc, ec, lc = scenario("C", 20, c_frame)
-    mn = [0, 1 % len(MMx.NAMES)]
+    mn = [MMx.NAMES.index("VO-6"), MMx.NAMES.index("DPRO-DENS")]
 
     def d_frame(b):
         f = base_frame(sound, machines, t0=MMx.TYPES[mn[0]], trigger=False,
@@ -1466,7 +1472,7 @@ def step_stress(init, sound, machines) -> dict:
         "every block of both returns": ra["ok"] and rb["ok"],
         "our voices done by 0.8 of the frame in both (the guard's limit holds under load)":
             ea is not None and eb is not None and ea <= 0.8 * P and eb <= 0.8 * P,
-        "v0.33, the worst cases: every block of C (16 P-I, all controls and track effects moving), D (16 Monomachine voices, "
+        "v0.33, the worst cases: every block of C (16 P-I, all controls and track effects moving), D (16 VO-6/DENS, "
         "all controls moving) and E (a retrigger every block beside 15 voices) returns":
             rc["ok"] and rd["ok"] and re_["ok"],
         "v0.33: in each, our voices done by 0.8 of the frame (the guard leaves voices out instead)":
@@ -1669,7 +1675,7 @@ def step_chords(init, sound, machines, need=4, cold=None) -> dict:
                           "sounding_mean": round(sum(sounding) / max(len(sounding), 1), 2),
                           "our_end_over_P": over and round(over, 3)}
             print(f"    {name}: {nums[name]}", flush=True)
-            want = need
+            want = need if name != "DPRO-DDRW" else 3      # (v0.37: DDRW skips its zero-weight level: three fit)
             flicker = any(b2 > a2 for a2, b2 in zip(sounding, sounding[1:]))    # a dropped voice back with no note
             nums[name]["flicker"] = flicker
             nums[name]["guard_attack"] = trace
@@ -4062,8 +4068,8 @@ def step_mnm(init, sound, machines, blocks) -> dict:
     runs["PLAITS_walk"] = _slim(run_blocks(init, plaits_walk, max(blocks, 2 * PLm.N_MODELS + 2)))
     # the budget: SID on tracks 0..3 at once; those whose cost fits PP.MNM_BUDGET in track
     # order play, the rest are silent
-    sid = 0                                  # the first machine (SID until 2026-11-08; the name stays)
-    fits = PP.MNM_BUDGET // PP.MNM_COST[MM.NAMES[sid]]
+    sid = MM.NAMES.index("SID 6581")
+    fits = PP.MNM_BUDGET // PP.MNM_COST["SID 6581"]
 
     def four(b):
         f = base_frame(sound, machines, t0=types[sid], overrides=mnm_words(sid), trigger=b == 1,
@@ -4115,28 +4121,6 @@ def step_mnm(init, sound, machines, blocks) -> dict:
         if rr["ok"] and all(0 in rr["perc"][b] for b in (REST_AT, REST_AT + 1, REST_AT + 2)) else 0.0
     rest_ok = rr["ok"] and seen_cost.get(REST_AT - 2) == 0 and seen_cost.get(2, 0) > 0 and rest_peak_after > 0.01
     rr.pop("state", None)
-    # 2026-11-08: a track on a removed machine's reserved type (a project saved with SID, the DPRO
-    # machines or VO-6): the DSP's lookup makes it the MIDI machine's slot, so it must be a stock
-    # MIDI track (type 4), bit for bit, every block: untriggered, triggered, and after switching
-    # from a sounding machine (the first one, triggered at block 1, the type changed at block 4).
-    # (A stock MIDI track is not all zeros in the runner: its amp stage carries the start-up
-    # snapshot's stock state, a decaying residue, peak 0.02 once triggered. Nothing renders.)
-    reserved, rpeaks = {}, {}
-    for how in ("untriggered", "triggered", "switched"):
-        def rf(b, t, how=how):
-            t0 = t if how != "switched" or b >= 4 else types[0]
-            return base_frame(sound, machines, t0=t0, overrides=mnm_words(0),
-                              trigger=b == 1 and how != "untriggered").to_bytes()
-        rmidi = run_blocks(init, lambda b, how=how: rf(b, 4, how), blocks)
-        want = [blk[0] for blk in rmidi["buffers"]]
-        rmidi.pop("state", None)
-        for rt in sorted(MM.RESERVED):
-            rres = run_blocks(init, lambda b, rt=rt, how=how: rf(b, rt, how), blocks)
-            got = [blk[0] for blk in rres["buffers"]]
-            rpeaks[f"{rt}_{how}"] = max((abs(x) for blk in got[4:] for x in blk), default=None)
-            reserved[f"{rt}_{how}"] = bool(rres["ok"]) and bool(rmidi["ok"]) and bool(got) and got == want
-            rres.pop("state", None)
-    print(f"    reserved types (peak from block 4; == MIDI): {rpeaks} {reserved}", flush=True)
     ok_runs = all(r["ok"] for r in runs.values())
     exact = {k: perc_exact(r) for k, r in runs.items() if r["ok"]}
     peaks = {name: V.peak(perc_series(runs[name], 0)) if runs[name]["ok"] else None for name in MM.NAMES}
@@ -4158,7 +4142,7 @@ def step_mnm(init, sound, machines, blocks) -> dict:
         "dnfw.perc.program run on the DSP's memory at PERC's entry":
             ok_runs and all(v[0] > 0 and v[1] == 0 and v[2] == 0 for k, v in exact.items() if k != "silent")
             and exact.get("silent", (0, 1, 1))[1:] == (0, 0),
-        "each machine sounds on track 0 and beside it on track 1 (peak > 0.005)":
+        "each machine sounds on track 0 and beside it on track 1 (peak > 0.005; VO-6's onset is 0.009)":
             all(v is not None and v > 0.005 for v in list(peaks.values()) + list(other.values())),
         "each machine is still sounding in the run's last four blocks (peak > 0.005)":
             all(v is not None and v > 0.005 for v in late.values()),
@@ -4166,9 +4150,6 @@ def step_mnm(init, sound, machines, blocks) -> dict:
             ok_runs and all(math.isfinite(x) and abs(x) <= 4.0 for r in runs.values() for blk in r["perc"]
                             for v in blk.values() for x in v["out"]),
         "control: no trigger is silent (every sample 0)": bool(silent) and all(x == 0.0 for x in silent),
-        "2026-11-08: a track on each removed machine's reserved type is a stock MIDI track: its "
-        "buffer bit-identical to a MIDI track's in every block, untriggered, triggered and after a "
-        "switch from a sounding machine (nothing renders it)": bool(reserved) and all(reserved.values()),
         f"the budget: of four SID tracks the first {fits} play, the rest are silent":
             None not in budget and all(v > 0.01 for v in budget[:fits]) and all(v == 0.0 for v in budget[fits:]),
     }

@@ -122,7 +122,7 @@ def test_the_list_offers_our_machines_then_the_sample_machines_before_midi(appli
     # v0.26: the Monomachine's machines after PERC (6, 7, then 14..)
     from dnfw.mnm import machines as MM
     # v0.19: SLICE before GRID; v0.44: BOUNCE (17) last of the sample machines
-    assert types == [0, 2, 1, 3, 5, *MM.TYPES, 8, 9, 10, 11, 13, 12, *([17] if SMB.BOUNCE_LISTED else []), 4]
+    assert types == [0, 2, 1, 3, 5, *MM.LIST_TYPES, 8, 9, 10, 11, 13, 12, *([17] if SMB.BOUNCE_LISTED else []), 4]
     n = 4 * len(types)
     assert at(main, CF.LIST_ALLOC, 4) == bytes.fromhex("4878") + n.to_bytes(2, "big")   # v0.19: 14 longs
     assert at(main, CF.LIST_CAP, 4) == bytes.fromhex("41e8") + n.to_bytes(2, "big")
@@ -133,10 +133,12 @@ def test_rows_5_to_12_of_the_name_table(applied):
     table = long_at(main, 0x400DC4A8)
     # v0.26: 6, 7 (and 14..) the Monomachine's machines (RESONATOR's and CZ's until v0.25)
     assert CF.MACHINE_NAMES[5] == ("Perc", "PRC") and CF.MACHINE_NAMES[13] == ("Slice", "SLC")
-    assert CF.MACHINE_NAMES[6] == CF.MACHINE_NAMES[7] == ("Removed", "---")   # SID, DPRO-WAVE: removed, reserved
-    # ours in MACHINE SEL (SOPHIE 20, PLAITS 18, TB303 19); BOUNCE (17) as upstream lists it (v0.47: hidden)
+    # the Monomachine's five back on 2026-11-11 (removed 2026-11-08, reserved meanwhile)
+    assert CF.MACHINE_NAMES[6] == ("SID 6581", "SID") and CF.MACHINE_NAMES[7] == ("DPRO Wave", "DPW")
+    # ours in MACHINE SEL (the Monomachine's 6, 7, 14..16, SOPHIE 20, PLAITS 18, TB303 19, DRONE 21,
+    # ANALOG2 22); BOUNCE (17) as upstream lists it (v0.47: hidden)
     from dnfw.mnm import machines as MM
-    assert 6 not in CF.LIST_NEW and 7 not in CF.LIST_NEW and all(t in CF.LIST_NEW for t in MM.TYPES)
+    assert all(t in CF.LIST_NEW for t in MM.TYPES) and not any(t in CF.LIST_NEW for t in MM.RESERVED)
     assert (SMB.BOUNCE_TYPE in CF.LIST_NEW) == SMB.BOUNCE_LISTED
     for row in CF.NEW_TYPES:
         lo, sh = (n.encode() + b"\0" for n in CF.MACHINE_NAMES[row])

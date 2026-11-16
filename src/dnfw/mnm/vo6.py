@@ -1544,11 +1544,18 @@ def _follower(p: Prog, L: C.Layout) -> None:
     ss(p, "pa", 3)
 
 
+# 2^x on [0, 1], degree 7, low order first: np.polyfit(x, 2.0 ** x, 7)[::-1] on the 64 Chebyshev
+# nodes x = 0.5 + 0.5 cos(pi (k + 0.5) / 64), as numpy 2.5.4 on the Mac gave it (macOS, 2026-11-10),
+# the coefficients the code had before. Written out: numpy's least squares is not bit-exact
+# across platforms (Pyodide's numpy differed in the last bits of some, so the page built another
+# file than the command line; dnfw.builder, 2026-11-10).
+EXP2_POLY = (0.9999999999438569, 0.6931471877102244, 0.24022635776983475, 0.05550529197694082,
+             0.009613535734324483, 0.0013429810681452109, 0.0001429940144509889, 2.1651723877774156e-05)
+
+
 def _exp2_poly() -> tuple[float, ...]:
-    """2^x on [0, 1], degree 7 (least squares on Chebyshev nodes), low order first"""
-    import numpy as np
-    x = 0.5 + 0.5 * np.cos(np.pi * (np.arange(64) + 0.5) / 64)
-    return tuple(float(c) for c in np.polyfit(x, 2.0 ** x, 7)[::-1])
+    """2^x on [0, 1], degree 7 (least squares on Chebyshev nodes), low order first: EXP2_POLY"""
+    return EXP2_POLY
 
 
 def _agc(p: Prog, L: C.Layout) -> None:

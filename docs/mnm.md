@@ -1,16 +1,12 @@
 # The Monomachine's synth machines on the DN2 (v0.26)
 
-> **Removed in this fork (2026-11-08, the User):** SID 6581, DPRO-WAVE, DPRO-DDRW, DPRO-DENS and
-> VO-6, to make room for PLAITS and the 303 (DSP code, USB image, their tables and the Digibank
-> stand-in's 256 KB of DDR). What stays: PERC's Monomachine voice plumbing (`dnfw.mnm.machines`,
-> `core`), SOPHIE (`docs/sophie.md`), the Monomachine-style page code. Their machine types
-> **6, 7, 14, 15, 16 stay reserved** (`machines.RESERVED`, never reused): the DSP's lookup sends a
-> track on one to the MIDI machine's engine slot, so the DSP renders nothing for it (in the SHARC
-> runner bit-identical to a stock MIDI track every block); its page is empty
-> (title Removed, eight unused places); MACHINE SEL no longer lists them. The build no longer
-> reads the Monomachine OS (`MNM_OS`, the patcher's `mnm` input: ignored). `test/test_mnm.py`
-> (the golden runs) and `scripts/mnm_identity.py` went with them. The rest of this page is the
-> history of the port.
+> **In this fork:** removed on 2026-11-08 (the User, to make room for PLAITS and the 303; their
+> types 6, 7, 14, 15, 16 stayed reserved) and back on 2026-11-11 (the User: the LZMA-stored DSP
+> section gave the USB image room), with the same types, levels and costs, after the machines
+> already in MACHINE SEL in PERC's machine index (`dnfw.mnm.machines.ALL_MODULES`) and first in
+> MACHINE SEL's list. Their tables (from the Monomachine OS, `MNM_OS`) come first in the
+> Monomachine table run, PLAITS's after them (`dnfw.mnm.tables`). Each is a builder part
+> (`MNM_SID`, `MNM_DPRO_WAVE`, `MNM_DPRO_DDRW`, `MNM_DPRO_DENS`, `MNM_VO6`), on by default.
 
 Owner, 2026-10-25: *"i want to build the digipro, sid, and VO synth machines from the
 elektron monomachine. you can erase the cz phase and resonator machines and just add these

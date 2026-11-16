@@ -1,7 +1,10 @@
 """The Monomachine-style machines' tables, in the order dnfw.mnm.core.Layout addresses them: signed
 Q23 words (the fill's FLOAT w BY -23) that dnfw.md.core ships in zpack after the Machinedrum's.
-A leaf module (dnfw.md.core reads it while dnfw.mnm.core imports dnfw.md.core), so the tables are
-built here, from formulas. SID's, the DPRO machines' and VO-6's went with them (2026-11-08).
+A leaf module (dnfw.md.core reads it while dnfw.mnm.core imports dnfw.md.core).
+
+First, with one of the Monomachine's own machines in this build (SID 6581, DPRO-WAVE, -DDRW, -DENS,
+VO-6: removed 2026-11-08, back 2026-11-11), their tables from the User's Monomachine OS
+(dnfw.mnm.rom.packed_words, as at 28eb110's parent); then PLAITS's, built here from formulas.
 
 PLAITS (dnfw.mnm.plaits): WS's five shapes (5 x 257) and the fold (516), Plaits'
 resources/lookup_tables.py formulas (MIT, THIRD-PARTY.md); 2026-11-09, FM's (dnfw.mnm.plaits_fm):
@@ -82,6 +85,29 @@ def plaits_words() -> tuple[int, ...]:
     return tuple(out)
 
 
+# the Monomachine's own machines' words (dnfw.mnm.rom.packed_words; dnfw.mnm.core.MNM_OS_WORDS)
+MNM_OS_WORDS = 31871
+MNM_OS_PARTS = ("MNM_SID", "MNM_DPRO_WAVE", "MNM_DPRO_DDRW", "MNM_DPRO_DENS", "MNM_VO6")
+
+
+def mnm_os_on() -> bool:
+    """Is one of the Monomachine's own machines in this build (dnfw.builder parts MNM_SID ..
+    MNM_VO6)? Their tables then come first."""
+    from ..builder import selection
+    return any(selection.on(k) for k in MNM_OS_PARTS)
+
+
+def mnm_os_words() -> tuple[int, ...]:
+    """Their words as zpack carries them: the User's Monomachine OS's (dnfw.mnm.rom.packed_words),
+    or, without that file (a test run outside the build), zeros in their place, so PLAITS's stay
+    where dnfw.mnm.core.Layout puts them (as at 28eb110's parent, the machines then read zeros)."""
+    from . import rom
+    if not rom.available():
+        return (0,) * MNM_OS_WORDS
+    words = tuple(rom.packed_words())
+    assert len(words) == MNM_OS_WORDS
+    return words
+
 
 def table_words() -> tuple[int, ...]:
-    return plaits_words()
+    return (mnm_os_words() if mnm_os_on() else ()) + plaits_words()

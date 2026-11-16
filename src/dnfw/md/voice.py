@@ -99,11 +99,16 @@ def _each(p: Prog, L: K.Layout, step: str) -> None:
     p.place(table)                             # JUMP's 48-bit window (hwrules BRANCH-WIN)
     for k, M in enumerate(ALL):
         p.jump("", body[same[k]])
+    bias3 = p.ibias.get(3)
     for k, M in enumerate(ALL):
         if same[k] == k:
             p.comment(f"---- {M.NAME} {step} ----")
             p.place(body[k])
             getattr(M, step)(p, L)
+            # 2026-11-11: each machine's code, emitted one after another, must end with I3 as it
+            # found it (the voice's biased slot: shrink's I3_BIAS), or the next one's offsets and
+            # the code after the dispatch are off by the bias
+            assert p.ibias.get(3) == bias3, f"{M.NAME} {step} leaves I3's bias {p.ibias.get(3)}, not {bias3}"
             p.jump("", end)
     p.place(end)
 

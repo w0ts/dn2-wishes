@@ -148,7 +148,7 @@ class Layout:
 
     def __init__(self, state, scratch, tables, sin, md_state=None, md_tables=None,
                  mnm_scratch=0, mnm_tables=0, md_shipped=None, md_ready=None, md_delay=None,
-                 mnm_render=None):
+                 mnm_dt=None, mnm_render=None):
         self.state, self.tables, self.sin = state, tables, sin
         self.C = {w: scratch + 4 * k for k, w in enumerate(SC_WORDS)}
         _, at = tables_bytes()
@@ -170,7 +170,7 @@ class Layout:
             self.sin = at_
         # v0.26: the Monomachine machines' buffers and tables (dnfw.mnm, docs/mnm.md)
         from ..mnm import core as MNC
-        self.md.mnm = MNC.Layout(self, mnm_scratch, mnm_tables,
+        self.md.mnm = MNC.Layout(self, mnm_scratch, mnm_tables, dt_at=mnm_dt,   # v0.36: DPRO tables in L2
                                  render=mnm_render)                     # v0.43: render scratch in L1
         # 2026-11-10 (perf): the P-I machines' block scratch (pi_sd / pi_bd, words 1536.. of a slot's
         # DDR delay area) in the render scratch's XB, YB rows instead: L1, shared, as every voice

@@ -53,6 +53,13 @@ def md_key(name: str) -> str:
 
 
 PARTS: tuple[Part, ...] = (
+    # 2026-11-11 (the User): the Monomachine's own five back (removed 2026-11-08); they read the
+    # User's Monomachine OS 1.32B at build time for their tables (dnfw.mnm.rom)
+    Part("MNM_SID", "SID 6581", "machines", "Monomachine SID 6581 (from the User's Monomachine OS), machine type 6."),
+    Part("MNM_DPRO_WAVE", "DPRO WAVE", "machines", "Monomachine DPRO WAVE, machine type 7."),
+    Part("MNM_DPRO_DDRW", "DPRO DDRW", "machines", "Monomachine DPRO DDRW, machine type 14."),
+    Part("MNM_DPRO_DENS", "DPRO DENS", "machines", "Monomachine DPRO DENS, machine type 15."),
+    Part("MNM_VO6", "VO-6", "machines", "Monomachine VO-6, machine type 16."),
     Part("MNM_SOPHIE", "SOPHIE", "machines",
          "Schwung Sophie's percussion voice (MIT port), machine type 17."),
     Part("MNM_PLAITS", "PLAITS", "machines",
