@@ -91,7 +91,8 @@ One program, written once (`src/dnfw/perc/`):
 instructions, 19.4 KB) and resolves its branches with selas's own layout.
 
 **Where it runs.** PERC's code is too big for the free tail of L1 block 1, so it runs
-from **L2 at `0x200c0000`** (sw `0xbe0000`), through the I-cache the startup enables.
+from **L2 at `0x200be200`** (sw `0xbdf100`; `0x200c0000` / `0xbe0000` until 2026-11-12, when it moved 7.5 KB down
+into unused L2 to fit 176 KB, scratch/perc-room), through the I-cache the startup enables.
 `scripts/sharc_l2_ceiling.py` records what L2 the stock firmware touches (`docs/data/l2-ceiling-2026-10-20.json`), from a fresh
 engine init (5.0 M instructions) and every stock machine on all 16 tracks: reads
 `0x2002f0d0..0x20078256`, writes `0x2002f0d0..0x200779f8`, **nothing above the stock
@@ -101,7 +102,7 @@ bytes, `0x2de180`) and scratch (`0x2dde80`) are in L1, its tables (6 KB, `0x8121
 in DDR beside the others, and it reads SHFT's sine table.
 
 **Entry and exit.** The block counter (`block_count.asm`), which the entry JUMP at
-`0x1c9448` reaches every block, now jumps to `0xbe0000`. PERC saves R0-R15, I0-I5, I12
+`0x1c9448` reaches every block, now jumps to `0xbdf100` (`0xbe0000` until 2026-11-12). PERC saves R0-R15, I0-I5, I12
 and M0-M4 at `0x2dde00` exactly as Waverider's loop did, renders every type-5 track, and
 jumps to RESONATOR (`0x172980`), then CZ, then PING, whose tail restores them and rejoins
 the chain at `0x1c944c`. Its subroutines return with a plain `JUMP (M14, I12)` (not the

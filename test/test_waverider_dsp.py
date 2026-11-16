@@ -266,7 +266,7 @@ def test_perc_code_is_in_l2_above_the_stock_image_and_below_the_uncached_window(
     for b in bootstream.walk(stock7).blocks:
         if b.count and 0x20000000 <= b.target < 0x20100000:
             assert b.target + b.count <= dsp.L2_IMAGE_END
-    assert dsp.PERC_SW == 0xBE0000 and dsp.l2_sw_to_load(dsp.PERC_SW) == dsp.PERC_L2_LOAD
+    assert dsp.PERC_SW == 0xBDF100 and dsp.l2_sw_to_load(dsp.PERC_SW) == dsp.PERC_L2_LOAD
     assert dsp.SMP_SW == 0xBDB000 and dsp.l2_sw_to_load(dsp.SMP_SW) == dsp.SMP_L2_LOAD
 
 
@@ -339,7 +339,7 @@ def test_the_block_counter_goes_on_to_perc():
     spec = json.loads((SHARC / "block_count.json").read_text(encoding="utf-8"))
     assert int(spec["load_sw"], 16) == dsp.COUNT_SW == 0x16F600
     be = bytes.fromhex(spec["object_parcels_be"])
-    assert be[spec["instruction_offsets"][-1]:].hex() == "063e00be0000"   # JUMP 0xbe0000, PERC in L2 (v0.11)
+    assert be[spec["instruction_offsets"][-1]:].hex() == "063e00bdf100"   # JUMP 0xbdf100, PERC in L2 (v0.11; 0xbe0000 until 2026-11-12)
     src = [ln.split("//", 1)[0].strip() for ln in (SHARC / "block_count.asm").read_text().splitlines()]
     stores = {c for c in src if c.startswith("DM(")}
     assert stores == {"DM(0x2de11c) = R8;", "DM(0x2de120) = R9;", "DM(0x2de118) = R8;",

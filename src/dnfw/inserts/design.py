@@ -56,10 +56,10 @@ GEN = POOL_DDR + GEN_OFFSET
 PACK = POOL_DDR + PACK_OFFSET
 assert PACK_OFFSET + 4 * PACK_WORDS == 0x1000 and RECORDS * FIELDS * 7 == 32 * PACK_WORDS
 # the bus pass's L2 (dnfw.waverider.dsp.INSBUS_L2_LOAD: the 16 KB between the sample machines' code,
-# which ends at 0x200bc000, and PERC's at 0x200c0000; clear of ports3's 0x200b1800..0x200b6000): its
+# which ends at 0x200bc000, and PERC's at 0x200be200 (0x200c0000 until 2026-11-12); clear of ports3's 0x200b1800..0x200b6000): its
 # code, then its state
 BUS_STATE = 0x200BD000                            # (dnfw.waverider.dsp.INSBUS_STATE_L2)
-BUS_STATE_END = 0x200C0000                        # PERC's code starts here (dnfw.waverider.dsp.PERC_L2_LOAD)
+BUS_STATE_END = 0x200BE200                        # PERC's code starts here (dnfw.waverider.dsp.PERC_L2_LOAD)
 # the unpacked records, then the last change word: in the pre pass's state (loaded with zeros). 2026-11-11 (perf):
 # L1 (0x2e3000 + 0x600; was L2 0x200AFA00, 4 cycles an access): the pre and post passes' state and scratch are in
 # L1 0x2e3000..0x2e4050, in the zeros that were PING's state (dnfw.waverider.dsp.INS_STATE_DM, POST_STATE_DM)

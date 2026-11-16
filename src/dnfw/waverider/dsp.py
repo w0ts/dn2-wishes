@@ -80,11 +80,15 @@ STATE_DM, STATE_BYTES = 0x2DDE00, 0x380      # save area, PERC's scratch, idle_l
 # touches L2 above the image's end) and well below the startup's non-cacheable window
 # 0x200fa000..0x200fdfff; the I-cache (enabled by the startup, docs/waverider-dsp-silence.md)
 # serves it. Its voices' state and scratch stay in L1, its tables in DDR.
-PERC_L2_LOAD = 0x200C0000
-PERC_L2_SPAN = 0x2A000                       # 168 KB (2026-11-11: 169,538 B of code with SID, the DPRO machines and VO-6 back; its end is the L2 ceiling 0x200ea000); 160 KB (v0.45 + b4, 2026-11-09: 150,710 B of code, BOUNCE's type and v0.45's PERC changes; 147 KB PLAITS VA+FM+ADD+SWARM+NOISE+PART+STRING+MODAL+BD+SD+HH, 2026-11-09: 149,892 B of code; VA 131,794; TB303: 128,282 B; PLAITS 123,128; 118,986 without SID, the DPRO machines and VO-6, 2026-11-08;
+# 2026-11-12 (the User, option b of scratch/perc-room): PERC starts 7.5 KB lower, at 0x200BE200 (0x200C0000 since
+# v0.11): the L2 under it was unused past the bus pass's state (with the moved inserts' state it ends at 0x200BE100),
+# and PERC with ANALOG 2's WDTH and PLAITS PART/STRG at 16 voices (176,550 B) no longer fit 168 KB. The ceiling
+# 0x200EA000 stays.
+PERC_L2_LOAD = 0x200BE200
+PERC_L2_SPAN = 0x2BE00                       # 175.5 KB (2026-11-12, from 0x200be200); 168 KB (2026-11-11: 169,538 B of code with SID, the DPRO machines and VO-6 back; its end is the L2 ceiling 0x200ea000); 160 KB (v0.45 + b4, 2026-11-09: 150,710 B of code, BOUNCE's type and v0.45's PERC changes; 147 KB PLAITS VA+FM+ADD+SWARM+NOISE+PART+STRING+MODAL+BD+SD+HH, 2026-11-09: 149,892 B of code; VA 131,794; TB303: 128,282 B; PLAITS 123,128; 118,986 without SID, the DPRO machines and VO-6, 2026-11-08;
                                              # 142 KB SOPHIE, 140 KB v0.24..v0.42, 80 KB v0.17..v0.23). The span is zero-padded into
                                              # the DSP upload, so it is kept to the code
-PERC_SW = 0xB80000 + (PERC_L2_LOAD - 0x20000000) // 2       # 0xbe0000
+PERC_SW = 0xB80000 + (PERC_L2_LOAD - 0x20000000) // 2       # 0xbdf100 (0xbe0000 until 2026-11-12)
 L2_IMAGE_END = 0x2008823C                    # the stock stream's last L2 byte
 L2_NOCACHE = 0x200FA000                      # the startup's non-cacheable L2 window starts here
 PERC_SCRATCH_DM = 0x2DDE80                   # 55 words (dnfw.perc.machines.SC_WORDS)
@@ -171,7 +175,7 @@ SENDS_SITE_STOCK = bytes.fromhex("04181c003817")
 # loop (sw 0x1c1fef) becomes JUMP wr_inbus, which does that instruction and JUMPs back to sw 0x1c1ff2, so
 # the main bus is summed from the blocks after the inserts (until then the engine's call of the output
 # stage, sw 0x1c307b, had wr_inbus as its target: the main mix never heard them). Its code in the
-# 16 KB between the sample machines' (to 0x200bc000) and PERC's (0x200c0000); its state after it (the
+# 8.5 KB between the sample machines' (to 0x200bc000) and PERC's (0x200be200); its state after it (the
 # instances' stores, not loaded); each instance's DDR in dnfw.inserts.design (FDN8_RING_DDR,
 # XDLY_LINES_DDR), not loaded either (a fresh instance clears, or never reads, what it has not written)
 INSBUS_L2_LOAD = 0x200BC000
