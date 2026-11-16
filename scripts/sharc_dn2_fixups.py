@@ -100,6 +100,19 @@ post-fix), or replaces the step outright:
       before channel 1 (0x8045a674..0x8045a68c instead of 0x8045a6a8..) and
       the chorus's R pass read non-audio state (R return 0.89 on silence).
       PRM p.6-10: (lw) scales as (nw), not by 8, in byte space.
+  G16 (2026-11-15, opt-host) Type 6b (shift immediate) in SIMD runs on PEx
+      only: G1's two-pass took only forms with a compute[22:16] field, and
+      6b's is shiftimm[22:16]. Now it is two-passed too (PRM p.101: the same
+      instruction in both PEs), so PEy's shift sets S registers and ASTATY.
+      The stock delay (L2 sw 0xb84223..0xb84228, in SIMD) loads N/2 into R2
+      and S2, tests `BTST R2 BY 0` and jumps on SZ, which a SIMD branch ANDs
+      over both PEs: with ASTATY.SZ never set the jump never went, and the
+      extra stage's DM(30,I5) (0xb84235..0xb8423e) wrote over the delay's
+      own length and write index (control block +0x100): the stock delay
+      was never heard. With G16 it is heard (xdly over 640 blocks), and
+      stockout stays bit-identical. Conditional 6b in SIMD still runs PEx
+      only (G6's conditional path), and so does Type 6a: neither is
+      measured on the DN2 image yet.
 
 Two accelerations, each measured against the emulated code it replaces:
 
@@ -159,8 +172,8 @@ def cond_of(f) -> int:
 
 # the warm snapshot (sharc_waverider_voice.py's engine init) depends on these fixups: its file name carries this, so
 # a snapshot built under older ones is never taken (G13 changed what the init leaves in slots 1..15)
-INIT_REV = "_g14h"
-# a bisection aid: DNFW_FIXUPS_OFF=G12,G13a,G13b,G13d,G14,G14d runs those as before them (a snapshot built so is named apart)
+INIT_REV = "_g16"
+# a bisection aid: DNFW_FIXUPS_OFF=G12,G13a,G13b,G13d,G14,G14d,G16 runs those as before them (a snapshot built so is named apart)
 OFF = {x for x in os.environ.get("DNFW_FIXUPS_OFF", "").split(",") if x}
 if OFF:
     INIT_REV += "_off_" + "_".join(sorted(OFF))
@@ -295,7 +308,8 @@ class Fixups:
             if t in FLOW:
                 if "compute[22:16]" in f:
                     return ("replace", lambda r: self.two_pass(r, insn, flow=True))
-            elif "compute[22:16]" in f or t in ("5a_move", "5b_move"):
+            elif "compute[22:16]" in f or t in ("5a_move", "5b_move") \
+                    or (t == "6b_shiftimm" and cond_of(f) == 31 and "G16" not in OFF):
                 return ("replace", lambda r: self.two_pass(r, insn, unscaled=blank))
         if blank and cond_of(f) == 31:
             return ("replace", lambda r: self.unscaled(r, insn))
