@@ -208,3 +208,67 @@ def test_page_2_takes_the_knobs_and_leaves_time_to_stock(tap):
 def test_the_reverb_page_takes_all_eight(tap):
     out = feed(tap, f"{FDN_PAGE} d 17 u 17 {FDN_PAGE} k 1 2 k 2 -2 k 3 4 v 1 0 v 1 1 v 1 2 ")
     assert out == ["took=1", "took=1", "took=1", "v=66", "v=125", "v=4"]
+
+
+def test_link_has_a_word_source_for_every_packet_kind():
+    """smp_tdm (csrc/sampler/link.c): every kind of packet it sends (is_cmd, is_ins, is_fxp, is_blank) has its words
+    in the word select; one without it sent job data (or NULL + 0..3) as that packet's words (326ff17f's bug)"""
+    import re
+    src = (ROOT / "csrc" / "sampler" / "link.c").read_text()
+    body = src[src.index("void smp_tdm(u32 h)"):]
+    body = body[:body.index("smp_tdm_sent++;")]
+    kinds = re.findall(r"\bint (is_\w+) = ", body)
+    sel = re.search(r"u32 w = (.*?);", body, re.S).group(1)
+    assert "is_fxp" in kinds
+    for k in kinds:
+        assert k in sel, f"{k}: no word source in {sel!r}"
+
+
+def test_the_mirror_page_is_not_written_and_nothing_goes_at_power_on():
+    import re
+    src = (ROOT / "csrc" / "sampler" / "link.c").read_text()
+    body = src[src.index("void smp_tdm(u32 h)"):]
+    body = body[:body.index("smp_tdm_sent++;")]
+    assert "DIR + FXP_OFFSET" not in body                       # the mirror is the checksummed image
+    assert "fxp_seen_gen __attribute__((section(\".data\"))) = 0;" in body    # no send at power-on
+    assert "fxp_active()" in body
+
+
+ACTIVE = r"""
+#include <stdio.h>
+typedef unsigned int u32;
+typedef unsigned char u8;
+int smp_overlay_dirty = 0;
+u32 ins_edits = 0;
+int smp_values_held(void) { return 0; }
+extern void fxp_defaults(void);
+extern void fxp_set_record(const u8 *f);
+extern int fxp_active(void);
+int main(void)
+{
+    fxp_defaults();
+    printf("%d ", fxp_active());
+    u8 f[16] = {0, 58, 61, 127, 64, 0, 0, 0, 64, 127, 0, 0, 0, 0, 0, 0};
+    fxp_set_record(f);
+    printf("%d ", fxp_active());
+    f[2] = 60;
+    fxp_set_record(f);
+    printf("%d ", fxp_active());
+    f[2] = 61; f[10] = 5;
+    fxp_set_record(f);
+    printf("%d\n", fxp_active());
+    return 0;
+}
+"""
+
+
+def test_active_means_not_at_the_defaults(tmp_path):
+    cc = shutil.which("cc") or shutil.which("clang") or shutil.which("gcc")
+    if not cc:
+        pytest.skip("no host C compiler")
+    (tmp_path / "h.c").write_text(ACTIVE)
+    r = subprocess.run([cc, "-O1", "-w", "-Dsection(x)=aligned(4)", "-o", str(tmp_path / "h"), str(tmp_path / "h.c"),
+                        str(ROOT / "csrc" / "fxpage" / "fxp.c")], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr[-1500:]
+    out = subprocess.run([str(tmp_path / "h")], capture_output=True, text=True, check=True).stdout.split()
+    assert out == ["0", "0", "1", "1"]

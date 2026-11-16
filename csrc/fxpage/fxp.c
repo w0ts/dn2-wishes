@@ -137,6 +137,17 @@ void fxp_words(u32 *w)
     w[10] = fbits(wr);
 }
 
+/* 1 when any value is not at its default: the DSP then needs the words (link.c); at the defaults it runs the old constants */
+int fxp_active(void)
+{
+    init();
+    for (int g = 0; g < 2; g++)
+        for (int k = 0; k < 8; k++)
+            if (fxp_v[g][k] != table(g + 1)[k].def)
+                return 1;
+    return 0;
+}
+
 /* page.c wr_screen: before stock draws */
 void fxp_begin(void)
 {

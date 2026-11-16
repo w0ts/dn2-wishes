@@ -447,6 +447,11 @@ static int rt_take(volatile u32 *w, volatile u32 *gen, u32 *seen)
 
 u32 smp_rx_sh __attribute__((section(".data"))) = 0;   /* the receive slots' justification (scope.c) */
 
+/* the second page's words: a directory page job (loads, the power-on page) wrote over them, send again after it;
+ * and whether the DSP holds non-default ones (smp_tdm) */
+static u32 fxp_pending __attribute__((section(".data"))) = 0;
+static int fxp_sent_active __attribute__((section(".data"))) = 0;
+
 void smp_tdm(u32 h)
 {
     periods++;
@@ -474,17 +479,26 @@ void smp_tdm(u32 h)
         ins_words(ins_w);
         ins_left = INS_REPEAT;
     }
+    /* the send pages' second page (csrc/fxpage): after a change of its values, and after a directory page job that
+     * covered its words (a load's page writes zeros there); only when something is not at its default, or the DSP
+     * holds words that are not (the DSP reads a change word 0 as the old constants): nothing is sent at power-on or
+     * for a project that never used the page. Not in the mirror's page: the mirror is the image, checksummed */
     extern u32 fxp_gen;
     extern void fxp_words(u32 *w);
-    static u32 fxp_seen_gen __attribute__((section(".data"))) = 0xFFFFFFFFu;
+    extern int fxp_active(void);
+    static u32 fxp_seen_gen __attribute__((section(".data"))) = 0;
     static u32 fxp_left __attribute__((section(".data"))) = 0;
     static u32 fxp_w[FXP_WORDS] __attribute__((section(".data")));
-    if (!is_cmd && !ins_left && !fxp_left && fxp_gen != fxp_seen_gen) {
+    int job_running = job_data && job_fast_next < job_n;
+    if (!is_cmd && !ins_left && !fxp_left && (fxp_gen != fxp_seen_gen || (fxp_pending && !job_running))) {
         fxp_seen_gen = fxp_gen;
-        fxp_words(fxp_w);
-        for (u32 j = 0; j < FXP_WORDS; j++)
-            ((volatile u32 *)(DIR + FXP_OFFSET))[j] = fxp_w[j];     /* the mirror's page too */
-        fxp_left = INS_REPEAT;
+        fxp_pending = 0;
+        int act = fxp_active();
+        if (act || fxp_sent_active) {
+            fxp_words(fxp_w);
+            fxp_sent_active = act;
+            fxp_left = INS_REPEAT;
+        }
     }
     int is_ins = !is_cmd && ins_left;
     int is_fxp = !is_cmd && !is_ins && fxp_left;
@@ -526,7 +540,7 @@ void smp_tdm(u32 h)
         UNIT(2, off);
         UNIT(3, off >> 16);
         for (u32 j = 0; j < RX_WORDS; j++) {
-            u32 w = j >= n || is_blank ? 0 : is_cmd ? cw[j] : is_ins ? ins_w[j] : le32(job_data + 4u * (k + j));
+            u32 w = j >= n || is_blank ? 0 : is_cmd ? cw[j] : is_ins ? ins_w[j] : is_fxp ? fxp_w[j] : le32(job_data + 4u * (k + j));
             UNIT(4 + 2 * j, w);
             UNIT(5 + 2 * j, w >> 16);
         }
@@ -1103,6 +1117,8 @@ static void job_start(const u8 *data, u32 off, u32 bytes)
     job_base = off / 4u;
     job_n = bytes / 4u;
     job_fast_next = 0;
+    if (off < FXP_OFFSET + 4u * FXP_WORDS && off + bytes > FXP_OFFSET)
+        fxp_pending = 1;                        /* a page job over the second page's words: send them again after it */
     job_data = data;
 }
 

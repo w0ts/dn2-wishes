@@ -84,7 +84,7 @@ METER_ENTRIES = ["mtr_isr_out", "mtr_switch", "mtr_poll", "mtr_draw"]
 FDN8_ENTRIES = ["rvt_poll", "rvt_cell", "rvt_state", "rvt_placed", "rvt_seen"]
 # XDLY (csrc/xdly, docs/xdly.md): the Delay page's TYPE, the same way
 XDLY_ENTRIES = ["dlt_poll", "dlt_cell", "dlt_state", "dlt_placed", "dlt_seen"]
-FXP_ENTRIES = ["fxp_pop", "fxp_draw", "fxp_begin", "fxp_seen", "fxp_words", "fxp_gen", "fxp_up", "fxp_v", "fxp_record", "fxp_set_record", "fxp_defaults"]
+FXP_ENTRIES = ["fxp_pop", "fxp_draw", "fxp_begin", "fxp_seen", "fxp_words", "fxp_active", "fxp_gen", "fxp_up", "fxp_v", "fxp_record", "fxp_set_record", "fxp_defaults"]
 # the per-track inserts (csrc/inserts, docs/inserts.md): the page's hooks and the values the checks read
 INS_ENTRIES = ["ins_pop", "ins_draw", "ins_visible", "ins_words", "ins_gen", "ins_up", "ins_sel", "ins_selv", "ins_mod", "ins_kv", "ins_hdr_tail",
                "ins_inst", "ins_edits", "ins_pj_write_hook", "ins_store_poll", "ins_wr_ring", "ins_wr_head",
