@@ -79,6 +79,8 @@ typedef signed char s8;
  * bit 1 FACTORY RESET (bootstrap 0x80002fbc; also set when the factory armed one, 0x400f21c4), bit 0 EMPTY RESET */
 #define BOOT_FLAGS (*(volatile u32 *)0x40287A60u)
 #define BOOT_FACTORY_RESET 2u
+#define SET_OWN (SET_JUMP | SET_REMOTE_OFF)                     /* the flags this file keeps itself */
+/* the other flags (bit 2 up) are other settings' (set_flag, set_flag_put): bit 2 LIVE SELECT off (csrc/msel/live.c) */
 _Static_assert(SET_SECTOR >= POOL_STORE_END && SET_SECTOR < LIB_SECTOR && SET_SECTOR >= STOCK_STORE_END,
                "the settings sector lies in our region, between the pool's image and the library");
 
@@ -101,6 +103,19 @@ u32 jmp_writes __attribute__((section(".data"))) = 0;
 u8 set_remote __attribute__((section(".data"))) = 1;
 u8 set_reset_seen __attribute__((section(".data"))) = 0;   /* this boot was a FACTORY RESET (and it was applied) */
 static u32 sector[128] __attribute__((section(".data")));
+u32 set_bits __attribute__((section(".data"))) = 0;      /* the flags as read, kept when written */
+
+/* another setting's flag in the sector: its value, and a change (written by jmp_poll) */
+int set_flag(u32 bit)
+{
+    return (set_bits & bit) != 0;
+}
+
+void set_flag_put(u32 bit, int on)
+{
+    set_bits = on ? set_bits | bit : set_bits & ~bit;
+    jmp_dirty = 1;
+}
 
 static int set_ok(void)
 {
@@ -134,9 +149,11 @@ void jmp_poll(void)
             if (sector[0] == SET_MAGIC && sector[1] == SET_VERSION && sector[3] == set_check(sector)) {
                 if (set_reset_seen) {           /* the FACTORY RESET changes REMOTE CONTROL only */
                     jmp_on = (sector[2] & SET_JUMP) != 0;
+                    set_bits = sector[2] & ~SET_OWN;
                 } else if (!jmp_dirty) {        /* nothing changed before the read: the sector's settings */
                     jmp_on = (sector[2] & SET_JUMP) != 0;
                     set_remote = (sector[2] & SET_REMOTE_OFF) == 0;
+                    set_bits = sector[2] & ~SET_OWN;
                 }
             }
         }
@@ -148,7 +165,7 @@ void jmp_poll(void)
             sector[k] = 0;
         sector[0] = SET_MAGIC;
         sector[1] = SET_VERSION;
-        sector[2] = (jmp_on ? SET_JUMP : 0) | (set_remote ? 0 : SET_REMOTE_OFF);
+        sector[2] = (set_bits & ~SET_OWN) | (jmp_on ? SET_JUMP : 0) | (set_remote ? 0 : SET_REMOTE_OFF);
         sector[3] = set_check(sector);
         if (BLK_WRITE(SET_SECTOR, 512u, sector) == 0)
             jmp_writes++;

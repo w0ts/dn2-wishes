@@ -482,6 +482,9 @@ ENG_CTOR_STOCK = bytes.fromhex("1541058415410585")
 # (0x40104f42), its three choices added, jmps to dt_usb_rebuild (a fourth item) before it puts the cursor back
 USB_REBUILD_SITE = 0x40105220           # movea.l (%a2),%a0 ; clr.l -(%sp) ; move.l %d6,-(%sp)
 USB_REBUILD_STOCK = bytes.fromhex("205242a72f06")
+# 2026-11-12: LIVE SELECT's row in SETTINGS > PERSONALIZE (csrc/msel/live.c, live.S)
+LIVE_MENU_SITE = 0x400987A2             # PersonalizeMenuView's constructor ends: movem.l 24(%sp),%d2-%d6/%a2-%a6
+LIVE_MENU_STOCK = bytes.fromhex("4cef7c7c0018")
 LINK_RX_SITE = 0x4012197A               # lea 0x40207f9e,%a3: F0 00 20 3C, before the compare
 LINK_RX_STOCK = bytes.fromhex("47f940207f9e")
 LINK_FEED_SITE = 0x400276A2             # lea 0x40006c4a,%a2: the frame is built
@@ -1020,6 +1023,12 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
          ENG_SORT_STOCK)
     edit(ENG_CTOR_SITE, bytes.fromhex("4eb9") + _long(csyms["eng_ctor_hook"]) + bytes.fromhex("4e71"),
          "the preset view's constructor: the engines cleared with stock's filters", ENG_CTOR_STOCK)
+    # 2026-11-12: LIVE SELECT (csrc/msel): its row, the last of PERSONALIZE
+    _need(content, LIVE_MENU_SITE - 10, bytes.fromhex("4e932f054e932f044e93"), "PERSONALIZE's last row's functions destroyed")
+    _need(content, LIVE_MENU_SITE + 6, bytes.fromhex("4fef00804e75"), "... then lea 128(%sp),%sp ; rts")
+    edit(LIVE_MENU_SITE, bytes.fromhex("4ef9") + _long(csyms["live_menu_hook"]),
+         "SETTINGS > PERSONALIZE: a LIVE SELECT row after the last (live_row), then stock's epilogue",
+         LIVE_MENU_STOCK)
 
     # 2026-11-12: REMOTE CONTROL in USB CONFIG (csrc/devtest/usbcfg.c)
     _need(content, USB_REBUILD_SITE + 6, bytes.fromhex("2f0a2068001c4e90"),
@@ -1235,6 +1244,8 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     for name in ("hold_seq", "hold_count", "hold_len", "hold_keys", "hold_poll", "hold_final", "hold_rel"):   # DRONE's HOLD (csrc/hold)
         layout[name] = csyms[name]
     for name in ("scope_up", "scope_taps", "scope_ring", "scope_pos", "smp_rx_sh"):   # AMP page 2's scope (csrc/scope)
+        layout[name] = csyms[name]
+    for name in ("ls_commits", "ls_reverts", "live_rows", "set_bits"):   # LIVE SELECT (csrc/msel)
         layout[name] = csyms[name]
     for name in ("eng_mask", "eng_tests", "eng_lists", "eng_n"):   # the preset browser's ENGINE filter (csrc/presets)
         layout[name] = csyms[name]

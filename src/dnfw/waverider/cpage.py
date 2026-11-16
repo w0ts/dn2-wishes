@@ -45,6 +45,8 @@ LINK_SOURCES = [SOURCE.parents[1] / "sampler" / "link.c", SOURCE.parents[1] / "s
                 SOURCE.parents[1] / "hold" / "hooks.S",
                 SOURCE.parent / "popup.c",                            # the list popup (2026-11-09)
                 SOURCE.parents[1] / "msel" / "msel.c",               # MACHINE SEL in two columns (2026-11-11)
+                SOURCE.parents[1] / "msel" / "live.c",               # ... LIVE SELECT, its PERSONALIZE row (2026-11-12)
+                SOURCE.parents[1] / "msel" / "live.S",
                 SOURCE.parent / "popup_stock.c",                      # ... on stock parameters' lists
                 SOURCE.parents[1] / "devtest" / "devtest.c",          # the test channel (docs/remote-ui.md, 2026-11-11)
                 SOURCE.parents[1] / "devtest" / "whitelist.c",        # ... its one whitelist
@@ -123,7 +125,10 @@ WISH_ENTRIES = ["wish_memcpy_stub", "wish_memset_stub", "wish_load_stub", "wish_
 # the preset browser's ENGINE filter (csrc/presets, dnfw.waverider.engfilt): its hooks and the state the checks read
 ENG_ENTRIES = ["eng_test_hook", "eng_sort_hook", "eng_ctor_hook", "eng_label", "eng_title", "eng_list", "eng_sort_row",
                "eng_clear", "eng_toggle", "eng_tick", "eng_match", "eng_mask", "eng_tests", "eng_lists", "eng_n"]
-LINK_ENTRIES = LINK_ENTRIES + WISH_ENTRIES + ENG_ENTRIES + DEVTEST_ENTRIES + LZMA7_ENTRIES + MOD_ENTRIES + SLIDE_ENTRIES + METER_ENTRIES + FDN8_ENTRIES + XDLY_ENTRIES + FXP_ENTRIES + INS_ENTRIES + HOLD_ENTRIES
+# LIVE SELECT (csrc/msel/msel.c, live.c, live.S): its hooks and the state the checks read
+LIVE_ENTRIES = ["live_menu_hook", "live_label", "live_box", "live_yes", "live_delta", "live_row", "live_on", "live_rows",
+                "msel_poll", "ls_commits", "ls_reverts", "set_bits"]
+LINK_ENTRIES = LINK_ENTRIES + WISH_ENTRIES + LIVE_ENTRIES + ENG_ENTRIES + DEVTEST_ENTRIES + LZMA7_ENTRIES + MOD_ENTRIES + SLIDE_ENTRIES + METER_ENTRIES + FDN8_ENTRIES + XDLY_ENTRIES + FXP_ENTRIES + INS_ENTRIES + HOLD_ENTRIES
 
 
 # the list popup (csrc/waverider/popup.c, docs/popups.md): on our machines' and FX's list parameters,

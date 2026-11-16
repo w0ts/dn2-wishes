@@ -58,7 +58,9 @@ def test_the_setting_lives_in_the_settings_sector_and_a_factory_reset_turns_it_o
     assert "u8 set_remote __attribute__((section(\".data\"))) = 1;" in JUMP_C
     assert "#define BOOT_FLAGS (*(volatile u32 *)0x40287A60u)" in JUMP_C
     assert "#define BOOT_FACTORY_RESET 2u" in JUMP_C
-    assert "sector[2] = (jmp_on ? SET_JUMP : 0) | (set_remote ? 0 : SET_REMOTE_OFF);" in JUMP_C
+    # written with DIRECT JUMP's bit and the other settings' (LIVE SELECT's bit 2, csrc/msel/live.c) beside it
+    assert ("sector[2] = (set_bits & ~SET_OWN) | (jmp_on ? SET_JUMP : 0) | (set_remote ? 0 : SET_REMOTE_OFF);"
+            in JUMP_C)
     layout = CODE["layout"]
     for name in ("set_remote", "set_reset_seen", "dt_usb_items", "dt_usb_changes"):
         assert name in layout, name

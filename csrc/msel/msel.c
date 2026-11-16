@@ -164,11 +164,15 @@ void msel_draw(void *c)
     }
 }
 
+static void ls_key(u32 code);                   /* LIVE SELECT (below) */
+
 /* from rec.c smp_ui_pop, every key item: FUNC + SYN while MACHINE SEL is up becomes stock's RIGHT / LEFT
  * (its own page switch), the press and its release; -> 1 when the item was changed (its code at it[7]) */
 int msel_key(u8 *it, u32 code, int down)
 {
     static int took __attribute__((section(".data"))) = 0;
+    if (down && (code == K_YES || code == K_NO))
+        ls_key(code);                           /* LIVE SELECT: then stock's YES / NO as ever */
     if (code != K_SRC)
         return 0;
     u32 v = view();
@@ -182,6 +186,157 @@ int msel_key(u8 *it, u32 code, int down)
     if (!down)
         took = 0;
     return 1;
+}
+
+/* LIVE SELECT (2026-11-12, the User: "preview/load the engine on the arrows, confirm and exit on YES, discard and
+ * revert on NO"; a PERSONALIZE row, csrc/msel/live.c, default on). While it is on, in MACHINE SEL (both pages) and in
+ * the FUNC + G filter list: the machine (filter) under the cursor is committed once the cursor has rested REST ticks
+ * (as stock's YES commits it: 0x4005bb7e, 0x4005bbbe); YES commits what is still pending, then stock's YES closes
+ * (the cursor's type is the track's by then); NO puts the type it had at the opening back through the same commit and
+ * then the track's whole sound as it was, byte for byte (a commit resets the machine's or filter's parameters to their
+ * defaults: measured in the 1.12 emulator, sound +70..+128), and stock's NO closes. Off: stock's YES and NO. */
+#define KIT_POINTER (*(u8 *volatile *)0x800052A0u)
+#define SOUND_AT    52                          /* a track's sound: kit + 52 + 1163 t */
+#define SOUND_LEN   1163
+#define TICK        (*(volatile u32 *)0x466768B0u)   /* the panel module's tick (ms on the unit), 0..4095 */
+#define TICK_MASK   0xFFFu
+#define REST        150                         /* ticks the cursor rests before its machine is committed */
+#define MACHINE_COMMIT ((u32 (*)(u32, int, int, int, int))0x40031880u)
+#define TYPE_AT     ((int (*)(u32))0x4005B162u) /* the type under MACHINE SEL's cursor (stock's YES reads it) */
+#define V_TRACK     128
+#define V_MODEL     132
+
+extern int live_on(void);                       /* live.c */
+
+static u8 ls_sound[SOUND_LEN] __attribute__((section(".data")));
+static u8 *ls_at __attribute__((section(".data"))) = 0;     /* the saved track's sound (0: none saved) */
+static int ls_type __attribute__((section(".data"))) = 0;    /* its machine and filter when saved */
+static int ls_filter __attribute__((section(".data"))) = 0;
+static int ls_track __attribute__((section(".data"))) = 0;
+static u32 ls_v __attribute__((section(".data"))) = 0;       /* the MACHINE SEL view seen open */
+static int ls_page __attribute__((section(".data"))) = 0, ls_cur __attribute__((section(".data"))) = 0;
+static int ls_due __attribute__((section(".data"))) = 0;     /* a commit waiting for the rest */
+static u32 ls_when __attribute__((section(".data"))) = 0;
+static u32 ls_mono __attribute__((section(".data"))) = 0, ls_tick __attribute__((section(".data"))) = 0;
+u32 ls_commits __attribute__((section(".data"))) = 0;        /* the checks read these */
+u32 ls_reverts __attribute__((section(".data"))) = 0;
+
+static u32 ls_now(void)                         /* the tick, unwrapped (every UI pass reads it) */
+{
+    u32 t = TICK;
+    ls_mono += (t - ls_tick) & TICK_MASK;
+    ls_tick = t;
+    return ls_mono;
+}
+
+static void ls_copy(u8 *to, const u8 *from)
+{
+    for (int i = 0; i < SOUND_LEN; i++)
+        to[i] = from[i];
+}
+
+static u8 *ls_sound_of(int track)
+{
+    return KIT_POINTER + SOUND_AT + SOUND_LEN * track;
+}
+
+/* the track's sound and types, as the list opens */
+static void ls_save(int track, u32 model)
+{
+    ls_track = track;
+    ls_at = ls_sound_of(track);
+    ls_copy(ls_sound, ls_at);
+    ls_type = ls_at[0xDE];
+    ls_filter = FILTER_GET(model, track);
+    ls_due = 0;
+}
+
+/* NO: the types back through stock's commits, then the sound as it was */
+static void ls_revert(u32 model, u32 view)
+{
+    ls_due = 0;
+    if (!ls_at || ls_at != ls_sound_of(ls_track))     /* no save, or another kit since: leave it */
+        return;
+    if (ls_at[0xDE] != ls_type) {
+        if (view)
+            *(volatile int *)(view + V_TYPE) = ls_type;
+        MACHINE_COMMIT(model, ls_track, ls_type, 1, 1);
+    }
+    if (FILTER_GET(model, ls_track) != ls_filter) {
+        if (view)
+            *(volatile int *)(view + V_FILTER) = ls_filter;
+        FILTER_COMMIT(model, ls_track, ls_filter, 1, 1);
+    }
+    ls_copy(ls_at, ls_sound);
+    ls_reverts++;
+}
+
+/* MACHINE SEL: the cursor's type committed as stock's YES commits it (the view's own record first) */
+static void ls_commit(u32 v)
+{
+    u32 model = *(volatile u32 *)(v + V_MODEL);
+    int track = TRK_INDEX(*(volatile u32 *)(v + V_TRACK));
+    int t = TYPE_AT(v);
+    ls_due = 0;
+    if (t < 0)
+        return;
+    if (*(volatile int *)(v + V_PAGE)) {
+        if (t != *(volatile int *)(v + V_FILTER)) {
+            *(volatile int *)(v + V_FILTER) = t;
+            FILTER_COMMIT(model, track, t, 1, 1);
+            ls_commits++;
+        }
+    } else if (t != *(volatile int *)(v + V_TYPE)) {
+        *(volatile int *)(v + V_TYPE) = t;
+        MACHINE_COMMIT(model, track, t, 1, 1);
+        *(volatile int *)(v + V_FILTER) = FILTER_GET(model, track);
+        ls_commits++;
+    }
+}
+
+static void fp_poll(void);
+
+/* page.c wr_poll, every UI pass */
+void msel_poll(void)
+{
+    u32 now = ls_now();
+    fp_poll();
+    u32 v = view();
+    if (!v) {
+        ls_v = 0;
+        return;
+    }
+    int page = *(volatile int *)(v + V_PAGE), cur = *(volatile int *)(v + V_CURSOR);
+    if (v != ls_v) {                            /* opened: the sound saved, whatever the setting */
+        ls_v = v;
+        ls_page = page;
+        ls_cur = cur;
+        ls_save(TRK_INDEX(*(volatile u32 *)(v + V_TRACK)), *(volatile u32 *)(v + V_MODEL));
+        return;
+    }
+    if (page != ls_page) {                      /* the other page: its cursor is the track's own */
+        ls_page = page;
+        ls_cur = cur;
+        ls_due = 0;
+    } else if (cur != ls_cur) {
+        ls_cur = cur;
+        ls_due = live_on();
+        ls_when = now + REST;
+    }
+    if (ls_due && (int)(now - ls_when) >= 0)
+        ls_commit(v);
+}
+
+/* from rec.c smp_ui_pop through msel_key: YES and NO while MACHINE SEL is up, before stock has them */
+static void ls_key(u32 code)
+{
+    u32 v = view();
+    if (!v || !live_on() || v != ls_v)
+        return;
+    if (code == K_YES && ls_due)
+        ls_commit(v);
+    else if (code == K_NO)
+        ls_revert(*(volatile u32 *)(v + V_MODEL), v);
 }
 
 /* FUNC + turn G on the FLTR page: the filter type's list */
@@ -209,13 +364,46 @@ static u32 fp_model(void)
     return TRK_CUR() + 0xF4u;
 }
 
-static void fp_close(int pick)
+static int fp_due __attribute__((section(".data"))) = 0;      /* LIVE SELECT: a commit waiting for the rest */
+static u32 fp_when __attribute__((section(".data"))) = 0;
+
+/* the lit row's type committed, if it is not the track's already */
+static void fp_commit(void)
+{
+    int type = msel_frows[fp_at];
+    fp_due = 0;
+    if (type != FILTER_GET(fp_model(), fp_track())) {
+        FILTER_COMMIT(fp_model(), fp_track(), type, 1, 1);
+        ls_commits++;
+    }
+}
+
+/* PICK: YES, G pushed, FUNC let go (the lit type); DISCARD: NO; OTHER: another key or knob (stock: as it was;
+ * LIVE SELECT: what is previewed stays) */
+enum { DISCARD, PICK, OTHER };
+
+static void fp_close(int how)
 {
     int type = msel_frows[fp_at];
     fp_open = 0;
     wpop_modal(0, 0, 0, 0, 0);
-    if (pick && type != fp_was)
+    if (live_on()) {
+        if (how == DISCARD)
+            ls_revert(fp_model(), 0);
+        else if (how == PICK && fp_due)
+            fp_commit();
+        fp_due = 0;
+        return;
+    }
+    if (how == PICK && type != fp_was)
         FILTER_COMMIT(fp_model(), fp_track(), type, 1, 1);
+}
+
+/* msel_poll, every UI pass: a resting cursor's type committed (LIVE SELECT) */
+static void fp_poll(void)
+{
+    if (fp_open && fp_due && (int)(ls_mono - fp_when) >= 0)
+        fp_commit();
 }
 
 static u32 fp_bit(u32 code)
@@ -237,22 +425,22 @@ int flt_pop(const u8 *it, u32 code, int down, int func_held)
             return 0;
         if (code == K_FUNC) {                   /* FUNC let go: the pick (FUNC goes on to stock) */
             if (!down)
-                fp_close(1);
+                fp_close(PICK);
             return 0;
         }
         if (b) {
             fp_eat |= b;
-            fp_close(code != K_NO);
+            fp_close(code != K_NO ? PICK : DISCARD);
             return 1;
         }
-        fp_close(0);                            /* another key: it does what it does */
+        fp_close(OTHER);                        /* another key: it does what it does */
         return 0;
     }
     if (it[0] != IT_KNOB)
         return 0;
     if (code != KNOB_G) {
         if (fp_open)
-            fp_close(0);
+            fp_close(OTHER);
         return 0;
     }
     if (!fp_open) {
@@ -264,9 +452,16 @@ int flt_pop(const u8 *it, u32 code, int down, int func_held)
             if (msel_frows[i] == fp_was)
                 fp_at = i;
         fp_open = 1;
+        fp_due = 0;
+        ls_save(fp_track(), fp_model());        /* the sound as it was, for NO (LIVE SELECT) */
     } else {
+        int was = fp_at;
         fp_at += (signed char)it[8];
         fp_at = fp_at < 0 ? 0 : fp_at >= MSEL_FROWS ? MSEL_FROWS - 1 : fp_at;
+        if (fp_at != was && live_on()) {
+            fp_due = 1;
+            fp_when = ls_mono + REST;
+        }
     }
     wpop_modal("FLT1", MSEL_FROWS, fp_at, fp_name, 0);
     return 1;

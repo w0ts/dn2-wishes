@@ -413,6 +413,7 @@ int wr_poll(void *screen)
     { extern void mx_poll(void); mx_poll(); }       /* the matrix's routes laid out for the frame (csrc/matrix) */
     smp_boot();
     jmp_poll();                                 /* DIRECT JUMP's setting, read and written (csrc/jump) */
+    { extern void msel_poll(void); msel_poll(); }   /* LIVE SELECT: MACHINE SEL's resting cursor, FUNC + G (csrc/msel) */
     rec_poll();
     { extern void mono_poll(void); mono_poll(); }   /* 2026-11-11: MONOMACHINE's engine turned: its start (rec.c) */
     { extern void hold_poll(void); hold_poll(); }   /* DRONE's HOLD latch (csrc/hold) */
