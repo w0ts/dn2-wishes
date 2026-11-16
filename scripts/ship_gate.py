@@ -277,6 +277,7 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("kbrec", "KEYBOARD kept through grid recording (ColdFire)"),
        ("thres", "THRES on both processors (coupled)"),
        ("stocknote", "a stock note through both processors (coupled)"),
+       ("ournote", "our machines' notes through both processors (coupled)"),
        ("flex", "FLEX: a recorder trig's take played by a note, on both processors (coupled)"),
        ("flexplay", "FLEX buffers played by a ONESHOT track, on both processors (coupled)"),
        ("mute", "FLEX MUTE SRC: the SRC track out of the mix, still recorded, on both processors (coupled)"),
@@ -2980,6 +2981,27 @@ def main() -> int:
             return True, "a held note on stock track 2 sounds through the ColdFire and the DSP together"
         later("stocknote", "a stock note through both processors (coupled)",
               "a stock note through both processors (coupled)", [sn_cmd, sorted(EMU_ENV.items())], sn_body)
+
+        # 2026-11-14 (the GATE GAP of 2026-11-13: our machines never sounded from a real ColdFire frame): the same for
+        # DRONE and JUNO, each put on track 3 by MACHINE SEL's commit and played first in its own run, so its note
+        # lands on voice slot 0: the one slot emu_coupled models faithfully (a note on any other slot is silent there,
+        # stock or ours: the reason every earlier our-machine run was). Track 3's filter is the Multimode: the stock
+        # Equalizer gives NaN in the harness whatever the machine (docs/coupled-emulator.md). Must pass on ours
+        on_runs = [(name, [a.coupled_py, "-u", "scripts/emu_coupled_stocknote.py", "--build", a.build, "--stock",
+                           a.stock, "--snapshot", snap, "--tracks", "", "--ours", spec,
+                           "--json", work / f"ournote_{name}.json"])
+                   for name, spec in (("drone", "2:21"), ("juno", "2:23"))]
+
+        def on_body(tdir):
+            for name, cmd in on_runs:
+                rc, out = run(f"our note coupled ({name})", cmd, logs, env=EMU_ENV, trace=tdir)
+                last = out.strip().splitlines()[-1] if out.strip() else ""
+                if rc != 0 or not last.startswith("PASS"):
+                    return False, f"{name}: " + out[-900:]
+            return True, "a held note on DRONE and on JUNO (track 3, each its own run) sounds through both processors"
+        later("ournote", "our machines' notes through both processors (coupled)",
+              "our machines' notes through both processors (coupled)",
+              [[c for _n, c in on_runs], sorted(EMU_ENV.items())], on_body)
 
         # v0.49 FLEX on the coupled emulator (emu_coupled.py: the ColdFire and the DSP together): a
         # one-shot recorder trig on step 1 placed with [TRIG 1] on FLEX REC, PLAY, the DSP's take into

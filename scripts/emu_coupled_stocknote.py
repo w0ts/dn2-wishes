@@ -7,6 +7,10 @@ track's voices must put sound in their track buffers (the DSP's block after the 
 
 Stage 2 (a cold boot: the ColdFire's power-on upload and READY) is not covered here: the DSP side is warm.
 
+2026-11-14: only voice slot 0 is modelled faithfully (emu_coupled.Coupled's all_slots): a note on any other slot is
+silent, stock or ours, and the first note played lands on slot 0. So one track a run: --tracks '' --ours TRACK:TYPE
+(the gate's ournote: 2:21 DRONE, then 3:23 JUNO, each in its own run) puts our machine on and plays it first.
+
 Validated 2026-11-13: r11f (heard on the unit) 0.0232, r14 (silent on the unit) 0.0001, r14b (r14, optstock off)
 0.0232. A gate step that must pass on ours whatever clean does (autobuild report.MUST_PASS).
 
@@ -32,7 +36,7 @@ KIT, STRIDE, SOUND_TYPE = 0x800052A0, 1163, 0xDE
 SLOT_TRACK = 0x80005308                  # the ColdFire's voice -> track table
 KB_ON = 0x42432A9C                       # KEYBOARD on (1.11's 0x42431A9C, BSS + 0x1000 on 1.12)
 TRK, KEYBOARD, TRIG1, NOTE_KEY = 16, 18, 25, 33
-FLOOR = 1e-3
+FLOOR, CEIL = 1e-3, 4.0
 SMOOTHER = 0x400DB28E                   # the stock parameter smoother (1.12; emu_slides.py)
 SM_STATE, SM_SRC, SM_OUT = 0x8000DE60, 0x80003AF0, 0x800068E4
 OWNER_FN = 0x4018AC5A                   # MACHINE SEL's model owner (1.12; emu_coupled_recplay.py)
@@ -76,7 +80,8 @@ def main() -> int:
     p.add_argument("--stock", required=True)
     p.add_argument("--snapshot", required=True)
     p.add_argument("--tracks", default="1", help="stock tracks (0-based; not 0: unassigned voices read 0); 1: track 2, type 0")
-    p.add_argument("--ours", default="", help="TRACK:TYPE of ours put on first (5 PERC, 6 SOPHIE); not validated yet")
+    p.add_argument("--ours", default="", help="TRACK:TYPE of ours put on first (21 DRONE, 23 JUNO: the gate's ournote, "
+                                                 "one a run with --tracks '', so its note is on voice slot 0)")
     p.add_argument("--layout", default=str(REPO / "src/dnfw/mods/waverider_code.json"))
     p.add_argument("--periods", type=int, default=48)
     p.add_argument("--json", default=None)
@@ -110,7 +115,7 @@ def main() -> int:
     print(f"  machine types, tracks 1..16: {types}", flush=True)
     SM = importlib.import_module("dnfw.sampler.machines")
     ok_all = True
-    side = {int(x): "stock" for x in a.tracks.split(",")} | {t: "ours" for t, _ in ours}
+    side = {int(x): "stock" for x in a.tracks.split(",") if x} | {t: "ours" for t, _ in ours}
     for t in side:
         held(TRK, True)
         tap(TRIG1 + t)
@@ -130,19 +135,28 @@ def main() -> int:
                     "frame_be": c.last_frame.hex(),
                     "pool": pool, "link_words": [c.dsp_word(pool + a_) for a_ in range(0xED0, 0x1000, 4)]}
             vt = struct.unpack(">16I", c.read(SLOT_TRACK, 64))
+            pk_now = 0.0
             for v in range(16):
                 if vt[v] == t:
                     voices.add(v)
-                    peak = max(peak, max(abs(x) for x in c.last_bufs[v]))
+                    pk_now = max(pk_now, max(abs(x) for x in c.last_bufs[v]))
+            peak = max(peak, pk_now)
+            rep.setdefault("series", {}).setdefault(t, []).append(pk_now)
+            if k % 4 == 0:
+                print(f"    period {k}: track {t + 1} peak {pk_now:.4g}", flush=True)
             main_peak = max(main_peak, max(abs(x) for x in c.dsp_floats(SM.MAIN_TAP, 64)))
         c.machine.pc = P.release(c.machine.m, c.panel.profile, *key(NOTE_KEY))
         c.periods(16)
-        ok = bool(voices) and peak > FLOOR and not c.halt    # (main_peak reported only: MAIN_TAP is pvmix's, 0 here)
+        # (main_peak reported only: MAIN_TAP is pvmix's, 0 here). 2026-11-14: and bounded (a block after the chain is
+        # within +-CEIL; JUNO's first coupled run read 1.1e33, a blow-up the floor alone passed)
+        ok = bool(voices) and FLOOR < peak < CEIL and not c.halt
         ok_all &= ok
         rep["tracks"][t] = {"side": side[t], "type": types[t], "keyboard": kb, "voices": sorted(voices), "track_peak": peak,
                             "main_peak": main_peak, "ok": ok}
         print(("  ok    " if ok else "  FAIL  ") + f"track {t + 1} ({side[t]}, type {types[t]}): voices {sorted(voices)}, "
-              f"track peak {peak:.4f}, main peak {main_peak:.4f}, keyboard {kb}", flush=True)
+              f"track peak {peak:.4f}, main peak {main_peak:.4f}, keyboard {kb}"
+              + ("" if 0 in voices else " (not on voice slot 0, the only one emu_coupled models faithfully)"),
+              flush=True)
     rep["halt"], rep["status"] = c.halt, getattr(c, "last_status", None)
     if a.json:
         pathlib.Path(a.json).write_text(json.dumps(rep, indent=1, default=str))

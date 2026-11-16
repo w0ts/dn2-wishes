@@ -163,6 +163,33 @@ def init_on(snap, m2mach, image: Image, warm: bool = False):
     return runner
 
 
+# 2026-11-14 (opt-host, the coupled emulator's gap: only voice slot 0 ever sounded): the per-slot chain's state
+# arrays (engine + base, 16 entries of STRIDE bytes; each stage's R4 at its entry, slot after slot, measured on r5).
+# The Milestone 2 snapshot holds slot 0's entries set up as the engine init leaves them, and every other slot's
+# zero or scattered (the DC blocker's a0 a1 b1 at slots 0, 4, 8, 12; one in b8265b's slot 1): a voice on slots
+# 1..15 left the DC blocker at 0, stock or ours alike. Unmeasured: which runner gap the engine init met.
+# Partial: with it slot 2 sounds ~2 dB under slot 0 (not bit-exact); the odd slots (1, 9, 15) stay silent, their note
+# trigger never latched (the runner's SIMD byte forms 3d/4d do no PEy access: sharc_dn2_fixups, G12, open).
+CHAIN_ARRAYS = (("b8251b", 0xED88, 0x14), ("1cdb56", 0xE788, 0x60), ("DC blocker", 0xE088, 0x70),
+                ("b8265b", 0xEEC8, 0x14), ("base-width", 0x12148, 0x20), ("Multimode", 0xF308, 0xCC),
+                ("amp", 0x13508, 0x2C))
+
+
+def chains_like_slot0(state) -> int:
+    """Every slot's per-slot chain state (CHAIN_ARRAYS) set to slot 0's, as an engine init would leave sixteen
+    voices -> the words written. A harness repair of the warm snapshot, never the firmware's. (Copying the track
+    records and the stock machines' voice state too, measured: no change.)"""
+    n = 0
+    for _name, base, stride in CHAIN_ARRAYS:
+        a0 = V.ENGINE + base
+        first = [m2.word(state, a0 + 4 * i) or 0 for i in range(stride // 4)]
+        for t in range(1, V.N_TRACKS):
+            for i, w in enumerate(first):
+                m2.poke(state, a0 + stride * t + 4 * i, w)
+                n += 1
+    return n
+
+
 def fixups(hooks=None) -> fx.Fixups:
     return m4.fixups(hooks)
 
