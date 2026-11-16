@@ -984,9 +984,11 @@ def main() -> int:
         # drawing throughout (scripts/emu_waverider_menu.py, keys and knob as the panel)
         if "rec_overlay" in lay:
             ov, src = hex(lay["rec_overlay"]), hex(lay["rec_src"])
+            # (2026-11-13, the 1.12 gate's blind spots: 1.12 redraws later in the emulator; the stock page came back
+            # 60..300 M instructions after NO on clean 1.12, so the waits are longer: the checks are the same)
             steps = (f"wait:5,png:p0,mem:{ov}:4,press:17,wait:3,tap:49,wait:3,release:17,"
-                     f"wait:30,mem:{ov}:4,png:a1,spin:0:3,wait:5,mem:{src}:4,spin:0:9,wait:5,mem:{src}:4,png:a2,no,"
-                     f"wait:30,mem:{ov}:4,png:a3,wait:5,png:a4")
+                     f"wait:60,mem:{ov}:4,png:a1,spin:0:3,wait:15,mem:{src}:4,spin:0:9,wait:15,mem:{src}:4,png:a2,no,"
+                     f"wait:300,mem:{ov}:4,png:a3,wait:15,png:a4")
             js = work / "recorder.json"
             rec_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
                                        "--build", bdir, "--snapshot", snap, "--steps", steps,
