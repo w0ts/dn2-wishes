@@ -17,6 +17,16 @@ instruction-set check → unit tests (both cores) → the ColdFire emulator step
 (types 0–4 bit-identical to stock) beside them; a failing SHARC part stops it at the next step.
 `--list` prints the order. About an hour; run it in the background.
 
+**Elektron's own DSP code (the User, 2026-11-12).** Stock code (machines, track chain, send
+FX, routing, output) may be changed only when the SHARC runner's `stockout` step passes on
+that build: with stock machines only, the main mix, every track's stereo blocks, the FX
+returns, TDM slots 0-13 and the Overbridge records are bit-identical to the stock image's,
+every block (`scripts/sharc_stockout_step.py`). A change that is not bit-identical is allowed
+only where the User decided it; so far: the idle savings (send-FX idle gate, idle stock voices
+skipped, the track chain skipped at a fixed point), each with the frame guard reserving the
+skipped cost. Such a change declares, in `stockout`, exactly which output words may differ
+and when.
+
 **Before the first build of a release (owner, 2026-11-07, after v0.44 was gated twice with
 0.43 on its screen):** bump `VERSION` to the release's number, then run
 `python3 scripts/gen_waverider_code.py` (the version is compiled into the ColdFire chunk;
