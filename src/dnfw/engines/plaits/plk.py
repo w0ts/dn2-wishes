@@ -261,32 +261,78 @@ SIN_POLY = (6.283185005187988, -41.34165573120117, 81.60099792480469, -76.549659
             39.53581237792969)
 
 
-def sinp_body(p: Prog) -> None:
-    """F15 = sin(2 pi F15), any F15. Clobbers R0, R1, R12-R14.
+class KTab:
+    """2026-11-14 (plaits16, r52): a constant pool for a hot loop: VALUES (floats, or ints as ("i", n)) as words of an
+    L1 row at BASE (an engine's own render scratch), read through IC (one of I0..I3), so that a load of a constant
+    is a memory move that rides on the compute before it, where `Rd = data32` is an instruction of its own (48 bits).
+    The words are the constants' own bits: every value the same. write() once a half, before the loop (the render
+    scratch is anyone's between halves). Clobbers R0, R12 there."""
+
+    def __init__(self, base: int, ic: int, values) -> None:
+        from ...perc.dsl import bits, f32
+        assert ic in (0, 1, 2, 3)
+        self.base, self.ic = base, ic
+        self.words = []
+        for v in values:
+            w = (v[1] & 0xFFFFFFFF) if isinstance(v, tuple) else bits(f32(v))
+            if w not in self.words:
+                self.words.append(w)
+        assert len(self.words) <= 32, "a pool's offsets stay in -32..31"
+
+    def write(self, p: Prog) -> None:
+        p.iconst(0, self.base)
+        p.seti(self.ic, 0)
+        for k, w in enumerate(self.words):
+            p.iconst(12, w)
+            p.sti(k, self.ic, 12)
+
+    def ld(self, p: Prog, d: int, v) -> None:
+        """Rd = the constant V (a float, or ("i", n)): DM(k, Ic)"""
+        from ...perc.dsl import bits, f32
+        w = (v[1] & 0xFFFFFFFF) if isinstance(v, tuple) else bits(f32(v))
+        p.ldi(d, self.words.index(w), self.ic)
+
+    def mulk(self, p: Prog, d: int, a: int, x: float, t: int = 12) -> None:
+        self.ld(p, t, x)
+        p.fop(d, a, "*", t)
+
+    def addk(self, p: Prog, d: int, a: int, x: float, t: int = 12) -> None:
+        self.ld(p, t, x)
+        p.fop(d, a, "+", t)
+
+
+SIN_KTAB = (0.5, 1.0, -0.5) + SIN_POLY                   # sinp_body's constants, for a KTab
+
+
+def sinp_body(p: Prog, kt: KTab | None = None) -> None:
+    """F15 = sin(2 pi F15), any F15. Clobbers R0, R1, R12-R14. KT (2026-11-14): its constants from that pool (the
+    same values, the loads on the computes) instead of constant loads.
 
     2026-11-10 (poly16): without branches, the same values bit for bit: x + 0.5's floor by TRUNC
     and a conditional + 1 (x + 0.5 - its TRUNC is exact, so + 1 and - (TRUNC - 1) round alike);
     the quarter-turn fold as MAX(MIN(r, 0.5 - r), -0.5 - r) (each picked value computed as
     before; the others cannot cross 0.25 by rounding). 28 instructions, not 33..37 and two
     branches."""
-    p.fconst(12, 0.5)
-    p.fconst(14, 1.0)
+    kc = (lambda d, v: kt.ld(p, d, v)) if kt else (lambda d, v: p.fconst(d, v))
+    kc(12, 0.5)
+    kc(14, 1.0)
     p.fop(13, 15, "+", 12)
     p.trunc(0, 13)
     p.float0(1, 0)
     p.fop(1, 13, "-", 1)
     p.fop_lt(1, 1, "+", 14)                    # x + 0.5 - floor(x + 0.5)
     p.fop(15, 1, "-", 12)                      # r = x - round(x): -1/2 .. 1/2
-    p.fconst(1, -0.5)
+    kc(1, -0.5)
     p.fop(13, 12, "-", 15)
     p.fop(14, 15, "MIN", 13)
     p.fop(13, 1, "-", 15)
     p.fop(15, 14, "MAX", 13)                   # |r| <= 1/4
     p.fop(13, 15, "*", 15)                     # r^2
-    p.fconst(14, SIN_POLY[-1])
+    kc(14, SIN_POLY[-1])
     for c in reversed(SIN_POLY[:-1]):
         p.fop(14, 14, "*", 13)
-        addk(p, 14, 14, c)
+        kc(12, c)
+        p.fop(14, 14, "+", 12)
     p.fop(15, 14, "*", 15)
 
 

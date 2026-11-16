@@ -68,18 +68,22 @@ def init(p: Prog, L: C.Layout) -> None:
     K.sv(p, PMF, 0)
 
 
-def _u32_body(p: Prog) -> None:
-    K.mulk(p, 15, 15, U32, t=13)
-    p.fconst(14, U32 / 2)
+def _u32_body(p: Prog, kt: K.KTab | None = None) -> None:
+    if kt:                                        # 2026-11-14: the sub-sample's, its constants from the pool
+        kt.mulk(p, 15, 15, U32, t=13)
+        kt.ld(p, 14, U32 / 2)
+    else:
+        K.mulk(p, 15, 15, U32, t=13)
+        p.fconst(14, U32 / 2)
     p.if_(15, "GE", 14, lambda: p.fop(15, 15, "-", 13))
     p.trunc(15, 15)
 
 
-def _u32(p: Prog, inline: bool = False) -> None:
+def _u32(p: Prog, inline: bool = False, kt: K.KTab | None = None) -> None:
     """R15 = static_cast<uint32_t>(2^32 F15), F15 in 0 .. 1 (exact). Clobbers R12-R14, I12.
-    INLINE (2026-11-10): the body here, not a call (the sub-sample's)."""
+    INLINE (2026-11-10): the body here, not a call (the sub-sample's); KT its constants' pool."""
     if inline:
-        _u32_body(p)
+        _u32_body(p, kt)
     else:
         p.call("plfm_u32", lambda: _u32_body(p))
 
@@ -123,34 +127,46 @@ def _params(p: Prog, L: C.Layout) -> None:
     K.interp_start(p, IFB, PFB, 5)
 
 
-def _sub(p: Prog) -> None:
+# 2026-11-14 (plaits16, r52): the sub-sample's constants (and its two sines') from a pool in the render scratch
+# (KT_ROW of YB, after the FIR's 7 words) through I2: each load rides on the compute before it, where a constant
+# load is an instruction of its own. The same values, the same operations: the output is bit for bit as before.
+KT_ROW = 16
+KT_VALUES = (1.0, 0.05, ("i", -32), U32, U32 / 2) + K.SIN_KTAB
+
+
+def _kt(L: C.Layout) -> K.KTab:
+    return K.KTab(L.YB + 4 * KT_ROW, 2, KT_VALUES)
+
+
+def _sub(p: Prog, kt: K.KTab) -> None:
     """One 4x sub-sample: F2 amount, R4 carrier increment, F5 modulator frequency, F6 phase
-    feedback, F7 modulator self-PM; F3 += carrier fir[3 - j] (I1 at j), F11 += carrier fir[j]."""
+    feedback, F7 modulator self-PM; F3 += carrier fir[3 - j] (I1 at j), F11 += carrier fir[j];
+    I2 the constants' pool (KT)."""
     K.ld(p, 9, PREV)
     p.fop(10, 9, "*", 6)
-    K.addk(p, 10, 10, 1.0)
+    kt.addk(p, 10, 10, 1.0)
     p.fop(15, 10, "*", 5)
-    _u32(p, inline=True)
+    _u32(p, inline=True, kt=kt)
     K.ld(p, 9, MPH)
     p.iop(9, 15, "+", 9)
     K.sv(p, MPH, 9)
     K.ld(p, 10, PREV)
     p.fop(10, 10, "*", 7)
-    p.iconst(12, -32)
+    kt.ld(p, 12, ("i", -32))
     p.float_(15, 9, 12)
     p.fop(15, 15, "+", 10)
-    K.sinp_body(p)                                # modulator (2026-11-10: inline, not a call)
+    K.sinp_body(p, kt)                            # modulator (2026-11-10: inline, not a call)
     p.fop(10, 2, "*", 15)
     K.ld(p, 9, CPH)
     p.iop(9, 9, "+", 4)
     K.sv(p, CPH, 9)
-    p.iconst(12, -32)
+    kt.ld(p, 12, ("i", -32))
     p.float_(15, 9, 12)
     p.fop(15, 15, "+", 10)
-    K.sinp_body(p)                                # carrier (inline)
+    K.sinp_body(p, kt)                            # carrier (inline)
     K.ld(p, 9, PREV)
     p.fop(10, 15, "-", 9)
-    K.mulk(p, 10, 10, 0.05)
+    kt.mulk(p, 10, 10, 0.05)
     p.fop(9, 9, "+", 10)
     K.sv(p, PREV, 9)
     p.ldi(10, 3, 1)
@@ -179,7 +195,7 @@ def _sample(p: Prog, L: C.Layout) -> None:
     p.fconst(11, 0.0)                             # its tail
     p.iconst(9, L.YB)                             # the FIR (2026-11-10: its L1 copy, half's start)
     p.seti(1, 9)
-    p.loop_r(8, 4, lambda: _sub(p))
+    p.loop_r(8, 4, lambda: _sub(p, _kt(L)))
     p.stpost(4, 3)
     K.sv(p, CFIR, 11)
 
@@ -194,4 +210,5 @@ def half(p: Prog, L: C.Layout) -> None:
     for k in range(7):
         p.ldpost(9, 1)
         p.stpost(5, 9)
+    _kt(L).write(p)                               # 2026-11-14: the sub-sample's constants (I2)
     p.loop(L.W["n4"], K.HALF, lambda: _sample(p, L))
