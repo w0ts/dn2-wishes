@@ -179,6 +179,10 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         for va in (BLK_READ, BLK_WRITE):
             machine.write(va, bytes.fromhex("70004e75"))
             uc.hook_add(UC_HOOK_CODE, blk, begin=va, end=va)
+        # (2026-11-14, the 1.12 gate: and the translated code dropped: a snapshot whose build polled the +Drive in the
+        # warm-up had stock's driver translated already, and ran it, not the two instructions: its eDMA read crashed
+        # Unicorn, rc -11, on clean 1.12's per-build snapshot)
+        machine.flush()
     machine.write(BLK_READY, struct.pack(">I", 1))
     machine.write(BLK_SECTORS, struct.pack(">I", 0x3A00000))   # 29 GiB
 
@@ -2043,6 +2047,7 @@ def main() -> int:
     # MACHINE SEL's view, as UP / DOWN hand it to the scroll-follow (the down-to: step)
     msel_view: dict[str, int] = {}
     down_to: list[list] = []
+    until: list[list] = []
     uc.hook_add(UC_HOOK_CODE, lambda uc_, ad, sz, us: msel_view.__setitem__("view", arg(4) & 0xFFFFFFFF),
                 begin=MSEL_FOLLOW, end=MSEL_FOLLOW)
 
@@ -2267,6 +2272,23 @@ def main() -> int:
             panel.let_go(FUNC)
         elif step in KEYS:
             panel.tap(KEYS[step])
+        elif step.startswith("until-call:"):
+            # until-call:VA:WANT[:MOST] (2026-11-14, the 1.12 gate): 10 M at a time until VA() returns WANT, at most MOST
+            # times: a state waited for, not a time (a save's bar and message last as long as the save does). Not a
+            # direct call (the JSON's direct_calls are the steps' own probes); the JSON's until: [VA, WANT, rounds, d0]
+            parts = step.split(":")
+            fn, want = int(parts[1], 0), int(parts[2], 0)
+            most, rounds, got = int(parts[3]) if len(parts) > 3 else 100, 0, None
+            while rounds < most:
+                panel.settle(10_000_000)
+                rounds += 1
+                guest_call(fn)
+                got = returned["d0"]
+                got = got - (1 << 32) if got & 0x80000000 else got
+                if got == want:
+                    break
+            until.append([parts[1], want, rounds, got])
+            print(f"  until {parts[1]}() == {want}: {rounds} x 10 M, d0 = {got}")
         elif step.startswith("down-to:"):
             # down-to:TYPE[:MOST] (2026-11-14, the 1.12 gate): DOWN in MACHINE SEL until the cursor's row is TYPE,
             # read as stock reads it (0x4005b162(view)), at most MOST presses; not a count of rows, which is the
@@ -2700,7 +2722,7 @@ def main() -> int:
               "setter_writes": writes,
               "mirror_type_writes": mirror_writes, "type_writes": type_writes,
               "direct_calls": calls_made,
-              "frames": frames, "memory": mems, "down_to": down_to, "labels": labels, "pixel_callers": pixels, "access": access, "counts": counts,
+              "frames": frames, "memory": mems, "down_to": down_to, "until": until, "labels": labels, "pixel_callers": pixels, "access": access, "counts": counts,
               "screen_frames": panel.frames() - frames_at_reset[0],
               "panel_writers": panel_writers, "items": items,
               "alive": alive, "fault_reports": reported, "stack_frees": stack_frees[:10],
