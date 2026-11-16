@@ -69,7 +69,7 @@ MNM_LEVELS: dict[str, float] = {"DRONE": 0.7,   # 2026-11-09: DRONE peaks 1.5..1
 LEVEL_DB: dict[str, float] = {"ANALOG2": -3.2, "SOPHIE": +3.8, "TB303": +4.0,   # TB303, DENS: held under the runner's 4.0 at all knobs 127
                               "DPRO-WAVE": +4.1, "DPRO-DDRW": +2.9, "DPRO-DENS": +4.7}
 PLAITS_LEVEL_DB: dict[str, float] = {"WS": -2.8, "": -2.8,      # "" the retired choice, which plays WS
-                                     "SWRM": +2.5, "MDAL": +2.2, "SD": +2.6, "HH": +4.0, "BD": +9.7, "STRG": +9.7}
+                                     "SWRM": +2.5, "MDAL": +2.2, "SD": +2.6, "HH": +4.0, "BD": +9.7, "STRG": +8.4}   # STRG: its start in the runner's MODL walk under 4.0
 
 
 def _db(x: float) -> float:

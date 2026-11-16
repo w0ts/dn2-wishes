@@ -35,17 +35,21 @@ An engine already in its band keeps its level (bit for bit); one outside moves t
 | PLAITS SD | hit | peak -19.9 | +2.6 | -17.3 |
 | PLAITS HH | hit | peak -21.3 | +4.0 | -17.3 |
 | PLAITS BD | hit | peak -27.0 | +9.7 | -17.3 |
-| PLAITS STRG | hit | peak -27.0 | +9.7 | -17.3 |
+| PLAITS STRG | hit | peak -27.0 | +8.4 | -18.6 ¹ |
 | SID 6581, PLAITS FM, ADD, VA, NOIS, DRONE, VO-6 | held | RMS -24.7 .. -28.4 | 0 | in band |
 | PLAITS PART | hit | peak -17.9 | 0 | in band |
 
 ¹ In its band, short of the middle: at the middle the engine's loudest setting (every knob 127, the runner's `tops`
-run) went past the runner's 4.0 bound on a track buffer (TB-303 4.29, DPRO-DENS 4.42 at +5.4 / +6.6 dB); at these it
+run) went past the runner's 4.0 bound on a track buffer (TB-303 4.29, DPRO-DENS 4.42 at +5.4 / +6.6 dB; PLAITS STRG 4.52 at +9.7 dB, its start when the runner's MODL walk turns to it); at these it
 stays near 3.6.
 
-The Machinedrum machines share one level (`MD_LEVEL`, v0.22): TRX-BD, TRX-SD and PI-BD sit in the hit band; PI-HH
-(-23.2) and EFM-SD (-20.6) below it. Not changed: a per-machine level would be new host code, and the other 29 are
-not measured.
+## The Machinedrum machines (all 34, peak at the amp stage, 53 ms; 2026-11-12)
+
+The hit band is -17.3 +-2 dB. In it: EFM-HH -18.7, TRX-XC -18.6, TRX-XT -18.4, PI-SD -18.4, GND-NS -18.1, TRX-SD -18.0, TRX-BD -17.9, PI-MT -17.9, PI-BD -17.3.
+Below it: TRX-MA -29.5, TRX-CH -28.5, TRX-OH -28.5, TRX-CY -28.3, TRX-CL -27.5, GND-SN -26.2, TRX-RS -26.0, PI-RC -26.0, TRX-CB -25.3, TRX-CP -25.2, TRX-S2 -24.6, PI-CC -24.6, PI-MA -23.8, EFM-CY -23.2, PI-HH -23.2, EFM-XT -22.3, PI-ML -21.7, EFM-CB -21.1, TRX-B2 -20.9, EFM-SD -20.6, EFM-BD -20.0, EFM-RS -19.8, GND-IM -19.8, EFM-CP -19.7, PI-RS -19.6.
+The Machinedrum's own kit balance (hats and cymbals ~10 dB under the kicks); they all share `MD_LEVEL` (v0.22).
+The User (2026-11-12): "leave MD as is" (a hi-hat need not be as loud: "it is not a melodic synth"). A per-category
+comparison against the User's own drum samples is kept in the session notes (md-levels-by-category.md).
 
 ## Where
 

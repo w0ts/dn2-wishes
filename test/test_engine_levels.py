@@ -88,3 +88,4 @@ def test_the_plaits_level_is_a_pure_scale_by_model(model, monkeypatch):
     assert max(abs(x) for x in then) > 1e-4, f"PLAITS {model}: silent"
     for x, y in zip(then, now):
         assert y == pytest.approx(x * g, rel=1e-4, abs=1e-7)
+
