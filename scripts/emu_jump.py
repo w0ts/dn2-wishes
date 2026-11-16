@@ -65,6 +65,9 @@ from emulib.panel import NO, YES, Panel                 # noqa: E402
 PLAY, PTN = (2, 3), (2, 6)
 TRIG = [(3 + k // 8, k % 8) for k in range(16)]         # codes 25..40
 SEQ_ISR, SEQ_VECTOR = 0x400D99DE, 121
+AUDIO_ISR, AUDIO_RTE = 0x40025E36, 0x40027BC6           # the audio ISR, entry to its rte (emu_coupled.py)
+CF_FRAME = 0x80005E60                                    # its frame: word 108 is BPM x 120 (emu_coupled.py)
+SEQ_ENTRIES_A_STEP, AUDIO_HZ = 24, 1500
 CUE = 0x400D9554
 STACK_TOP, SENTINEL = 0x46A20000, 0x46A20400
 P0, PSTRIDE = 0x4121998C, 122478                         # pattern n at P0 + n * PSTRIDE (0x400fa348)
@@ -176,19 +179,47 @@ def main() -> int:
 
     regs = [getattr(K, f"UC_M68K_REG_{r}{i}") for r in "DA" for i in range(8)]
 
+    # The audio ISR between the sequencer's entries, at the tempo's rate (1,500 a second, a
+    # sixteenth SEQ_ENTRIES_A_STEP entries), as emu_coupled.py runs the two. It hands back the
+    # nodes the sequencer takes from its 64-node pool (0x44645230, 1.12; 0x40026eee frees
+    # them): 1.12's sequencer takes two every eight entries, so without it the pool ran dry
+    # at entry 256 and the next entry waited for a node forever (0x40138b60, bra *)
+    audio_acc = [0.0]
+
+    def audio_isr():
+        sp = STACK_TOP - 0x200
+        m.write(sp, struct.pack(">I", SENTINEL))
+        uc.reg_write(K.UC_M68K_REG_A7, sp)
+        bounded.run(uc, m.m, AUDIO_ISR, AUDIO_RTE, 3_000_000)
+
+    def audio_isrs():
+        bpm = struct.unpack(">H", m.read(CF_FRAME + 2 * 108, 2))[0] / 120.0
+        if bpm <= 0:                                     # no frame built yet: the ISR builds one
+            audio_isr()
+            bpm = struct.unpack(">H", m.read(CF_FRAME + 2 * 108, 2))[0] / 120.0
+            if bpm <= 0:
+                raise SystemExit("the audio ISR's frame gives no tempo (word 108)")
+        audio_acc[0] += AUDIO_HZ / (SEQ_ENTRIES_A_STEP * bpm / 15.0)
+        while audio_acc[0] >= 1.0:
+            audio_acc[0] -= 1.0
+            audio_isr()
+
     def isr():
         saved = [uc.reg_read(r) for r in regs]
         pc = uc.reg_read(K.UC_M68K_REG_PC)
+        sr = uc.reg_read(K.UC_M68K_REG_SR)
         sp = STACK_TOP - 0x100
         m.write(sp, struct.pack(">HHI", 0x4000 | (SEQ_VECTOR << 2), 0x2000, SENTINEL))
         m.write(SENTINEL, bytes.fromhex("4e714e71"))
         uc.reg_write(K.UC_M68K_REG_A7, sp)
         try:
             bounded.run(uc, m.m, SEQ_ISR, SENTINEL, 3_000_000)
+            audio_isrs()
         finally:
             for r, v in zip(regs, saved):
                 uc.reg_write(r, v)
             uc.reg_write(K.UC_M68K_REG_PC, pc)
+            uc.reg_write(K.UC_M68K_REG_SR, sr)
 
     def guest(fn, *args):
         saved = [uc.reg_read(r) for r in regs]

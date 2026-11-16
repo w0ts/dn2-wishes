@@ -2732,7 +2732,14 @@ def main() -> int:
             jruns = [("off", "pp", True), ("off", "pp", False), ("pc", "pp", False), ("on", "pp", False),
                      ("ref", "pp", True), ("on", "pt", False), ("ref", "pt", True), ("on", "odd", False),
                      ("persist", "pp", False), ("rapid", "pp", False)]
-            jcmds = [[a.venv, "-u", "scripts/emu_jump.py", "--build", bdir, "--snapshot", snap, "--scenario", sc,
+            # 2026-11-14 (the 1.12 gate's blind spots): both runs from one snapshot that booted
+            # stock (ui1200M, no section beside it), the build installed over it. 1.12's per-build
+            # ui800M booted THIS build: its UI state calls into the build's C chunk, so reverted to
+            # stock (--stock) it faulted at once (stock's fault reporter, from 0x46acee58)
+            jsnap = snap.parent / "ui1200M.snap"
+            if not jsnap.exists() or pathlib.Path(f"{jsnap}.section_3_MAIN_OS.bin").exists():
+                jsnap = snap
+            jcmds = [[a.venv, "-u", "scripts/emu_jump.py", "--build", bdir, "--snapshot", jsnap, "--scenario", sc,
                       "--variant", var, "--png-dir", jdir / "screens", "--json", jdir / f"{sc}_{var}_{'stock' if st else 'build'}.json"]
                      + (["--stock"] if st else []) for sc, var, st in jruns]
 
