@@ -50,13 +50,13 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
                 f.put(0xA5A + 2 * s_, tr)
         return f.to_bytes()
 
-    def blocks(par_of, n, routed=False):
+    def blocks(par_of, n, routed=False, frames_fn=None, fixed_gen=False):
         caps = []
         cur = {}
 
         def put_par(r):                          # (2026-11-10: packed, a new change word each block, as the
             par = par_of(len(caps))              # link sends them: the pass's own unpack runs every block)
-            for k, w in enumerate(D.pack(D.records(par), 1 + len(caps))):
+            for k, w in enumerate(D.pack(D.records(par), 1 if fixed_gen else 1 + len(caps))):
                 m2.poke(r.state, D.GEN + 4 * k, w)
 
         def at_ins(r):
@@ -77,7 +77,7 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
         res = []
         for b in range(n):
             put_par(state)
-            out = M5.run_blocks(state, lambda _b, b=b: frames(b, routed), 1,
+            out = M5.run_blocks(state, (lambda _b, b=b: frames_fn(b)) if frames_fn else (lambda _b, b=b: frames(b, routed)), 1,
                                 extra_hooks={dsp.INS_SW: at_ins, dsp.PING_SW: at_ping})
             if not out.get("ok"):
                 return caps, {"halt": out.get("halt"), "block": b}
@@ -126,6 +126,47 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
     checks["FUZZ: it changes the sound (not a pass-through)"] = changed > 500
     numbers["FUZZ: first mismatch (block)"] = first_bad
     numbers["FUZZ: run info"] = info if "halt" in info else {"blocks": len(caps)}
+
+    # 2c. 2026-11-12 (opt-host's measure on A09: T9 owns slots 2..15, so its DIST ran 14 times a block, sounding or
+    # not): slots 2..15 on track 10's DIST, one of them sounding; the silent ones skip it once at rest (program.quiet,
+    # DIST's gate smoothing ~250 blocks into silence): every buffer still the reference's, the pass's instructions down
+    def frames_q(b):
+        f = M5.base_frame(sound, machines, overrides=M5.perc_words(1), trigger=b % 24 == 1,
+                          others={2: 5}, trigger_others=True)
+        for s_ in range(16):
+            f.put(0xA5A + 2 * s_, s_ if s_ < 2 else 9)
+        return f.to_bytes()
+
+    def par_q(b):
+        rows = bytearray(128)
+        rows[72:80] = bytes([D.DIST, 127, 90, 90, 20, 64, 64, 0])
+        return bytes(rows)
+    caps, info = blocks(par_q, 300, frames_fn=frames_q, fixed_gen=True)   # (the link moves it only on an edit:
+                                                                          # ins.c ins_gen; quiet's mark needs that)
+    ref = R.Ref()
+    exact, first_bad = bool(caps), None
+    for b, c in enumerate(caps):
+        bufs = [[bf(w) for w in c["in"][t]] for t in range(16)]
+        ref.block(D.records(c["par"]), bufs, c["route"])
+        if c.get("out") != [[fb(x) for x in bufs[t]] for t in range(16)]:
+            exact = False
+            first_bad = first_bad if first_bad is not None else b
+    ins = info.get("instructions") or [0]
+    early, late = sum(ins[5:25]) / 20, sum(ins[-20:]) / 20
+    zero_in = [sum(1 for s_ in range(16) if c["route"][s_] == 9 and not any(w & 0xFFFFFFFF for w in c["in"][s_]))
+               for c in caps[-3:]]
+    print(f"    quiet: instructions a block {round(early)} (blocks 5..24), {round(late)} (the last 20); slots on track "
+          f"10 with all-zero input in the last 3 blocks {zero_in}; first mismatch {first_bad}", flush=True)
+    for s_ in (2, 3, 7, 15):                     # what a silent slot's buffer holds: its size, and whether it is the
+        c0, c1 = caps[-2], caps[-1]              # last block's output (a buffer no voice rewrites)
+        mx = max(abs(float(bf(w))) for w in c1["in"][s_])
+        print(f"    quiet: slot {s_} max |in| {mx:.3g}; in == last block's out: {c1['in'][s_] == c0['out'][s_]}; "
+              f"in == last block's in: {c1['in'][s_] == c0['in'][s_]}; ptr {c1['ptr'][s_]:#x}", flush=True)
+    mapped = sum(1 for s_ in range(16) if caps and caps[-1]["route"][s_] == 9)
+    checks["14 slots on one DIST track, one sounding: every buffer as dnfw.inserts.ref's (300 blocks; the silent "
+           "slots skip DIST once at rest)"] = exact and mapped == 14
+    checks["14 slots on one DIST track: the block's instructions fall once the silent slots are at rest"] = late < early - 20_000
+    numbers["quiet: instructions a block, blocks 5..24 and the last 20; first mismatch"] = (round(early), round(late), first_bad)
 
     # 2b. voices moving: the frame's slot map (0xa5a + 2 s) rotating tracks 1, 2, 5, 16 (and 2 twice)
     # over five slots with different inserts; each slot gets the insert of the track it plays

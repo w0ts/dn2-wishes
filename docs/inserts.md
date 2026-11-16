@@ -526,6 +526,17 @@ the voices' LIMIT from the next frame on (and a sudden one could run past the fr
   grace it is out at once. MIX x g with g exactly 1.0 when not fading: the sound as before. One gate and one blend
   for both units (insbus.asm ~4.1 KB of its 4.2). A moved slot 2 still has the bus pass's own admit around it
   (MV_COST) besides the pre pass's hold inside.
+- **2026-11-12, silent slots (`program.quiet`; opt-host's measure on A09: a per-voice insert runs on every slot the
+  slot map gives its track, sounding or not; T9 owned slots 2..15, so its DIST ran 14 times a block, ~75.6k asked
+  against ~70k of room):** a per-voice instance skips its block when its input is all exact zeros and its quiet mark
+  (`design.QUIET_L2`) is the change word + 1: its last run had all-zero input, left all-zero output and its six state
+  words and AUTO's powers as they were, under the same records. Running it again would give the same zeros and the
+  same state, so the skip is bit-identical (the model runs it too; every test and runner step against the
+  references holds). A type whose state moves on silence (TAPE's wow and hiss, RING's and GATER's phases, a gate
+  still smoothing) never qualifies until it rests: DIST rests ~250 blocks into silence (its gate smoothing reaching
+  its fixed point). Model: 14 slots on one DIST track, one sounding: 50,508 steps a block, 8,167 once at rest.
+  Runner: the inserts step's 14-slot case (300 blocks). The gate's counts by type are opt-host's `INS_TSKIP`
+  (`count_skip_r`): a refused block under its type, a held-out one under 14, a faded one (the bus) under 15.
 - **2026-11-11 fix (`guard.ins_start`, `INS_DLP`):** INS_DEADLINE leaves room for the WHOLE stock tail, but only the
   pre pass and a2f run at its start. The post pass runs at the FX sends and the bus pass (FDN8/XDLY) just
   before the output stage, with most of the tail already done, so it was counted twice. The unit's
@@ -540,6 +551,23 @@ the voices' LIMIT from the next frame on (and a sudden one could run past the fr
   P about 592,000 the inserts have about 120,000 before the deadline when the voices use all of theirs
   (about three FDN8 at their bound), more when they do not. An FDN8 left out of a block is a gap in its
   tail (a click): the price of never costing a voice.
+- **2026-11-12 (round 13): what the unit says about the refusals.** On r11f the User's pattern A09 lost an insert on
+  ~43 % of blocks (about 1.6 a block while T9 played) with our frame at 7-10 % of P, and the unit cannot read the
+  guard's words (PEEK reaches ColdFire RAM only). So the DSP now reports them itself:
+  - **per type** (`guard.INS_TSKIP`, L1 `0x2E1700`, 16 words): every block `ins_admit` leaves out, under its
+    type (0..13, `design.NAMES`; a moved slot 2 under its own type); words 14 and 15 kept for the inserts' own gate
+    (opt-inserts: held out, faded). Cumulative. The model never counts.
+  - **each pass's least room** (`guard.INS_ROOM`, after them, 4 words): `INS_DLP - (EMUCLK - MARK0)` as each pass
+    starts (`ins_start(p, k)`: 0 the A2 filters, 1 pre, 2 post, 3 bus), the least since the last idle packet
+    (`0x7FFFFFFF`: none seen). Negative: the pass started past its deadline, so all its inserts are left out.
+  - **The way out:** the idle packet's units 42..57 (the counts, low 16 bits), 58..61 (each pass's least room, as
+    `(room + 2^19) / 16` held to 0..0xFFFE; 0xFFFF none; the DSP's words reset after each packet) and 62 (TAIL /
+    16). The ColdFire keeps the counts (`smp_ins_tskip`), the least room until DIAG reads it (`smp_ins_room`) and
+    TAIL (`smp_ins_tail`). **DIAG** (link command 24) adds, after its words: 8 words of counts (two a word, type
+    2k low, 2k+1 high), then rooms a2f | pre << 16, post | bus << 16, then TAIL / 16; reading DIAG resets the rooms.
+  - Checked in the runner's `insdl` step: TIGHT's counts add up to `INS_SKIPS`, under FDN8 and XDLY only.
+    `DNFW_INSDL_STUDY=1` runs the study instead (each insert type on ANALOG2 and the JUNO engine, the stock's tail
+    raised by `DNFW_INSDL_EXTRA` cycles): numbers in its report.
 
 ## JUNO's and CHOR's taps through L1 (2026-11-12)
 

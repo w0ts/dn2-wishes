@@ -601,7 +601,7 @@ def body(p: Prog, X: M.Ctx) -> None:
     p.st(C["s"], 0)
     p.iconst(0, 16)
     p.st(C["cnt"], 0)
-    G.ins_start(p)                               # 2026-11-10: this pass's time apart (the guard's INS_ACC), out of the stock's tail
+    G.ins_start(p, 0)                            # 2026-11-10: this pass's time apart (the guard's INS_ACC), out of the stock's tail
     if ONE_VOICE:
         _pick(p, X)
     p.iconst(0, 0)

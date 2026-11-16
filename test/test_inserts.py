@@ -262,3 +262,35 @@ def test_a_refused_insert_stays_out_and_switches_without_a_step():
         raw = abs(float((dry0 if b == 20 else want[b][0]) - got[b - 1][31]))
         jump = abs(float(got[b][0] - got[b - 1][31]))
         assert raw > 0.2 and jump < 0.1 * raw, (b, jump, raw)
+
+
+def test_silent_slots_skip_their_insert_bit_identically():
+    # 2026-11-12 (opt-host's measure on A09: T9 owns slots 2..15, so its DIST ran 14 times a block, sounding or not):
+    # a slot whose input is all zeros and whose insert last left zeros and its state at rest skips it. Every block is
+    # still the reference's, word for word; once the silent slots are at rest (DIST's gate smoothing reaches its
+    # fixed point ~250 blocks into silence) the pass runs far fewer steps
+    import math
+    route = [0, 1] + [9] * 14
+    rows = {9: [D.DIST, 127, 90, 90, 20, 64, 64, 0], 1: [D.FOLD, 127, 80, 64, 0, 100, 100, 0]}
+    m, r = mem0(), R.Ref()
+    steps = []
+    for b in range(420):
+        ph = [2 * math.pi * 110 * (32 * b + j) / D.FS for j in range(32)]
+        bufs = [[-0.0 if t >= 8 else 0.0] * 32 for t in range(D.TRACKS)]   # silent slots hold -0.0s or +0.0s (the
+        bufs[2] = [0.4 * math.sin(x) for x in ph]                     # runner's: -0.0s); one T9 voice sounds
+        if 30 <= b < 60:
+            bufs[5] = [0.2 * math.sin(3 * x) for x in ph]            # a second one, then it stops (a tail)
+        want = [[np.float32(x) for x in buf] for buf in bufs]
+        r.block(par_of(rows), want, route)
+        for k in range(8):
+            m.put(D.ROUTE + 4 * k, (route[2 * k] & 0xFFFF) | (route[2 * k + 1] & 0xFFFF) << 16)
+        send(m, par_of(rows))
+        for t in range(D.TRACKS):
+            for j in range(D.BLOCK):
+                m.put(BUF + 0x80 * t + 4 * j, fbits(bufs[t][j]))
+        p = P.run(m)
+        steps.append(p.steps)
+        got = [[m.get(BUF + 0x80 * t + 4 * j) for j in range(D.BLOCK)] for t in range(D.TRACKS)]
+        assert got == [[fbits(x) for x in w] for w in want], f"block {b}"
+    assert max(steps[400:]) < 0.5 * min(steps[1:20]), (steps[1:20], steps[400:])
+    assert all(m.get(D.QUIET_L2 + 4 * (2 * s)) for s in (3, 4, 8, 9, 15)), "silent slots, +0.0 and -0.0, marked"

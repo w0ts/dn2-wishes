@@ -45,7 +45,8 @@ _NAMES = ["t", "i", "j", "rec", "w1", "sa", "buf", "gn"] + [f"p{k}" for k in ran
     "pa", "rel", "a1", "lv", "kl", "fz", "inv", "inc", "sl", "nsl", "pat", "nx", "b1", "h0", "h1",
     "ret",                       # one's return address - 1 (2026-11-11: the bus pass calls it too)
     "aa", "au", "at",            # AUTO (design.AUTO_L2): the aux words' address, on (1.0) / off, PGAIN's gain T
-    "icost", "ist", "d0", "d31"]  # the gate (2026-11-12): this type's bound, its status, the dry's first and last
+    "icost", "ist", "d0", "d31",  # the gate (2026-11-12): this type's bound, its status, the dry's first and last
+    "qa", "zin", "ap0", "ap1"]   # quiet (2026-11-12): the mark's address, the input's OR, AUTO's powers before
 C = {n: SCRATCH + 4 * k for k, n in enumerate(_NAMES)}
 assert len(C) == len(_NAMES)
 SCRATCH_BYTES = 4 * len(_NAMES)
@@ -1062,9 +1063,111 @@ def skip_moved(p: Prog) -> None:
     p.ifz(0, "NE", lambda: p.ifz(5, "NE", check))     # (C['rec'] is the record's only when it plays)
 
 
+def _or_buf(p: Prog) -> None:
+    """R3 = the OR of the 32 words at C['buf'] (0: all +0.0), R4 their AND (R3 = R4 = 0x80000000: all -0.0). Clobbers
+    R1, R2, R11, I0"""
+    p.ld(2, C["buf"])
+    p.seti(0, 2)
+    p.iconst(3, 0)
+    p.iconst(4, -1)
+
+    def one():
+        p.ldpost(1, 0)
+        p.iop(3, 3, "OR", 1)
+        p.iop(4, 4, "AND", 1)
+    p.loop_r(11, D.BLOCK, one)
+
+
+def _zero_class(p: Prog) -> None:
+    """R3 = the input's zero class from _or_buf's R3, R4: 0 all +0.0, 0x80000000 all -0.0, 1 anything else (not
+    quiet). Clobbers R12"""
+    p.iconst(12, 0x80000000)
+
+    def neg():
+        p.iconst(3, 1)
+        p.if_(4, "EQ", 12, lambda: p.iconst(3, 0x80000000), kind="i")
+    p.ifz(3, "NE", lambda: p.if_(3, "EQ", 12, neg, lambda: p.iconst(3, 1), kind="i"))
+
+
+def quiet(p: Prog, gated) -> None:
+    """2026-11-12 (main; opt-host's measure: a per-voice insert runs on every slot its track owns, sounding or not):
+    GATED() (the insert, its gate and smoothing) unless the input is all +0.0 or all -0.0 and the instance's quiet
+    mark (C['qa']) is the change word + 1 with that sign in bit 31: then its last run had the same input and left
+    all +0.0 output, its state and AUTO words as they were, under the same records, so running it again would give
+    the same: the skip writes the +0.0s, bit-identical. (The runner's silent slots hold -0.0s, not +0.0s.) Clobbers
+    R0-R4, R11, R12, I0, I4 (and GATED's)"""
+    _or_buf(p)
+    _zero_class(p)
+    p.st(C["zin"], 3)
+    p.ld(0, TABLE + 4 * D.RECORDS * D.FIELDS)    # the change word + 1, the sign in bit 31
+    p.iconst(12, 1)
+    p.iop(0, 12, "+", 0)
+    p.iop(0, 0, "OR", 3)
+    p.ld(2, C["qa"])
+    p.seti(4, 2)
+    p.ldi(1, 0, 4)
+    p.iconst(2, 0)                               # 1: skip
+
+    def marked():
+        p.if_(1, "EQ", 0, lambda: p.iconst(2, 1), kind="i")
+    p.iconst(12, 1)
+    p.if_(3, "NE", 12, marked, kind="i")
+
+    def skip():                                  # what the run gave: +0.0s
+        p.ld(2, C["buf"])
+        p.seti(0, 2)
+        p.iconst(1, 0)
+        p.loop_r(11, D.BLOCK, lambda: p.stpost(0, 1))
+    p.ifz(2, "EQ", gated, skip)
+
+
+def quiet_mark(p: Prog) -> None:
+    """after a run: the quiet mark = the change word + 1, the input's sign in bit 31, when the input was all +0.0 or all
+    -0.0 (C['zin'] 0 or 0x80000000), the gate ran it (status 0), the output is all +0.0, and the state words
+    (C['s0'..'s5'] against the stored) and AUTO's powers are as they were; else 0. Clobbers R0-R4, R8, R9, R11, R12, I0,
+    I4"""
+    p.iconst(8, 0)                               # the mark
+
+    def check():
+        _or_buf(p)
+        p.iconst(9, 1)                           # all as they were
+
+        def same():
+            for stored, kept, n in (("sa", "s0", D.STATE_WORDS - 2), ("aa", "ap0", 2)):
+                p.ld(2, C[stored])
+                p.seti(4, 2)
+                p.iconst(2, C[kept])
+                p.seti(0, 2)
+
+                def one():
+                    p.ldpost(0, 4)
+                    p.ldpost(1, 0)
+                    p.if_(0, "NE", 1, lambda: p.iconst(9, 0), kind="i")
+                p.loop_r(11, n, one)
+
+            def mark():
+                p.ld(8, TABLE + 4 * D.RECORDS * D.FIELDS)
+                p.iconst(12, 1)
+                p.iop(8, 8, "+", 12)
+                p.ld(0, C["zin"])
+                p.iop(8, 8, "OR", 0)
+            p.ifz(9, "NE", mark)
+        p.ifz(3, "EQ", same)
+    p.ld(0, C["zin"])                            # 0 or 0x80000000, and status 0
+    p.iconst(12, 0x7FFFFFFF)
+    p.iop(0, 0, "AND", 12)
+    p.ld(1, C["ist"])
+    p.iop(0, 0, "OR", 1)
+    p.ifz(0, "EQ", check)
+    p.ld(2, C["qa"])
+    p.seti(4, 2)
+    p.sti(0, 4, 8)
+
+
 def auto_addr(p: Prog) -> None:
     """C['aa'] = the aux words (design.AUX_WORDS) for the state at R2 (C['sa']): the pre pass's (L1, STATE + 32 i) at
-    AUTO_L2 + 16 i, a moved slot 2's (L2, MV_STATE + 32 k) at AUTO_MV_L2 + 16 ((MV_STATE / 32 + k) mod 32). Keeps R2"""
+    AUTO_L2 + 16 i, a moved slot 2's (L2, MV_STATE + 32 k) at AUTO_MV_L2 + 16 ((MV_STATE / 32 + k) mod 32); C['qa']
+    its quiet mark, QUIET_L2 + 4 i (+ 4 RECORDS for a moved one). Keeps R2"""
     p.lsh(1, 2, -5)
     p.iconst(12, D.RECORDS - 1)
     p.iop(1, 1, "AND", 12)
@@ -1072,8 +1175,13 @@ def auto_addr(p: Prog) -> None:
     p.iconst(12, D.AUTO_L2)
     p.iconst(3, 0x20000000)                      # L2 and above: a moved slot 2's state (bus.MV_STATE)
     p.if_(2, "GE", 3, lambda: p.iconst(12, D.AUTO_MV_L2), kind="i")
+    p.iop(8, 12, "+", 1)
+    p.st(C["aa"], 8)
+    p.lsh(1, 1, -2)                              # the quiet mark (design.QUIET_L2): 4 i, the moved ones after
+    p.iconst(12, D.QUIET_L2)
+    p.if_(2, "GE", 3, lambda: p.iconst(12, D.QUIET_L2 + 4 * D.RECORDS), kind="i")
     p.iop(1, 12, "+", 1)
-    p.st(C["aa"], 1)
+    p.st(C["qa"], 1)
 
 
 def dry_ends(p: Prog, buf_at: int | None = None, d0_at: int | None = None, d31_at: int | None = None) -> None:
@@ -1178,10 +1286,13 @@ def one(p: Prog) -> None:
         p.ld(5, C["sel"])
         p.sti(D.STATE_WORDS - 2, 4, 8)
         p.sti(D.STATE_WORDS - 1, 4, 5)
-        p.ld(2, C["aa"])                         # the aux words too (AUTO's powers, the gate's)
+        p.ld(2, C["aa"])                         # the aux words too (AUTO's powers, the gate's), and the quiet mark
         p.seti(4, 2)
         for k in range(D.AUX_WORDS):
             p.sti(k, 4, 9)
+        p.ld(2, C["qa"])
+        p.seti(4, 2)
+        p.sti(0, 4, 9)
 
         def fresh_ring():                        # TAPE starts from a silent ring
             p.ld(1, C["rb"])
@@ -1220,16 +1331,25 @@ def one(p: Prog) -> None:
         if fzd:
             p.ld(0, C["fz"])
             p.ifz(0, "NE", lambda: fz_loop(p))
-    dry_ends(p)
-    p.ld(1, C["sel"])                            # the type's bound (COST_TAB)
-    p.lsh(1, 1, 2)
-    p.iconst(12, COST_TAB)
-    p.iop(1, 12, "+", 1)
-    p.seti(4, 1)
-    p.ldi(1, 0, 4)
-    p.st(C["icost"], 1)
-    G.ins_gate(p, C["icost"], C["aa"], C["ist"], run)
-    smooth(p)
+
+    def gated():
+        dry_ends(p)
+        p.ld(1, C["sel"])                        # the type's bound (COST_TAB)
+        p.lsh(1, 1, 2)
+        p.iconst(12, COST_TAB)
+        p.iop(1, 12, "+", 1)
+        p.seti(4, 1)
+        p.ldi(1, 0, 4)
+        p.st(C["icost"], 1)
+        p.ld(2, C["aa"])                         # AUTO's powers as they were (quiet_mark)
+        p.seti(4, 2)
+        for k in range(2):
+            p.ldi(1, k, 4)
+            p.st(C[f"ap{k}"], 1)
+        G.ins_gate(p, C["icost"], C["aa"], C["ist"], run, typ_at=C["sel"])
+        smooth(p)
+        quiet_mark(p)
+    quiet(p, gated)
     p.ld(2, C["sa"])
     p.seti(4, 2)
     for k in range(D.STATE_WORDS - 2):
@@ -1376,7 +1496,7 @@ def set_flags(p: Prog) -> None:
 
 
 def body(p: Prog) -> None:
-    G.ins_start(p)
+    G.ins_start(p, 1)
     unpack(p, C)
     p.ld(0, D.FLAGS)                             # (perf) no BUILT record: nothing to walk
     p.ifz(0, "NE", lambda: _walk(p))

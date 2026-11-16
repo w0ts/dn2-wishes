@@ -160,7 +160,7 @@ STOCK_DELAY_SW = 0xB8482C
 # the range proven on units; XDLY's branch ends its span here), their state after the code. smp.asm's
 # tail JUMPs to wr_ins, which JUMPs on to PING.
 INS_L2_LOAD = 0x200ADA00                     # 2026-11-10 (0x200AE000 until the four ports)
-INS_L2_SPAN = 0x2000                         # the code (2026-11-12: AUTO, 0x1c00 until then; 0x1b00 until 2026-11-11: one, the bus pass's moved inserts); 0x1800 until
+INS_L2_SPAN = 0x2100                         # the code (2026-11-12: AUTO, the gate, quiet; 0x1c00 until then; 0x1b00 until 2026-11-11: one, the bus pass's moved inserts); 0x1800 until
                                              # 2026-11-10: two slots' state and the unpacked records need the room)
 INS_SW = 0xB80000 + (INS_L2_LOAD - 0x20000000) // 2          # 0xbd7000
 INS_STATE_DM = 0x2E3000                                      # 2026-11-11 (perf): L1, in the zeros after the shared tail (was L2 0x200af400)
@@ -168,8 +168,8 @@ INS_STATE_DM = 0x2E3000                                      # 2026-11-11 (perf)
 # L2 after the inserts' state (below the sample machines' span), their state after the code, their rings
 # in DDR. The engine's call of the FX sends (sw 0x1c3054) gets wr_inpost as its target; wr_inpost JUMPs on
 # to the sends.
-POST_L2_LOAD = 0x200AFA00                    # 2026-11-12 (the guard's hold; the arbiter): 0x200b0000 until then, same end
-POST_L2_SPAN = 0x1E00                        # the code (4,078 B since 2026-11-11, the unrolled loops; 0x1000 before; the L2 from 0x200b1800 to the sample machines' is unused)
+POST_L2_LOAD = 0x200AFB00                    # 2026-11-12 (the guard's hold; the arbiter): 0x200b0000 until then, same end
+POST_L2_SPAN = 0x1D00                        # the code (4,078 B since 2026-11-11, the unrolled loops; 0x1000 before; the L2 from 0x200b1800 to the sample machines' is unused)
 POST_SW = 0xB80000 + (POST_L2_LOAD - 0x20000000) // 2        # 0xbd8000
 # 2026-11-09: DRONE's BEAT side blocks at 0x200b1800 (dnfw.inserts.post.SIDE_L2, 0x900 B); the A2 filter
 # machines' pass (dnfw.a2f.program): its code, then its state
@@ -190,9 +190,9 @@ SENDS_SITE_STOCK = bytes.fromhex("04181c003817")
 # instances' stores, not loaded); each instance's DDR in dnfw.inserts.design (FDN8_RING_DDR,
 # XDLY_LINES_DDR), not loaded either (a fresh instance clears, or never reads, what it has not written)
 INSBUS_L2_LOAD = 0x200BC000
-INSBUS_L2_SPAN = 0x1100                      # (0x1000 until 2026-11-12: the FDN8 bound by block; 0xc00 until 2026-11-11: the unrolled copy loops, insbus.asm 3,154 B)
+INSBUS_L2_SPAN = 0x1180                      # (0x1000 until 2026-11-12: the FDN8 bound by block, the gate and its counts; 0xc00 until 2026-11-11: the unrolled copy loops, insbus.asm 3,154 B)
 INSBUS_SW = 0xB80000 + (INSBUS_L2_LOAD - 0x20000000) // 2    # 0xbde000
-INSBUS_STATE_L2 = INSBUS_L2_LOAD + INSBUS_L2_SPAN            # 0x200bd100
+INSBUS_STATE_L2 = INSBUS_L2_LOAD + INSBUS_L2_SPAN            # 0x200bd180
 # 2026-11-12: the chorus SEND's TYPE JUNO (dnfw.inserts.jsend, docs/inserts.md "The chorus send"): its code in L2 in
 # the old MD state room after opt-samples' 0x200a0000..0x200a1800 (claimed in docs/memory-map.md's SHARC list); the
 # FX bus's CALL of the stock chorus retargeted to it; its scratch is the post pass's (L1), its words and ring in DDR
@@ -295,6 +295,9 @@ PING_SW = PING_CODE_DM // 2                                  # 0x170280
 # tables that hold their addresses. Its code is in the free span between ping.asm's tail and there.
 TRACKBUF_CODE_DM = 0x2E1000
 TRACKBUF_SW = TRACKBUF_CODE_DM // 2                          # 0x170800
+# 2026-11-12 (round 13, opt-host): the inserts' per-type skip counts (dnfw.perc.guard.INS_TSKIP), in L1 hole F2 after
+# trackbuf.asm (v0.52 merge: opt-mnm's interp copy, which it followed, was dropped; trackbuf's span pads to it)
+INS_TSKIP_DM, INS_TSKIP_BYTES = 0x2E1700, 0x50       # then each insert pass's least room (guard.INS_ROOM)
 TRACKBUF_DM, TRACKBUF_BYTES = 0x2E1D00, 16 * 128             # to 0x2e2500
 TRACKBUF_DDR = 0x804ACF90                                    # where the stock puts them
 TRACKAUX_DM, TRACKAUX_DDR, TRACKAUX_BYTES = 0x2E1C00, 0x804ACE90, 0x100   # the extra 256 B just below them
@@ -511,6 +514,8 @@ def _raw_spans() -> list[tuple[str, int, bytes]]:
         ("ping.asm (wr_ping: the shared tail)", PING_CODE_DM, obj["ping"]),
         ("PERC's exp2 table, its L1 copy (2026-11-12)", PERC_EXP2_DM, _perc_exp2()),
         ("trackbuf.asm (wr_trackbuf: the stock track buffers to L1, once)", TRACKBUF_CODE_DM, obj["trackbuf"]),
+        ("the inserts' per-type skip counts (zeros), each pass's least room (none seen; 2026-11-12, round 13)",
+         INS_TSKIP_DM, bytes(64) + (0x7FFFFFFF).to_bytes(4, "little") * 4),
         ("the stock track buffers in L1 (zeros; 256 B extra block, then 16 x 128 B)", TRACKAUX_DM,
          bytes(TRACKAUX_BYTES + TRACKBUF_BYTES)),
         *_ins_state_spans(),
@@ -782,7 +787,7 @@ def l2_spans() -> list[tuple[str, int, bytes]]:
     # 2026-11-12: the insert instances' aux words (dnfw.inserts.design.AUTO_L2 .. BUS_AUX_END: AUTO's powers and the
     # guard's hold, perc.guard.ins_gate; the pre pass's, the moved slot 2s', the bus instances'), zeros
     out.append(("the inserts' aux words: AUTO, the guard's hold (zeros), in L2", _ins().AUTO_L2,
-                bytes(_ins().BUS_AUX_END - _ins().AUTO_L2)))
+                bytes(_ins().QUIET_END - _ins().AUTO_L2)))      # (and the per-voice quiet marks, design.QUIET_L2)
     if "a2f" in obj:                             # 2026-11-09: the A2 filter machines' pass (dnfw.a2f)
         from ..a2f import program as a2f_program
         code = obj["a2f"]

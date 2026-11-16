@@ -2769,10 +2769,38 @@ def tdm_tx(p: Prog, L: Layout) -> None:
         p.ld(6, A2.C["ndry"])
         p.iop(6, 6, "AND", 12)
         p.st(SM.LINK_BUF + 4 * 41, 6)
+        # 2026-11-12 (round 13): units 42..57, the inserts' blocks left out per type (guard.INS_TSKIP: types 0..13,
+        # then the inserts' own gate's two counts; low 16 bits, cumulative); the rest zeros
+        p.iconst(12, G.INS_TSKIP)
+        p.seti(1, 12)
         p.iconst(12, SM.LINK_BUF + 4 * 42)
         p.seti(4, 12)
-        p.iconst(6, 0)
-        p.loop_r(11, SM.TX_UNITS - 1 - 42, lambda: p.stpost(4, 6))
+        p.iconst(9, 0xFFFF)
+
+        def tskip():
+            p.ldpost(6, 1)
+            p.iop(6, 6, "AND", 9)
+            p.stpost(4, 6)
+        p.loop_r(11, G.INS_TSKIP_WORDS, tskip)
+        # units 58..61, each insert pass's least room since the last packet (guard.INS_ROOM: the A2 filters, pre, post,
+        # bus), (room + 2^19) / 16 held to 0..0xFFFF (0xFFFF: none seen), then reset; unit 62, TAIL / 16
+        p.iconst(8, -(1 << 19))
+        p.iconst(10, (1 << 19) - 32)                 # (held under 0xFFFF, which says none)
+
+        def room():
+            p.ldi(6, 0, 1)
+            p.iop(6, 6, "MAX", 8)
+            p.iop(6, 6, "MIN", 10)
+            p.iop(6, 6, "-", 8)
+            p.lsh(6, 6, -4)
+            p.stpost(4, 6)
+            p.iconst(6, G.INS_ROOM_NONE)
+            p.stpost(1, 6)
+        p.loop_r(11, G.INS_ROOM_PASSES, room)
+        p.ld(6, G.TAIL)
+        p.lsh(6, 6, -4)
+        p.iop(6, 6, "AND", 9)
+        p.stpost(4, 6)
         _loop_done(p, K, SM.TX_UNITS - 1)
         _tx_out(p, K)
 

@@ -573,7 +573,7 @@ def around(p, t_word: int, cost: int, buffers: int, voice, rests: int | None = N
 
 
 # -- 2026-11-10: the inserts (dnfw.inserts): their time apart, and their deadline ---------------------
-def ins_start(p) -> None:
+def ins_start(p, k: int | None = None) -> None:
     """an insert pass begins: INS_T0 = EMUCLK, and INS_DLP = this pass's deadline (cycles after MARK0; 0
     when none is known yet). 2026-11-11 (the unit's telemetry: FDN8/XDLY on the bus passed through for
     thousands of blocks at a 60 % frame, no voice skipped): INS_DEADLINE leaves room for the WHOLE stock
@@ -605,11 +605,25 @@ def ins_start(p) -> None:
     p.e("R9 = R9 + R8;", "no longer to come")
     p.place(z)
     p.st(INS_DLP, 9)
+    if k is not None:
+        assert 0 <= k < INS_ROOM_PASSES
+        nz = p.label("irz")
+        p.e("R9 = PASS R9;")
+        p.jump("EQ", nz)
+        p.e("R8 = EMUCLK;")
+        p.e("R8 = R9 - R8;", "the room before this pass's deadline ..")
+        p.ld(9, MARK0)
+        p.e("R8 = R8 + R9;", ".. from here, in the frame")
+        p.ld(9, INS_ROOM + 4 * k)
+        p.iop(8, 8, "MIN", 9)
+        p.st(INS_ROOM + 4 * k, 8)
+        p.place(nz)
 
 
 def ins_end(p, last: bool = False) -> None:
     """an insert pass ends: INS_ACC += EMUCLK - INS_T0; LAST (the bus pass): INS_BUSEND = EMUCLK too (2026-11-11,
-    REST_OUT). Emit only. Clobbers R8, R9."""
+    REST_OUT). 2026-11-12: K given (the pass, INS_ROOM's index), INS_ROOM[K] = min(itself, INS_DLP - (EMUCLK - MARK0))
+    when a deadline is known. Emit only. Clobbers R8, R9."""
     if p.run:
         return
     p.e("R8 = EMUCLK;")
@@ -622,15 +636,16 @@ def ins_end(p, last: bool = False) -> None:
     p.st(INS_ACC, 8)
 
 
-def ins_gate(p, cost_at: int, aux_at: int, status_at: int, run, grace: bool = False) -> None:
+def ins_gate(p, cost_at: int, aux_at: int, status_at: int, run, grace: bool = False, typ_at: int | None = None) -> None:
     """2026-11-12 (main: the unit's skips toggled inserts wet / dry every block, a click each): RUN() for an insert
     instance by its bound (the word at COST_AT) against the pass's deadline, as ins_admit, but an instance once
     refused stays out until it has fitted INS_HOLD blocks in a row. Its out count is word 2 of its aux words (the
     address at AUX_AT). STATUS_AT gets 0 ran, 1 ran again after being out, 2 left out (just refused), 3 left out
     (still); 2 and 3 count in INS_SKIPS. The model reads INS_TESTCLK for EMUCLK (0 deadline: every block fits, as
     the runner). GRACE (the bus pass, opt-host's ins_fade): a refusal still within P/16 past the deadline is 4, RUN
-    once more (the caller fades it out over that block), counted as left out. Clobbers R0-R3, R8-R10, R12, I4
-    before RUN."""
+    once more (the caller fades it out over that block), counted as left out. TYP_AT (opt-host's INS_TSKIP, 2026-11-12):
+    the word holding the type; a block just refused counts under it, a held-out one under 14, a faded one under 15.
+    Clobbers R0-R3, R8-R10, R12, I4 before RUN."""
     p.iconst(9, 1)                               # fits
     p.ld(10, INS_DLP)
 
@@ -681,6 +696,13 @@ def ins_gate(p, cost_at: int, aux_at: int, status_at: int, run, grace: bool = Fa
         p.iconst(9, 1)
         p.iop(8, 8, "+", 9)
         p.st(INS_SKIPS, 8)
+        if typ_at is not None and not p.run:
+            p.iconst(1, INS_TSKIP_WORDS - 2)     # 14: held out
+            p.iconst(2, 2)
+            p.if_(0, "EQ", 2, lambda: p.ld(1, typ_at), kind="i")
+            p.iconst(2, 4)
+            p.if_(0, "EQ", 2, lambda: p.iconst(1, INS_TSKIP_WORDS - 1), kind="i")   # 15: faded
+            count_skip_r(p, 1)
     p.if_(0, "GE", 1, out, kind="i")
     p.ld(0, status_at)                           # RUN once in the code: 0, 1, and (GRACE) 4
     if grace:
@@ -690,12 +712,72 @@ def ins_gate(p, cost_at: int, aux_at: int, status_at: int, run, grace: bool = Fa
     p.if_(0, "LT", 1, run, kind="i")
 
 
-def ins_admit(p, cost: int, run, cost_at: int | None = None) -> None:
+# 2026-11-12 (round 13, main: which insert is refused): the blocks left out per insert type, 16 words in L1 (the memory
+# arbiter's allotment, F2's tail after opt-mnm's table; zeros at power-on, dnfw.waverider.dsp's span): words 0..13 the
+# types (dnfw.inserts.design), 14 and 15 kept for the inserts' own gate (opt-inserts: held out, faded). Cumulative; the
+# idle packet's units 42..57 carry their low 16 bits to the ColdFire (link.c smp_ins_tskip, DIAG)
+INS_TSKIP = 0x2E1700
+INS_TSKIP_WORDS = 16
+# .. then each insert pass's least room before its deadline since the ColdFire last heard (INS_DLP - (EMUCLK - MARK0)
+# as the pass starts, signed cycles; ins_start(p, k)): k 0 the A2 filters, 1 the pre pass, 2 the post pass, 3 the bus
+# pass. 0x7FFFFFFF: none seen (power-on, and after each idle packet). Read with TAIL by the idle packet (units 58..62):
+# the unit's own measure of how close the deadline is, for the guard's margin (main's (a))
+INS_ROOM = INS_TSKIP + 4 * INS_TSKIP_WORDS
+INS_ROOM_PASSES = 4
+INS_ROOM_NONE = 0x7FFFFFFF
+INS_TEL_END = INS_ROOM + 4 * INS_ROOM_PASSES
+
+
+def count_skip(p, typ: int | None = None, typ_at: int | None = None) -> None:
+    """INS_TSKIP[type] + 1: TYP the type, or TYP_AT the address of the word holding it (its low 4 bits). Emit only.
+    Clobbers R8, R9, R12 (and I4 by TYP_AT)"""
+    if p.run:
+        return
+    if typ is not None:
+        assert 0 <= typ < INS_TSKIP_WORDS
+        at = INS_TSKIP + 4 * typ
+        p.ld(8, at)
+        p.iconst(9, 1)
+        p.e("R8 = R8 + R9;")
+        p.st(at, 8)
+        return
+    p.ld(9, typ_at)
+    p.iconst(12, INS_TSKIP_WORDS - 1)
+    p.iop(9, 9, "AND", 12)
+    p.lsh(9, 9, 2)
+    p.iconst(12, INS_TSKIP)
+    p.iop(9, 12, "+", 9)
+    p.seti(4, 9)
+    p.ldi(8, 0, 4)
+    p.iconst(12, 1)
+    p.e("R8 = R8 + R12;")
+    p.sti(0, 4, 8)
+
+
+def count_skip_r(p, r: int) -> None:
+    """INS_TSKIP[R{r} & 15] + 1 (the inserts' own gate, opt-inserts: the type in a register). Emit only. Clobbers R8,
+    R9, R12, I4 (so R must not be one of R8, R9, R12)"""
+    assert r not in (8, 9, 12)
+    if p.run:
+        return
+    p.iconst(12, INS_TSKIP_WORDS - 1)
+    p.iop(9, r, "AND", 12)
+    p.lsh(9, 9, 2)
+    p.iconst(12, INS_TSKIP)
+    p.iop(9, 12, "+", 9)
+    p.seti(4, 9)
+    p.ldi(8, 0, 4)
+    p.iconst(12, 1)
+    p.e("R8 = R8 + R12;")
+    p.sti(0, 4, 8)
+
+
+def ins_admit(p, cost: int, run, typ: int | None = None, typ_at: int | None = None) -> None:
     """RUN() if the insert is expected to end before its pass's deadline (INS_DLP: EMUCLK - MARK0
     + COST), or no deadline is known yet (0: the runner, a frame not measured); else INS_SKIPS + 1 and the
-    insert left out of this block (the sound passes as it is). The model always runs it (the runner's clock
-    does not move either). COST_AT: the word holding this block's bound instead of COST (2026-11-12, the
-    bus FDN8's clearing and steady blocks). Clobbers R8-R10 before RUN."""
+    insert left out of this block (the sound passes as it is), and (2026-11-12) its type's count (count_skip) when TYP
+    or TYP_AT is given. The model always runs it (the runner's clock does not move either). Clobbers R8-R10 before RUN (and R12,
+    I4 when left out)."""
     if p.run:
         run()
         return
@@ -707,10 +789,7 @@ def ins_admit(p, cost: int, run, cost_at: int | None = None) -> None:
     p.e("R8 = EMUCLK;")
     p.ld(9, MARK0)
     p.e("R8 = R8 - R9;", "into the frame")
-    if cost_at is None:
-        p.iconst(9, cost)
-    else:
-        p.ld(9, cost_at)
+    p.iconst(9, cost)
     p.e("R8 = R8 + R9;", "and this insert's bound")
     p.e("COMP(R8, R10);")
     p.jump("LE", go)
@@ -718,6 +797,8 @@ def ins_admit(p, cost: int, run, cost_at: int | None = None) -> None:
     p.iconst(9, 1)
     p.e("R8 = R8 + R9;")
     p.st(INS_SKIPS, 8)
+    if typ is not None or typ_at is not None:
+        count_skip(p, typ, typ_at)
     p.jump("", done)
     p.place(go)
     run()

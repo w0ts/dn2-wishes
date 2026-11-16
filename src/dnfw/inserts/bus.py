@@ -449,7 +449,7 @@ def slot(p: Prog) -> None:
 
     def gated():                                 # 2026-11-12: the guard's hold (guard.ins_gate), faded in blend
         block_ptrs(p)
-        G.ins_gate(p, C["bnd"], C["aa"], C["ist"], run, grace=True)
+        G.ins_gate(p, C["bnd"], C["aa"], C["ist"], run, grace=True, typ_at=C["sel"])
     p.ld(0, C["unit"])
     p.ifz(0, "NE", gated)
     p.ld(0, C["i"])
@@ -509,7 +509,7 @@ def moved(p: Prog) -> None:
         p.iconst(12, (1 << D.TYPE_BITS) - 1)
         p.iop(3, 3, "AND", 12)
         PR.in_types(p, 4, 3, 8, D.MOVERS)
-        p.ifz(4, "NE", lambda: G.ins_admit(p, MV_COST, run))
+        p.ifz(4, "NE", lambda: G.ins_admit(p, MV_COST, run, typ_at=C["sel"]))   # (the moved slot's own type)
     p.ld(3, C["sel"])
     PR.in_types(p, 4, 3, 8, D.BUILT)
     p.ifz(4, "NE", built)
@@ -557,7 +557,7 @@ def program(prefix: str = "ib") -> str:
     p.raw(".GLOBAL wr_inbus.;")
     p.raw("wr_inbus.:")
     save(p)
-    G.ins_start(p)
+    G.ins_start(p, 3)
     body(p)
     G.ins_end(p, last=True)                      # 2026-11-11: its end time too (the guard's REST_OUT)
     restore(p)

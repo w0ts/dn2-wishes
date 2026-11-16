@@ -335,6 +335,7 @@ listed (`scratch/juno-engine/l1consts.py`) and F1, F2 re-checked against them (R
 | L2 `0x200A0000..0x200A1800` | 6,144 | opt-samples | (their claim) | (theirs) | taken |
 | L1 `0x2E0080..0x2E0100` | 128 | opt-samples | (their claim) | (theirs) | taken |
 | L1 F2 `0x2E1200..0x2E1700` | 1,280 | opt-mnm | DPRO's interp table (`dsp.MNM_INTERP_DM`; trackbuf's span cut to `0x2E1200`) | measured (dsp_cost.py, engine): DPRO-DDRW -5,120 a voice, DPRO-DENS -2,560 (a 3-PCH chord ~-10k) | released (v0.52 merge: opt-mnm dropped, main's rule b) |
+| L1 F2 `0x2E1700..0x2E1750` | 80 | opt-host | the inserts' refusal telemetry (round 13): per-type skip counts (`guard.INS_TSKIP`, 16 words) and each insert pass's least room (`guard.INS_ROOM`, 4 words); a span (`dsp.INS_TSKIP_DM`) | (telemetry, not a saving) | used (claude/instel; the arbiter allotted 0x2E1700..0x2E1980, the rest given back) |
 | L1 F1 `0x2E0640..0x2E0E44` | 2,052 | opt-synths | PERC's exp2 table | SOPHIE -2.2..3.9k a voice (with tan), MD too | allotted |
 | L1 `0x2E4050..0x2E53D0` | 4,992 | inserts (bus) | the bus FDN8 instances' stores (`inserts.bus.FD_L1`), live across blocks | (perf 2026-11-11) | used |
 | L1 `0x2E5400..0x2E5600` (MNM render IN) | 512, transient | opt-inserts | the post-insert pass's per-voice copy of the JUNO/CHOR ring span; only during the pass (IN is per-render scratch, dead after the voices) | bit-identical | allotted |

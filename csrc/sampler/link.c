@@ -357,6 +357,13 @@ int smp_dsp_load(void)
  * and when it last moved (periods | 1, 0 never) */
 volatile u32 smp_ins_skips __attribute__((section(".data"))) = 0;
 volatile u32 smp_ins_skip_at __attribute__((section(".data"))) = 0;
+/* 2026-11-12 (round 13): units 42..57, the insert blocks left out per type (guard.INS_TSKIP: types 0..13, then the
+ * inserts' gate's two counts), low 16 bits, cumulative; DIAG (cmd 24) sends them after its words */
+volatile u16 smp_ins_tskip[16] __attribute__((section(".data"))) = {0};
+/* units 58..61, each insert pass's least room before its deadline since the last packet (the A2 filters, pre, post,
+ * bus: room = unit x 16 - 2^19 cycles; 0xFFFF none seen), unit 62 the guard's TAIL / 16 (DIAG sends them too) */
+volatile u16 smp_ins_room[4] __attribute__((section(".data"))) = {0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF};
+volatile u16 smp_ins_tail __attribute__((section(".data"))) = 0;
 
 int smp_skipped_any(void)                       /* any voice, or an insert block, within the last half second */
 {
@@ -607,6 +614,12 @@ void smp_tdm(u32 h)
             smp_ins_skips = v[23];
             smp_ins_skip_at = periods | 1u;
         }
+        for (int t = 0; t < 16; t++)            /* 2026-11-12: units 42..57, the insert skips per type */
+            smp_ins_tskip[t] = v[42 + t];
+        for (int t = 0; t < 4; t++)             /*   58..61, each insert pass's least room (kept: the least */
+            if (v[58 + t] < smp_ins_room[t])    /*   until DIAG reads it) */
+                smp_ins_room[t] = v[58 + t];
+        smp_ins_tail = v[62];
         for (int t = 0; t < 16; t++)            /* 2026-11-11: units 24..41, the telemetry frame's */
             smp_tlm_cost[t] = v[24 + t];
         smp_tlm_nfil = v[40];
@@ -3053,6 +3066,14 @@ void smp_rx(const u8 *msg, u32 len, u32 source)
         put32(rp + r, ok ? ((u32)h[13] << 16 | h[12]) : 0xFFFFFFFFu); r += 4;
         put32(rp + r, ok ? h[14] : 0); r += 4;
         put32(rp + r, scan_seq); r += 4;
+        for (int t = 0; t < 16; t += 2) {       /* 2026-11-12: the insert skips per type (two a word, low first) */
+            put32(rp + r, (u32)smp_ins_tskip[t] | (u32)smp_ins_tskip[t + 1] << 16); r += 4;
+        }
+        put32(rp + r, (u32)smp_ins_room[0] | (u32)smp_ins_room[1] << 16); r += 4;   /* the least room since */
+        put32(rp + r, (u32)smp_ins_room[2] | (u32)smp_ins_room[3] << 16); r += 4;   /* the last DIAG, then */
+        put32(rp + r, smp_ins_tail); r += 4;    /* TAIL / 16 */
+        for (int t = 0; t < 4; t++)
+            smp_ins_room[t] = 0xFFFF;
     } else if (cmd == 25) {                     /* v0.34: SCAN u32 address, u32 words -> u16 seq */
         if (n < 11) {
             rp[3] = 1;

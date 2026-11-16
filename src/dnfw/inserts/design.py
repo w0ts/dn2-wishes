@@ -60,7 +60,7 @@ assert PACK_OFFSET + 4 * PACK_WORDS == 0x1000 and RECORDS * FIELDS * 7 == 32 * P
 # the bus pass's L2 (dnfw.waverider.dsp.INSBUS_L2_LOAD: the 16 KB between the sample machines' code,
 # which ends at 0x200bc000, and PERC's at 0x200be200 (0x200c0000 until 2026-11-12); clear of ports3's 0x200b1800..0x200b6000): its
 # code, then its state
-BUS_STATE = 0x200BD100                            # (dnfw.waverider.dsp.INSBUS_STATE_L2; 0x200bd000 until 2026-11-12, the code's span + 0x100)
+BUS_STATE = 0x200BD180                            # (dnfw.waverider.dsp.INSBUS_STATE_L2; 0x200bd000 until 2026-11-12, the code's span + 0x180)
 BUS_STATE_END = 0x200BE200                        # PERC's code starts here (dnfw.waverider.dsp.PERC_L2_LOAD)
 # the unpacked records, then the last change word: in the pre pass's state (loaded with zeros). 2026-11-11 (perf):
 # L1 (0x2e3000 + 0x600; was L2 0x200AFA00, 4 cycles an access): the pre and post passes' state and scratch are in
@@ -217,7 +217,12 @@ AUTO_END = AUTO_MV_L2 + 4 * AUX_WORDS * MV_INSTANCES
 # the bus instances' (FDN8's then XDLY's): word 2 the gate's out count (guard.ins_gate; the fade is bus.blend's MIX)
 BUS_AUX_L2 = AUTO_END
 BUS_AUX_END = BUS_AUX_L2 + 4 * AUX_WORDS * 12      # (FDN8_INSTANCES + XDLY_INSTANCES, below)
-assert BUS_AUX_END <= 0x200BE100 <= BUS_STATE_END   # the bus pass's room (the arbiter, 2026-11-12)
+# 2026-11-12 (opt-host's measure: a per-voice insert runs on every slot its track owns, sounding or not; A09's T9 owns
+# 14): each per-voice instance's quiet mark (program.quiet): the change word + 1 when its last run, on all-zero input,
+# left zero output and its state and AUTO words as they were; 0 otherwise. The pre pass's 32, then the moved 32
+QUIET_L2 = BUS_AUX_END
+QUIET_END = QUIET_L2 + 4 * (RECORDS + MV_INSTANCES)
+assert QUIET_END <= 0x200BE100 <= BUS_STATE_END     # the bus pass's room (the arbiter, 2026-11-12)
 # the post pass's (CHOR WIDE JUNO): its instances' aux words (32 x 4: the last wet - dry, L and R, the gate's out
 # count) and its gate's own words (8: its L1 scratch is full), in the Monomachine L2 scratch (the arbiter,
 # 2026-11-12: +0x3440..+0x36c0; a loaded span, zeros at every DSP load)

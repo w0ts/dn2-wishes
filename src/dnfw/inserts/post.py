@@ -976,7 +976,8 @@ def run(p: Prog) -> None:
     by_type(cost(D.WIDE), cost(D.JUNO), cost(D.CHOR))
     for side, d0, d31 in (("lp", "dl0", "dl31"), ("rp", "dr0", "dr31")):
         PR.dry_ends(p, C[side], GW[d0], GW[d31])
-    G.ins_gate(p, GW["icost"], GW["aa"], GW["ist"], lambda: by_type(lambda: wide(p), lambda: juno(p), lambda: chor(p)))
+    G.ins_gate(p, GW["icost"], GW["aa"], GW["ist"], lambda: by_type(lambda: wide(p), lambda: juno(p), lambda: chor(p)),
+               typ_at=C["sel"])
     for k, (side, d0, d31) in enumerate((("lp", "dl0", "dl31"), ("rp", "dr0", "dr31"))):
         p.ld(0, C[side])
         p.st(GW["rbuf"], 0)
@@ -1040,7 +1041,7 @@ def program(prefix: str = "ip") -> str:
     p.raw(".GLOBAL wr_inpost.;")
     p.raw("wr_inpost.:")
     save(p)
-    G.ins_start(p)
+    G.ins_start(p, 2)
     body(p)
     G.ins_end(p)
     restore(p)
