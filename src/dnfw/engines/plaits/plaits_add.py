@@ -58,9 +58,19 @@ def _steps(p: Prog, L, i: int) -> None:
     p.seti(i, 0)
 
 
-def _update(p: Prog) -> None:
+# 2026-11-14 (plaits16, r52): the sample's and the harmonics' update's constants (their sines' too) from a pool in
+# the render scratch's YB row (plk.KTab), through I1 in the sample, I2 in the update: each load rides on the compute
+# before it. The same values, the same operations.
+KT_VALUES = (1.0, 0.5, 0.0, 12.0, 0.25, 13.0, 0.001) + K.SIN_KTAB
+
+
+def _kt(L: C.Layout, i: int) -> K.KTab:
+    return K.KTab(L.YB, i, KT_VALUES)
+
+
+def _update(p: Prog, kt: K.KTab) -> None:
     """UpdateAmplitudes(centroid F2 -> center, slope F3, bumps F4) over the 24 harmonics, I1 at
-    the first: F5 = the sum. Clobbers R0, R1, R6-R15, I12."""
+    the first: F5 = the sum; I2 the constants' pool (KT). Clobbers R0, R1, R6-R15, I12."""
     p.fconst(5, 0.001)
     p.fconst(6, 0.0)                              # i
 
@@ -68,25 +78,25 @@ def _update(p: Prog) -> None:
         p.fop(7, 6, "-", 2)
         K.fabs(p, 7, 7)
         p.fop(7, 7, "*", 3)                       # order
-        p.fconst(12, 1.0)
+        kt.ld(p, 12, 1.0)
         p.fop(9, 12, "-", 7)
         K.fabs(p, 10, 9)
         p.fop(9, 9, "+", 10)
         p.fop(9, 9, "*", 9)                       # gain
         p.fop(15, 7, "*", 4)
-        K.addk(p, 15, 15, 0.25)
-        K.sinp_inline(p, 15, 15)
-        K.addk(p, 15, 15, 1.0)
+        kt.addk(p, 15, 15, 0.25)
+        K.sinp_body(p, kt)
+        kt.addk(p, 15, 15, 1.0)
         p.fop(9, 9, "*", 15)
         p.fop(9, 9, "*", 9)
         p.fop(9, 9, "*", 9)
         p.ldi(10, 0, 1)
         p.fop(9, 9, "-", 10)
-        K.mulk(p, 9, 9, 0.001)
+        kt.mulk(p, 9, 9, 0.001)
         p.fop(10, 10, "+", 9)
         p.stpost(1, 10)
         p.fop(5, 5, "+", 10)
-        K.addk(p, 6, 6, 1.0)
+        kt.addk(p, 6, 6, 1.0)
     p.loop_r(8, N_H, one)
 
 
@@ -114,7 +124,9 @@ def _params(p: Prog, L: C.Layout) -> None:
     p.fop(6, 2, "*", 6)
     K.mulk(p, 5, 5, 0.5)
     p.fop(2, 6, "-", 5)
-    _update(p)
+    kt = _kt(L, 2)
+    kt.write(p)                                   # (R0, R12: free here)
+    _update(p, kt)
     K.recip(p, 5, 5)                              # 1 / sum
     # the oscillators: f = min(f0, 0.5); harmonic k's amplitude target A_k (1 - 2 min(k f, 0.5))
     K.ld(p, 6, K.S_NOTE)
@@ -167,27 +179,32 @@ def _bank(p: Prog) -> None:
 
 
 def _sample(p: Prog, L) -> None:
+    kt = _kt(L, 1)                                # (I1: the pool, set by half)
     K.interp_next(p, 6, FREQ, IFREQ)
     K.ld(p, 11, PHASE)
     p.fop(11, 11, "+", 6)
-    p.fconst(12, 1.0)
+    kt.ld(p, 12, 1.0)
     p.if_(11, "GE", 12, lambda: p.fop(11, 11, "-", 12))
     K.sv(p, PHASE, 11)
-    K.sinp_inline(p, 2, 11)
+    p.fpass(15, 11)
+    K.sinp_body(p, kt)
+    p.fpass(2, 15)
     p.fop(2, 2, "+", 2)                           # two_x
     _ptr(p, 2, V_W)                               # (I2: a compute's move goes through I0..I3)
     _steps(p, L, 0)
-    p.fconst(3, 1.0)
-    K.mulk(p, 4, 2, 0.5)
-    p.fconst(5, 0.0)
+    kt.ld(p, 3, 1.0)
+    kt.mulk(p, 4, 2, 0.5)
+    kt.ld(p, 5, 0.0)
     _bank(p)                                      # harmonics 1..12
     p.fpass(10, 5)
-    K.mulk(p, 15, 11, 12.0)
-    K.addk(p, 15, 15, 0.25)
-    K.sinp_inline(p, 3, 15)
-    K.mulk(p, 15, 11, 13.0)
-    K.sinp_inline(p, 4, 15)
-    p.fconst(5, 0.0)
+    kt.mulk(p, 15, 11, 12.0)
+    kt.addk(p, 15, 15, 0.25)
+    K.sinp_body(p, kt)
+    p.fpass(3, 15)
+    kt.mulk(p, 15, 11, 13.0)
+    K.sinp_body(p, kt)
+    p.fpass(4, 15)
+    kt.ld(p, 5, 0.0)
     _bank(p)                                      # 13..24
     p.fop(10, 10, "+", 5)
     p.stpost(4, 10)
@@ -196,4 +213,6 @@ def _sample(p: Prog, L) -> None:
 def half(p: Prog, L: C.Layout) -> None:
     """AdditiveEngine::Render(16 samples) at I4 (OUT)."""
     _params(p, L)
+    p.iconst(0, L.YB)                             # 2026-11-14: the constants' pool (written by _params)
+    p.seti(1, 0)
     p.loop(L.W["n4"], K.HALF, lambda: _sample(p, L))
