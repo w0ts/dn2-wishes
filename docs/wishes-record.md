@@ -50,6 +50,55 @@ link can never name different data. A link whose cell is not on this +Drive (a p
 cut before the cell was written) plays the stock part and keeps its link, so the record is found if it arrives
 later.
 
+## Every item type (2026-11-12)
+
+The User: "we need link + blob for every type of item". A kit's or a pattern's record is the same thing as a
+sound's: an entry in the same RAM table, **keyed by the live object's address**, holding TLV fields, linked from
+the stored object by 14 bytes and filed on the +Drive by its hash (`csrc/wishes/item.c`, `items.S`). The API:
+
+    u32 at = wish_item(WI_KIT, n);           /* n 0..128; WI_PATTERN n 0..127; 0 when out of range */
+    wish_get(at, TAG, out, max);             /* as for a sound */
+    wish_put(at, TAG, v, vlen);              /* then stock re-saves the item, and the save links it */
+
+`WISH_KIT_PLAYING` (`0x42c5b9ac`) and `WISH_PATTERN_PLAYING` (`0x42c5b9a0`) are the live kit and pattern the
+sequencer plays, written by the pattern/kit switch `0x400d93b0`.
+
+| item | live | stored | the link (contiguous: 'W', version, h0, h1, length, check) | why it is free |
+|---|---|---|---|---|
+| kit | `0x4210d08c + 23,921 n`, 129 (KitActive's array) | 10,752 B | stored 10,416..10,429 | past the terminator `BACEF00C` at 10,411: the saver `0x400ddfa8` writes 0..23 and 28..10,414 and nothing after; the loader `0x400dddb6` reads nothing after |
+| pattern | `0x4121998c + 122,478 n`, 128 | 89,088 B | the body of the **last unused** lock record (stored 68,148 + 258 i, + 2) | the lock saver `0x400de87c` writes only an unused record's `FF FF` header; the loader `0x400de682` skips the record whole. Slides' records (ids 200..202) are not `FF FF` and are left alone |
+| song | `0x423fe67d + 3,694 n`, 17 (0 the work song, 1..16) | 3,072 B | stored 2,900..2,913 | the saver `0x400decc6` zeroes 2,900..3,071 (memset 172 B), the loader `0x400debce` never reads them |
+| project | its settings, 738 B at `0x42432a61` (`WI_PROJECT`, index 0) | 1,024 B (`projectSettingsStorage_v2_t`) | stored 544..557 | the saver `0x400df6de` zeroes 542..1,023, the loader `0x400df050` never reads them |
+| sound | (phase 1) | 359 B | lane ids 4..28 | above |
+
+The stored pattern has only 2 B free after its last field (89,086..89,087), so its link lives in the lock pool.
+**All 80 lock records in use:** the stock lock record with the fewest locked steps (the last on a tie) gives way to
+the link in the stored pattern. It still plays until that pattern is reloaded (`docs/modulation-matrix.md`, "A
+pattern's wishes record with every lock record in use"; `wish_item_nolane`, `wish_item_dropped`).
+
+| event | the hook |
+|---|---|
+| kit LOAD (project, kit library, SysEx, reload) | `0x400ddf52`, after its 16 sounds and MIDI tracks: a3 live, a2 stored |
+| kit SAVE (project, kit library, SysEx, KitActive's mirrors) | `0x400de0ce`, before the version word: a2 stored, a3 live |
+| pattern LOAD | `0x400de85e`, after its lock pool (a branch target: the jmp replaces the whole `move.l #122474,%d0`): a2 live, d2 stored + 68,148 |
+| pattern SAVE | `0x400de9b2`, after its lock pool: d2 stored, d3 live + 97,872 |
+| song LOAD / SAVE | `0x400dec52` (a2 live, a3 stored) / `0x400dedb8`, after the tail's memset (a2 stored, live at 40(%sp)) |
+| project settings LOAD / SAVE | `0x400df58c` (a2 live, a3 stored; a branch target, replaced whole) / `0x400df89e`, after the tail's zero loop |
+| copy, clear | stock's memcpy / memset of the live kit (23,921 B) or pattern (122,478 B): phase 1's stubs carry or drop every entry inside the block, the item's own and its sounds' |
+
+The project settings are 738 B, smaller than a sound: a memcpy of them is not carried (stock moves them only
+through their saver and loader, as far as its callers were read). The song's and the settings' links travel inside
+the project image, so a project copy, save-as or Transfer of `/projects/N` carries them (the blob stays on this
+unit's +Drive, as for sounds).
+
+A pattern SAVE zeroes the first 14 body bytes of every other unused lock record, so an old link never outlives a
+lock that took its record. The cell's kind byte holds the item type (1 sound, 2 kit, 3 pattern, 4 song, 5 project). One table serves
+every item: about 2,192 sounds, 129 kits and 128 patterns, plus the clipboards, of 8,192 entries.
+
+The global tier stays the `DN2S` sector (one per unit, no link needed); presets travel with their sound. Not driven
+yet: a project switch and the ERASE MOD DATA path end to end under the emulator for these items (the hooks' paths
+are the ones every project load and save passes; ERASE erases the same cells as for sounds).
+
 ## Versioning
 
 A record is fields: tag (u16), length (u16), value, big-endian, **tags strictly ascending** (one spelling per

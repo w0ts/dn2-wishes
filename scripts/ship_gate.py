@@ -53,6 +53,11 @@ failure:
    memcpy and memset through the four hooks, on a Python +Drive at the driver: every byte outside the link's
    lane as stock saves it, the link and the cell as the host reference spells them, a record copied, carried,
    dropped, written once 0.5 s on, read back from a cell; nothing written under ERASE's lock; no fault.
+6w2. **the wishes record on every item** (2026-11-12, `emu_wishes_items.py`, docs/wishes-record.md "Every item
+   type"): stock's kit, pattern, song and project-settings SAVE and LOAD through their hooks: every stored byte
+   outside the link as stock saves it, the link as the host reference spells it, the record loaded into another
+   item and dropped by a stock-saved one, the live bytes the same with or without the link, copy and clear carry
+   and drop it, its cell written with its item type; a pattern's link moves when its lock record is taken.
 6x. **the matrix** (2026-11-12, `emu_matrix.py`, docs/matrix.md): the frame's parameter path called by hand,
    stock's route 1 on every voice row against the same route in the row's sound's record: the heard slot the same
    every frame (one route a row; then three into one slot, clamped in stock's order); the matrix's instructions the
@@ -190,7 +195,7 @@ TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platfo
          "test/test_inserts_post.py",                         # the post inserts (CHOR, WIDE): the same
          "test/test_inserts_bus.py",                          # the bus inserts (FDN8, XDLY per track): the same
          "test/test_inserts_c.py",                            # the ColdFire's packed values against design.pack
-         "test/test_wishes.py", "test/test_wishes_c.py", "test/test_matrix_c.py"]      # the wishes record: its stubs, its C on the host
+         "test/test_wishes.py", "test/test_wishes_c.py", "test/test_wishes_items_c.py", "test/test_matrix_c.py"]      # the wishes record: its stubs, its C on the host
 HIT = re.compile(r"^\s+([0-9a-f]{8}):", re.M)
 
 # v0.38 (owner, 2026-11-01): the steps by name, for --only and --list, in the order a full run
@@ -248,6 +253,7 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("pools", "per-project pools (ColdFire)"),
        ("erase", "ERASE MOD DATA (ColdFire)"),
        ("wishes", "the wishes record through stock's SAVE, LOAD, memcpy, memset (ColdFire)"),
+       ("wishitems", "the wishes record on kits, patterns, songs and the project settings (ColdFire)"),
        ("matrix", "the matrix's routes heard as stock's route 1, at a constant cost (ColdFire)"),
        ("engine", "engine + LOAD/SAVE"),
        ("boot", "boot from reset"),
@@ -880,6 +886,29 @@ def main() -> int:
             later("wishes", "the wishes record through stock's SAVE, LOAD, memcpy, memset (ColdFire)",
                   "the wishes record through stock's SAVE, LOAD, memcpy, memset (ColdFire)",
                   [wi_cmd, sorted(EMU_ENV.items())], wi_body)
+
+        # 6w2. 2026-11-12: the wishes record on kits, patterns, songs and the project settings (csrc/wishes/item.c,
+        # items.S; scripts/emu_wishes_items.py)
+        if "wish_kit_load_stub" in lay:
+            wt_js = work / "wishitems.json"
+            wt_cmd = [a.venv, "-u", "scripts/emu_wishes_items.py", "--build", bdir, "--snapshot", snap, "--json", wt_js]
+
+            def wt_body(tdir):
+                rc, out = run("wishitems", wt_cmd, logs, env=EMU_ENV, trace=tdir)
+                why, good = out[-800:], False
+                if rc == 0 and wt_js.exists():
+                    r = json.loads(wt_js.read_text())
+                    checks = r.get("checks", {})
+                    good = bool(r.get("ok")) and len(checks) >= 40 and all(c["ok"] for c in checks.values())
+                    why = json.dumps({k: c for k, c in checks.items() if not c["ok"]})[:800] or out[-800:]
+                    if good:
+                        why = (f"kit, pattern, song, project settings: stock's SAVE/LOAD through the hooks, link-only "
+                               f"difference, link and cell as the host reference, copy/clear carry and drop; "
+                               f"{len(checks)} checks")[:800]
+                return good, why
+            later("wishitems", "the wishes record on kits, patterns, songs and the project settings (ColdFire)",
+                  "the wishes record on kits, patterns, songs and the project settings (ColdFire)",
+                  [wt_cmd, sorted(EMU_ENV.items())], wt_body)
 
         # 6x. 2026-11-12: the matrix's routes (csrc/matrix, docs/matrix.md; scripts/emu_matrix.py): every voice row's
         # route of ours heard frame by frame as stock's route 1 at the same depth (one a row, then three into one

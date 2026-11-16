@@ -121,6 +121,29 @@ int wish_get(u32 sound, u32 tag, u8 *out, u32 max);                   /* -> the 
 int wish_put(u32 sound, u32 tag, const u8 *v, u32 vlen);              /* vlen 0 removes; -> 0, or < 0 */
 int wish_known(u32 tag);
 
+/* item.c: kits and patterns, keyed by their live object's address as sounds are (docs/wishes-record.md, "Every
+ * item type"). An entry's `pad` is its item type (0: a sound, as phase 1 makes it); the cell's kind byte too. */
+#define WI_SOUND 1u
+#define WI_KIT 2u
+#define WI_PATTERN 3u
+#define WI_SONG 4u                      /* index 0 the work song, 1..16 the songs */
+#define WI_PROJECT 5u                   /* index 0: the project's settings (one live project) */
+#define WI_LINK 14u                     /* 'W', version, h0, h1, length, check: the sound link's words, in a row */
+extern u32 wish_item_loads, wish_item_saves, wish_item_nolane, wish_item_dropped;
+u32 wish_item(u32 type, u32 index);    /* -> the live object's address (then wish_get / wish_put on it), or 0 */
+/* the live kit the sequencer plays: written by the pattern/kit switch 0x400d93b0 (kit 128 when 0x42432b75 bit 0
+ * is set) and four more sites, read by the engine (16 references in 1.12) */
+#define WISH_KIT_PLAYING (*(volatile u32 *)0x42C5B9ACu)
+#define WISH_PATTERN_PLAYING (*(volatile u32 *)0x42C5B9A0u)
+void wish_kit_load(u32 live, const u8 *stored);
+void wish_kit_save(u8 *stored, u32 live);
+void wish_pattern_load(u32 live, const u8 *stored);
+void wish_pattern_save(u8 *stored, u32 live);
+void wish_song_load(u32 live, const u8 *stored);
+void wish_song_save(u8 *stored, u32 live);
+void wish_settings_load(u32 live, const u8 *stored);
+void wish_settings_save(u8 *stored, u32 live);
+
 /* store.c */
 extern u32 wish_cells_written, wish_cells_found, wish_cells_read, wish_resolved, wish_missing;
 extern volatile u32 wish_pend_head, wish_pend_tail;

@@ -127,6 +127,23 @@ WISH_LOAD_SITE = 0x400DD3E6             # mvs.b 28(%a2),%d0 ; moveq #6,%d2 (a2 l
 WISH_LOAD_STOCK = bytes.fromhex("712a001c7406")
 WISH_SAVE_SITE = 0x400DD888             # mvs.b 54(%a2),%d0 ; move.l (%a0,%d0.l*4),%d0 (a2 stored, a3 live)
 WISH_SAVE_STOCK = bytes.fromhex("712a003620300c00")
+# the wishes record on kits and patterns (csrc/wishes/item.c, items.S): past each loader's and saver's own work
+WISH_KIT_LOAD_SITE = 0x400DDF52         # pea 10264(%a2) ; lea 23840(%a3),%a3 (a3 live kit, a2 stored)
+WISH_KIT_LOAD_STOCK = bytes.fromhex("486a281847eb5d20")
+WISH_KIT_SAVE_SITE = 0x400DE0CE         # moveq #4,%d0 ; move.l %d0,4(%a2) (a3 live kit, a2 stored)
+WISH_KIT_SAVE_STOCK = bytes.fromhex("700425400004")
+WISH_PAT_LOAD_SITE = 0x400DE85E         # move.l #122474,%d0 (a2 live pattern, d2 stored + 68148)
+WISH_PAT_LOAD_STOCK = bytes.fromhex("203c0001de6a")
+WISH_PAT_SAVE_SITE = 0x400DE9B2         # movea.l %d2,%a0 ; moveq #4,%d1 ; move.l %d1,(%a0) (d2 stored)
+WISH_PAT_SAVE_STOCK = bytes.fromhex("204272042081")
+WISH_SONG_LOAD_SITE = 0x400DEC52        # move.l 3679(%a2),%d1 ; clr.l %d0 (a2 live song, a3 stored)
+WISH_SONG_LOAD_STOCK = bytes.fromhex("222a0e5f4280")
+WISH_SONG_SAVE_SITE = 0x400DEDB8        # clr.l (%a2) ; lea 12(%sp),%sp (a2 stored, live at 40(%sp))
+WISH_SONG_SAVE_STOCK = bytes.fromhex("42924fef000c")
+WISH_PS_LOAD_SITE = 0x400DF58C          # move.w 236(%a3),%d1 ; mvs.w %d1,%d0 (a2 live settings, a3 stored)
+WISH_PS_LOAD_STOCK = bytes.fromhex("322b00ec7141")
+WISH_PS_SAVE_SITE = 0x400DF89E          # moveq #2,%d0 ; move.l %d0,(%a2) ; moveq #1,%d0 (a2 stored, a3 live)
+WISH_PS_SAVE_STOCK = bytes.fromhex("700224807001")
 
 # the caves: clean runs from `dnfw cave scan` that no other mod writes, entered
 # 4 bytes in and left 4 bytes short, as arpmodes does (docs/memory-map.md).
@@ -912,6 +929,49 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
          "else loads as FM Tone)", WISH_LOAD_STOCK)
     _need(content, WISH_LOAD_SITE + 6, bytes.fromhex("20300c00"), "the loader goes on: move.l (%a0,%d0.l*4),%d0")
     _need(content, WISH_SAVE_SITE + 8, bytes.fromhex("e1883540"), "the saver goes on: lsl.l #8,%d0 ; move.w %d0,...")
+    # 2026-11-12: kits and patterns (csrc/wishes/item.c, docs/wishes-record.md "Every item type")
+    _need(content, 0x400DDDB6, bytes.fromhex("4fefffe048d77c1c"),
+          "the kit loader's entry: lea -32(%sp),%sp ; movem.l (8 registers): a3 live, a2 stored")
+    _need(content, WISH_KIT_LOAD_SITE + 8, bytes.fromhex("2f0b4eba"), "the kit loader goes on: move.l %a3,-(%sp) ; jsr")
+    _need(content, 0x400DDFA8, bytes.fromhex("4fefffe448d73c1c246f0020266f0024"),
+          "the kit saver's entry: a2 stored, a3 live")
+    _need(content, WISH_KIT_SAVE_SITE + 6, bytes.fromhex("223cbacef00c254128ab"),
+          "the kit saver goes on: the terminator at stored 10411 (the link lies past it)")
+    _need(content, 0x400DE77A, bytes.fromhex("4fefffe048d73c3c246f0024242f0028"),
+          "the pattern loader's entry: a2 live, d2 stored")
+    _need(content, WISH_PAT_LOAD_SITE - 0x14, bytes.fromhex("4eba"), "... its lock loader call (d2 = stored + 68148)")
+    _need(content, WISH_PAT_LOAD_SITE + 6, bytes.fromhex("41ef002c25900800"), "the pattern loader goes on")
+    _need(content, 0x400DE90C, bytes.fromhex("4fefffe848d7047c242f001c262f0020"),
+          "the pattern saver's entry: d2 stored, d3 live")
+    _need(content, WISH_PAT_SAVE_SITE - 4, bytes.fromhex("4fef0018"), "... past its lock saver call (d3 = live + 97872)")
+    _need(content, WISH_PAT_SAVE_SITE + 6, bytes.fromhex("6002"), "the pattern saver goes on: bra.s to its return")
+    _need(content, 0x400DEBCE, bytes.fromhex("4feffff048d71c04246f0014266f0018"),
+          "the song loader's entry: a2 live, a3 stored")
+    _need(content, WISH_SONG_LOAD_SITE + 6, bytes.fromhex("41eb0014"), "the song loader goes on: its rows")
+    _need(content, 0x400DECC6, bytes.fromhex("4fefffec48d73c04246f0018266f001c"),
+          "the song saver's entry: lea -20(%sp),%sp ; 5 registers: stored 24(%sp), live 28(%sp)")
+    _need(content, WISH_SONG_SAVE_SITE - 0x10, bytes.fromhex("487800ac42a7486a0b54"),
+          "... its tail 2,900..3,071 zeroed (memset 172 B), 12 B pushed: live at 40(%sp) at the site")
+    _need(content, WISH_SONG_SAVE_SITE + 6, bytes.fromhex("7001"), "the song saver goes on: moveq #1,%d0")
+    _need(content, 0x400DF050, bytes.fromhex("4fefffec48d70c1c246f0018266f001c"),
+          "the settings loader's entry: a2 live, a3 stored")
+    _need(content, WISH_PS_LOAD_SITE + 6, bytes.fromhex("0681fffff060"), "the settings loader goes on")
+    _need(content, 0x400DF6DE, bytes.fromhex("4feffff448d70c04246f0010266f0014"),
+          "the settings saver's entry: a2 stored, a3 live")
+    _need(content, WISH_PS_SAVE_SITE - 0xC, bytes.fromhex("1141021e0c80000001e2"),
+          "... its tail 542..1,023 zeroed just before the site")
+    _need(content, WISH_PS_SAVE_SITE + 6, bytes.fromhex("6002"), "the settings saver goes on: bra.s to its return")
+    for site, stub, old, what in (
+            (WISH_KIT_LOAD_SITE, "wish_kit_load_stub", WISH_KIT_LOAD_STOCK, "the kit LOAD: the link past its terminator read (wish_kit_load)"),
+            (WISH_KIT_SAVE_SITE, "wish_kit_save_stub", WISH_KIT_SAVE_STOCK, "the kit SAVE: the kit's link written past its terminator (wish_kit_save)"),
+            (WISH_PAT_LOAD_SITE, "wish_pat_load_stub", WISH_PAT_LOAD_STOCK, "the pattern LOAD: the link in an unused lock record read (wish_pattern_load)"),
+            (WISH_PAT_SAVE_SITE, "wish_pat_save_stub", WISH_PAT_SAVE_STOCK, "the pattern SAVE: the link written into the last unused lock record (wish_pattern_save)"),
+            (WISH_SONG_LOAD_SITE, "wish_song_load_stub", WISH_SONG_LOAD_STOCK, "the song LOAD: the link in its zeroed tail read (wish_song_load)"),
+            (WISH_SONG_SAVE_SITE, "wish_song_save_stub", WISH_SONG_SAVE_STOCK, "the song SAVE: the link written after stock zeroes its tail (wish_song_save)"),
+            (WISH_PS_LOAD_SITE, "wish_ps_load_stub", WISH_PS_LOAD_STOCK, "the project settings LOAD: the link in their zeroed tail read (wish_settings_load)"),
+            (WISH_PS_SAVE_SITE, "wish_ps_save_stub", WISH_PS_SAVE_STOCK, "the project settings SAVE: the link written after stock zeroes their tail (wish_settings_save)")):
+        jmp = bytes.fromhex("4ef9") + _long(csyms[stub])
+        edit(site, jmp + bytes.fromhex("4e71") * ((len(old) - 6) // 2), what, old)
 
     # v0.38: per-project pools: the four detours, entered by jmp (the stack as stock left it)
     _need(content, PJ_BEGIN_SITE + 8, bytes.fromhex("262f0028"), "the load goes on: move.l 40(%sp),%d3")
@@ -1129,6 +1189,8 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
                  "wish_pend_head", "wish_pend_tail", "wish_cells_written", "wish_resolved", "wish_missing",
                  "wish_wants", "wish_io_fails", "wish_edits"):
         layout[name] = csyms[name]              # 2026-11-11: the wishes record (csrc/wishes): the checks read them
+    for name in ("wish_item", "wish_item_loads", "wish_item_saves", "wish_item_nolane", "wish_item_dropped"):
+        layout[name] = csyms[name]              # 2026-11-12: kits and patterns (csrc/wishes/item.c)
     for name in ("mx_poll", "mx_eval", "mx_lay", "mx_compiles"):
         layout[name] = csyms[name]              # 2026-11-12: the matrix (csrc/matrix): the checks call them
     for name in ("mod_mask_hook", "mod_lfo_mask", "mod_eval", "mod_eval_pre", "mod_wb", "mod_wb_cell",

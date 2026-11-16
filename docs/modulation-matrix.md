@@ -562,3 +562,26 @@ Following the owner's lead: a free-running LFO must add elapsed time to its
 phase and a tempo-synced one needs a tempo-scaled step, so the tick either
 reads `0x402a0dec` or reads something computed from it and the BPM in that
 clock module.
+
+## A pattern's wishes record with every lock record in use (2026-11-12)
+
+A pattern's link to its wishes record (`csrc/wishes/item.c`, `docs/wishes-record.md` "Every item type") lives in the
+body of an unused lock record of the stored pattern. When all 80 lock records are in use at a SAVE, **one lock record
+gives way** (the User: "delete one plock? no one will notice"):
+
+1. only stock's records are candidates (lock id 0..106, track 0..15); slides' SLD / SLEN / REC records (ids
+   200..202) never give way;
+2. the one with the **fewest locked steps** (words other than `FFFF` among its 128);
+3. on a tie, the **last** of them.
+
+Its stored header becomes `FF FF` and the link goes into its body. The lock stays in RAM, so it still plays until that
+pattern is reloaded, and from then on it is gone. `wish_item_nolane` counts these saves. `wish_item_dropped` holds
+the last one dropped: `steps << 16 | track << 8 | lock id`. A pattern with no record of ours keeps all 80 locks. With
+no stock record among the 80 (all slides), nothing gives way and the record stays in RAM only.
+
+**Not done:** the tie-break the User's rule put second, "locked values equal to the track's base value first". It
+needs the scale of a lock word compared with the sound's stored value at the same lock id. That is not measured,
+so it is not implemented.
+
+Tests: `test/test_wishes_items_c.py` (fewest, tie, no record, slides only); `scripts/emu_wishes_items.py` 6b (stock's
+pattern SAVE with 80 live lock records).

@@ -3,7 +3,7 @@
  *   0x6F0800 .. 0x6FEFFF   59,392 cells of one sector, between the library's extension (lib.c LIB_X, to
  *                          0x6F0700) and the settings sector (jump.c, 0x6FF000), sectors nothing else uses
  *
- *   a cell:  +0 'DN2W'  +4 version  +5 kind (1 a sound's record)  +6 length  +8 h0  +12 h1  +16 generation (0)
+ *   a cell:  +0 'DN2W'  +4 version  +5 kind (1 a sound's record, 2 a kit's, 3 a pattern's: item.c)  +6 length  +8 h0  +12 h1  +16 generation (0)
  *            +20 the record (up to 488 B)  +508 its check
  *
  * **Where a record goes:** cell (h0 mod 59,392), then the next ones, the first that is empty or already holds
@@ -107,7 +107,7 @@ static void cell_make(u8 *p, const struct wish *w)
         p[k] = 0;
     put32(p, MAGIC);
     p[4] = VERSION;
-    p[5] = KIND_SOUND;
+    p[5] = w->pad ? w->pad : KIND_SOUND;      /* item.c: the item type (a sound's entry keeps pad 0) */
     p[6] = (u8)(w->len >> 8);
     p[7] = (u8)w->len;
     put32(p + 8, w->h0);
