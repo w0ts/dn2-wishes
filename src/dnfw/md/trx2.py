@@ -226,7 +226,7 @@ def umulq(p: Prog, a: int, b: int, k: int) -> None:
 # 56300's limiter does. Subroutines (one copy for all machines) take R4 / R5 / R6 and
 # clobber R3-R10, R12-R15, I1; a sample loop keeps what it needs in R1, R2, R11.
 
-def _wmul_body(p: Prog, k: int = 23, flag: bool = False) -> None:
+def _wmul_body(p: Prog, k: int = 23, flag: bool = False, top: int | None = None) -> None:
     # R4 = floor(R5 R6 / 2^k) through the limiter: sat(mpy(a, b)) (k 23), or of 2 mpy (k 22)
     # 2026-11-10 (perf): the fixed-point multiplier's SSF on the operands shifted up 31 - k bits in
     # all (the product exact in its 64 bits: efm.xfloor); SSI's low word for the flag. Bit for bit
@@ -240,8 +240,10 @@ def _wmul_body(p: Prog, k: int = 23, flag: bool = False) -> None:
         p.iconst(12, (1 << k) - 1)
         p.iop(3, 3, "AND", 12)
     if k == 23:
-        p.iconst(12, 0x7FFFFF)
-        p.iop(4, 4, "MIN", 12)
+        if top is None:                      # (TOP: a register the caller holds 0x7FFFFF in)
+            p.iconst(12, 0x7FFFFF)
+            top = 12
+        p.iop(4, 4, "MIN", top)
 
 
 def wmul(p: Prog) -> None:
@@ -1885,13 +1887,24 @@ class TRXS2:
             p.ld(1, C["mdb"])
             iaddk(p, 1, 1, 4 * (K.S0 + S.XA))
 
+            # the filters inline (path_inline): the limiter's bounds in R15 (the block) and R0 (free in the loop's
+            # body: loop() reloads it), 2^-22 in F10 until the oscillators below take R10
+            cr = (15, 0)
+            if not EXACT:
+                p.iconst(15, 0x7FFFFF)
+
             def one():
                 p.ldi(4, 0, 5)
-                hpc(p, S.HP)
-                res4(p, S.RS)
+                if EXACT:
+                    hpc(p, S.HP)
+                    res4(p, S.RS)
+                else:
+                    p.iconst(0, -0x800000)
+                    p.fconst(10, 2.0 ** -22)
+                    path_inline(p, S.HP, S.RS, cr, 10)
                 p.ipass(5, 4)
                 p.ld(6, C["d"])
-                wmul(p)
+                _wmul_body(p, top=15 if not EXACT else None)
                 p.seti(1, 1)
                 p.sti(0, 1, 4)                        # the noise, kept (S47..)
                 p.iconst(12, 4)
@@ -1904,7 +1917,7 @@ class TRXS2:
                     ss(p, 3 + k, 6)
                     to_word(p, 5, 4)
                     w(p, 6, 3 + k)
-                    wmul(p)
+                    _wmul_body(p, top=15 if not EXACT else None)
                     if k == 0:
                         p.ipass(2, 4)
                     else:
@@ -1916,7 +1929,7 @@ class TRXS2:
                 p.ash(4, 4, -2)
                 ss(p, 8, 4)                           # x0 = sat(mpy(k40, x0))
                 p.ash(4, 2, -1)
-                _clamp(p, 4)                          # the body
+                _clamp(p, 4, cr if not EXACT else None)   # the body
             out_loop(p, L, one)
 
         s(p, 0, 9)
