@@ -388,9 +388,12 @@ static const char *unit_text_of(int kind, int curve, int k)
         n = ucat(ub, 0, v);
         ub[n++] = '%';
     } else if (kind == MU_DB) {
-        if (v < 0) { ub[n++] = '-'; v = -v; }
+        int neg = v < 0;
+        if (neg) { ub[n++] = '-'; v = -v; }
         n = ucat(ub, n, v);
-        ub[n++] = 'd'; ub[n++] = 'B';
+        if (!(neg && v >= 10)) {                /* (2026-11-13, TAPE's PGAIN: -32 .. -10 keep four characters: "-24") */
+            ub[n++] = 'd'; ub[n++] = 'B';
+        }
     } else if (kind == MU_C) {
         n = ucat(ub, 0, k);
         ub[n++] = 'c';
@@ -456,10 +459,11 @@ const char *mu_flt(int w, int k)
     return unit_text_of(flt_unit[w], flt_unit_curve[w], k > 127 ? 127 : k < 0 ? 0 : k);
 }
 
-/* the inserts' knobs (csrc/inserts/ins.c, SYN held): type 0..13, knob 0..5, 7 the MIX; 0 a knob with no unit yet */
+/* the inserts' knobs (csrc/inserts/ins.c, SYN held): type 0..13, knob 0..5, 6 AUTO (FUZZ, TAPE), 7 the MIX, 8 TAPE's PGAIN;
+ * 0 a knob with no unit yet */
 const char *mu_ins(int type, int knob, int k)
 {
-    if (type < 0 || type >= (int)(sizeof ins_unit / sizeof ins_unit[0]) || knob < 0 || knob > 7)
+    if (type < 0 || type >= (int)(sizeof ins_unit / sizeof ins_unit[0]) || knob < 0 || knob > 8)
         return 0;
     return unit_text_of(ins_unit[type][knob], ins_unit_curve[type][knob], k > 127 ? 127 : k);
 }

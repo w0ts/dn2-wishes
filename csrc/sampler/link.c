@@ -131,6 +131,12 @@ _Static_assert(LIBID_OFFSET >= META_PTR + 12u && LIBID_OFFSET % 4u == 0 && LIBID
 /* 2026-11-11: the send pages' second page (csrc/fxpage): the Delay engine's change word and five float words, the Reverb engine's the same
  * (dnfw.xdly.design.EX), in the directory page's 0xED0..0xEFF, which was BOUNCE's buffer directory's tail (BUF_DIR .. 0xECF; BOUNCE is gone from
  * the ColdFire). Kept in the mirror's page too, so a load's page carries them */
+/* 2026-11-13: TAPE's PGAIN, a byte an insert record (csrc/inserts ins_tpg_words; dnfw.inserts.design.TP_PG_DDR), in the
+ * READY page after its two words (the arbiter: TABLE_READY + 0x100 .. + 0x120, unread by the table decode; sends and
+ * page loads skip it). K_READY writes that whole page once a boot, so these go only after it (smp_tables 2), and once
+ * more when it turns 2 */
+#define TPG_OFFSET (TABLE_READY + 0x100u)
+#define TPG_WORDS 8u
 #define FXP_OFFSET 0xED0u
 #define FXP_WORDS 12u
 _Static_assert(FXP_OFFSET >= 0xE10u + 192u && FXP_OFFSET + 4u * FXP_WORDS <= CMD_OFFSET,
@@ -507,16 +513,29 @@ void smp_tdm(u32 h)
             fxp_left = INS_REPEAT;
         }
     }
+    extern void ins_tpg_words(u32 *w);
+    extern int smp_tables;
+    static u32 tpg_seen __attribute__((section(".data"))) = 0;
+    static u32 tpg_left __attribute__((section(".data"))) = 0;
+    static int tpg_after_ready __attribute__((section(".data"))) = 0;
+    static u32 tpg_w[TPG_WORDS] __attribute__((section(".data")));
+    if (!is_cmd && !ins_left && !fxp_left && !tpg_left && smp_tables == 2 && (ins_gen != tpg_seen || !tpg_after_ready)) {
+        tpg_seen = ins_gen;
+        tpg_after_ready = 1;
+        ins_tpg_words(tpg_w);
+        tpg_left = INS_REPEAT;
+    }
     int is_ins = !is_cmd && ins_left;
     int is_fxp = !is_cmd && !is_ins && fxp_left;
-    int is_blank = !is_cmd && !is_ins && !is_fxp && blank_left;
+    int is_tpg = !is_cmd && !is_ins && !is_fxp && tpg_left;
+    int is_blank = !is_cmd && !is_ins && !is_fxp && !is_tpg && blank_left;
     if (is_rt)
         for (int j = 0; j < CMD_WORDS; j++)
             cw[j] = rt_cw[j];
     else if (is_cmd)                            /* a command first: the command block's words */
         for (int j = 0; j < CMD_WORDS; j++)
             cw[j] = cmdq[cmd_tail % CMDQ][j];
-    if (is_cmd || is_ins || is_fxp || is_blank || (job_data && job_fast_next < job_n)) {
+    if (is_cmd || is_ins || is_fxp || is_tpg || is_blank || (job_data && job_fast_next < job_n)) {
         volatile u32 *t = TDM_TX(h);
         u32 k = job_fast_next, n = job_n - k, off = job_base + k;
         if (is_cmd) {
@@ -531,6 +550,10 @@ void smp_tdm(u32 h)
             k = 0;
             n = FXP_WORDS;
             off = FXP_OFFSET / 4u;
+        } else if (is_tpg) {
+            k = 0;
+            n = TPG_WORDS;
+            off = TPG_OFFSET / 4u;
         } else if (is_blank) {
             u32 at = (BLANK_PACKETS - blank_left) * RX_WORDS;
             k = 0;
@@ -547,7 +570,8 @@ void smp_tdm(u32 h)
         UNIT(2, off);
         UNIT(3, off >> 16);
         for (u32 j = 0; j < RX_WORDS; j++) {
-            u32 w = j >= n || is_blank ? 0 : is_cmd ? cw[j] : is_ins ? ins_w[j] : is_fxp ? fxp_w[j] : le32(job_data + 4u * (k + j));
+            u32 w = j >= n || is_blank ? 0 : is_cmd ? cw[j] : is_ins ? ins_w[j] : is_fxp ? fxp_w[j] : is_tpg ? tpg_w[j]
+                    : le32(job_data + 4u * (k + j));
             UNIT(4 + 2 * j, w);
             UNIT(5 + 2 * j, w >> 16);
         }
@@ -561,6 +585,8 @@ void smp_tdm(u32 h)
             ins_left--;
         } else if (is_fxp) {
             fxp_left--;
+        } else if (is_tpg) {
+            tpg_left--;
         } else if (is_blank) {
             blank_left--;
             smp_blank_sent++;

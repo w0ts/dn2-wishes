@@ -27,6 +27,7 @@ extern void ins_set_record(int t, int j, const u8 *f);
 extern void ins_loaded(void);
 extern void ins_words(u32 *w);
 extern void ins_record(int t, int j, u8 *f);
+extern void ins_tpg_words(u32 *w);
 int main(void)
 {
     unsigned v;
@@ -52,6 +53,10 @@ int main(void)
             for (int k = 0; k < 8; k++)
                 printf("%u\n", f[k]);
         }
+    u32 g[8];
+    ins_tpg_words(g);
+    for (int k = 0; k < 8; k++)
+        printf("%u\n", g[k]);
     return 0;
 }
 """
@@ -160,3 +165,32 @@ def test_fuzz_has_pgain_and_auto_on_page_1_and_gate_on_page_2():
     assert '{"DRIV", "TONE", "BIAS", "PRE", "PGAIN", AUTO_LABEL},' in src
     assert '[T_FUZZ] = {"GATE", "", "", "", "", ""},' in src
     assert "return pg ? (k == 0 ? 4 : -1) : (k < 4 ? k : k == 4 ? 5 : X_AUTO);" in src
+
+
+def test_tape_pgain_is_saved_in_the_knobs_bit_7_and_sent_by_record(exe):
+    """2026-11-13 (the User: PGAIN on F, AUTO on G on TAPE; AGE HISS on page 2): an old project's TAPE (no bit 7s) loads with
+    PGAIN 0 dB and AUTO off, as before; PGAIN -6 dB is saved as 6-bit two's complement in K1..K6's bit 7 and sent, a byte a
+    record, to design.TP_PG_DDR's words; AUTO as FUZZ's (MIX bit 7, field 0 bit 4)"""
+    s = (-6) & 0x3F
+    tape6 = [D.TAPE, 0x80 | 100] + [10 * (k + 1) | ((s >> k) & 1) << 7 for k in range(6)]
+    recs = [[D.TAPE, 100, 10, 20, 30, 40, 50, 60], [0] * 8, [0] * 8, tape6]
+    recs += [[0] * 8 for _ in range(D.RECORDS - 4)]
+    text = "\n".join(str(x) for r in recs for x in r)
+    r = subprocess.run([str(exe)], input=text, capture_output=True, text=True, check=True)
+    v = [int(x) for x in r.stdout.split()]
+    w, back, tpg = v[:58], [v[58 + 8 * i:58 + 8 * i + 8] for i in range(D.RECORDS)], v[58 + 8 * D.RECORDS:]
+    got = D.unpack(w[2:])
+    assert got[0:8] == [D.TAPE, 100, 10, 20, 30, 40, 50, 60]
+    assert got[24:32] == [D.TAPE | D.FZ_AUTO_BIT, 100, 10, 20, 30, 40, 50, 60]
+    assert back[0] == recs[0] and back[3] == tape6
+    assert len(tpg) == D.TP_PG_WORDS and tpg[0] == ((-6) & 0x7F) << 24 and not any(tpg[1:])   # record 3: word 0 byte 3
+
+
+def test_tape_pages_and_pgain_place():
+    src = (ROOT / "csrc" / "inserts" / "ins.c").read_text()
+    assert '{"DRIV", "WOW", "WRAT", "FLUT", "PGAIN", AUTO_LABEL},' in src
+    assert '[T_TAPE] = {"AGE", "HISS", "", "", "", ""},' in src
+    link = (ROOT / "csrc" / "sampler" / "link.c").read_text()
+    assert "#define TPG_OFFSET (TABLE_READY + 0x100u)" in link and "smp_tables == 2" in link
+    from dnfw.sampler import machines as SM
+    assert D.TP_PG_DDR == D.POOL_DDR + SM.TABLE_READY + 0x100 and 4 * D.TP_PG_WORDS == 0x20   # the arbiter's 32 B

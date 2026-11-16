@@ -75,7 +75,7 @@ static const char AUTO_LABEL[] = "AUTO";
 static const char *const LABEL[TYPES][6] = {
     {"", "", "", "", "", ""},
     {"DRIV", "TONE", "BIAS", "PRE", "PGAIN", AUTO_LABEL},   /* FUZZ: GATE on page 2 (FIELD) */
-    {"DRIV", "WOW", "WRAT", "FLUT", "AGE", "HISS"},
+    {"DRIV", "WOW", "WRAT", "FLUT", "PGAIN", AUTO_LABEL},   /* TAPE: AGE HISS on page 2 (FIELD) */
     {"AMNT", "SYMM", "SHPE", "TONE", "PGAIN", AUTO_LABEL},
     {"DPTH", "RATE", "DLY", "VOIC", "WDTH", "FDBK"},
     {"WDTH", "TIME", "BASS", "TONE", "", ""},
@@ -96,14 +96,19 @@ static const char *const LABEL[TYPES][6] = {
  * field 0's bit 4, saved in the MIX byte's bit 7), page 2 GATE (field 4). -1: an empty place. A FUNC tap switches a
  * type with a page 2 between its pages (ins_pop); [FX] goes on to the next FX page, page 1 again. */
 #define T_FUZZ    1
-#define X_AUTO    6
+#define T_TAPE    2
+#define X_AUTO    6                             /* FUZZ's and TAPE's AUTO (ins_fza) */
+#define X_TPG     8                             /* TAPE's PGAIN (ins_tpg: knob 64 0 dB, 1 dB a step, 32 .. 95) */
 static const char *const LABEL2[TYPES][6] = {
     [T_FUZZ] = {"GATE", "", "", "", "", ""},
+    [T_TAPE] = {"AGE", "HISS", "", "", "", ""},
 };
 static int field_of(int y, int pg, int k)
 {
     if (y == T_FUZZ)
         return pg ? (k == 0 ? 4 : -1) : (k < 4 ? k : k == 4 ? 5 : X_AUTO);
+    if (y == T_TAPE)                            /* 2026-11-13: PGAIN (new) and AUTO; AGE HISS on page 2 */
+        return pg ? (k < 2 ? 4 + k : -1) : (k < 4 ? k : k == 4 ? X_TPG : X_AUTO);
     return pg || !LABEL[y][k][0] ? -1 : k + DOFF(y);
 }
 static int has_page2(int y)
@@ -121,7 +126,8 @@ static const u8 DEFAULT[TYPES][6] = {
 u8 ins_sel[16][SLOTS] __attribute__((section(".data")));    /* the type (from ins_selv's band) */
 u8 ins_selv[16][SLOTS] __attribute__((section(".data")));   /* M.SEL as turned, 0..127: each type a band of it */
 u8 ins_mod[16][SLOTS] __attribute__((section(".data")));
-u8 ins_fza[16][SLOTS] __attribute__((section(".data")));   /* FUZZ's AUTO (0 / 127; X_AUTO) */
+u8 ins_fza[16][SLOTS] __attribute__((section(".data")));   /* FUZZ's or TAPE's AUTO (0 / 127; X_AUTO) */
+u8 ins_tpg[16][SLOTS] __attribute__((section(".data")));   /* TAPE's PGAIN (X_TPG): 64 + dB, 32 .. 95 */
 static int ins_pg __attribute__((section(".data"))) = 0;      /* the INSERT page's page: 0, 1 (page 2) */
 static int ins_armed __attribute__((section(".data"))) = 0;   /* FUNC went down on an insert with a page 2 */
 u8 ins_inst[16][SLOTS] __attribute__((section(".data")));   /* FDN8 / XDLY: the DSP's instance, NO_INST: FULL */
@@ -142,6 +148,7 @@ void ins_defaults(void)
             ins_selv[t][j] = 0;
             ins_mod[t][j] = 127;
             ins_fza[t][j] = 0;
+            ins_tpg[t][j] = 64;
             ins_inst[t][j] = NO_INST;
             for (int y = 0; y < TYPES; y++)
                 for (int k = 0; k < 6; k++)
@@ -211,8 +218,8 @@ static void fields(int t, int j, u8 *f)
     int y = ins_sel[t][j];
     int full = instances(y) && ins_inst[t][j] == NO_INST;
     f[0] = full || !BUILT[y] ? 0 : (u8)(y | (instances(y) ? ins_inst[t][j] << 4 : 0));
-    if (y == T_FUZZ && ins_fza[t][j] >= 64)
-        f[0] |= 0x10;                           /* FUZZ's AUTO (dnfw.inserts.design.FZ_AUTO_BIT) */
+    if ((y == T_FUZZ || y == T_TAPE) && ins_fza[t][j] >= 64)
+        f[0] |= 0x10;                           /* FUZZ's or TAPE's AUTO (dnfw.inserts.design.FZ_AUTO_BIT) */
     f[1] = ins_mod[t][j];
     for (int k = 0; k < 6; k++)
         f[2 + k] = ins_kv[t][j][y][k];
@@ -239,16 +246,31 @@ void ins_words(u32 *w)
     }
 }
 
+/* 2026-11-13: TAPE's PGAIN for the DSP (dnfw.inserts.design.TP_PG_DDR; link.c sends them after READY): a byte a record,
+ * record i byte i % 4 of word i // 4, 7-bit two's complement dB (0: unity); not TAPE, 0 */
+void ins_tpg_words(u32 *w)
+{
+    init();
+    for (int k = 0; k < 8; k++)
+        w[k] = 0;
+    for (int i = 0; i < 32; i++) {
+        int t = i >> 1, j = i & 1;
+        if (ins_sel[t][j] == T_TAPE)
+            w[i >> 2] |= (u32)((ins_tpg[t][j] - 64) & 0x7F) << (8 * (i & 3));
+    }
+}
+
 /* store.c's view: slot (t, j)'s record as saved (type, MIX, the type's knobs), and its setting back */
 void ins_record(int t, int j, u8 *f)
 {
     init();
     int y = ins_sel[t][j];
     f[0] = (u8)y;
-    f[1] = (u8)(ins_mod[t][j] | (y == T_FUZZ && ins_fza[t][j] >= 64 ? 0x80 : 0));   /* FUZZ's AUTO: MIX's bit 7 (an
-                                                 * older build masks it: the FUZZ loads, without AUTO) */
+    f[1] = (u8)(ins_mod[t][j] | ((y == T_FUZZ || y == T_TAPE) && ins_fza[t][j] >= 64 ? 0x80 : 0));   /* AUTO: MIX's
+                                                 * bit 7 (an older build masks it: the insert loads, without AUTO) */
+    int s = y == T_TAPE ? ins_tpg[t][j] - 64 : 0;   /* TAPE's PGAIN, 6-bit two's complement dB in K1..K6's bit 7 */
     for (int k = 0; k < 6; k++)
-        f[2 + k] = ins_kv[t][j][y][k];
+        f[2 + k] = (u8)(ins_kv[t][j][y][k] | ((s >> k) & 1) << 7);
 }
 
 void ins_set_record(int t, int j, const u8 *f)
@@ -258,8 +280,14 @@ void ins_set_record(int t, int j, const u8 *f)
     ins_sel[t][j] = (u8)y;
     ins_selv[t][j] = (u8)((POS[y] * 128 + 64) / TYPES);   /* the middle of its band, by display position */
     ins_mod[t][j] = f[1] & 0x7F;
-    if (y == T_FUZZ)
+    if (y == T_FUZZ || y == T_TAPE)
         ins_fza[t][j] = f[1] & 0x80 ? 127 : 0;
+    if (y == T_TAPE) {
+        int s = 0;
+        for (int k = 0; k < 6; k++)
+            s |= (f[2 + k] >> 7) << k;
+        ins_tpg[t][j] = (u8)(64 + (s >= 32 ? s - 64 : s));
+    }
     for (int k = 0; k < 6; k++)
         ins_kv[t][j][y][k] = f[2 + k] & 0x7F;
     ins_inst[t][j] = NO_INST;
@@ -279,9 +307,9 @@ static int clamp(int v, int lo, int hi)
     return v < lo ? lo : v > hi ? hi : v;
 }
 
-static u8 *value_of(int t, int j, int y, int f)  /* a place's value: a stored field, or FUZZ's AUTO */
+static u8 *value_of(int t, int j, int y, int f)  /* a place's value: a stored field, AUTO, TAPE's PGAIN */
 {
-    return f == X_AUTO ? &ins_fza[t][j] : &ins_kv[t][j][y][f];
+    return f == X_AUTO ? &ins_fza[t][j] : f == X_TPG ? &ins_tpg[t][j] : &ins_kv[t][j][y][f];
 }
 
 static void turn(int knob, int delta)
@@ -310,6 +338,8 @@ static void turn(int knob, int delta)
             u8 *v = value_of(t, j, y, f);
             if (!ins_pg && LABEL[y][knob - 2] == AUTO_LABEL)
                 *v = delta > 0 ? 127 : delta < 0 ? 0 : *v;   /* a switch */
+            else if (f == X_TPG)
+                *v = (u8)clamp(*v + delta, 32, 95);   /* -32 .. +31 dB */
             else
                 *v = (u8)clamp(*v + delta, 0, 127);
         }

@@ -46,7 +46,8 @@ _NAMES = ["t", "i", "j", "rec", "w1", "sa", "buf", "gn"] + [f"p{k}" for k in ran
     "ret",                       # one's return address - 1 (2026-11-11: the bus pass calls it too)
     "aa", "au", "at",            # AUTO (design.AUTO_L2): the aux words' address, on (1.0) / off, PGAIN's gain T
     "icost", "ist", "d0", "d31",  # the gate (2026-11-12): this type's bound, its status, the dry's first and last
-    "qa", "zin", "ap0", "ap1"]   # quiet (2026-11-12): the mark's address, the input's OR, AUTO's powers before
+    "qa", "zin", "ap0", "ap1",   # quiet (2026-11-12): the mark's address, the input's OR, AUTO's powers before
+    "tpg"]                       # TAPE's PGAIN (2026-11-13), the gain
 C = {n: SCRATCH + 4 * k for k, n in enumerate(_NAMES)}
 assert len(C) == len(_NAMES)
 SCRATCH_BYTES = 4 * len(_NAMES)
@@ -398,6 +399,11 @@ def tape(p: Prog) -> None:
     p.fconst(1, D.TP_HISS_MAX)
     p.fop(0, 0, "*", 1)
     p.st(C["lvl"], 0)                            # (the ring: C['rb'], the caller's)
+    tape_pgain(p)
+    auto_pre(p)                                  # AUTO's sums and gain in F13, F14, F15 here (the loop uses R4, R8, R9)
+    p.fpass(13, 8)
+    p.fpass(14, 9)
+    p.fpass(15, 10)
     p.ld(4, C["buf"])
     p.seti(0, 4)
     p.seti(1, 4)
@@ -480,13 +486,70 @@ def tape(p: Prog) -> None:
         p.ld(3, C["lvl"])
         p.fop(2, 2, "*", 3)                      # n
         p.fop(2, 1, "+", 2)                      # o = lp + n
+        p.ld(3, C["tpg"])
+        p.fop(2, 2, "*", 3)                      # x PGAIN
         p.ld(0, C["k"])
+        p.fop(3, 0, "*", 0)                      # AUTO's sums, its gain (auto_sample's, in F13-F15)
+        p.fop(13, 13, "+", 3)
+        p.fop(3, 2, "*", 2)
+        p.fop(14, 14, "+", 3)
+        p.fop(2, 2, "*", 15)
         p.fop(2, 2, "-", 0)
         p.ld(3, C["p0"])
         p.fop(2, 2, "*", 3)
         p.fop(2, 0, "+", 2)
         p.stpost(1, 2)
     p.loop_r(11, D.BLOCK, one)
+    p.fpass(8, 13)
+    p.fpass(9, 14)
+    auto_post(p)
+
+
+def tape_pgain(p: Prog) -> None:
+    """TAPE's PGAIN and AUTO (2026-11-13; ref.Ref.tape): C['tpg'] = 2^(dB / 6.02) of its record's byte at
+    design.TP_PG_DDR (7-bit two's complement; 0: exactly 1.0), C['at'] the same (AUTO's T), C['au'] field 0's bit 4.
+    Clobbers R0-R3, R12, I4"""
+    p.ld(2, C["rec"])
+    p.iconst(12, (-TABLE) & 0xFFFFFFFF)
+    p.iop(1, 12, "+", 2)
+    p.lsh(1, 1, -5)                              # the record i
+    p.lsh(3, 1, -2)
+    p.lsh(3, 3, 2)
+    p.iconst(12, D.TP_PG_DDR)
+    p.iop(3, 12, "+", 3)
+    p.seti(4, 3)
+    p.ldi(0, 0, 4)                               # its word
+    p.iconst(12, 2)
+    p.iop(2, 1, "AND", 12)
+    p.ifz(2, "NE", lambda: p.lsh(0, 0, -16))
+    p.iconst(12, 1)
+    p.iop(2, 1, "AND", 12)
+    p.ifz(2, "NE", lambda: p.lsh(0, 0, -8))
+    p.iconst(12, 0x7F)
+    p.iop(0, 0, "AND", 12)                       # the byte
+    p.fconst(1, 1.0)
+    p.st(C["tpg"], 1)
+
+    def gain():
+        p.iconst(12, 64)
+        p.if_(0, "GE", 12, lambda: (p.iconst(12, -128), p.iop(0, 12, "+", 0)), kind="i")
+        p.iconst(1, 0)
+        p.float_(0, 0, 1)
+        p.fconst(1, D.TP_PG_DB)
+        p.fop(0, 0, "*", 1)
+        FP.exp2(p)
+        p.st(C["tpg"], 0)
+    p.ifz(0, "NE", gain)
+    p.ld(0, C["tpg"])
+    p.st(C["at"], 0)
+    p.fconst(0, 0.0)
+    p.st(C["au"], 0)
+    p.ld(2, C["rec"])
+    p.seti(4, 2)
+    p.ldi(1, 0, 4)
+    p.iconst(12, D.FZ_AUTO_BIT)
+    p.iop(1, 1, "AND", 12)
+    p.ifz(1, "NE", lambda: (p.fconst(0, 1.0), p.st(C["au"], 0)))
 
 
 def pole_c(p: Prog, src: str, w: float, l2: float) -> None:

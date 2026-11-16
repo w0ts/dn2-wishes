@@ -81,8 +81,8 @@ CLAIMS = [
     ("the main mix's tap", 0x200A9000, 0x200A9200, ("dnfw.sampler.machines", "dnfw.waverider.dsp.MAIN_TAP_L2"), True),
     ("fdn8.asm", 0x200AA000, 0x200AC400, ("dnfw.waverider.dsp.FDN8_L2_LOAD",), True),
     ("xdly.asm", 0x200AC400, 0x200ADA00, ("dnfw.waverider.dsp.XDLY_L2_LOAD",), True),
-    ("inserts.asm", 0x200ADA00, 0x200AFB00, ("dnfw.waverider.dsp.INS_L2_LOAD",), True),
-    ("inspost.asm", 0x200AFB00, 0x200B1800, ("dnfw.waverider.dsp.POST_L2_LOAD",), True),
+    ("inserts.asm", 0x200ADA00, 0x200AFC00, ("dnfw.waverider.dsp.INS_L2_LOAD",), True),
+    ("inspost.asm", 0x200AFC00, 0x200B1800, ("dnfw.waverider.dsp.POST_L2_LOAD",), True),
     # DRONE's BEAT and ANALOG 2's WDTH write the slot's side block (one machine a slot at a time)
     ("the side blocks (DRONE's BEAT, ANALOG 2's WDTH)", 0x200B1800, 0x200B2100,
      ("dnfw.inserts.post", "dnfw.mnm.drone", "dnfw.mnm.analog2"), True),

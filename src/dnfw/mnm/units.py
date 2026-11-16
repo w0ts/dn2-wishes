@@ -115,7 +115,9 @@ INS_UNITS: dict[str, dict[int, tuple]] = {
              6: ("onoff", None, False)},           # 6: AUTO (2026-11-13, ins.c X_AUTO)
     "TAPE": {0: ("db", lambda k: 18.0 * k / 127.0, False), 1: ("pct", None, False),
              2: ("hz100", lambda k: 10.0 * 20.0 ** (k / 127.0), False), 3: ("pct", None, False),
-             4: ("hz", lambda k: 16000.0 * 2.0 ** (-3.0 * k / 127.0), False), 5: ("pct", None, False)},
+             4: ("hz", lambda k: 16000.0 * 2.0 ** (-3.0 * k / 127.0), False), 5: ("pct", None, False),
+             6: ("onoff", None, False),            # 6: AUTO, 8: PGAIN (2026-11-13: knob 64 0 dB, 1 dB a step)
+             8: ("db", lambda k: float(min(max(k - 64, -32), 31)), False)},
     "FOLD": {0: ("db", lambda k: 24.0 * k / 127.0, False), 1: ("spct", None, False), 2: ("pct", None, False),
              3: ("pct", None, False), 4: ("pct", None, False), 5: ("onoff", None, False)},
     "CHOR": {0: ("ms10", lambda k: 40.0 * k / 127.0, False), 1: ("hz100", lambda k: 5.0 * 100.0 ** (k / 127.0), False),
@@ -179,7 +181,7 @@ def ins_tables() -> tuple[list[list[int]], list[list[int]], list[list[int]]]:
     kinds, at = [], []
     for name in INS_TYPES:
         krow, arow = [], []
-        for j in range(8):
+        for j in range(9):
             if j == 7:
                 kind, fn, off = ("pct", None, False) if name != "OFF" else ("raw", None, False)
             else:

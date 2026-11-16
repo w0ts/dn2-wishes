@@ -322,3 +322,37 @@ def test_fuzz_auto_rides_in_field_0_and_holds_the_level():
     for x in lv[0]:
         assert abs(20 * math.log10(x / (100 / 127))) < 1.5, lv
     assert 20 * math.log10(lv[1][1]) > 6                          # off: much louder at full drive
+
+
+def test_tape_pgain_and_auto():
+    # 2026-11-13 (the User: PGAIN on F and AUTO on G on TAPE too): PGAIN a byte a record at design.TP_PG_DDR (7-bit two's
+    # complement dB, 0 x 1.0), AUTO field 0's bit 4. The model is the reference, word for word; -6 dB is half the wet's
+    # level (MIX 127); AUTO holds the wet at the dry's level x PGAIN
+    import math
+    pg = {0: (-6) & 0x7F, 1: 0, 2: (-6) & 0x7F}
+    rows = {0: [D.TAPE, 127, 90, 0, 0, 0, 0, 0], 1: [D.TAPE, 127, 90, 0, 0, 0, 0, 0],
+            2: [D.TAPE | D.FZ_AUTO_BIT, 127, 90, 0, 0, 0, 0, 0]}
+    m, r = mem0(), R.Ref()
+    words = [0] * D.TP_PG_WORDS
+    for t, b in pg.items():
+        i = 2 * t                                 # slot 1's record
+        words[i // 4] |= b << (8 * (i % 4))
+        r.tpg[i] = b
+    for k, w in enumerate(words):
+        m.put(D.TP_PG_DDR + 4 * k, w)
+    acc = {t: 0.0 for t in pg}
+    for b in range(200):
+        ph = [2 * math.pi * 110 * (32 * b + j) / D.FS for j in range(32)]
+        bufs = [[0.25 * math.sin(x) for x in ph] for _ in range(D.TRACKS)]
+        par = par_of(rows)
+        want = [[np.float32(x) for x in buf] for buf in bufs]
+        r.block(par, want)
+        got = call(m, par, bufs)
+        assert got == [[fbits(x) for x in w] for w in want], f"block {b}"
+        if b >= 160:
+            for t in pg:
+                acc[t] += sum(float(x) ** 2 for x in want[t])
+    db = {t: 10 * math.log10(acc[t] / acc[1]) for t in pg}
+    assert abs(db[0] + 6) < 0.3, db                        # -6 dB
+    dry = 40 * 32 * 0.25 ** 2 / 2
+    assert abs(10 * math.log10(acc[2] / dry) + 6) < 1.5, (db, acc[2] / dry)   # AUTO: the dry's level, -6 dB

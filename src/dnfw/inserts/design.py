@@ -206,6 +206,14 @@ AUTO_TYPES = (DIST, FOLD, HARM)
 # 2026-11-13 (the User: PGAIN on F and AUTO on G on every distortion): FUZZ's six fields are all its knobs, so its AUTO
 # rides in field 0's instance bits (FUZZ has no instance): bit 4 (FZ_AUTO_BIT), on or off; GATE goes to page 2
 FZ_AUTO_BIT = 1 << TYPE_BITS
+# TAPE (2026-11-13): AUTO the same bit; PGAIN, which TAPE never had, in a word area of its own (all six fields are its
+# knobs): a byte a record (record i: byte i % 4 of word i // 4), 7-bit two's complement dB, -32..+31 (0: unity, x 1.0
+# exactly, so every record before it and the area's zeros before the ColdFire's first send are bit-identical), at
+# TP_PG_DDR (the arbiter: pool DDR TABLE_READY + 0x100..+0x120, after the READY page's two words; link.c sends it)
+from ..sampler import machines as _SM          # noqa: E402
+TP_PG_DDR = POOL_DDR + _SM.TABLE_READY + 0x100
+TP_PG_WORDS = RECORDS // 4
+TP_PG_DB = 1.0 / 6.020599913279624                # 1 dB in octaves (exp2)
 AUTO_ON = 0.5                                     # p6 = field 5 / 127 above this: on (the page writes 0 or 127)
 AUTO_TAU = 0.05
 AUTO_A = 1.0 - math.exp(-BLOCK / (AUTO_TAU * FS))

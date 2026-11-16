@@ -203,8 +203,13 @@ for **DIST, FOLD and HARM** (HARM's PGAIN is its stored LEV, K5, back on the pag
 DRIV TONE BIAS PRE PGAIN AUTO, **GATE on a page 2** (a FUNC tap switches pages, as the send pages' second page, csrc/fxpage;
 "PG 2" under M.SEL; [FX] goes on to the next FX page). Its stored fields do not move (ins.c `field_of`: a place -> a field); its AUTO has no field of
 its own: on the ColdFire `ins_fza`, saved in the MIX byte's bit 7 (an older build masks it: the FUZZ loads without
-AUTO), sent in field 0's bit 4 (`design.FZ_AUTO_BIT`; FUZZ has no instance), T its PGAIN. TAPE (PGAIN and AUTO, HISS
-to page 2) follows.
+AUTO), sent in field 0's bit 4 (`design.FZ_AUTO_BIT`; FUZZ has no instance), T its PGAIN. **TAPE** (2026-11-13): page 1
+DRIV WOW WRAT FLUT PGAIN AUTO, **AGE and HISS on page 2**. TAPE never had a PGAIN: a new one, -32 .. +31 dB in 1 dB steps
+(knob 64 0 dB), saved as 6-bit two's complement in K1..K6's bit 7 (an older build masks them), sent by link.c to its own
+words, a byte a record, 7-bit two's complement (`design.TP_PG_DDR`: the arbiter's pool DDR `TABLE_READY` + 0x100 ..
++0x120, after the READY page's two words; sent only after K_READY has written that page, and once more then). A byte of
+0 (every old project, and the words before the first send) is a gain of exactly 1.0: bit-identical. AUTO as FUZZ's;
+T the PGAIN gain. The value readout's dB shows -10 .. -32 without "dB" ("-24"), to keep four characters.
 
 Measured on the reference models (110 Hz, MIX 127, defaults), the wet's level against the drive 0 .. 127 without
 AUTO: FUZZ +1 .. +13 dB on a -12 dBFS sine (+2.5 dB at 0 dBFS), TAPE -0 .. +13, FOLD -2 .. +10, DIST -1 .. +1.5

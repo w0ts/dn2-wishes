@@ -44,6 +44,7 @@ class Ref:
         self.last = [(0, 0)] * D.RECORDS         # per (voice slot, insert slot): (type, track) it last ran
         self.ring = [np.zeros(D.TP_RING, F) for _ in range(D.RECORDS)]
         self.au = [[F(0), F(0)] for _ in range(D.RECORDS)]   # AUTO's powers (design.AUTO_L2): Pin, Pout
+        self.tpg = [0] * D.RECORDS               # TAPE's PGAIN bytes by record (design.TP_PG_DDR; the caller sets them)
 
     def block(self, par: bytes, bufs, route=None, tempo: int = 0, clk: int = 0) -> None:
         """TEMPO: the frame's BPM x 120 (0: 120 BPM); CLK: the ColdFire's clock word (design.CLK)"""
@@ -55,9 +56,9 @@ class Ref:
                 continue
             if j == 1 and D.moved(par, tr):     # 2026-11-11: the bus pass runs it (dnfw.inserts.busref)
                 continue
-            self.one(i, tr, par[8 * (2 * tr + j):8 * (2 * tr + j) + 8], bufs[t])
+            self.one(i, tr, par[8 * (2 * tr + j):8 * (2 * tr + j) + 8], bufs[t], 2 * tr + j)
 
-    def one(self, k: int, tr: int, v: bytes, buf) -> None:
+    def one(self, k: int, tr: int, v: bytes, buf, ri: int | None = None) -> None:
         """record V (played by track TR) over BUF in place, with state / ring K (program.one)"""
         sel = v[0] & ((1 << D.TYPE_BITS) - 1)
         if sel not in D.BUILT:
@@ -71,6 +72,7 @@ class Ref:
         p = [F(b) * F(1 / 127) for b in v[1:8]]
         self.k = k
         self.fz_auto = bool(v[0] & D.FZ_AUTO_BIT)
+        self.ri = 2 * tr + 1 if ri is None else ri    # the record (TAPE's PGAIN; a moved slot 2: the track's slot 2)
         if sel == D.FUZZ:
             self.fuzz(self.st[k], p, buf)
         elif sel == D.TAPE:
@@ -238,6 +240,14 @@ class Ref:
         lp, seed, wp = s[0], int(s[4]), int(s[5])
         ring = self.ring[t]
         d = d0
+        b = self.tpg[self.ri] & 0x7F                 # PGAIN (2026-11-13): 7-bit two's complement dB, 0 x 1.0
+        pg = F(1.0)
+        if b:
+            pg = F(b - 128 if b >= 64 else b)
+            pg = pg * F(D.TP_PG_DB)
+            pg = exp2(pg)
+        ac = self.auto_gain(self.fz_auto, pg)
+        si = so = F(0.0)
         for j in range(D.BLOCK):
             x = F(buf[j])
             x = max(x, F(-D.IN_MAX))
@@ -268,10 +278,15 @@ class Ref:
             n = F(float(seed - (1 << 32) if seed >> 31 else seed) * 2.0 ** -31)
             n = n * lvl
             o = lp + n
+            o = o * pg
+            si = si + x * x
+            so = so + o * o
+            o = o * ac
             o = o - x
             o = o * mod
             buf[j] = x + o
         s[0], s[1], s[2], s[3], s[4], s[5] = lp, phw, phf, d1, seed, wp
+        self.auto_end(si, so)
 
     @staticmethod
     def pole_c(p, w, l2) -> np.float32:

@@ -47,7 +47,7 @@ def test_the_formatter_fits_four_characters(tmp_path):
             + "\nint main(void){for(int mi=0;mi<MNM_N;mi++)for(int j=0;j<MNM_J;j++)for(int k=0;k<128;k++){"
               "const char*t=mnm_unit_text(mi,j,k);if(t)printf(\"%d %d %d %s\\n\",mi,j,k,t);}"
               "for(int w=0;w<9;w++)for(int k=0;k<128;k++){const char*t=mu_flt(w,k);if(t)printf(\"f%d 0 %d %s\\n\",w,k,t);}"
-              "for(int ty=0;ty<13;ty++)for(int kn=0;kn<8;kn++)for(int k=0;k<128;k++){"
+              "for(int ty=0;ty<13;ty++)for(int kn=0;kn<9;kn++)for(int k=0;k<128;k++){"
               "const char*t=mu_ins(ty,kn,k);if(t)printf(\"i%d %d %d %s\\n\",ty,kn,k,t);}return 0;}\n")
     c = tmp_path / "u.c"
     c.write_text(prog)

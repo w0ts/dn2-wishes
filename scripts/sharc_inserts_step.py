@@ -50,7 +50,7 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
                 f.put(0xA5A + 2 * s_, tr)
         return f.to_bytes()
 
-    def blocks(par_of, n, routed=False, frames_fn=None, fixed_gen=False):
+    def blocks(par_of, n, routed=False, frames_fn=None, fixed_gen=False, tpg=None):
         caps = []
         cur = {}
 
@@ -58,6 +58,8 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
             par = par_of(len(caps))              # link sends them: the pass's own unpack runs every block)
             for k, w in enumerate(D.pack(D.records(par), 1 if fixed_gen else 1 + len(caps))):
                 m2.poke(r.state, D.GEN + 4 * k, w)
+            for k, w in enumerate(tpg or []):        # (2026-11-13: TAPE's PGAIN bytes, as link.c sends them)
+                m2.poke(r.state, D.TP_PG_DDR + 4 * k, w)
 
         def at_ins(r):
             cur.clear()
@@ -101,14 +103,18 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
         rows[8:16] = bytes([D.FUZZ | (D.FZ_AUTO_BIT if b >= 25 else 0), 64, 127, 20, 0, 0, 20, 100]) if b >= 8 else bytes(8)
         # (2026-11-13: FUZZ's AUTO, field 0's bit 4, switched on at block 25)
         rows[40:48] = bytes([D.WIDE, 127, 127, 127, 127, 127, 127, 127])
-        rows[16:24] = bytes([D.TAPE, 127, 90, 110, 100, 110, 80, 60])          # TAPE on track 2
+        rows[16:24] = bytes([D.TAPE | (D.FZ_AUTO_BIT if b >= 30 else 0), 127, 90, 110, 100, 110, 80, 60])   # TAPE on
+        # track 2 (2026-11-13: its PGAIN -6 dB, below, and AUTO from block 30)
         rows[24:32] = bytes([D.FOLD, 127, 100, 70, 64, 90, 110, 0])            # FOLD on track 3 (silent)
         rows[32:40] = bytes([D.HARM, 127, 127, 50, 64, 100, 110, 0])           # HARM on track 4 (silent)
         if b >= 30:
-            rows[16:24] = bytes([D.TAPE, 100, 127, 127, 0, 127, 127, 0])
+            rows[16:24] = bytes([D.TAPE | D.FZ_AUTO_BIT, 100, 127, 127, 0, 127, 127, 0])
         return bytes(rows)
-    caps, info = blocks(par_of, 40)
+    tpg = [0] * D.TP_PG_WORDS
+    tpg[1] = (-6) & 0x7F                         # record 4 (track 2's slot 1): word 1, byte 0
+    caps, info = blocks(par_of, 40, tpg=tpg)
     ref = R.Ref()
+    ref.tpg[4] = (-6) & 0x7F
     exact, first_bad, others_same, changed = bool(caps), None, True, 0
     for b, c in enumerate(caps):
         bufs = [[bf(w) for w in c["in"][t]] for t in range(16)]

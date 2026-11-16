@@ -160,7 +160,7 @@ STOCK_DELAY_SW = 0xB8482C
 # the range proven on units; XDLY's branch ends its span here), their state after the code. smp.asm's
 # tail JUMPs to wr_ins, which JUMPs on to PING.
 INS_L2_LOAD = 0x200ADA00                     # 2026-11-10 (0x200AE000 until the four ports)
-INS_L2_SPAN = 0x2100                         # the code (2026-11-12: AUTO, the gate, quiet; 0x1c00 until then; 0x1b00 until 2026-11-11: one, the bus pass's moved inserts); 0x1800 until
+INS_L2_SPAN = 0x2200                         # the code (2026-11-13: FUZZ / TAPE AUTO, TAPE PGAIN; 2026-11-12: AUTO, the gate, quiet; 0x1c00 until then; 0x1b00 until 2026-11-11: one, the bus pass's moved inserts); 0x1800 until
                                              # 2026-11-10: two slots' state and the unpacked records need the room)
 INS_SW = 0xB80000 + (INS_L2_LOAD - 0x20000000) // 2          # 0xbd7000
 INS_STATE_DM = 0x2E3000                                      # 2026-11-11 (perf): L1, in the zeros after the shared tail (was L2 0x200af400)
@@ -168,8 +168,8 @@ INS_STATE_DM = 0x2E3000                                      # 2026-11-11 (perf)
 # L2 after the inserts' state (below the sample machines' span), their state after the code, their rings
 # in DDR. The engine's call of the FX sends (sw 0x1c3054) gets wr_inpost as its target; wr_inpost JUMPs on
 # to the sends.
-POST_L2_LOAD = 0x200AFB00                    # 2026-11-12 (the guard's hold; the arbiter): 0x200b0000 until then, same end
-POST_L2_SPAN = 0x1D00                        # the code (4,078 B since 2026-11-11, the unrolled loops; 0x1000 before; the L2 from 0x200b1800 to the sample machines' is unused)
+POST_L2_LOAD = 0x200AFC00                    # 2026-11-12 (the guard's hold; the arbiter): 0x200b0000 until then, same end
+POST_L2_SPAN = 0x1C00                        # the code (4,078 B since 2026-11-11, the unrolled loops; 0x1000 before; the L2 from 0x200b1800 to the sample machines' is unused)
 POST_SW = 0xB80000 + (POST_L2_LOAD - 0x20000000) // 2        # 0xbd8000
 # 2026-11-09: DRONE's BEAT side blocks at 0x200b1800 (dnfw.inserts.post.SIDE_L2, 0x900 B); the A2 filter
 # machines' pass (dnfw.a2f.program): its code, then its state

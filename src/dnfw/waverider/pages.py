@@ -490,8 +490,8 @@ def mnm_c_header() -> str:
         f"static const unsigned char flt_unit[{len(_fk)}] = {{{', '.join(map(str, _fk))}}};",
         f"static const unsigned char flt_unit_curve[{len(_fk)}] = {{{', '.join(map(str, _fa))}}};",
         f"#define FLT_UNIT_IDS {{{', '.join(map(str, _mnm_units.FLT_IDS))}}}",
-        f"static const unsigned char ins_unit[{len(_ik)}][8] = {{{arr(_ik)}}};",
-        f"static const unsigned char ins_unit_curve[{len(_ia)}][8] = {{{arr(_ia)}}};",
+        f"static const unsigned char ins_unit[{len(_ik)}][9] = {{{arr(_ik)}}};",
+        f"static const unsigned char ins_unit_curve[{len(_ia)}][9] = {{{arr(_ia)}}};",
     ]
     if _st is not None:                          # only with DN2_STOCK_UNITS: without it the header is as before
         ids, kinds, at, stock, _c = _st
