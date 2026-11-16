@@ -7,8 +7,9 @@ The User: "compare the engine levels, they should match approx, don't boost out 
 As v0.22 measured `MD_LEVEL` (docs/md.md): the SHARC runner, track 0 on the init sound, note 60 triggered at block 1,
 the **amp stage's input** (after the stock filter at the init sound, before the amp): peak and RMS over 341 blocks
 (227 ms), each engine at its defaults, no velocity. Stock reference: WaveTone (peak -15.8 dB, RMS -26.4) and FM TONE
-(-18.7, -33.4); FM DRUM and Swarmer do not render in the runner (their machine output is 0 on any track), so they are
-not in it.
+(-18.7, -33.4). **Runner gap:** FM DRUM and Swarmer do not render in the SHARC runner (their machine output is 0
+on track 0 and on track 1, set as the runner's own stock step sets them; the engine-init snapshot is WaveTone's), so
+they are not in the reference; not chased (main, 2026-11-12).
 
 Two yardsticks, because a decaying hit and a held tone with the same peak differ 10 dB and more in RMS:
 
@@ -26,10 +27,10 @@ An engine already in its band keeps its level (bit for bit); one outside moves t
 | PLAITS WS | held | RMS -23.6 | -2.8 | -26.4 |
 | DPRO-WAVE | held | RMS -30.5 | +4.1 | -26.4 |
 | DPRO-DDRW | held | RMS -29.3 | +2.9 | -26.4 |
-| DPRO-DENS | held | RMS -33.0 | +6.6 | -26.4 |
+| DPRO-DENS | held | RMS -33.0 | +4.7 | -28.3 ¹ |
 | PLAITS SWRM | held | RMS -28.9 | +2.5 | -26.4 |
 | SOPHIE | hit | peak -21.1 | +3.8 | -17.3 |
-| TB-303 | hit | peak -22.7 | +5.4 | -17.3 |
+| TB-303 | hit | peak -22.7 | +4.0 | -18.7 ¹ |
 | PLAITS MDAL | hit | peak -19.5 | +2.2 | -17.3 |
 | PLAITS SD | hit | peak -19.9 | +2.6 | -17.3 |
 | PLAITS HH | hit | peak -21.3 | +4.0 | -17.3 |
@@ -37,6 +38,10 @@ An engine already in its band keeps its level (bit for bit); one outside moves t
 | PLAITS STRG | hit | peak -27.0 | +9.7 | -17.3 |
 | SID 6581, PLAITS FM, ADD, VA, NOIS, DRONE, VO-6 | held | RMS -24.7 .. -28.4 | 0 | in band |
 | PLAITS PART | hit | peak -17.9 | 0 | in band |
+
+¹ In its band, short of the middle: at the middle the engine's loudest setting (every knob 127, the runner's `tops`
+run) went past the runner's 4.0 bound on a track buffer (TB-303 4.29, DPRO-DENS 4.42 at +5.4 / +6.6 dB); at these it
+stays near 3.6.
 
 The Machinedrum machines share one level (`MD_LEVEL`, v0.22): TRX-BD, TRX-SD and PI-BD sit in the hit band; PI-HH
 (-23.2) and EFM-SD (-20.6) below it. Not changed: a per-machine level would be new host code, and the other 29 are
