@@ -1086,7 +1086,9 @@ def _shift_by(p: Prog, d: int, s: int) -> None:
 # 2026-11-12 (perc-layout): the subroutines only events run (measured: VO-6's trig, the TRX coefficients on a knob
 # change, the integer divide of P-I's and TRX-MA's knob scaling) go beside the steps that call them (dnfw.md.voice
 # STEP_SPAN)
-SUB_SPAN = {"trx_coefs": "perc2a", "md_idiv": "perc2a", "vo6_bqx": "perc2b"}
+# v0.52 merge: trx_coefs back in PERC's own span (v0.51's float TRX filters' pieces made it larger than span 2a
+# holds beside the host bodies; it runs on a knob change only, and the main span has the room)
+SUB_SPAN = {"md_idiv": "perc2a", "vo6_bqx": "perc2b"}
 
 
 def program(L: M.Layout, rings_sw: int, prefix: str = "pk") -> str:
