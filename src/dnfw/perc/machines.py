@@ -73,6 +73,10 @@ FX_NAMES = (("AMD", "Amp Mod Depth"), ("AMF", "Amp Mod Rate"), ("EQF", "EQ Freq"
             ("EQG", "EQ Gain"), ("FLTF", "Filter Base"), ("FLTW", "Filter Width"),
             ("FLTQ", "Filter Q"))
 FRAME = 0x25C48C
+# 2026-11-12 (velocity): the frame slot the ColdFire writes a voice's note velocity into (vel x 256) for our machine
+# types (csrc/slides/slide.c VEL_SLOT). None of our machines reads it otherwise (PARAMS, FX_PARAMS, P3_RECS, TYPE_REC,
+# the sample machines' records); on a stock machine it is FM TONE's KSA, so the ColdFire leaves stock voices alone.
+VEL_SLOT = 62
 
 
 def frame_offset(slot: int) -> int:

@@ -150,6 +150,12 @@ def masks(stock: bytes) -> tuple[int, list[int]]:
     return mask(SHARED_PAGES), [mask((p,)) for p in MACHINE_PAGES]
 
 
+def _vel_slot() -> int:
+    """2026-11-12: the frame slot slide.c writes our voices' note velocity into (dnfw.perc.machines.VEL_SLOT)"""
+    from .perc import machines as PM
+    return PM.VEL_SLOT
+
+
 def c_header(stock: bytes) -> str:
     shared, machine = masks(stock)
 
@@ -175,6 +181,7 @@ def c_header(stock: bytes) -> str:
             f"static const char *const sl_len_text[{len(SLEN_TEXT)}] = {{{texts}}};\n"
             f"#define SL_PERC_TYPE {PERC_TYPE}\n#define SL_PERC_TYPE_SLOT {PERC_TYPE_SLOT}\n"
             f"#define SL_PERC_N {len(MD.MACHINES)}\n"
+            f"#define SL_VEL_SLOT {_vel_slot()}\n"
             f"static const unsigned char sl_perc_slot[8] = {{{', '.join(map(str, PERC_SLOTS))}}};\n"
             f"static const unsigned char sl_perc_bits[{len(MD.MACHINES)}] = {{{md_bits}}};\n"
             f"static const unsigned int sl_perc_fx[4] = {fx};\n"

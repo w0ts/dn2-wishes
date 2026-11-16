@@ -120,6 +120,10 @@ SLOT_N = 0x31C0                            # 2026-11-10 (poly16): mnm_ages' loop
 # scratch below the keys: nothing has used 0..0x3000 since the render scratch went to L1 (v0.43)
 CUM_OFF = 0x2FC0
 assert CUM_OFF + 4 * 16 <= MNM_KEYS_OFF
+# 2026-11-12 (velocity, the User: "like Sophie, and our other synths too"): each slot's attenuation 1 - vel/127,
+# latched at its trig (vel_latch), applied at the output guard; 0 (full level) until a velocity arrives. After
+# ANALOG 2's mix tables (dnfw.mnm.analog2.TABLES_OFF, 106 words)
+VEL_OFF = 0x3400
 # 2026-11-10 (poly16, the User: 16 PLAITS voices on every engine): 30,000, not MNM_COST's 60,000: a
 # note's start costs about a steady block now (the heaviest engine's ~25,000 on the memory clock),
 # and sixteen notes started together must fit the frame at it (16 x 60,000 cannot: only six
@@ -477,6 +481,7 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
     _shift_by(p, 1, 9)
     p.iop(0, 0, "AND", 1)
     p.st(C["trig"], 0)
+    vel_latch(p, L)
     # TYPE and the eight parameters from the frame
     p.ld(9, C["t"])
     t146(p, 10, 9)
@@ -671,6 +676,40 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
 OUT_LIMIT = 8.0                                # v0.33: our voices' samples, at most (+- 18 dBFS)
 
 
+def _vel_word(p: Prog, L: M.Layout) -> None:
+    """I1 = this slot's attenuation word (VEL_OFF + 4 t). Clobbers R9, R11, R12."""
+    p.ld(9, L.C["t"])
+    p.lsh(12, 9, 2)
+    p.iconst(11, L.md.mnm.scratch + VEL_OFF)
+    p.iop(12, 11, "+", 12)
+    p.seti(1, 12)
+
+
+def vel_latch(p: Prog, L: M.Layout) -> None:
+    """2026-11-12: at the slot's trig, its note's velocity (frame slot M.VEL_SLOT, vel x 256; 0: none sent, full level)
+    as the attenuation (127 - vel) / 127, so 127 and none are exactly 0 (the voice bit for bit as before). Clobbers
+    R0, R1, R4, R9..R12, I1."""
+    C = L.C
+
+    def latch():
+        p.ld(9, C["t"])
+        t146(p, 10, 9)
+        half(p, 4, M.frame_offset(M.VEL_SLOT), 10)
+        p.lsh(4, 4, -8)
+        p.iconst(12, 127)
+        p.ifz(4, "EQ", lambda: p.iconst(4, 127))
+        p.iop(4, 4, "MIN", 12)
+        p.iop(4, 12, "-", 4)                       # 127 - vel
+        p.iconst(12, 0)
+        p.float_(4, 4, 12)
+        p.fconst(12, 1.0 / 127.0)
+        p.fop(4, 4, "*", 12)
+        _vel_word(p, L)
+        p.sti(0, 1, 4)
+    p.ld(0, C["trig"])
+    p.ifz(0, "NE", latch)
+
+
 def out_guard(p: Prog, L: M.Layout) -> None:
     """v0.33 (Moog, CAT: a PERC track burst into white noise, then all audio went silent until
     a restart -- the signature of a voice blowing up: a resonant filter or a feedback state
@@ -678,9 +717,14 @@ def out_guard(p: Prog, L: M.Layout) -> None:
     reverb, where it stays). Every sample of the block our voice wrote is held to
     +-OUT_LIMIT; and if one is not finite (infinite or NaN: its exponent all ones), the whole
     block is zeroed and the voice's state cleared (its 'on' word with it: the next block starts
-    it fresh, as a new machine), so nothing non-finite ever leaves our code. Uses R0-R2, R5,
-    R10-R14, I1, I2, I4 and fxy (a flag, free after the effects)."""
+    it fresh, as a new machine), so nothing non-finite ever leaves our code. 2026-11-12: each sample first scaled
+    by the slot's velocity (vel_latch; F6 = 1 - its attenuation). Uses R0-R2, R5, R6, R9-R14, I1, I2, I4 and fxy
+    (a flag, free after the effects)."""
     C = L.C
+    _vel_word(p, L)                            # 2026-11-12: x vel/127 = 1 - the slot's attenuation (vel_latch)
+    p.ldi(6, 0, 1)
+    p.fconst(12, 1.0)
+    p.fop(6, 12, "-", 6)
     p.iconst(0, 0)
     p.st(C["fxy"], 0)
     p.ld(0, C["buf"])
@@ -698,6 +742,7 @@ def out_guard(p: Prog, L: M.Layout) -> None:
         # samples in turn in R0 and R2 through I1, so the next sample's load and each store but the pass's
         # last ride on a compute: 20 instructions the four samples, not 24
         def sample(x: int, y: int | None, first: bool) -> None:
+            p.fop(x, x, "*", 6)                # 2026-11-12: x vel/127 (the NaN test below sees the scaled sample)
             p.fop(1, x, "*", 11)               # (takes in the store before it, if any)
             if y is not None and first:
                 p.ldi(y, 1, 1)                 # the next sample (I1 still at this one)

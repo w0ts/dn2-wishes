@@ -97,6 +97,14 @@ s8 sl_lastv[NV] D = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
 u32 sl_started D;                               /* slides begun (a counter for the checks) */
 u32 sl_ticks D;                                 /* frames the tick has run */
 
+/* 2026-11-12, velocity on OUR machines (the User: "like Sophie, and our other synths too"): each voice's note
+ * velocity, latched at its note (the track's VELOCITY cell, vel x 256, set at 0x40026ac0 before sl_pre's
+ * 0x40026bac), is written every frame into frame slot SL_VEL_SLOT of a voice on one of our machine types (5 and up;
+ * the slot is FM TONE's KSA on a stock voice, which is left alone). The DSP's voice host latches it at the voice's
+ * trig and scales the voice by vel/127 (dnfw.perc.program vel_latch). 0: no note yet, full level. */
+#define VELOCITY ((volatile u16 *)0x8000DD40u)       /* per track (docs/modulation-matrix.md) */
+u16 sl_vel[NV] D;
+
 static void capture(u32 t, u32 from_voice)
 {
     for (u32 s = 0; s < NS; s++)
@@ -112,6 +120,7 @@ void sl_pre(u32 v, u32 t)
 {
     if (v >= NV || t >= NV)
         return;
+    sl_vel[v] = VELOCITY[t];
     sl_v[v].n = 0;
     u32 f = FRAMES;
     if (sl_cap_frame[t] != f) {
@@ -248,6 +257,11 @@ u32 sl_smooth(void *src)
     if (w < 1200 || w > 60000)
         w = 120 * 120;
     u32 inc = (w << 16) / 112500u;              /* 1/24 steps a frame, 16.16, at 1x */
+    for (u32 v = 0; v < NV; v++) {              /* velocity: our voices' note velocity into the frame */
+        const u8 *s = VSOUND(v);
+        if (sl_vel[v] && s && s[SOUND_TYPE] >= 5 && s[SOUND_TYPE] < 32)
+            OUT[IDX(v, SL_VEL_SLOT)] = sl_vel[v];
+    }
     for (u32 v = 0; v < NV; v++) {
         struct slide *sl = &sl_v[v];
         if (!sl->n)
