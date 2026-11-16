@@ -101,10 +101,22 @@ against stock's own envelope in the SHARC runner, block by block (`scripts/sharc
 
 ## The AMP pages
 
-[AMP] on stock's AMP page now steps AMP 1/3 (stock's) -> 2/3 (ENV2) -> 3/3 (the scope) -> 1/3. Each page's place is
+[AMP] on stock's AMP page now steps AMP 1/3 (stock's) -> 2/3 (ENV2) -> 3/3 (the scope) -> 1/3. Their titles (the
+User, 2026-11-13): **ENV1/AMP**, **ENV2**, **WAVEFORM**; the page dots say which of three. Stock's own header for the
+AMP mode, a bare "AMP", is renamed ENV1/AMP by inserts' header hook (`ins_header`, as it names FX's pages), so only
+that page's title changes, nowhere else stock writes "AMP". The gate's `matrix` step (`titles`) reads each back from
+the title bar and checks it ends clear of the screen's right edge. Each page's place is
 one constant in `csrc/waverider/amp_pages.h` (the User: the scope "might move elsewhere"). ENV2's page
-(`csrc/matrix/env2_page.c`) lays out the envelope as stock's AMP page does: A ATK, B DEC, C SUS, D REL, E RSET,
-F MODE (ADSR / AHD). HOLD is not on stock's 1.12 page either. The destinations are set from the knob popup (phase 4).
+(`csrc/matrix/env2_page.c`) is drawn by stock's own AMP page code with ENV2's values (the User, 2026-11-13: "why is
+ENV2 not like ENV1"): stock's draw (`0x4006dfb6`) walks the 8 places, each place's record id from the table of the
+envelope's MODE (`0x400c25d8`, 14 AHD / 15 ADSR), its knob drawn by the page's own method (+180), then the shape
+(`0x40065766` AHD, `0x4006594c` ADSR, from plain values). ENV2's page makes the same calls on stock's AMP page object
+with ENV2's MODE and values: the same knobs, labels, lock look and shape preview. The places (read in 1.12): ADSR
+A ATK, B DEC, C SUS, D REL, E RSET, F MODE; AHD A ATK, B HOLD, C DEC, E RSET, F MODE (D empty). G and H (records 71,
+72: PAN, VOL) are the sound's, not ENV2's: drawn with the sound's values as stock draws them, and turned by stock's
+page beneath, as on AMP 1/3. HOLD (AHD) has no lock kind; with a trig held it does nothing. The gate's
+`matrix` step (`env2page`) sets ENV2 to the sound's own envelope and checks ENV2's page is stock's AMP page pixel for
+pixel below the title bar (but for the page dots), in ADSR and AHD. The destinations are set from the knob popup.
 
 ## The routes popup (phase 4)
 
@@ -121,6 +133,15 @@ F MODE (ADSR / AHD). HOLD is not on stock's 1.12 page either. The destinations a
 - **Editing:** turning the knob sets the lit row's depth live; push-and-turn (or UP/DOWN) moves the lit row. Turned
   from 0, an LFO's row takes its stock route 1 when that is free (DEST and DEP, so a stock unit plays it), else a
   route of the record; a route left at 0 goes when the popup closes.
+- **Deleting** (the User, 2026-11-13: "as FUNC + long press also resets a knob value to default"): inside the popup,
+  FUNC + long push (0.6 s) on the popup's knob deletes the lit row's route. A route of the record goes; stock's
+  route 1 gets DEST 0 and DEP's default back, and its DEP p-locks on this track are freed (the lock pool's record
+  written as stock's free ones are: slot 0xff, track 0xff, 128 x 0xffff, the shape of 76 of 80 records in 1.12's pool).
+  With the lit row empty, every route into this parameter goes. MOD SETUP's rows say READ ONLY. "DELETED" or
+  "ALL CLEARED" shows for a second; NO undoes it with the rest (a freed lock record comes back if still free). A
+  FUNC + tap closes the popup, kept. Outside the popup, FUNC + long push resets the parameter as before. **Not
+  measured:** whether stock keeps other bookkeeping of its lock pool than the records (a lock freed here was only
+  checked in the emulator, not on the unit).
 - **Closing:** the same knob pushed, YES, FUNC + push, another knob turned, any key that leaves, a track change, a
   stock question, 6 s untouched: kept. NO: every change undone.
 - **Refused** (the push stays stock's): a trig held, a stock question, a page of ours up, a MIDI track, a parameter

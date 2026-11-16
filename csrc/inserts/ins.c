@@ -336,9 +336,16 @@ static void say(const char *text, int slide)    /* slide: as stock's switch; els
     STR_FREE(str);
 }
 
-void ins_say(const char *text, int slide)       /* csrc/scope/scope.c: "AMP (2/2)" */
+void ins_say(const char *text, int slide)       /* csrc/scope/scope.c: "ENV2" */
 {
     say(text, slide);
+}
+
+const char *ins_title_now(void)                 /* the checks: the title bar's text, or 0 */
+{
+    void *m = title();
+    const char *t = m ? *(const char *volatile *)((u8 *)m + 0x48) : 0;
+    return t && ram_ok((u32)t & ~3u) ? t : 0;
 }
 
 static const char *const PAGE_NAME[PAGES] = {"FX (1/3)", "FX (2/3)", "FX (3/3)"};
@@ -348,16 +355,25 @@ static const char *const PAGE_NAME[PAGES] = {"FX (1/3)", "FX (2/3)", "FX (3/3)"}
  * track FX mode has one, so stock's header for it is a bare "FX", and every route to the page that
  * shows the header (from a SEND page, whose header mode stock keeps) showed "FX". Here a bare "FX"
  * becomes "FX (1/3)", or "FX (2/3)" / "FX (3/3)" while an INSERT page is up: the header as stock
- * would make it for a mode of three pages. No other mode is named "FX". */
+ * would make it for a mode of three pages. No other mode is named "FX".
+ * 2026-11-13 (the User): the AMP mode's bare "AMP" becomes "ENV1/AMP", page 1 of AMP's three (csrc/scope/scope.c
+ * names the other two). No other mode is named "AMP". */
 void ins_header(void *s)
 {
+    extern const char *const amp_title1;        /* csrc/scope/scope.c */
     static u32 str[4] __attribute__((section(".data")));
     static u32 alloc __attribute__((section(".data")));
-    const char *t = s && ram_ok((u32)s) ? *(const char *volatile *)s : 0;
-    if (!(t && ram_ok((u32)t & ~3u) && t[0] == 'F' && t[1] == 'X' && t[2] == 0))
+    const char *t = s && ram_ok((u32)s) ? *(const char *volatile *)s : 0, *name;
+    if (!(t && ram_ok((u32)t & ~3u)))
+        return;
+    if (t[0] == 'F' && t[1] == 'X' && t[2] == 0)
+        name = PAGE_NAME[ins_up % PAGES];
+    else if (t[0] == 'A' && t[1] == 'M' && t[2] == 'P' && t[3] == 0)
+        name = amp_title1;
+    else
         return;
     str[0] = str[1] = str[2] = str[3] = 0;
-    STR_NEW(str, PAGE_NAME[ins_up % PAGES], &alloc);
+    STR_NEW(str, name, &alloc);
     STR_SET(s, str);
     STR_FREE(str);
 }

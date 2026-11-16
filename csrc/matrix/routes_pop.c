@@ -19,6 +19,12 @@
  * the sum of its source's routes into this slot, in stock's depth word / 256, and the moving bar as stock's kernel
  * (0x400db340) applies it: cell + value x depth / 2048. The lit row says SETUP; its knob does nothing.
  *
+ * FUNC + long push (0.6 s) on the popup's knob deletes the lit row's route (the User, 2026-11-13: as FUNC + long push
+ * resets a knob): a route of the record goes; stock's route 1 gets its DEST 0 and DEP's default back, and its DEP
+ * p-locks on this track are freed (the pool's record made as stock's free ones are). With the lit row empty, every
+ * route into this parameter goes. MOD SETUP's rows say READ ONLY. A short word on screen says what was done; NO
+ * undoes it with the rest.
+ *
  * Turning the knob sets the lit row's depth, live; push-and-turn (or UP / DOWN) moves the lit row. A row turned from 0
  * makes the route: an LFO's stock route 1 first when it is free (DEST, DEP: stock's parameters, so a stock unit plays
  * it), else a route of the record; a route left at 0 is removed when the popup closes. Closed and kept: the same
@@ -69,6 +75,7 @@ typedef short s16;
 #define LONG       900u                                 /* 0.6 s: still held, the parameter is reset */
 #define IDLE       9000u                                /* 6 s untouched: closed */
 #define REDRAW     60u                                  /* 25 a second while up (the moving bar) */
+#define SAY_TIME   1500u                                /* 1 s: DELETED, ALL CLEARED, READ ONLY */
 #define OWN_ROWS   5                                    /* LFO1-3, ENV1, ENV2: ours to edit */
 #define ROWS       11                                   /* then MOD SETUP's six, read only */
 #define SHOWN      5                                    /* the rows on screen */
@@ -103,13 +110,18 @@ static struct {
     u8 undo_routes[4 * 23 + 8];                         /* the record's routes when it opened */
     int undo_n;
     u16 undo_dest[3], undo_dep[3];                      /* stock's route 1 of each LFO when it opened */
+    s32 freed_at[3];                                    /* the pool record a delete freed (each LFO's DEP), -1 none */
+    u8 freed[3][LOCK_REC];                              /* ... as it was, for NO */
     u32 next_draw;
+    const char *say;                                    /* the word on screen, until SAY_AT */
+    u32 say_at;
 } P D_;
 
 /* the checks' counters: FUNC + pushes taken, popups opened, opens refused and why (1 no parameter, 2 refused here,
  * 3 not a sound parameter of the row) */
 u32 mxp_pushes D_ = 0, mxp_opens D_ = 0, mxp_refusals D_ = 0, mxp_why D_ = 0, mxp_rid D_ = 0;
 u32 mxp_turns D_ = 0, mxp_keys D_ = 0;               /* knob turns and key presses taken while up */
+u32 mxp_erased D_ = 0;                                  /* routes a FUNC + long push deleted (the checks) */
 int mxp_detents D_ = 0;                                 /* their detents, summed (the checks) */
 
 /* the page's eight places as the last draw left them (page.c wr_cell): record ids, 0 none */
@@ -269,13 +281,92 @@ static void drop_zeros(void)
         record_put(v, m);
 }
 
+/* the UI track's pattern lock pool (80 records {u8 slot, u8 track, u16[128]}, in RAM a record's slot is the mirror
+ * slot), 0 when the track is not the popup's */
+static u8 *lock_pool(void)
+{
+    u32 ctx = TRACK_CTX(APP());
+    if (!ctx)
+        return 0;
+    void *model = *(void **)(ctx + 44);
+    if (!model || *(u32 *)(ctx + 60) != P.track)
+        return 0;
+    return (u8 *)((u32 (*)(void *))((*(void ***)model)[10]))(model);
+}
+
+/* LFO L's DEP p-locks on this track freed: its pool record made as stock's free ones are (slot 0xff, track 0xff,
+ * every value 0xffff: 76 of 80 records of 1.12's pool read so), kept for NO */
+static void free_dep_locks(u32 l)
+{
+    u8 *table = lock_pool();
+    u32 slot = (u32)RECORD(DEP_REC[l])[1];
+    for (u32 i = 0; table && i < LOCK_RECS; i++) {
+        u8 *rec = table + LOCK_REC * i;
+        if (rec[0] != slot || rec[1] != P.track)
+            continue;
+        if (P.freed_at[l] < 0) {
+            P.freed_at[l] = (s32)i;
+            for (u32 b = 0; b < LOCK_REC; b++)
+                P.freed[l][b] = rec[b];
+        }
+        for (u32 b = 0; b < LOCK_REC; b++)
+            rec[b] = 0xFF;
+    }
+}
+
 static void undo(void)
 {
+    u8 *table = lock_pool();
     for (u32 l = 0; l < 3u; l++) {
         stock_set(P.track, DEST_REC[l], P.undo_dest[l]);
         stock_set(P.track, DEP_REC[l], P.undo_dep[l]);
+        if (table && P.freed_at[l] >= 0 && table[LOCK_REC * (u32)P.freed_at[l]] == 0xFFu)   /* still free */
+            for (u32 b = 0; b < LOCK_REC; b++)
+                table[LOCK_REC * (u32)P.freed_at[l] + b] = P.freed[l][b];
     }
     record_put(P.undo_routes, P.undo_n);
+}
+
+/* row R's route into this slot deleted -> 1 when there was one */
+static int del_route(u32 r)
+{
+    u8 v[4 * 23 + 8];
+    int where, at, n = routes_get(P.track, v);
+    row_depth(r, &where, &at);
+    if (where == 1) {
+        stock_set(P.track, DEST_REC[r], 0);
+        stock_set(P.track, DEP_REC[r], (u32)RECORD(DEP_REC[r])[4]);
+        free_dep_locks(r);
+    } else if (where == 2) {
+        for (int i = at; i + 4 < n; i++)
+            v[i] = v[i + 4];
+        record_put(v, n - 4);
+    }
+    return where != 0;
+}
+
+static void say(const char *w)
+{
+    P.say = w;
+    P.say_at = FRAMES_NOW + SAY_TIME;
+    smp_overlay_dirty = 1;
+}
+
+/* FUNC + long push on the popup's knob: the lit row's route deleted, or with none, every route into this slot */
+static void erase(void)
+{
+    if (P.lit >= OWN_ROWS) {
+        say("READ ONLY");
+        return;
+    }
+    if (del_route(P.lit)) {
+        mxp_erased++;
+        say("DELETED");
+        return;
+    }
+    for (u32 r = 0; r < OWN_ROWS; r++)
+        mxp_erased += (u32)del_route(r);
+    say("ALL CLEARED");
 }
 
 /* --- MOD SETUP's routes (stock's): read only ----------------------------------------------------- */
@@ -344,7 +435,9 @@ static void open(u32 k)
     for (u32 l = 0; l < 3u; l++) {
         P.undo_dest[l] = (u16)stock_get(t, DEST_REC[l]);
         P.undo_dep[l] = (u16)stock_get(t, DEP_REC[l]);
+        P.freed_at[l] = -1;
     }
+    P.say = 0;
     P.last = FRAMES_NOW;
     P.up = 1;
     mxp_opens++;
@@ -378,10 +471,6 @@ int mxp_pop(u8 *it)
     if (it[0] == IT_KEY && code >= K_PUSH0 && code < K_PUSH0 + 8u) {
         u32 k = code - K_PUSH0;
         if (press && smp_func_held) {                   /* FUNC + push: ours; told apart on its release */
-            if (P.up) {
-                close(1);
-                return 1;
-            }
             P.push_at = FRAMES_NOW;
             P.push_k = k + 1u;
             mxp_pushes++;
@@ -391,8 +480,12 @@ int mxp_pop(u8 *it)
         if (release && P.push_k == k + 1u) {
             u32 held = FRAMES_NOW - P.push_at;
             P.push_k = 0;
-            if (!P.reset_done && held < TAP)
-                open(k);
+            if (!P.reset_done && held < TAP) {
+                if (P.up)
+                    close(1);                           /* up: a tap closes it, kept */
+                else
+                    open(k);
+            }
             return 1;
         }
         if (P.up && k == P.knob) {                      /* the same knob pushed and let go, no turn: closed, kept */
@@ -454,7 +547,11 @@ void mxp_poll(void *screen)
     if (P.push_k && !P.reset_done && FRAMES_NOW - P.push_at >= LONG) {
         u32 k = P.push_k - 1u, rid = knob_rid(k), t = UI_TRACK & 15u;
         P.reset_done = 1;
-        if (rid && !refused(t))
+        if (P.up) {                                     /* up: the route deleted (its own knob only) */
+            P.last = FRAMES_NOW;
+            if (k == P.knob)
+                erase();
+        } else if (rid && !refused(t))
             stock_set(t, rid, (u32)RECORD(rid)[4]);     /* the record's default, as stock's setValue writes it */
     }
     if (!P.up)
@@ -552,14 +649,10 @@ static void mod_row(void *c, u32 r, int y, int live, s32 v)
  * head is the mirror slot) */
 static void locks_strip(void *c)
 {
-    u32 ctx = TRACK_CTX(APP()), len, cur, page;
+    u32 ctx = TRACK_CTX(APP()), len, cur, page, t = P.track;
+    const u8 *table = lock_pool(), *rec = 0;
     if (!ctx)
         return;
-    void *model = *(void **)(ctx + 44);
-    u32 t = *(u32 *)(ctx + 60);
-    if (!model || t != P.track)
-        return;
-    const u8 *table = (const u8 *)((u32 (*)(void *))((*(void ***)model)[10]))(model), *rec = 0;
     len = PATTERN_LEN(ctx);
     if (!table || !len)
         return;
@@ -635,4 +728,9 @@ void mxp_draw(void *c)
         }
     }
     locks_strip(c);
+    if (P.say && (int)(P.say_at - FRAMES_NOW) > 0) {    /* what a FUNC + long push did */
+        fill(c, 28, 24, 99, 38, 0);
+        TEXT(c, FONT, 34, 28, 0, "%s", P.say);
+        invert(c, 28, 24, 99, 38);
+    }
 }

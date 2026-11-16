@@ -64,7 +64,10 @@ failure:
    same with no route and with every route, under its bound; ENV1 (the row's AMP cells) and ENV2 (the record) through
    HOLD's own note hooks, each routed cell every frame as the clone's model; the routes popup through the panel
    (FUNC + push opens it, turns make routes, push-and-turn moves the row, YES keeps, a route at 0 goes, NO undoes,
-   FUNC + long push resets the parameter; LOCKS shows the parameter's own locks; MOD SETUP's rows read only); ENV2's
+   FUNC + long push resets the parameter; LOCKS shows the parameter's own locks; MOD SETUP's rows read only;
+   FUNC + long push inside deletes a route, its DEP lock freed, NO brings them back); the AMP pages' titles
+   (ENV1/AMP, ENV2, WAVEFORM, read from the title bar, clear of the right edge); ENV2's page drawn by stock's AMP
+   page code (with ENV2 set to the sound's envelope, stock's page pixel for pixel, ADSR and AHD); ENV2's
    locks through the panel (grid recording, a trig held, an ENV2 knob turned: the step's lock; the lock list's tail;
    SAVE as id 203.., LOAD back).
 6y. **the envelope clone** (2026-11-12, `sharc_matrix_env.py --quick`): the model ENV1/ENV2 run against stock's own AMP

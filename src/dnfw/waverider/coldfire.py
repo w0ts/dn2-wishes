@@ -1211,7 +1211,7 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
         layout[name] = csyms[name]              # 2026-11-12: the DSP load budget (csrc/load): the check reads its state
     for name in ("mx_poll", "mx_eval", "mx_lay", "mx_compiles", "mx_env_on", "mx_env_off", "mxp_pop", "mxp_poll",
                  "mxp_draw", "mxp_visible", "mxp_pushes", "mxp_opens", "mxp_refusals", "mxp_why",
-                 "mxp_rid", "mxp_turns", "mxp_keys", "mxp_detents", "mxp_setup_dep", "mxp_setup_rows",
+                 "mxp_rid", "mxp_turns", "mxp_keys", "mxp_detents", "mxp_setup_dep", "mxp_setup_rows", "mxp_erased", "ins_title_now",
                  "env2_visible", "mx_env2_locks", "sl_e2_held", "sl_e2_set"):
         layout[name] = csyms[name]              # 2026-11-12: the matrix (csrc/matrix): the checks call them
     for name in ("mod_mask_hook", "mod_lfo_mask", "mod_eval", "mod_eval_pre", "mod_wb", "mod_wb_cell",

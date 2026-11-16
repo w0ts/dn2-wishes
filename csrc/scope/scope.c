@@ -122,9 +122,13 @@ static int amp_page(void)                       /* stock's AMP page is the page 
     return ins_view_of(AMP_PAGE_VTABLE) != 0;
 }
 
+/* the pages' titles (the User, 2026-11-13): stock's AMP page is ENV1 (it is routable, docs/matrix.md), so "ENV1/AMP"
+ * (inserts' ins_header renames stock's own "AMP" with it); the page dots say which of three */
+const char *const amp_title1 = "ENV1/AMP";
+
 static void amp_open(int sub)
 {
-    static const char *const TITLE[AMP_PAGES] = {"AMP (1/3)", "AMP (2/3)", "AMP (3/3)"};
+    static const char *const TITLE[AMP_PAGES] = {[AMP_STOCK] = "ENV1/AMP", [AMP_ENV2] = "ENV2", [AMP_SCOPE] = "WAVEFORM"};
     amp_sub = sub;
     scope_up = sub == AMP_SCOPE;
     phase = 0;
@@ -155,7 +159,7 @@ int scope_pop(u8 *it)
         }
         return 0;
     }
-    if (amp_sub == AMP_ENV2 && it[0] == IT_KNOB && code >= 1 && code <= 8) {
+    if (amp_sub == AMP_ENV2 && it[0] == IT_KNOB && code >= 1 && code <= 6) {   /* G, H: the sound's PAN, VOL: stock's */
         if (env2_turn(code - 1, (s8)it[8]))
             smp_overlay_dirty = 1;
         return 1;
@@ -243,9 +247,23 @@ void scope_draw(void *c)
     PAGE_DOTS(0, c, AMP_PAGES, AMP_SCOPE, 7);
 }
 
-/* page.c wr_screen, after stock's page when nothing of ours covers it: AMP 1/3's dots */
+extern const char *ins_title_now(void);         /* csrc/inserts/ins.c */
+
+static int named(const char *t, const char *w)
+{
+    while (*w && *t == *w)
+        t++, w++;
+    return !*w && !*t;
+}
+
+/* page.c wr_screen, after stock's page when nothing of ours covers it: AMP 1/3's dots, and its title ENV1/AMP over
+ * stock's own (1.12 says "Amplitude" on its title line; inserts' ins_header renames a bare "AMP" header) */
 void scope_dots(void *c)
 {
-    if (amp_sub == AMP_STOCK && amp_page())
+    if (amp_sub == AMP_STOCK && amp_page()) {
+        const char *t = ins_title_now();
+        if (t && (named(t, "Amplitude") || named(t, "AMP")))
+            ins_say(amp_title1, 0);
         PAGE_DOTS(0, c, AMP_PAGES, AMP_STOCK, 7);
+    }
 }

@@ -438,6 +438,46 @@ def scenario_popup(a, report, sym):
     panel.tap(NO)
     after = (record(), param(4), param(8), param(12), param(16))
     check("popup: NO undoes every change", after == before and visible() == 0, f"{after} vs {before}")
+    # FUNC + long push inside: delete (the User, 2026-11-13). The state set directly: LFO1's stock route 1 into FREQ
+    # (DEST 67, DEP 0x4800) with a DEP p-lock on step 2, LFO2's and ENV1's routes in the record
+    m.write(snd + 20 + 2 * 4, struct.pack(">H", 67 << 8))
+    m.write(snd + 20 + 2 * 8, struct.pack(">H", 0x4800))
+    rb = m.alloc(16)
+    m.write(rb, bytes([1, 67, 0x44, 0x00, 3, 67, 0x3C, 0x00]))
+    m.flush()
+    MO.guest(m, sym["wish_put"], snd, TAG, rb, 8)
+    deplock = None
+    if tbl:                                             # a p-lock of LFO1's DEP (slot 8) on step 2
+        heads = [m.read(tbl + 258 * i, 1)[0] for i in range(80)]
+        deplock = heads.index(0xFF) if 0xFF in heads else None
+    if deplock is not None:
+        vals = [0xFFFF] * 128
+        vals[1] = 0x6000
+        m.write(tbl + 258 * deplock, bytes([8, 0]) + b"".join(struct.pack(">H", v) for v in vals))
+        m.flush()
+    lockrec0 = bytes(m.read(tbl + 258 * deplock, 258)) if deplock is not None else b""
+    before = (record(), param(4), param(8), param(12), param(16), lockrec0)
+    e0 = m.long(sym["mxp_erased"])
+    func_push(300)                                      # LFO1 lit
+    func_push(1000)
+    freed = bytes(m.read(tbl + 258 * deplock, 258)) if deplock is not None else b""
+    check("popup: FUNC + long push deletes the lit row's route (LFO1's route 1: DEST off, its DEP lock freed)",
+          visible() == 1 and m.long(sym["mxp_erased"]) == e0 + 1 and param(4) >> 8 != 67
+          and depth_of(1, 12, 16)[0] == "record" and freed == b"\xff" * 258,
+          f"erased {m.long(sym['mxp_erased']) - e0}, LFO1 DEST {param(4):#06x}, lock record {freed[:4].hex()}")
+    panel.screen("popup_deleted")
+    for _ in range(2):                                  # DOWN twice: LFO3, no route here (a push-and-turn's single
+        panel.tap(DOWN)                                 # count can be lost from rest, and a bare push closes)
+    func_push(1000)
+    panel.screen("popup_all_cleared")
+    check("popup: on an empty row, every route into FREQ goes (LFO2's, ENV1's)",
+          m.long(sym["mxp_erased"]) == e0 + 3 and depth_of(1, 12, 16)[0] is None
+          and not any(r[1] == 67 for r in routes()), f"erased {m.long(sym['mxp_erased']) - e0}, {record().hex()}")
+    panel.tap(NO)
+    after = (record(), param(4), param(8), param(12), param(16),
+             bytes(m.read(tbl + 258 * deplock, 258)) if deplock is not None else b"")
+    check("popup: NO brings back what the deletes took, the DEP lock too", after == before and visible() == 0,
+          f"{after[:5]} vs {before[:5]}, lock back {after[5] == before[5]}")
     m.write(snd + 20 + 2 * 67, struct.pack(">H", 0x1234))
     m.flush()
     held = func_push(1000)
@@ -516,11 +556,111 @@ def scenario_env2lock(a, report, sym):
     report["env2lock"] = {"lock": lock, "tail": list(e2)}
 
 
+def scenario_titles(a, report, sym):
+    """the AMP pages' titles (the User, 2026-11-13): [AMP] steps ENV1/AMP (stock's page; its own header "AMP" renamed
+    by inserts' ins_header) -> ENV2 -> WAVEFORM -> ENV1/AMP; each title read back from the title bar, and its lit
+    width on screen measured (it must end clear of the screen's right edge)"""
+    from emu import panel as EP
+    from emulib.panel import Panel
+    m = setup(a.build, a.snapshot)
+    panel = Panel(m, png_dir=str(pathlib.Path(a.json or "out/matrix").with_suffix("")) + "_png")
+    m.write(MO.UI_TRACK, b"\x00")
+    panel.settle(3_000_000)
+    check("titles: track 1 is WaveTone", MO.set_machine(m, panel, 0, 1) == 1)
+
+    def title():
+        p = MO.guest(m, sym["ins_title_now"]) & 0xFFFFFFFF
+        return bytes(m.read(p, 24)).split(b"\0")[0].decode("ascii", "replace") if p else None
+
+    seen = {}
+    for want in ("ENV1/AMP", "ENV2", "WAVEFORM", "ENV1/AMP"):
+        panel.tap((0, 3))                               # [AMP]
+        panel.settle(30_000_000)                        # the title's slide over
+        name = f"title_{len(seen)}_{want.replace('/', '_')}"
+        panel.screen(name)
+        frame = bytes(panel.capture.frames[-1]) if panel.capture.frames else b""
+        lit = EP.lit(frame) if frame else set()
+        dark = [x for x in range(20, 128) if any((x, y) not in lit for y in range(2, 8))]
+        seen[name] = (title(), max(dark) if dark else None)   # the bar is lit, its letters dark: where they end
+        check(f"titles: [AMP] shows {want!r}", seen[name][0] == want, f"title {seen[name][0]!r}")
+    report["titles"] = seen
+    print(f"    titles, where each title's letters end: {seen}", flush=True)
+    check("titles: every title's letters end inside the bar, clear of its right end (x < 120)",
+          all(e is not None and e < 120 for _, e in seen.values()), str(seen))
+
+
+def scenario_env2page(a, report, sym):
+    """ENV2's page drawn by stock's own AMP page code with ENV2's values (csrc/matrix/env2_page.c; the User, 2026-11-13):
+    ENV2's record set to the sound's own AMP envelope, ENV2's page (AMP 2/3) must be stock's AMP page (1/3) pixel for
+    pixel below the title bar, but for the page dots; in ADSR and in AHD. Then ENV2's ATK changed: the picture changes"""
+    from emu import panel as EP
+    from emulib.panel import Panel
+    m = setup(a.build, a.snapshot)
+    panel = Panel(m, png_dir=str(pathlib.Path(a.json or "out/matrix").with_suffix("")) + "_png")
+    m.write(MO.UI_TRACK, b"\x00")
+    panel.settle(3_000_000)
+    check("env2page: track 1 is WaveTone", MO.set_machine(m, panel, 0, 1) == 1)
+    snd = m.long(MO.KIT) + 52
+    cell = lambda slot: m.read(snd + 20 + 2 * slot, 1)[0]                          # noqa: E731
+    g = lambda fn, *args: MO.guest(m, sym[fn], *args) & 0xFFFFFFFF                    # noqa: E731
+    buf = m.alloc(16)
+
+    def put_env(val):                                   # guest: the running UI's registers kept (not Machine.call)
+        m.write(buf, val)
+        m.flush()
+        return MO.guest(m, sym["wish_put"], snd, ENV_TAG, buf, len(val)) & 0xFFFFFFFF
+
+    def screen(name):
+        panel.screen(name)
+        frame = bytes(panel.capture.frames[-1]) if panel.capture.frames else b""
+        return EP.lit(frame) if frame else set()
+
+    def amp_pages():
+        """-> the lit pixels of AMP 1/3 and 2/3, ENV2 set to the sound's envelope (ATK HOLD DEC SUS REL MODE RSET)"""
+        env = [cell(s) for s in (81, 82, 83, 84, 85, 91, 92)]
+        put_env(bytes(env + [0]))
+        panel.settle(30_000_000)                        # stock's AMP page, redrawn with the sound's MODE
+        one = screen(f"env2page_stock_{env[5]}")
+        panel.tap((0, 3))                               # [AMP]: ENV2's
+        panel.settle(30_000_000)
+        two = screen(f"env2page_env2_{env[5]}")
+        for _ in range(2):                              # [AMP] twice: WAVEFORM, then stock's again
+            panel.tap((0, 3))
+            panel.settle(10_000_000)
+        return env, one, two
+
+    panel.tap((0, 3))                                   # [AMP]: stock's AMP page
+    panel.settle(10_000_000)
+    out = {}
+    for mode in (1, 0):                                 # ADSR (the default), then AHD
+        m.write(snd + 20 + 2 * 91, bytes([mode, 0]))    # the sound's AMP MODE (stock's draw reads the sound)
+        m.flush()
+        env, one, two = amp_pages()
+        diff = sorted((one ^ two))
+        below = [(x, y) for x, y in diff if y >= 12 and x < 122]   # not the title bar (ENV1/AMP, ENV2), the page dots
+        box = (min(x for x, _ in below), min(y for _, y in below), max(x for x, _ in below),
+               max(y for _, y in below)) if below else None
+        out[mode] = {"env": env, "differ": len(below), "box": box, "lit": (len(one), len(two))}
+        check(f"env2page: MODE {'ADSR' if mode else 'AHD'}: ENV2's page is stock's AMP page but for the page dots",
+              env[5] == mode and len(one) > 200 and not below and g("env2_visible") == 0,
+              f"{len(below)} pixels differ, in {box}; lit {len(one)}, {len(two)}")
+    env = [cell(s) for s in (81, 82, 83, 84, 85, 91, 92)]
+    put_env(bytes([(env[0] + 40) % 128] + env[1:] + [0]))
+    panel.settle(10_000_000)
+    one = screen("env2page_stock_again")
+    panel.tap((0, 3))
+    panel.settle(30_000_000)
+    two = screen("env2page_env2_atk")
+    moved = len([(x, y) for x, y in one ^ two if y >= 9])
+    check("env2page: ENV2's own ATK changes its knob and shape", moved > 20, f"{moved} pixels differ")
+    report["env2page"] = out
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--build", required=True)
     p.add_argument("--snapshot", default=MO.SNAP)
-    p.add_argument("--scenario", default="exact,env,popup,env2lock,cost")
+    p.add_argument("--scenario", default="exact,env,popup,env2lock,titles,env2page,cost")
     p.add_argument("--frames", type=int, default=240)
     p.add_argument("--json", default=None)
     a = p.parse_args()
@@ -531,6 +671,8 @@ def main() -> int:
         {"exact": lambda: scenario_exact(a, report, sym), "env": lambda: scenario_env(a, report, sym),
          "popup": lambda: scenario_popup(a, report, sym),
          "env2lock": lambda: scenario_env2lock(a, report, sym),
+         "titles": lambda: scenario_titles(a, report, sym),
+         "env2page": lambda: scenario_env2page(a, report, sym),
          "cost": lambda: scenario_cost(a, report, sym)}[sc]()
     report["ok"] = not FAILS
     if a.json:
