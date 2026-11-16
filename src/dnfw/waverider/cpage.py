@@ -44,6 +44,8 @@ LINK_SOURCES = [SOURCE.parents[1] / "sampler" / "link.c", SOURCE.parents[1] / "s
                 SOURCE.parents[1] / "scope" / "scope.c",              # AMP page 2's oscilloscope (2026-11-11)
                 SOURCE.parents[1] / "hold" / "hold.c",                # DRONE's HOLD latch (2026-11-10)
                 SOURCE.parents[1] / "hold" / "hooks.S",
+                SOURCE.parents[1] / "para" / "vmenu.c",               # PARA on the VOICE menu's B (2026-11-15)
+                SOURCE.parents[1] / "para" / "hooks.S",
                 SOURCE.parent / "popup.c",                            # the list popup (2026-11-09)
                 SOURCE.parents[1] / "msel" / "msel.c",               # MACHINE SEL in two columns (2026-11-11)
                 SOURCE.parents[1] / "msel" / "live.c",               # ... LIVE SELECT, its PERSONALIZE row (2026-11-12)
@@ -109,7 +111,9 @@ FXP_ENTRIES = ["fxp_pop", "fxp_draw", "fxp_begin", "fxp_seen", "fxp_words", "fxp
 INS_ENTRIES = ["ins_pop", "ins_draw", "ins_visible", "ins_words", "ins_gen", "ins_up", "ins_sel", "ins_selv", "ins_mod", "ins_kv", "ins_hdr_tail",
                "ins_inst", "ins_edits", "ins_pj_write_hook", "ins_store_poll", "ins_wr_ring", "ins_wr_head",
                "ins_st_writes", "ins_st_loads", "ins_st_fails"]
-HOLD_ENTRIES = ["hold_note_hook", "hold_final_hook", "hold_final", "hold_len", "hold_keys", "hold_poll", "hold_seq", "hold_key", "hold_count", "hold_drops", "hold_rel"]   # DRONE's HOLD (csrc/hold)
+HOLD_ENTRIES = ["hold_note_hook", "hold_final_hook", "hold_final", "hold_len", "hold_keys", "hold_poll", "hold_seq", "hold_key", "hold_count", "hold_drops", "hold_rel",
+                "para_live", "para_kept", "para_count"]   # DRONE's HOLD (csrc/hold); ANALOG 2's PARA legato (2026-11-15)
+PARA_ENTRIES = ["vm_seen_hook", "vm_begin", "vm_draw", "vm_pop", "vm_seen", "vm_sets"]   # PARA on the VOICE menu (csrc/para)
 DEVTEST_ENTRIES = ["dt_rx", "dt_poll", "dt_sw", "smp_bulk_at", "prof_isr", "prof_audio",
                    "dt_glass", "dt_present", "dt_inv",   # the test channel (csrc/devtest)
                    "dt_usb_rebuild", "dt_usb_items", "dt_usb_changes", "set_remote", "set_reset_seen"]
@@ -144,7 +148,7 @@ LOAD_ENTRIES = ["load_alloc_hook", "load_poll", "load_voice", "load_stock", "loa
                 # 2026-11-13: the budget by the DSP's room, the release tails (the checks set and read them)
                 "load_meas", "load_busins", "load_pend", "load_pend_at", "load_tails", "load_by_room", "load_last_free",
                 "smp_tlm_cost", "smp_room_now", "smp_room_at", "smp_periods"]
-LINK_ENTRIES = LINK_ENTRIES + WISH_ENTRIES + LOAD_ENTRIES + LIVE_ENTRIES + ENG_ENTRIES + DEVTEST_ENTRIES + LZMA7_ENTRIES + MOD_ENTRIES + SLIDE_ENTRIES + METER_ENTRIES + FDN8_ENTRIES + XDLY_ENTRIES + FXP_ENTRIES + INS_ENTRIES + HOLD_ENTRIES
+LINK_ENTRIES = LINK_ENTRIES + WISH_ENTRIES + LOAD_ENTRIES + LIVE_ENTRIES + ENG_ENTRIES + DEVTEST_ENTRIES + LZMA7_ENTRIES + MOD_ENTRIES + SLIDE_ENTRIES + METER_ENTRIES + FDN8_ENTRIES + XDLY_ENTRIES + FXP_ENTRIES + INS_ENTRIES + HOLD_ENTRIES + PARA_ENTRIES
 
 
 # the list popup (csrc/waverider/popup.c, docs/popups.md): on our machines' and FX's list parameters,

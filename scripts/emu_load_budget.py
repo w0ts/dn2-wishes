@@ -26,6 +26,13 @@ stole, as every voice was released, and judged by a fixed LOAD_AVAIL the unit's 
 10. the same tails with plenty of room reported: stock's result exactly;
 11. no room reported (no packet yet): LOAD_AVAIL decides, as before: the same light tails fit, stock's result;
 12. a voice's measured cost over its table cost: the measure decides (the note that fits by the table steals).
+2026-11-15 (ANALOG 2's PARA, docs/paraphonic.md; track 0 on ANALOG 2, two of its notes held, hold.c's para_live):
+13. a note joining the held chord is priced as a member (LOAD_PARA_MEMBER + LOAD_PARA_ADD) and its chord's slots at a
+    member's each: a kit where it fits takes stock's result exactly; the same kit with PARA OFF steals;
+14. a note past the chord's N (PARA 2 pitches, two held) is priced as dropped (LOAD_PARA_DROPPED);
+15. with none of the track's notes held, the note starts a chord: priced as the track's voice;
+16. a heavy note's further releases never take a PARA chord's voice (HOLD keeps its note-off back); with PARA OFF they
+    take the chord's next oldest.
 Exit 0 when every check passes.
 """
 
@@ -258,6 +265,85 @@ def twin(e, sym, build, t, n):
     return got, ref, mh == ms
 
 
+A2_TYPE, MOD_AT = 22, 20 + 2 * 37             # ANALOG 2's machine type value; the sound's MOD (PARA) value
+
+
+def para_checks(e: Emu, sym, res) -> None:
+    """13..16: ANALOG 2's PARA (load.c para_join_cost, slot_cost, load_post)"""
+    from dnfw import load as LD
+    t = LD.load()
+    pc, avail = t["para"], t["avail"]
+    join = pc["member"] + pc["add"]
+    snd0 = e.r32(KIT_PTR) + 52                 # track 0's sound
+    keep = (e.read(snd0 + 0xDE, 1), e.read(snd0 + MOD_AT, 2))
+
+    def para(v):
+        e.write(snd0 + 0xDE, bytes([A2_TYPE]))
+        e.write(snd0 + MOD_AT, struct.pack(">H", v << 8))
+
+    def chord(value, fill, n1=10, held=True):
+        """track 0 (a voice 10,000): notes 60, 64 held, its chord; track 1: N1 notes of FILL; PARA VALUE"""
+        def build():
+            cost = [10000] + [fill] * 15
+            k = Kit(e, sym, cost)
+            for nn in (60, 64):
+                k.play(0, nn, hook=False)
+            k.chord = e.r32(HELD)
+            for nn in range(n1):
+                k.play(1, 30 + nn, hook=False)
+            e.w32(sym["para_live"], k.chord if held else 0)
+            para(value)
+            return k
+        return build
+    fill = (avail - 2 * pc["member"] - join - 500) // 10          # PARA: the slots' sum and a joining note just fit
+    try:
+        got, ref, same = twin(e, sym, chord(3, fill), 0, 67)
+        need = counters(e, sym)["last_need"]
+        check("13 PARA: a note joining a held chord is priced as a member; it fits: stock's result exactly",
+              got == ref and same and need == join, f"{got:#06x} / {ref:#06x}, need {need} (a member {join})")
+        snap = e.save(SPANS)
+        k = chord(0, fill)()
+        held0 = e.r32(HELD)
+        o0 = counters(e, sym)["over"]
+        off = k.play(0, 67, True)
+        c = counters(e, sym)
+        e.restore(snap)
+        check("13 ... the same kit with PARA OFF: priced as a voice, it steals a held one",
+              c["over"] == o0 + 1 and c["last_need"] == 10000 and off and not (off & ~held0),
+              f"need {c['last_need']}, took {off:#06x} of held {held0:#06x}")
+        twin(e, sym, chord(1, fill), 0, 67)
+        need = counters(e, sym)["last_need"]
+        check("14 PARA 2 pitches, two held: a third note is dropped, priced as such", need == pc["dropped"],
+              f"need {need} (dropped {pc['dropped']})")
+        twin(e, sym, chord(3, fill, held=False), 0, 67)
+        need = counters(e, sym)["last_need"]
+        check("15 none of the track's notes held: the note starts a chord, priced as the track's voice", need == 10000,
+              f"need {need}")
+
+        def heavy(value):
+            snap = e.save(SPANS)
+            k = chord(value, 20000, n1=12)()
+            e.w16(sym["load_voice"] + 2 * 2, 60000)       # track 2: a heavy voice
+            held0 = e.r32(HELD)
+            k0 = counters(e, sym)["keyups"]
+            got = k.play(2, 90, True)
+            gone = held0 & ~e.r32(HELD) & ~got
+            ups = counters(e, sym)["keyups"] - k0
+            e.restore(snap)
+            return k.chord, got, gone, ups
+        ch, got, gone, ups = heavy(3)
+        ch0, got0, gone0, ups0 = heavy(0)
+        res["para_heavy"] = {"chord": ch, "took": got, "released": gone, "keyups": ups,
+                             "off": {"took": got0, "released": gone0, "keyups": ups0}}
+        check("16 a heavy note's further releases never take a PARA chord's voice; PARA OFF takes the chord's next",
+              ups >= 1 and gone and not (gone & ch) and ups0 >= 1 and (gone0 & ch0),
+              f"PARA: released {gone:#06x} (chord {ch:#06x}); OFF: released {gone0:#06x}")
+    finally:
+        e.write(snd0 + 0xDE, keep[0])
+        e.write(snd0 + MOD_AT, keep[1])
+        e.w32(sym["para_live"], 0)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--snapshot", default=SNAP)
@@ -407,6 +493,7 @@ def main() -> int:
     e.restore(snap)
     check("12 a voice measured dearer than its table: the measure decides (it steals)",
           got and not (got & ~snd) and t1 == t0 + 1, f"hook {got:#06x}, sounding {snd:#06x}")
+    para_checks(e, sym, res)
     res["pass"] = all(OK)
     print(("PASS" if all(OK) else "FAIL") + f": {sum(OK)} of {len(OK)} checks")
     if a.json:

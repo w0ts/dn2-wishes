@@ -15,6 +15,7 @@ from . import machines as M
 from .dsl import Prog
 from ..md import voice as MDV
 from ..md import core as MDK
+from ..engines.analog2 import para as PARA
 
 MD_LEVEL = 1.4                            # the Machinedrum's full scale on a DN2 track: v0.22 +6 dB (0.7 in v0.17..v0.21),
                                           # its default hits as loud as WaveTone's and FM Tone's default notes
@@ -296,6 +297,12 @@ def _rest_clear(p: Prog, L: M.Layout) -> None:
     p.if_(0, "GE", 12, rested, kind="i")
 
 
+def para_prepass(p: Prog, L: M.Layout) -> None:
+    """2026-11-15: ANALOG 2's PARA (dnfw.engines.analog2.para): the held slots, the chords and each slot's role, after
+    mnm_ages (its ORDER). Clobbers R0-R15, I0-I2."""
+    PARA.prepass(p, TRIG_WORD, PARA.types(), L.md.mnm.scratch + ORDER_OFF, L.md.mnm.scratch + MNM_KEYS_OFF)
+
+
 def mnm_ages(p: Prog, L: M.Layout) -> None:
     """v0.29: every slot's key and Monomachine cost for this block (MNM_KEYS_OFF), and the
     slots in key order (ORDER_OFF), and (2026-11-12) the budget sums (CUM_OFF). Clobbers R0-R15, I0-I2."""
@@ -397,6 +404,7 @@ def mnm_ages(p: Prog, L: M.Layout) -> None:
                 p.ldi(0, RESTS_OFF // 4, 5)
                 p.fconst(12, MNM_QUIET_LEVEL)
                 p.if_(7, "LT", 12, lambda: (p.iconst(12, 1), p.iop(0, 12, "+", 0)), lambda: p.iconst(0, 0))
+                PARA.quiet_as_leader(p, L.md.mnm.scratch, RESTS_OFF)   # 2026-11-15: a PARA member's silence is not its sound
                 p.sti(RESTS_OFF // 4, 5, 0)
             p.ifz(12, "NE", struck, listen)
             p.ldi(0, RESTS_OFF // 4, 5)
@@ -714,17 +722,31 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
         p.if_(5, "GE", 12, lambda: (p.iconst(12, _mnm_types.MONO_FIRST + len(_mnm_types.MONO_ENGINES)),
                                     p.if_(5, "LE", 12, by_mach, kind="i")), kind="i")
 
-    def render():
-        p.ld(2, C["trig"])
-        p.ld(5, C["type"])
-        MDV.block(p, L.md, [C[f"p{k}"] for k in range(8)], 2, 5, level_word=C["lev"],
-                  after_advance=mono_level if MONO_THRESHOLDS else None)
-
     def silence():                            # past the budget: this block is silent
         p.ld(0, C["buf"])
         p.seti(4, 0)
         p.fconst(1, 0.0)
         p.loop(C["tmp"], 32, lambda: p.stpost(4, 1))
+
+    def render():
+        # 2026-11-15 (ANALOG 2's PARA, dnfw.engines.analog2.para): a chord's member plays silence (its leader plays
+        # its half); a dropped one only silence; the leader gives the members its stream position for the next block
+        PARA.role(p, 6, C["t"])
+        p.lsh(7, 6, -PARA.ROLE_SHIFT)
+        p.iconst(12, PARA.DROPPED)
+        p.if_(7, "EQ", 12, silence, plays, kind="i")
+
+    def plays():
+        p.ld(2, C["trig"])
+        p.ld(5, C["type"])
+        MDV.block(p, L.md, [C[f"p{k}"] for k in range(8)], 2, 5, level_word=C["lev"],
+                  after_advance=mono_level if MONO_THRESHOLDS else None)
+        PARA.role(p, 6, C["t"])
+        p.lsh(7, 6, -PARA.ROLE_SHIFT)
+        p.iconst(12, PARA.MEMBER)
+        p.if_(7, "EQ", 12, silence, kind="i")
+        p.iconst(12, PARA.LEADER)
+        p.if_(7, "EQ", 12, lambda: PARA.push_position(p, L.md.state, 6), kind="i")
     from . import pairs as PAIRS
     PAIRS.unskip(p, L.md, C["mskip"])         # 2026-11-12: a voice rendered ahead this block plays it
     p.ld(0, C["mskip"])
@@ -1168,6 +1190,7 @@ def _emit(L: M.Layout, rings_sw: int, prefix: str) -> Prog:
     p.iconst(0, 0)
     p.st(L.C["mcost"], 0)                      # v0.26: no Monomachine voice rendered yet this block
     mnm_ages(p, L)                             # v0.29: the newest Monomachine voices first
+    para_prepass(p, L)                         # 2026-11-15: ANALOG 2's PARA chords and roles
     from . import guard as G
     G.entry(p)                                 # v0.27: the frame's length and the time our voices have
     from ..sampler import machines as SMx2
@@ -1202,7 +1225,8 @@ def _emit(L: M.Layout, rings_sw: int, prefix: str) -> Prog:
              strikes=L.md.mnm.scratch + STRIKES_OFF, steal_at=STEAL_STRIKES,       # time in a note, stolen
              limit=G.LIMIT_PERC,                                                    # v0.49: after the samples' share
              keys=L.md.mnm.scratch + MNM_KEYS_OFF,     # 2026-11-09: PLAITS' start bound, its trig block no strike
-             admit=(lambda ok: PAIRS.admit(p, L.md, L.C["t"], ok)) if PAIRS.enabled() else None)
+             admit=(lambda ok: PAIRS.admit(p, L.md, L.C["t"], ok)) if PAIRS.enabled() else None,
+             reserve=lambda: PARA.reserve(p, L.C["t"], G.COST_PERC, G.FLOOR))   # 2026-11-15: a member, its leader's room
     p.jump("", nxt)
     # not PERC: its voice is silenced, so a track that comes back to PERC starts clean
     # (v0.12: v0.11 resumed what it had left ringing)

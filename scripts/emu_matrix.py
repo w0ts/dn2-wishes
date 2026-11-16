@@ -261,6 +261,64 @@ def scenario_env(a, report, sym):
     report["env"] = rep
 
 
+def scenario_para(a, report, sym):
+    """ANALOG 2's PARA legato (csrc/hold/hold.c para_final, through HOLD's own note hooks as the frame calls them):
+    on a PARA track a voice's note-off waits while another of the track's voices is held (amp +36 and filter +40
+    gates kept open), and every one waiting goes with the last; PARA off, and another machine, as stock (the note-off
+    goes out in its own frame); a kept voice's new note takes it out of the waiting"""
+    m = setup(a.build, a.snapshot)
+    kit = m.long(MO.KIT)
+    owner = 0x80005308
+
+    def track(t, typ, para):
+        snd = kit + 52 + 1163 * t
+        m.write(snd + 0xDE, bytes([typ]))
+        m.write(snd + 20 + 2 * 37, struct.pack(">H", para << 8))
+
+    track(0, 22, 3)                                     # ANALOG 2, PARA 4
+    track(1, 22, 0)                                     # ANALOG 2, PARA OFF
+    track(2, 21, 3)                                     # DRONE, the record set (not PARA: another machine)
+    own = {0: 15, 1: 0, 2: 0, 3: 0, 4: 15, 5: 1, 6: 1, 7: 2, 8: 2}
+    for v in range(16):
+        m.write(owner + 4 * v, struct.pack(">I", own.get(v, 15)))
+    track(15, 0, 0)
+    w40 = m.alloc(4)
+    m.flush()
+
+    def on(*vs):
+        for v in vs:
+            m.call(sym["hold_len"], v, own[v], 100)
+
+    def off(bits):
+        m.write(w40, struct.pack(">I", bits))
+        m.flush()
+        got = m.call(sym["hold_final"], bits, w40) & 0xFFFF
+        return got, struct.unpack(">I", m.read(w40, 4))[0] & 0xFFFF
+
+    kept = lambda: m.long(sym["para_kept"]) & 0xFFFF                   # noqa: E731
+    b = lambda *vs: sum(1 << v for v in vs)                             # noqa: E731
+    on(1, 2, 3, 5, 6, 7, 8)
+    r1 = off(b(1, 5, 7))                                # one note of each track ends
+    check("para: PARA's voice 1 waits while 2 and 3 are held (+36 and +40 kept open); PARA OFF's 5 and DRONE's 7 "
+          "go at once", r1 == (b(5, 7), b(5, 7)) and kept() == b(1), f"{r1} kept {kept():#x}")
+    r2 = off(b(2))
+    check("para: voice 2 waits too while 3 is held", r2 == (0, 0) and kept() == b(1, 2), f"{r2} kept {kept():#x}")
+    r3 = off(0)
+    check("para: a frame with no note-off sends none", r3 == (0, 0) and kept() == b(1, 2), f"{r3}")
+    r4 = off(b(3, 6, 8))
+    check("para: the last note's note-off takes the waiting ones with it (1 2 3 together); the others as stock",
+          r4 == (b(1, 2, 3, 6, 8), b(1, 2, 3, 6, 8)) and kept() == 0, f"{r4} kept {kept():#x}")
+    on(1, 2)
+    r5 = off(b(1))
+    on(1)                                               # voice 1 waiting, then a new note on it
+    check("para: a waiting voice that takes a new note is no longer waiting",
+          r5 == (0, 0) and kept() == 0, f"{r5} kept {kept():#x}")
+    r6 = off(b(1, 2))
+    check("para: both held voices end together, nothing waits after", r6 == (b(1, 2), b(1, 2)) and kept() == 0,
+          f"{r6} kept {kept():#x}")
+    report["para"] = {"r": [r1, r2, r3, r4, r5, r6], "count": m.long(sym["para_count"])}
+
+
 def scenario_popup(a, report, sym):
     """the routes popup through the panel (csrc/matrix/routes_pop.c): WaveTone's FLTR page, FUNC + a short push on
     FREQ's knob opens it; turning makes LFO1's route (stock's route 1: its DEST and DEP), push-and-turn moves to LFO2
@@ -679,7 +737,7 @@ def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--build", required=True)
     p.add_argument("--snapshot", default=MO.SNAP)
-    p.add_argument("--scenario", default="exact,env,popup,env2lock,titles,env2page,cost")
+    p.add_argument("--scenario", default="exact,env,popup,env2lock,titles,env2page,cost,para")
     p.add_argument("--frames", type=int, default=240)
     p.add_argument("--json", default=None)
     a = p.parse_args()
@@ -692,7 +750,8 @@ def main() -> int:
          "env2lock": lambda: scenario_env2lock(a, report, sym),
          "titles": lambda: scenario_titles(a, report, sym),
          "env2page": lambda: scenario_env2page(a, report, sym),
-         "cost": lambda: scenario_cost(a, report, sym)}[sc]()
+         "cost": lambda: scenario_cost(a, report, sym),
+         "para": lambda: scenario_para(a, report, sym)}[sc]()
     report["ok"] = not FAILS
     if a.json:
         pathlib.Path(a.json).write_text(json.dumps(report, indent=1))

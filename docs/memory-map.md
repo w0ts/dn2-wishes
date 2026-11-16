@@ -337,6 +337,7 @@ listed (`scratch/juno-engine/l1consts.py`) and F1, F2 re-checked against them (R
 | L1 F2 `0x2E1200..0x2E1700` | 1,280 | DPRO speed (v0.52) | DPRO's interp table (`dsp.MNM_INTERP_DM`; trackbuf's span cut to `0x2E1200`) | measured on v0.52's engines (dsp_cost.py, engine): DPRO-DDRW -2,560 a voice (12,444 -> 9,884), DPRO-DENS -1,280 (5,735 -> 4,455) | used (re-allotted 2026-11-13) |
 | L1 F2 `0x2E1700..0x2E1750` | 80 | opt-host | the inserts' refusal telemetry (round 13): per-type skip counts (`guard.INS_TSKIP`, 16 words) and each insert pass's least room (`guard.INS_ROOM`, 4 words); a span (`dsp.INS_TSKIP_DM`) | (telemetry, not a saving) | used (claude/instel; the arbiter allotted 0x2E1700..0x2E1980, the rest given back) |
 | L1 F1 `0x2E0640..0x2E0E44` | 2,052 | opt-synths | PERC's exp2 table | SOPHIE -2.2..3.9k a voice (with tan), MD too | allotted |
+| L1 F1 `0x2E0E44..0x2E0F08` | 196 | plaits16 (main, the arbiter, 2026-11-15) | ANALOG 2's PARA chords (`engines.analog2.para`: HELD, CUR[16], MEM[16], ROLE[16]; `dsp.PARA_DM`), live across blocks; zeros in the upload, so clear after every DSP load | (a feature: a 4-note ANALOG 2 chord ~12k cycles against ~27k as four voices, the study's) | used (claude/para) |
 | L1 `0x2E4050..0x2E53D0` | 4,992 | inserts (bus) | the bus FDN8 instances' stores (`inserts.bus.FD_L1`), live across blocks | (perf 2026-11-11) | used |
 | L1 `0x2E68EC..0x2E6DEC` (FDN8 state's tail) | 1,280, **transient: FDN8 block only, written before read** | insfx (main, 2026-11-14) | FDN8's staged tank's block buffers X, S, F0..F7 (`fdn8.stages.bufs`); XDLY's x / xb borrow them while XDLY runs (`xdly.program._xx`) | FDN8 25.1k -> 16.0k an instance, bit-identical | used |
 | L1 `0x2E6F00..0x2E7000` (XDLY state's unused tail) | 256, **transient: FDN8 block only, written before read** | insfx (main, 2026-11-14) | FDN8's L / R sums (`fdn8.stages.lr_bufs`) | (with the row above) | used |
@@ -354,7 +355,7 @@ listed (`scratch/juno-engine/l1consts.py`) and F1, F2 re-checked against them (R
 | L2 `0x200B5800..0x200B6000` | 2,048 | opt-md | the P-I modes' curve table (`PI_CURVE_142949`; `dsp.PI_CURVE_L2`), copied the same way: the gap between a2f.asm's span and smp.asm's (ANALOG 2's filter state left it for L1, 2026-11-11) | PI-SD/RS/BD/MT/ML a little each block | used (main as arbiter, 2026-11-14; claude/md16-r5) |
 | L2 128 KB, place open | 131,072 | opt-md | DSP2's sine table (no exact smaller form: no symmetry) | EFM-CY -2.5k a voice, FM / TRX | **decision**: no 128 KB contiguous anywhere today; see below |
 
-Left free: F1 `0x2E0E44..0x2E1000` (444 B), F2 `0x2E1750..0x2E1C00` (1,200 B), F3: none (FDN8 stores),
+Left free: F1 `0x2E0F08..0x2E1000` (248 B), F2 `0x2E1750..0x2E1C00` (1,200 B), F3: none (FDN8 stores),
 L2 `0x2009B400..0x200A0000` (19,456 B) and `0x200A2800..0x200A4000` (6,144 B), both taken by perc-layout: with them,
 nothing is left inside dsp.py's L2 floor but the small gaps between spans.
 

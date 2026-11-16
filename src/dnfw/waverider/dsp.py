@@ -101,6 +101,9 @@ PERC_TABLES_DDR = 0x81216000                 # dnfw.perc.machines.tables_bytes
 # loaded by stock's boot stream into block 0 and never written at run time, the runner's write-watch): the User's
 # merge of SHFT's sine into it, 26 of its words one ulp apart.
 PERC_EXP2_DM = 0x2E0640                      # .. 0x2E0E44
+# 2026-11-15 (main, the arbiter): ANALOG 2's PARA chords (dnfw.engines.analog2.para: HELD, CUR, MEM, ROLE; 49 words), the
+# start of F1's free tail. Zeros in the upload (spans() pads the REGION's holes), so every DSP load starts it clear
+PARA_DM, PARA_BYTES = 0x2E0E44, 196          # .. 0x2E0F08
 STOCK_SINE_DM, STOCK_SINE_N = 0x25D980, 257
 # 2026-11-12 (perf, opt-synths; the arbiter's claim): TB303's constants table (dnfw.engines.tb303.tb303_sched KTAB_AT, 128
 # words) after the Monomachine render scratch's real end (0x2E5400 + core.RENDER_BYTES 3,280 = 0x2E60D0)

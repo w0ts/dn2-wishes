@@ -226,6 +226,11 @@
   26857
  ],
  "ours": 310000,
+ "para": {
+  "add": 1087,
+  "dropped": 610,
+  "member": 6095
+ },
  "per_voice": 530,
  "plaits": [
   12346,

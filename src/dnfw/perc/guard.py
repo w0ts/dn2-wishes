@@ -382,7 +382,7 @@ def perc_limit(p, smp_types, smp_state: int, smp_stride: int, on_word: int, trig
 def around(p, t_word: int, cost: int, buffers: int, voice, rests: int | None = None,
            rest_blocks: int = 0, strikes: int | None = None, steal_at: int = 1,
            limit: int = LIMIT, struck: int | None = None, stop=None, keys: int | None = None,
-           admit=None) -> None:
+           admit=None, reserve=None) -> None:
     """VOICE() if it fits, else the slot's buffer zeroed and the skip counted. T_WORD:
     the scratch word holding the slot; COST: the slots' cost words; BUFFERS: the track
     buffers' pointers (0x254a60). v0.36: RESTS (the slots' rest counters) given, a voice
@@ -391,7 +391,9 @@ def around(p, t_word: int, cost: int, buffers: int, voice, rests: int | None = N
     block and, with time short, flickered in and out (DDRW's four-note chord: one block
     two voices, the next one). v0.49: LIMIT the limit word (PERC's: LIMIT_PERC); STRUCK and
     STOP (a sample voice): left out a second time in one note (STRUCK's bit t set by the
-    first), STOP() ends the voice until its next note, instead of a crunchy flicker."""
+    first), STOP() ends the voice until its next note, instead of a crunchy flicker. 2026-11-15: RESERVE() adds to R8
+    (how far into the frame plus the voice's expected cost) what must still fit after this voice (ANALOG 2's PARA: a
+    chord's member keeps its leader's room, dnfw.engines.analog2.para.reserve); it keeps R8 and I5."""
     skip = p.label("gskip")
     done = p.label("gdone")
     p.e("R8 = EMUCLK;")
@@ -445,6 +447,8 @@ def around(p, t_word: int, cost: int, buffers: int, voice, rests: int | None = N
         p.e("R9 = PASS R11;", "the machine's start bound")
         p.place(nob)
     p.iop(8, 8, "+", 9)
+    if reserve is not None:
+        reserve()
     ok = p.label("gok") if admit is not None else None
     if admit is not None:                      # 2026-11-12 (dnfw.perc.pairs): a voice rendered ahead is admitted
         admit(ok)

@@ -37,6 +37,7 @@ typedef unsigned short u16;
 typedef unsigned char u8;
 
 #include "wr_gen.h"
+#include "../para/para.h"                     /* para_track, para_value */
 
 #define KIT       (*(volatile u32 *)0x800052A0u)
 #define SOUND(t)  ((volatile u8 *)(KIT + 52u + 1163u * (u32)(t)))
@@ -234,6 +235,36 @@ static u32 voice_cost(int t)
     return c && load_meas[t] > c ? load_meas[t] : c;
 }
 
+/* 2026-11-15: ANALOG 2's PARA (docs/paraphonic.md). A chord plays on its leader: each member renders its oscillators,
+ * noise and drive (LOAD_PARA_MEMBER) and its leader adds them (LOAD_PARA_ADD a member), a note past the chord's N is
+ * dropped (LOAD_PARA_DROPPED: not rendered). The track's measured voices (load_meas) are its leader's, so they price
+ * a note that starts a chord, not one that joins it. */
+extern u32 para_live;                           /* hold.c: the held voices (the DSP's HELD, as the frame sends it) */
+
+static int para_on_track(int t)
+{
+    return para_track(t) && para_value(t) != 0;
+}
+
+/* a note on track T, its voice costing ONE: on a PARA track, while some of the track's voices are held it joins
+ * their chord (a member), past the chord's N it is dropped; with none held it starts a chord (ONE). (A joining note is
+ * the newest: the DSP runs it first, so its leader's guard room (para.reserve) is the room room_asked already keeps
+ * for the last voice, FLOOR less a voice) */
+static u32 para_join_cost(int t, u32 one)
+{
+    if (!para_on_track(t))
+        return one;
+    int held = 0;
+    for (int v = 0; v < 16; v++)
+        if (VOICE(v)[1] == t && (para_live & (1u << v)))
+            held++;
+    if (!held)
+        return one;
+    if (held > para_value(t))                   /* N = PARA + 1 notes play */
+        return LOAD_PARA_DROPPED;
+    return LOAD_PARA_MEMBER + LOAD_PARA_ADD;
+}
+
 /* slot V sounds: held, or released and the DSP still reports it busy (its release tail) */
 static int sounding(int v)
 {
@@ -249,8 +280,9 @@ static u32 slot_cost(int v)
         return load_stock[own];
     if (!sounding(v))
         return 0;
-    u32 c = voice_cost(own), m = (u32)smp_tlm_cost[v] * 16u;
-    return m > c ? m : c;                       /* (2026-11-13: what the DSP measured, when dearer) */
+    u32 c = para_on_track(own) ? LOAD_PARA_MEMBER : voice_cost(own), m = (u32)smp_tlm_cost[v] * 16u;
+    return m > c ? m : c;                       /* (2026-11-13: what the DSP measured, when dearer; 2026-11-15: a PARA
+                                                 * track's slot is its own measure, a leader's or a member's) */
 }
 
 /* the DSP's room now (cycles, may be negative), from the last idle packet: 1 when it is reported and fresh */
@@ -299,6 +331,7 @@ void load_pre(const u32 *a)
     u32 one = voice_cost(t);
     if (!one)                                   /* a stock machine's or MIDI's note: stock's allocation */
         return;
+    one = para_join_cost(t, one);
     int n = PER_NOTE[t] > 0 ? PER_NOTE[t] : 1;
     u32 sum = load_fx;
     for (int v = 0; v < 16; v++) {
@@ -365,8 +398,10 @@ void load_post(u32 taken, u8 *fp)
             u32 b = 1u << v;
             u32 st = *(volatile u32 *)(VOICE(v) + 8);
             int own = VOICE(v)[1];
-            if (!(HELD & b) || (taken & b) || !cost_was[v] || st >= now || own > 15 || load_stock[own])
-                continue;                       /* (a stock machine's slot costs as much released: not this way) */
+            if (!(HELD & b) || (taken & b) || !cost_was[v] || st >= now || own > 15 || load_stock[own]
+                || para_on_track(own))
+                continue;                       /* (a stock machine's slot costs as much released: not this way; nor a
+                                                 * PARA chord's: hold.c keeps its note-off back while the chord is held) */
             if (best < 0 || st < at) {
                 best = v;
                 at = st;

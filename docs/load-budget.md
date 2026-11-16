@@ -96,6 +96,17 @@ alone takes a free slot; 10: plenty of room: stock's result; 11: no room reporte
 the table decides). Not checked: the coupled emulator run of the unit's 16 notes (it needs a time model: the coupled
 harness has no DSP clock, so no deadline and no room), and the unit.
 
+**2026-11-15, ANALOG 2's PARA** (docs/paraphonic.md, main for the User). A chord plays on its leader; each member
+renders its oscillators, noise and drive. The track's measured voices (`load_meas`) are its leader's, so before this
+every note of a PARA track and every slot of its chord was priced at a leader's cost. Now `para_join_cost`: a note
+joining a held chord (hold.c `para_live`) costs `LOAD_PARA_MEMBER + LOAD_PARA_ADD` (6,095 + 1,087,
+`scripts/para_cost.py`), one past the chord's N `LOAD_PARA_DROPPED` (610), one with none held the track's voice; a
+PARA track's sounding slot is priced at its own DSP measure (at least a member's); the release loop skips a PARA
+chord's voices (HOLD keeps their note-off back while the chord is held). Checked: `scripts/emu_load_budget.py` 18 of
+18 (13: a joining note fits as a member where PARA OFF steals; 14: dropped; 15: a new chord; 16: the releases skip
+the chord's voices, PARA OFF takes them).
+
+
 **2026-11-13, the coupled proof** (`scripts/emu_coupled_budget.py`: both processors, the DSP given a clock by
 `emu_coupled.dsp_clock`, idle D calibrated to the unit's 0.69; T12's sound, 16 short notes): guard voice skips and
 insert-block skips, r3 (no fix) 14 / 368 with no steal; budgetfix 7 / 39 with 11 tails stolen; with the guard's FLOOR

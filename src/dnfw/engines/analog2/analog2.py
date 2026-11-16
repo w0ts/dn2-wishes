@@ -61,6 +61,7 @@ L2 scratch, which the coordinator loads.
 from __future__ import annotations
 
 from . import a2glide as G
+from . import para as PARA
 from ...mnm import core as C
 from ..drone.drone import SIDE_L2, SIDE_STRIDE, _side_base
 from ..tb303.tb303 import _exp2p
@@ -1218,13 +1219,18 @@ def half(p: Prog, L: C.Layout) -> None:
         p.lsh(9, 9, 4)
         p.iop(8, 8, "+", 9)
         _sv(p, ph, 8)
-    _ld(p, 0, D_WID)
-    p.fconst(12, 0.0)
-    p.if_(0, "NE", 12, lambda: _filter(p, L, side=True))
+    def side_filter():
+        _ld(p, 0, D_WID)
+        p.fconst(12, 0.0)
+        p.if_(0, "NE", 12, lambda: _filter(p, L, side=True))
+    PARA.stage(p, L, side_filter)
     _noise(p, L)
     _drive(p, L)
-    _filter(p, L)
-    _out(p, L)
-    _ld(p, 0, D_WID)
-    p.fconst(12, 0.0)
-    p.if_(0, "NE", 12, lambda: _side_out(p, L))
+
+    def rest():
+        _filter(p, L)
+        _out(p, L)
+        _ld(p, 0, D_WID)
+        p.fconst(12, 0.0)
+        p.if_(0, "NE", 12, lambda: _side_out(p, L))
+    PARA.stage(p, L, rest, bv_word=L.W[WN["bv"]])

@@ -48,6 +48,64 @@ static int hold_on(int t)
     return (*(const u16 *)(snd + SOUND_PARAMS + 2u * SLOT_HOLD) >> 8) >= 64u;   /* the page's two-way rule */
 }
 
+/* ANALOG 2's PARA (2026-11-15, dnfw.engines.analog2.para): the DSP plays a chord on the chord's oldest voice, so the
+ * chord's envelopes are that voice's, and a PARA track's notes end together. A voice of such a track whose note-off
+ * comes while another of the track's voices is held keeps its amp gate (+36) and filter gate (+40) open (para_kept);
+ * once none of the track's voices is held, every kept voice's note-off goes out (legato: one envelope a chord, the
+ * pilot's). Held, as the DSP's own HELD: from a voice's note-on until its note-off first comes (para_live), so it
+ * does not depend on how the gate timers run for a live key. A kept voice that takes a new note leaves para_kept; a
+ * track whose PARA goes off lets its kept voices go. */
+#include "../para/para.h"                              /* para_track, para_value: the engines and the value */
+#define OWNER ((volatile u32 *)0x80005308u)             /* each voice's track (DN2_OWNER_REG) */
+
+u32 para_live D = 0;                                    /* the held voices (bit v) */
+u32 para_kept D = 0;                                    /* voices whose note-off is held back */
+u32 para_count D = 0;                                   /* frames that held a note-off back (the emulator reads it) */
+
+static int para_on(int t)
+{
+    return para_track(t) && para_value(t) != 0;
+}
+
+/* a note that plays on voice v: held, and no longer kept */
+static void para_note(int v)
+{
+    para_live |= 1u << v;
+    para_kept &= ~(1u << v);
+}
+
+/* the frame's note-off words (hold_final): each PARA track's note-offs held back while one of its voices is held,
+ * and let go together when none is. -> the new +36 */
+static u32 para_final(u32 off36, u32 *w40)
+{
+    para_live &= ~off36;
+    u32 seen = 0;
+    for (int v = 0; v < 16; v++) {
+        u32 t = OWNER[v];
+        if (t > 15u || ((seen >> t) & 1u))
+            continue;
+        seen |= 1u << t;
+        u32 mine = 0;
+        for (int j = 0; j < 16; j++)
+            if (OWNER[j] == t)
+                mine |= 1u << j;
+        u32 go;
+        if (para_on((int)t) && (para_live & mine)) {
+            u32 keep = off36 & mine;
+            if (keep & ~para_kept)
+                para_count++;
+            para_kept |= keep;
+            go = 0;
+        } else {
+            go = para_kept & mine;
+            para_kept &= ~mine;
+        }
+        off36 = (off36 & ~(para_kept & mine)) | go;
+        *w40 = (*w40 & ~(para_kept & mine)) | go;
+    }
+    return off36;
+}
+
 /* at a voice's note-on (the frame ISR, hooks.S): its gate length; v the voice, t its track. A note that plays
  * (not dropped) restarts the voice's envelopes (csrc/matrix) */
 static int hold_len_of(int v, int t, int len);
@@ -55,8 +113,10 @@ int hold_len(int v, int t, int len)
 {
     extern void mx_env_on(u32 v);
     int r = hold_len_of(v, t, len);
-    if (r >= 0)
+    if (r >= 0) {
         mx_env_on((u32)v);
+        para_note(v);
+    }
     return r;
 }
 
@@ -113,6 +173,7 @@ u32 hold_final(u32 off36, u32 *w40)
     *w40 = (*w40 & ~hold_seq) | hold_rel;
     off36 = (off36 & ~hold_seq) | hold_rel;
     hold_rel = 0;
+    off36 = para_final(off36, w40);                              /* ANALOG 2's PARA: a chord's notes end together */
     { extern void mx_env_off(u32 bits); mx_env_off(off36); }     /* the voices' envelopes released (csrc/matrix) */
     return off36;
 }

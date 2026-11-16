@@ -104,5 +104,10 @@ def c_header(t: dict | None = None) -> str:
              arr("load_bus", by_type(t["bus"], 16)),
              f"#define LOAD_SEND_FDN8 {t['send']['FDN8']}u",
              f"#define LOAD_SEND_XDLY {t['send']['XDLY']}u",
-             f"#define LOAD_SEND_JUNO {t['send']['JUNO']}u"]
+             f"#define LOAD_SEND_JUNO {t['send']['JUNO']}u",
+             # 2026-11-15: ANALOG 2's PARA (csrc/load/load.c para_note): a note joining a held chord costs a member's
+             # voice and what it adds to its leader; one past the chord's N is dropped (not rendered)
+             f"#define LOAD_PARA_MEMBER {t['para']['member']}u",
+             f"#define LOAD_PARA_ADD {t['para']['add']}u",
+             f"#define LOAD_PARA_DROPPED {t['para']['dropped']}u"]
     return "\n".join(lines) + "\n"

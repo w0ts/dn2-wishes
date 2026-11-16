@@ -46,6 +46,8 @@ CLAIMS = [
     ("SLICE / GRID relatch", 0x2E0100, 0x2E0200, ("dnfw.sampler.program", "dnfw.waverider.dsp.W2_RND_DM"), False),
     ("ping code (the shared tail) + its 128 B", 0x2E0500, 0x2E0640, ("dnfw.waverider.dsp.PING_CODE_DM",), True),
     ("F1: opt-synths' PERC exp2 copy", 0x2E0640, 0x2E0E44, ("dnfw.waverider.dsp.PERC_EXP2_DM",), True),
+    ("F1: ANALOG 2's PARA chords (plaits16; main, the arbiter, 2026-11-15)", 0x2E0E44, 0x2E0F08,
+     ("dnfw.engines.analog2.para", "dnfw.waverider.dsp.PARA_DM"), False),
     ("trackbuf code + its 128 B", 0x2E1000, 0x2E1200, ("dnfw.waverider.dsp.TRACKBUF_CODE_DM",), True),
     ("F2: opt-mnm's DPRO interp table", 0x2E1200, 0x2E1700, ("dnfw.mnm", "dnfw.waverider.dsp"), True),
     ("F2: the inserts' per-type skip counts, each pass's room (opt-host, round 13)", 0x2E1700, 0x2E1750,
@@ -203,3 +205,22 @@ def test_every_span_starts_inside_a_claim_that_takes_spans():
             continue
         claims = _claim_of(a)
         assert claims and any(c[4] for c in claims), f"span {what!r} at {a:#x} starts in {claims or 'no claim'}"
+
+
+def test_paras_words_load_as_zeros_every_time_the_dsp_loads():
+    """2026-11-15 (main, the arbiter): ANALOG 2's PARA chords (dnfw.engines.analog2.para) live across blocks in L1 F1
+    and must start clear after any DSP load, not only the first: the upload writes the REGION end to end (each span
+    padded with zeros to the next), so PARA's words are inside a span's zero padding and nothing loads code or data
+    there (entry_mark's first-time flag TWIN relies on the same)"""
+    from dnfw.engines.analog2 import para
+    assert (para.AREA, 4 * para.WORDS) == (dsp.PARA_DM, dsp.PARA_BYTES)
+    lo, hi = dsp.PARA_DM, dsp.PARA_DM + dsp.PARA_BYTES
+    covered = 0
+    for _what, at, payload in dsp.spans():
+        a = at - dsp.LOAD_ALIAS
+        if a < hi and a + len(payload) > lo:
+            assert not lo < a < hi, f"a span starts inside PARA's words at {a:#x}"
+            part = payload[max(lo - a, 0):min(hi - a, len(payload))]
+            assert part == bytes(len(part)), "PARA's words are not zeros in the upload"
+            covered += len(part)
+    assert covered == dsp.PARA_BYTES

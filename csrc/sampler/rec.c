@@ -2085,7 +2085,8 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
         extern int ins_pop(u8 *it);
         extern int scope_pop(u8 *it);           /* AMP page 2's oscilloscope (csrc/scope) */
         extern int fxp_pop(u8 *it);             /* the send pages' second page (csrc/fxpage) */
-        if (ins_pop(it) || scope_pop(it) || fxp_pop(it)) {
+        extern int vm_pop(u8 *it);              /* PARA on the VOICE menu's B (csrc/para) */
+        if (ins_pop(it) || scope_pop(it) || fxp_pop(it) || vm_pop(it)) {
             if (it[0] == IT_KEY && (flags & F_PRESS) && !(flags & F_RELEASE) && code < 32)
                 eaten |= 1u << code;
             it[0] = IT_DROP;

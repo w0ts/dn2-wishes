@@ -616,6 +616,10 @@ HOLD_KEYS_SITE = 0x40026F6A             # lea 0x4002a3a6,%a2: the ISR's "a key i
 HOLD_KEYS_STOCK = "45f94002a3a6"
 HOLD_FINAL_SITE = 0x40027092            # jsr 0x4002b12e after the ISR's note-off word is composed (0x4002708e)
 HOLD_FINAL_STOCK = "4eb94002b12e"
+# 2026-11-15: PARA on the VOICE menu's knob B (csrc/para): VoiceMenuView's draw pushes place B's "---"
+# (pea 0x402108e1, the empty place's label at x 43, y 27); vm_seen_hook pushes the same and marks the menu drawn
+VMENU_B_SITE = 0x400285C0
+VMENU_B_STOCK = "4879402108e1"
 # 2026-11-11 (lzma-dsp, docs/lzma7.md): the SHARC uploader's (0x400cf4b0) depack of section 7:
 # `jsr 0x40136820` (aPLib depack(src, dst)) -> dn_depack7 (csrc/waverider/lzma7.c), same arguments
 DEPACK7_SITE = 0x400CF73A
@@ -849,6 +853,9 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
          "DRONE's HOLD: a latched track's keys count as held", bytes.fromhex(HOLD_KEYS_STOCK))
     edit(HOLD_FINAL_SITE, bytes.fromhex("4eb9") + _long(csyms["hold_final_hook"]),
          "DRONE's HOLD: the frame's note-off word without the latched voices", bytes.fromhex(HOLD_FINAL_STOCK))
+    _need(content, VMENU_B_SITE + 6, bytes.fromhex("42a7"), "VoiceMenuView: clr.l -(sp) after B's label push")
+    edit(VMENU_B_SITE, bytes.fromhex("4eb9") + _long(csyms["vm_seen_hook"]),
+         "PARA on the VOICE menu's B: the menu seen as it pushes B's \"---\"", bytes.fromhex(VMENU_B_STOCK))
     edit(POLL_SITE, bytes.fromhex("4eb9") + _long(csyms["wr_poll"]),
          "the UI loop's redraw test: wr_poll asks for a redraw while a modulation marker on "
          "Waverider's page would move, then answers as stock", POLL_STOCK)
@@ -1300,6 +1307,9 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
         layout[name] = csyms[name]
     for name in ("hold_seq", "hold_count", "hold_len", "hold_keys", "hold_poll", "hold_final", "hold_rel"):   # DRONE's HOLD (csrc/hold)
         layout[name] = csyms[name]
+    for name in ("para_live", "para_kept", "para_count", "vm_seen_hook", "vm_begin", "vm_draw", "vm_pop", "vm_seen",
+                 "vm_sets", "vm_frames", "vm_hooks", "vm_bs", "vm_why"):
+        layout[name] = csyms[name]              # 2026-11-15: ANALOG 2's PARA (csrc/hold legato, csrc/para): the checks read them
     for name in ("scope_up", "scope_taps", "scope_ring", "scope_pos", "smp_rx_sh"):   # AMP page 2's scope (csrc/scope)
         layout[name] = csyms[name]
     for name in ("ls_commits", "ls_reverts", "live_rows", "set_bits", "set_flag_put"):   # LIVE SELECT (csrc/msel; gate: livesel)

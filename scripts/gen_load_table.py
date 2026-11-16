@@ -44,6 +44,7 @@ def fx() -> dict[str, dict]:
 
 
 def table(eng: dict, fxr: dict) -> dict:
+    import para_cost as PC                    # (scripts/, on sys.path above)
     from dnfw.engines.analog2.filters import design as A2D
     from dnfw.inserts import design as ID
     from dnfw.md import voice as MDV
@@ -79,6 +80,7 @@ def table(eng: dict, fxr: dict) -> dict:
                 if f"BUS {ID.NAMES[t]}" in fxr},
         "send": {k: m(fxr[f"SEND {k}"]["per_instance"]) for k in ("FDN8", "XDLY", "JUNO")},
         "engines": eng,
+        "para": PC.table_costs(),             # 2026-11-15: ANALOG 2's PARA chords (a joining note, a dropped one)
     }
 
 

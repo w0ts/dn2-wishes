@@ -311,6 +311,7 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("wishes", "the wishes record through stock's SAVE, LOAD, memcpy, memset (ColdFire)"),
        ("wishitems", "the wishes record on kits, patterns, songs and the project settings (ColdFire)"),
        ("matrix", "the matrix's routes heard as stock's route 1, at a constant cost (ColdFire)"),
+       ("paravmenu", "PARA on the VOICE menu's B: stock's places as stock's, B's steps and cap (ColdFire)"),
        ("envclone", "ENV1/ENV2's clone against stock's own AMP envelope (SHARC runner)"),
        ("engine", "engine + LOAD/SAVE"),
        ("boot", "boot from reset"),
@@ -1007,6 +1008,26 @@ def main() -> int:
             later("matrix", "the matrix's routes heard as stock's route 1, at a constant cost (ColdFire)",
                   "the matrix's routes heard as stock's route 1, at a constant cost (ColdFire)",
                   [mx_cmd, sorted(EMU_ENV.items())], mx_body)
+
+        # 2026-11-15: ANALOG 2's PARA on the VOICE menu's knob B (csrc/para, docs/paraphonic.md;
+        # scripts/emu_para_vmenu.py): on a stock machine's track the menu as stock's after turns of B and C; on an
+        # ANALOG 2 track only B's label row differs (PARA OFF), and B steps PARA 2 3 4 (capped) and back to OFF
+        if "vm_sets" in lay:
+            pv_js = work / "para_vmenu.json"
+            pv_cmd = [a.venv, "-u", "scripts/emu_para_vmenu.py", "--build", a.build, "--snapshot", snap,
+                      "--json", pv_js, "--png-dir", work / "para_vmenu"]
+
+            def pv_body(tdir):
+                rc, out = run("paravmenu", pv_cmd, logs, env=EMU_ENV, trace=tdir)
+                last = out.strip().splitlines()[-1] if out.strip() else ""
+                if rc != 0 or not last.startswith("PASS"):
+                    return False, "\n".join(l for l in out.splitlines() if "FAIL" in l)[-900:] or out[-900:]
+                r = json.loads(pv_js.read_text()) if pv_js.exists() else {}
+                return True, (f"stock's places untouched, B right {r.get('right')}, left {r.get('left')}, "
+                              f"vm_sets {r.get('vm_sets')}")[:800]
+            later("paravmenu", "PARA on the VOICE menu's B: stock's places as stock's, B's steps and cap (ColdFire)",
+                  "PARA on the VOICE menu's B: stock's places as stock's, B's steps and cap (ColdFire)",
+                  [pv_cmd, sorted(EMU_ENV.items())], pv_body)
 
             # 2026-11-12: ENV1/ENV2 (the User: ENV1 is stock's AMP envelope, ENV2 its clone): the clone's model against
             # stock's own envelope in Elektron's DSP code, block by block (scripts/sharc_matrix_env.py --quick); the
