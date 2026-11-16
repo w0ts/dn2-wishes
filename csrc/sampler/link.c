@@ -114,6 +114,13 @@ _Static_assert(CMD_OFFSET % 4u == 0 && CMD_OFFSET >= 8u + 16u * POOL_SLOTS + NAM
 #define LIBID(k) (DIR + LIBID_OFFSET + 4u * (u32)(k))
 _Static_assert(LIBID_OFFSET >= META_PTR + 12u && LIBID_OFFSET % 4u == 0 && LIBID_OFFSET + 4u * REC_FIRST <= CMD_OFFSET,
                "the slots' library identities lie between the meta pointer and the command block");
+/* the per-track inserts' values (dnfw.inserts.design.PAR_OFFSET): 16 x 8 bytes after the command
+ * block, inside the directory page, which loads never write past CMD_OFFSET */
+#define INS_OFFSET 0xF80u
+#define INS_WORDS 32u
+#define INS_REPEAT 3u
+_Static_assert(INS_OFFSET >= CMD_OFFSET + 4u * CMD_WORDS && INS_OFFSET + 4u * INS_WORDS <= DIR_BYTES,
+               "the inserts' values lie after the command block, inside the directory page");
 
 /* our RAM (the mirror's 5 MB, laid out anew in v0.16) */
 #define DIR ((u8 *)SMP_MIRROR)                                      /* the image's directory page */
@@ -419,20 +426,37 @@ void smp_tdm(u32 h)
         rt_take(q_w, &q_fire, &q_seen);
     int is_rt = rt_left != 0;
     int is_cmd = is_rt || cmd_tail != cmd_head;
-    int is_blank = !is_cmd && blank_left;
+    /* the per-track inserts' values (csrc/inserts): INS_WORDS at INS_OFFSET, after each change,
+     * INS_REPEAT times (one may be lost), between a command and a load's chunk */
+    extern u32 ins_gen;
+    extern void ins_words(u32 *w);
+    static u32 ins_seen __attribute__((section(".data"))) = 0;
+    static u32 ins_left __attribute__((section(".data"))) = 0;
+    static u32 ins_w[INS_WORDS] __attribute__((section(".data")));
+    if (!is_cmd && !ins_left && ins_gen != ins_seen) {
+        ins_seen = ins_gen;
+        ins_words(ins_w);
+        ins_left = INS_REPEAT;
+    }
+    int is_ins = !is_cmd && ins_left;
+    int is_blank = !is_cmd && !is_ins && blank_left;
     if (is_rt)
         for (int j = 0; j < CMD_WORDS; j++)
             cw[j] = rt_cw[j];
     else if (is_cmd)                            /* a command first: the command block's words */
         for (int j = 0; j < CMD_WORDS; j++)
             cw[j] = cmdq[cmd_tail % CMDQ][j];
-    if (is_cmd || is_blank || (job_data && job_fast_next < job_n)) {
+    if (is_cmd || is_ins || is_blank || (job_data && job_fast_next < job_n)) {
         volatile u32 *t = TDM_TX(h);
         u32 k = job_fast_next, n = job_n - k, off = job_base + k;
         if (is_cmd) {
             k = 0;
             n = CMD_WORDS;
             off = CMD_OFFSET / 4u;
+        } else if (is_ins) {
+            k = 0;
+            n = INS_WORDS;
+            off = INS_OFFSET / 4u;
         } else if (is_blank) {
             u32 at = (BLANK_PACKETS - blank_left) * RX_WORDS;
             k = 0;
@@ -449,7 +473,7 @@ void smp_tdm(u32 h)
         UNIT(2, off);
         UNIT(3, off >> 16);
         for (u32 j = 0; j < RX_WORDS; j++) {
-            u32 w = j >= n || is_blank ? 0 : is_cmd ? cw[j] : le32(job_data + 4u * (k + j));
+            u32 w = j >= n || is_blank ? 0 : is_cmd ? cw[j] : is_ins ? ins_w[j] : le32(job_data + 4u * (k + j));
             UNIT(4 + 2 * j, w);
             UNIT(5 + 2 * j, w >> 16);
         }
@@ -459,7 +483,9 @@ void smp_tdm(u32 h)
         t[16 * 31 + 8 + 7] = TDM_TAG << 16 | (sum & 0xFFFFu);
 #undef UNIT
         seq++;
-        if (is_blank) {
+        if (is_ins) {
+            ins_left--;
+        } else if (is_blank) {
             blank_left--;
             smp_blank_sent++;
         } else if (!is_cmd)
@@ -1168,18 +1194,25 @@ void smp_load(void)                             /* load (again) whatever the ima
  * from there (CMD_PREVIEW at PREVIEW_AT) once the first PV_START bytes are in. */
 #define PREVIEW_AT 0xFFFFu                  /* dnfw.sampler.program.PREVIEW_AT, PREVIEW_BYTES */
 #define PREVIEW_BYTES (10u * 48000u * 2u)
-#define PV_START 0x20000u
+#define PV_START 0x8000u                    /* playback starts once 32 KB are in (44 ms of link; it plays 96 KB/s,
+                                             * the link fills ~744 KB/s, so the lead only grows). Was 128 KB */
+#define PV_CHUNK 0x4000u                    /* a preview moves in 16 KB pieces: a move cuts the one in flight sooner */
 static int pv_k __attribute__((section(".data"))) = -1;     /* the library entry, -1 none */
 static u32 pv_off __attribute__((section(".data"))) = 0;
 static u32 pv_bytes __attribute__((section(".data"))) = 0;
 int smp_pv_state __attribute__((section(".data"))) = 0;  /* 0 none, 1 asked, 2 loading, 3 playing */
+/* The transfer's own copy of which library sample and where (taken when it starts). A move asks
+ * the next preview while the last one's transfer still runs; that transfer used to read pv_k and
+ * pv_off, by then the next one's, failed, and cancelled the NEXT preview (pv_k = -1): silence. */
+static int lpv_k __attribute__((section(".data"))) = -1;
+static u32 lpv_off __attribute__((section(".data"))) = 0;
 
 static void load_poll(void)
 {
     if (smp_lstate == L_READ) {
-        u32 n = l_end - l_off;
-        if (n > CHUNK)
-            n = CHUNK;
+        u32 n = l_end - l_off, cap = l_kind == K_PREVIEW ? PV_CHUNK : CHUNK;
+        if (n > cap)
+            n = cap;
         if (l_kind == K_TABLES || l_kind == K_READY || l_kind == K_PREVIEW || (l_kind == K_AREA && !l_area_read))
             span_drop(l_off, l_off + n);                    /* v0.38: not the image's bytes */
         if (l_kind == K_AREA) {                             /* v0.23: from the copy */
@@ -1204,8 +1237,10 @@ static void load_poll(void)
             put_le32(STAGE(0), TABLE_MAGIC);
         } else if (l_kind == K_PREVIEW) {                   /* v0.33: +DRIVE's preview, from the library */
             extern int smp_lib_read(int k, u32 off, u32 bytes, void *buf);
-            if (pv_k < 0 || smp_lib_read(pv_k, l_off - pv_off, n, STAGE(0)) != 0) {
-                pv_k = -1;
+            if (lpv_k < 0 || smp_lib_read(lpv_k, l_off - lpv_off, n, STAGE(0)) != 0) {
+                if (lpv_k >= 0 && pv_k == lpv_k && smp_pv_state >= 2)
+                    pv_k = -1;                              /* the +Drive refused this very one */
+                lpv_k = -1;
                 smp_lstate = L_IDLE;
                 return;
             }
@@ -1277,8 +1312,10 @@ static void load_poll(void)
         smp_retries++;                                      /* wrong, or no answer: again */
         if (++l_tries > 6) {
             fast_on = 0;                                    /* nothing gets through: stop */
-            if (l_kind == K_PREVIEW)
+            if (l_kind == K_PREVIEW && pv_k == lpv_k && smp_pv_state >= 2)
                 pv_k = -1;                                  /* v0.33: and no preview of half of it */
+            if (l_kind == K_PREVIEW)
+                lpv_k = -1;
             smp_lstate = L_IDLE;
             return;
         }
@@ -2221,8 +2258,10 @@ void smp_lib_preview_stop(void)
 {
     if (smp_pv_state == 3)
         smp_command(CMD_PREVIEW, PREVIEW_AT, 0, 0, 0);
-    if (smp_pv_state == 2 && l_kind == K_PREVIEW)
-        l_end = l_off;                          /* the chunk in flight is the last */
+    if (l_kind == K_PREVIEW && lpv_k >= 0 && smp_lstate != L_IDLE && smp_lstate != L_DONE) {
+        l_end = l_off;                          /* the chunk in flight is the last (playing or not: */
+        lpv_k = -1;                             /* a stopped preview no longer holds the link) */
+    }
     smp_pv_state = 0;
     pv_k = -1;
 }
@@ -2251,6 +2290,8 @@ static void lp_poll(void)
             return;
         }
         l_kind = K_PREVIEW;
+        lpv_k = pv_k;
+        lpv_off = pv_off;
         l_off = pv_off;
         l_end = pv_off + pv_bytes;
         l_slot = POOL_SLOTS + 1;

@@ -1352,7 +1352,7 @@ static void fb_preview(int slot)
  * scrolling starts no +Drive reads and sends nothing over the link; each new one stops the
  * one before (fb_preview). Folders play nothing. Off when the browser closes, when it leaves
  * +DRIVE, or at the next FUNC + YES. PROJECT RAM's FUNC + YES stays hold-to-play. */
-#define FB_AUTO_REST 225u                       /* 150 ms, in the 1.5 kHz ticks of 0x4058f8d4 */
+#define FB_AUTO_REST 113u                       /* 75 ms, in the 1.5 kHz ticks of 0x4058f8d4 (was 150) */
 int smp_fb_auto __attribute__((section(".data"))) = 0;
 u32 smp_fb_auto_starts __attribute__((section(".data"))) = 0;   /* previews it started (the gate reads it) */
 static int fb_auto_cur __attribute__((section(".data"))) = -1;
@@ -1388,6 +1388,13 @@ static void fb_pv_poll(void)                    /* the browser closed: its previ
     if (smp_fb_cur != fb_auto_cur || smp_fb_folder != fb_auto_fold) {
         fb_auto_cur = smp_fb_cur;               /* moved: wait until it rests */
         fb_auto_fold = smp_fb_folder;
+        fb_auto_at = now;
+        return;
+    }
+    extern int smp_pv_state;
+    if (fb_pv == 2 && smp_pv_state == 0 && fb_auto_slot >= 0) {
+        fb_pv = 0;                              /* the +Drive preview it started was dropped */
+        fb_auto_slot = -1;                      /* (refused by the loader): again after a rest */
         fb_auto_at = now;
         return;
     }
@@ -1947,6 +1954,15 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
         }
         if (!down && (enc_eaten & b)) {
             enc_eaten &= ~b;
+            it[0] = IT_DROP;
+            return (u32)it;
+        }
+    }
+    if (!rec_overlay) {                         /* the per-track inserts' page (csrc/inserts) */
+        extern int ins_pop(u8 *it);
+        if (ins_pop(it)) {
+            if (it[0] == IT_KEY && (flags & F_PRESS) && !(flags & F_RELEASE) && code < 32)
+                eaten |= 1u << code;
             it[0] = IT_DROP;
             return (u32)it;
         }

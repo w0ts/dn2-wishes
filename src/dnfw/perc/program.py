@@ -32,19 +32,22 @@ MACHINE_TYPE = 5
 from ..mnm import machines as _mnm_types   # noqa: E402
 MNM_TYPES = {t: k for k, t in enumerate(_mnm_types.TYPES)}   # 6, 7 (CZ's and RESONATOR's until v0.25), 14..
 MNM_LEVEL = 0.25                         # a Monomachine machine's full scale on a DN2 track
-# v0.27: each machine's own (owner: MNM-1 was quiet). 0.25 put SID's default sound at a peak
-# of 0.046 on its track's buffer, DPRO Wave's 0.022, DDRW's 0.26, DENS's 0.13, VO-6's 0.015,
-# where the Machinedrum machines peak at 1.0..1.4 (the model, 2026-10-27); each now peaks
-# about 1.0 at its defaults. MODULES order (SID, WAVE, DDRW, DENS, VO-6).
-MNM_LEVELS = (5.4, 11.5, 0.95, 2.0, 16.5)
+# v0.27: each machine's own level, by name (owner: MNM-1 was quiet); a machine without one plays
+# at MD_LEVEL (SOPHIE). SID, the DPRO machines and VO-6 had theirs until they went (2026-11-08).
+MNM_LEVELS: dict[str, float] = {}
 # v0.26: the DSP's room for the Monomachine voices. They never go quiet (as on the
 # Monomachine, a voice plays until the next note), and one costs as much as two to ten of
 # the Machinedrum's, so each block they are rendered in track order while their cost (the
 # instructions a DN2 block takes, measured in the model at the most each can take,
 # test_perc_live) fits MNM_BUDGET; a track past it plays silence that block. About half of
 # what the SHARC has free beside the stock engines (docs/sharc-load.md: ~250,000 cycles).
-MNM_COST = {"SID 6581": 60_000, "DPRO-WAVE": 34_000, "DPRO-DDRW": 78_000, "DPRO-DENS": 70_000,
-            "VO-6": 75_000, "SOPHIE": 34_000}   # SOPHIE: 29,979 measured (test_perc_live, the trig block)
+MNM_COST = {"SOPHIE": 34_000,   # SOPHIE: 29,979 measured (test_perc_live, the trig block)
+            "PLAITS": 60_000,   # PLAITS: the whole voice in a DN2 block (test_perc_live's harness), the heaviest
+                                # engine's: STRG 58,409 (its entry block, its init clearing its DDR), PART
+                                # 58,357, MDAL 47,418, ADD 32,682, FM 29,216, the others 20,295 (WS)..24,451
+                                # (SD). 2026-11-09: one figure for every engine (sixteen voices at it, 960,000,
+                                # stay under MNM_BUDGET, so a cost per engine would change nothing)
+            "TB303": 70_000}    # TB303: 63,577 measured (WAVE square; saw 52,140), the voice in a DN2 block
 # v0.36: no longer the limit (the owner and misterairplane: two voices at most on a Monomachine
 # track). 150,000 fitted 2 SID / VO-6 / DENS and 1 DDRW whatever the DSP's real time; it came
 # before the frame guard (v0.27), which measures the frame and leaves out (v0.36: steals) the
@@ -315,8 +318,8 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
 
     def mnm_note():
         from ..mnm import core as MNC
-        for k, lev in enumerate(MNM_LEVELS):    # v0.27: the machine's own level
-            p.iconst(12, k + 1)
+        for name, lev in MNM_LEVELS.items():    # v0.27: the machine's own level
+            p.iconst(12, _mnm_types.NAMES.index(name) + 1)
             p.if_(0, "EQ", 12, lambda lev=lev: (p.fconst(1, lev), p.st(C["lev"], 1)), kind="i")
         p.ld(9, C["t"])
         p.lsh(12, 9, 2)
@@ -704,8 +707,6 @@ def program(L: M.Layout, rings_sw: int, prefix: str = "pk") -> str:
         p.e(f"DM({SAVE + 4 * k:#x}) = {r};")
     from ..md import core as MDK
     MDK.table_fill(p, L.md)                    # the Machinedrum's sine and tables, 1024 words a block until whole (v0.24: zpack)
-    from ..mnm import dpro as MNP
-    MNP.build(p, L.md.mnm)                     # v0.26: then DENS's and DDRW's Digibank stand-in, 8 words a block
     p.iconst(0, 0)
     p.st(L.C["mcost"], 0)                      # v0.26: no Monomachine voice rendered yet this block
     mnm_ages(p, L)                             # v0.29: the newest Monomachine voices first

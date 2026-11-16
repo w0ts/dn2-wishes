@@ -1,0 +1,210 @@
+# PLAITS: Plaits engines on the DN2 (fork, not released)
+
+A seventh Monomachine-style machine, **Plaits / PLT** in MACHINE SEL (machine type 18), after
+SOPHIE. A port of Mutable Instruments Plaits' engines (two at first, thirteen since 2026-11-09:
+see *The other engines*) (Emilie Gillet,
+github.com/pichenettes/eurorack `plaits/`, MIT; THIRD-PARTY.md): **WS** (waveshaping) and
+**GRAIN** (granular formant). More engines can join MODL later, each one a DSL routine.
+
+`src/dnfw/mnm/plaits.py`, in the DSL (`dnfw.perc.dsl`): one program for the SHARC code and its
+run-mode model, in PERC's voice like the Monomachine machines (`docs/mnm.md`).
+
+## The page
+
+| knob | what | range |
+|---|---|---|
+| HARM | WS: the waveshaper (Plaits' five Tides tables, crossfaded); GRAIN: the second formant's ratio (-24..+24 semitones) and, below the middle, the carrier's bleed | 0..100 % |
+| TIMB | WS: the wavefolder's gain; GRAIN: the formant (24..108 semitones) | 0..100 % |
+| MORP | WS: the slope oscillator's shape (its pulse width, 0.5..0.95); GRAIN: the carrier's shape | 0..100 % |
+| MODL | the engine: WS, GRAN (GRAIN), then the engines below (2026-11-09), in MODL's order | one choice each |
+| FINE | cents on the note (2026-11-09), shown as +0 at the centre | -64..+63 cents |
+| TUNE | whole semitones on the note (2026-11-09; continuous until then), shown as +7, -12 | -24..+24 (+0 at the centre) |
+
+TUNE is (knob x 49 >> 7) - 24 and FINE knob - 64 (the page's value by the same arithmetic, its
+signed figure under the knob). At their centres the note is bit for bit what it was. FINE is the
+fifth record (BASE's), at 0 in a project saved before it: MACHINE SEL starts it at the centre, but
+a PLAITS track saved earlier comes back 64 cents flat until FINE is turned up.
+
+The two other places are empty (`---`). MACHINE SEL starts it at WS, every knob in the middle.
+
+## What is left out (against Plaits)
+
+- Plaits' **AUX** output (WS's triangle-and-fold-2 mix, GRAIN's Z oscillator): the track is mono.
+- Plaits' **LPG** and its decay, and the internal envelope: the DN2's track filter and amp do that.
+- Trigger, level and FM inputs, the model's accent.
+- **No reset on a trig**: Plaits' engines run on through every note, as on the module (the two
+  Digitakt II ports reset per note and report a recurring trigger click).
+
+## Numbers
+
+44.1 kHz in PERC's stream; every frequency is Hz / 44100 (so a note sounds at its pitch).
+Plaits' parameter interpolators run over a 16-sample half (Plaits: 12). Sines are PERC's sine
+table (256 a turn, linear; Plaits' is 512), exp2 PERC's table, divisions PERC's reciprocal.
+The tables (WS's five shapes, 5 x 257, and the fold, 516) are rebuilt from Plaits'
+`lookup_tables.py` formulas and ship in zpack after VO-6's (`dnfw.mnm.core.PL_TABLES`).
+
+GRAIN's two grainlets share their carrier (the same frequency, shape and bleed in Plaits too, so
+the same numbers), which leaves one carrier and two formants a sample.
+
+Cost, the whole voice in a DN2 block (the model's steps, `test_perc_live`'s method, at its
+defaults, every knob up and down, random knobs, notes 36..84): **WS 20,316, GRAIN 22,054**, so
+`MNM_COST` 25,000 (SOPHIE 34,000, SID 60,000). The machine itself, a 32-sample block: WS about
+5,600, GRAIN about 8,000.
+
+Size, on this fork's base without SID, the DPRO machines and VO-6 (28eb110): PERC's code grew
+4,142 bytes to 123,128 (27,441 instructions), its L2 span 4 KB to 0x1E400 (SMP_SW 0xbef200).
+
+| | base (28eb110) | + PLAITS | cost | free |
+|---|---|---|---|---|
+| DSP upload, unpacked | 999,036 | 1,003,180 | +4,144 B | 45,395 B |
+| USB image | 2,049,795 | 2,053,431 | +3,636 B | 43,721 B |
+
+(Its tables, 1,801 Q23 words, ride in zpack.)
+
+## Checks (this fork)
+
+`plaits_ref.py` (outside the repo, `dn2mk2-scratch/plaits303/ref/`) is a Python reference of
+the original C++ engines and their tables. Held to the original C++ itself (compiled from
+pichenettes/eurorack, block 16), with its float32 accumulators: **110..116 dB** on WS and GRAIN,
+every window of 8,000 samples.
+
+The run-mode model (the program the SHARC runs, `compare_plaits.py`) against the reference at
+44.1 kHz, the same carrier frequency, 8,000 samples a case:
+
+| case | SNR |
+|---|---|
+| WS, four cases (notes 36..84, folds, shapes) | 115.3..121.6 dB |
+| GRAIN, four cases, against the reference with PERC's exp2 | 84.5..87.1 dB |
+| GRAIN, against the reference with Plaits' own pitch tables | 49.2..71.2 dB |
+
+GRAIN's lower figure is its formant frequency: PERC's exp2 and Plaits' 1/256-semitone tables
+differ by up to 2.3e-4 (0.4 cent), and the formant runs up to a few turns a grain. With the same
+exp2 the rest is the sine table's (256 against 512).
+
+In the SHARC runner (`sharc:mnm+frame`, OS 1.12): PLAITS's buffer and state bit-exact to the model
+every block (beside the next machine, every knob up, the budget and rest checks). Unit tests: the
+base's results. Its page drawn in the 1.12 emulator (a snapshot booted on the build), the big-knob
+style: HARM, TIMB, MORP, MODL (WS, GRAN), TUNE.
+
+**Not done**: the project's ship gate needs the owner's bench; no build of this branch is
+cleared to flash. Unverified on hardware: the sound, the DSP time on the unit, the page.
+
+## The other engines (2026-11-09)
+
+Each further engine is its own module, `src/dnfw/mnm/plaits_<name>.py` (`MODEL`, `init`, `half`),
+listed in `plaits.ENGINES`; MODL's choices are `plaits.MODELS` (the page reads them), the knob
+picks one as knob x N >> 7. Their common ground is `src/dnfw/mnm/plk.py`:
+
+- **The model's own words.** The note (`S_NOTE`, TUNE added), the model last rendered (`S_LAST`),
+  the trigger (`S_TRIG`), the voice's random generator (`S_RNG`), then 48 union words. A model is
+  started (its `init`, Plaits' Init and Reset) when MODL chooses it; WS and GRAIN keep their own
+  words and are never restarted, as before.
+- **The trigger.** A trig sets S_TRIG: the next half is Plaits' TRIGGER_RISING_EDGE, its trigger
+  input patched (never a gate, never unpatched); accent 0.8 (Plaits' with LEVEL unpatched). The
+  oscillator engines ignore it.
+- **Memory.** Each voice has 32 KB of DDR of its own at 0x82600000 + slot x 32 KB (`plk.BIG_DDR`,
+  512 KB for sixteen; nothing ships there, an engine clears what it reads): delay lines, modes,
+  the diffuser.
+- **Arithmetic.** exp2 from the float's exponent and a polynomial (2e-7, float32's rounding), a
+  polynomial sine (1.9e-7), stmlib's random generator (one per voice, seeded 0x21), PERC's
+  reciprocal for divisions. The references take the same arithmetic ("matched"); Plaits' own
+  SemitonesToRatio reads 1/256-semitone tables, so against those ("faithful") an engine's pitch
+  differs by up to 0.4 cent and its phases drift apart: the faithful figures below measure that
+  quantisation, not the port.
+
+The references (`dn2mk2-scratch/allplaits/ref/`, outside the repo) are Python ports of the C++,
+each held to the C++ itself (compiled from the read-only clone, `-ffp-contract=off`, block 16,
+48 kHz, Plaits' own tables) with float32 rounding; the run-mode model (the program the SHARC runs)
+against them at 44.1 kHz.
+
+### VA (virtual analog)
+
+Plaits' VIRTUAL ANALOG (`virtual_analog_engine.cc`, VA_VARIANT 2): OUT = a variable saw (MORPH:
+its notch's pulse width, its triangle near the middle; detuned from the note by HARMONICS'
+interval: unison, fifth, octave, octave + fifth, two octaves, either way) + a square hard-synced
+to the note (TIMBRE: its pulse width, from the middle up the sync's interval, its level).
+Plaits' primary and auxiliary oscillators only feed AUX: not rendered. One deviation: the synced
+square starts at waveshape 1.0 (Plaits ramps it from 0 over its first block): the first 16
+samples after VA is chosen differ.
+
+| | |
+|---|---|
+| reference vs the C++ | 180.5..184.8 dB, six cases (the 9-digit printout's limit) |
+| model vs reference, matched | 90.8..144.8 dB, seven cases (notes 24..84, the knobs' ranges) |
+| model vs reference, faithful | 12.0..46.6 dB (the sync case lowest: its interval's 0.4 cent moves every reset) |
+| cost, a DN2 block | 7,820 steps at worst (entry block 7,375) |
+| PERC code | +3,420 B (with the dispatcher's arm) |
+
+### The other ten (agents' ports, integrated and checked here)
+
+MODL's order: WS, GRAN, VA, FM, ADD, SWRM, NOIS, PART, STRG, MDAL, BD, SD, HH (Plaits' own order;
+not ported: wavetable, chords, speech). Every engine below renders Plaits' OUT only. "ref vs C++":
+the float32 reference against the original C++ at 48 kHz; "matched": the run-mode model against
+it at 44.1 kHz with the same arithmetic (the 85 dB target: GRAIN's figure); "faithful": with
+Plaits' own pitch / sine tables. Steps: the worst DN2 block (pitch + two halves), the model-entry
+block (its init) apart where larger. Code: PERC's growth as the commits added them.
+
+| model | what (Plaits) | ref vs C++ | matched | faithful | steps | code |
+|---|---|---|---|---|---|---|
+| VA | virtual analog (VA_VARIANT 2) | 180.5 dB | 90.8 dB | 12.0 dB | 7,824 | +3,420 B |
+| FM | 2-operator FM, 4x downsampled | 186.7 dB | 106.8 dB | 10.3 dB | 15,184 | +2,452 B (FM + ADD) |
+| ADD | additive (harmonic oscillators) | 175.2 dB | 105.3 dB | 62.3 dB | 17,740 (entry 18,093) | |
+| SWRM | swarm: 8 grain-enveloped saws, burst on a trig | bit-exact | 152.9 dB | -2.0 dB | 8,476 (entry 8,600) | +1,940 B (with the cost's constant) |
+| NOIS | clocked noise through the SVF | bit-exact | 102.3 dB | 3.6 dB | 5,864 | +3,648 B (NOIS + PART) |
+| PART | particles, post filter, diffuser | bit-exact | 92.4 dB | 25.7 dB | 19,517 (entry 43,725) | |
+| STRG | three inharmonic strings, rotating on a trig | bit-exact | 91.6 dB | 40.0 dB | 25,035 (entry 43,685) | +5,614 B (STRG + MDAL) |
+| MDAL | modal resonator and exciters | bit-exact | 70.2 dB | 65.5 dB | 32,280 (entry 32,794) | |
+| BD | analog bass drum | bit-exact | 108.1 dB | 73.8 dB | 8,007 | +4,444 B (BD + SD + HH) |
+| SD | analog snare drum | bit-exact | 103.4 dB | 85.5 dB | 9,646 (entry 9,821) | |
+| HH | hi-hat (square noise, OUT's) | bit-exact | 121.7 dB | 54.3 dB | 6,141 (entry 6,268) | |
+
+("bit-exact": the reference equals the C++'s printed floats in every case.)
+
+- **MDAL's 70.2 dB** (three cases with damping near the top) is below the target: there the modes'
+  Q reaches about 4 million and PERC's reciprocal, 1 ulp off a division, moves their phase over a
+  long ring. With the DSP's own routines in the reference it is bit-exact (200 dB); it is float32
+  sensitivity of Plaits' own high-Q modes, not a porting error.
+- **The faithful gaps** are Plaits' 1/256-semitone pitch tables (their quantised frequencies drift
+  the phases apart, or, in the random engines SWRM / NOIS, move a grain or a clock edge to another
+  block so the sequence differs), ADD's and FM's 1,024-point sine table, STRG's interpolated
+  lut_svf_shift (computed here) and PART's 12-bit diffuser (floats here). Each agent's NOTES.md
+  measures them piece by piece.
+- **Deviations** (each module's docstring has its own): 44.1 kHz with Plaits' per-sample time
+  constants kept (decays, pulse lengths, LFOs ~9 % longer); the sub-oscillators, organ
+  harmonics, sines and second noises that only feed AUX left out (their random draws still taken,
+  so the sequence is Plaits'); STRG's f0 delay 14 blocks (5.1 ms); the never-struck string's
+  1/0 as 1/1e-30.
+- **The OUT stage.** Plaits never sends an engine's raw OUT to its jack: `voice.cc` gives each a
+  gain, a fixed one (VA, ADD, the drums 0.8; FM 0.6) or a negative one, stmlib's Limiter with that
+  pre-gain (SWRM 3, NOIS 1, PART 2, STRG 1, MDAL 1: a peak follower, x 0.8), and the DAC's 16 bits
+  clip at +-1. The raw engines go well past it (PART to 8.0 on a trig right after it is chosen,
+  MDAL to 3.6), so `plaits._post` does the same after each of these engines (its limiter's peak in
+  the slot's word 250, reset when the engine changes); WS and GRAIN stay as before, without it.
+  Held to stmlib's Limiter and Clip16 in float32 (`post_check.py`): 144..200 dB. The engines'
+  comparisons above are of the raw engines (`plaits.POST` off).
+- **Memory**: SWRM 88 DDR words a voice, ADD 96, MDAL 192, STRG 3,984, PART 8,192 (the diffuser).
+- **Cost in PERC's budget** (the whole voice in a DN2 block, `test_perc_live`'s harness: the steps
+  above plus the voice's own ~14,700): WS 20,295, GRAN 22,077, VA 21,586, FM 29,216, ADD 32,682,
+  SWRM 22,885, NOIS 20,484, PART 58,357, STRG 58,409, MDAL 47,418, BD 21,822, SD 24,451, HH 20,649
+  (PART's and STRG's worst is their entry block, clearing their DDR). With the OUT stage (below):
+  WS 20,305, GRAN 22,087, VA 22,014, FM 29,644, ADD 33,110, SWRM 23,818, NOIS 21,396, PART 59,333,
+  STRG 59,325, MDAL 48,604, BD 22,250, SD 24,879, HH 21,077. `MNM_COST["PLAITS"]` 60,000;
+  sixteen voices at it, 960,000, stay under MNM_BUDGET, so one figure serves every engine.
+
+Size, the commits on this branch (base: sophie-v043-os112-all, de642a3, build 149feeca):
+
+| | base | + framework + VA | + FM, ADD | + NOIS, PART | + BD, SD, HH | + STRG, MDAL | + SWRM (final) |
+|---|---|---|---|---|---|---|---|
+| PERC code | 128,290 | 131,794 | 134,246 | 137,894 | 142,338 | 147,952 | 149,892 |
+| DSP upload free | 33,079 | 29,575 | 27,123 | 23,475 | 19,031 | 13,419 | 11,479 |
+| USB image free | 38,570 | 37,257 | 35,944 | 34,429 | 32,611 | 30,086 | 29,278 |
+
+Then the OUT stage and the cost at 60,000 (the final build, d8f5c3c9): PERC code 150,412 B (span
+0x24C00), DSP upload 10,959 B free, USB image 29,076 B free.
+
+PERC's L2 span grew to 0x24C00; the sample machines' code moved below it (0x200b6000, after FDN8's
+code) so it could.
+
+**Checks of the final build**: the SHARC runner (`sharc:mnm+frame`) holds every model's track
+(triggered at blocks 1 and 4, off-centre knobs) and a track walking MODL through every model to the
+model, bit for bit, every block; WS and GRAIN are bit-identical to the build before.

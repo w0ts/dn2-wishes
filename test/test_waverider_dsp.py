@@ -163,8 +163,15 @@ def test_ddr_spans_are_clear_of_the_stock_image_and_the_engine():
                                       dsp.SMP_TABLES_DDR,                       # v0.18: the DT2 reader's
                                       dsp.MD_TABLES_DDR,
                                       dsp.MD_DELAY_DDR,                         # v0.32: P-I's lines, zeroed
+                                      dsp.FDN8_RING_DDR,                        # FDN8's ring, zeroed
+                                      0x82500000,                               # the inserts' TAPE rings, zeroed
                                       dsp.SMP_POOL_DDR, dsp.SMP_POOL_DDR + 8]   # v0.17: the MD's
     assert not any(ddr[-1][2])
+    # v0.45: PING's tables went: every index one lower than b4's
+    assert not any(ddr[5][2]) and len(ddr[5][2]) == dsp.FDN8_RING_BYTES       # FDN8: zeros at power-on
+    assert dsp.MD_DELAY_DDR + len(ddr[4][2]) <= dsp.FDN8_RING_DDR
+    assert dsp.FDN8_RING_DDR + 0x80000 <= 0x82500000                         # (FDN8 LONG's 512 KB too)
+    assert not any(ddr[6][2]) and 0x82500000 + len(ddr[6][2]) <= dsp.SMP_POOL_DDR
     assert not any(ddr[3][2]) and not any(ddr[4][2])      # the MD's tables (the DSP fills them), P-I's lines
     assert dsp.MD_TABLES_DDR + len(ddr[3][2]) <= dsp.MD_DELAY_DDR
     # v0.32: the voices' working state in L2 (zeros), inside the room proven on units
@@ -207,8 +214,11 @@ def test_perc_code_is_in_l2_above_the_stock_image_and_below_the_uncached_window(
                                                       (dsp.SMP_L2_LOAD, dsp.SMP_L2_SPAN)]
     for _w, at, payload in data:
         assert dsp.L2_IMAGE_END + 0x10000 <= at and at + len(payload) <= dsp.PERC_L2_LOAD
+        assert not (at < dsp.SMP_L2_LOAD + dsp.SMP_L2_SPAN and dsp.SMP_L2_LOAD < at + len(payload))
         assert bootstream.read_span(built, at, len(payload)) == payload
-    assert dsp.SMP_L2_LOAD == dsp.PERC_L2_LOAD + dsp.PERC_L2_SPAN
+    # 2026-11-09: the sample machines' code below PERC's, after FDN8's (until then after PERC's span)
+    assert dsp.FDN8_L2_LOAD + dsp.FDN8_L2_SPAN <= dsp.SMP_L2_LOAD
+    assert dsp.SMP_L2_LOAD + dsp.SMP_L2_SPAN <= dsp.PERC_L2_LOAD
     for (what, at, payload), name in zip(spans, ("perc", "smp")):
         code = dsp.objects()[name]
         if name == "smp":                        # v0.25: wr_pvmix in the span's last 1 KB
@@ -226,7 +236,7 @@ def test_perc_code_is_in_l2_above_the_stock_image_and_below_the_uncached_window(
         if b.count and 0x20000000 <= b.target < 0x20100000:
             assert b.target + b.count <= dsp.L2_IMAGE_END
     assert dsp.PERC_SW == 0xBE0000 and dsp.l2_sw_to_load(dsp.PERC_SW) == dsp.PERC_L2_LOAD
-    assert dsp.SMP_SW == 0xBF1C00 and dsp.l2_sw_to_load(dsp.SMP_SW) == dsp.SMP_L2_LOAD
+    assert dsp.SMP_SW == 0xBDB000 and dsp.l2_sw_to_load(dsp.SMP_SW) == dsp.SMP_L2_LOAD
 
 
 def test_the_region_is_written_end_to_end_and_code_is_nop_padded():
@@ -323,10 +333,11 @@ def _code_lines(name):
     return [ln for ln in lines if ln and not ln.startswith(".") and not ln.endswith(":")]
 
 
-def test_smp_hands_on_to_ping_and_writes_only_saved_registers():
-    # v0.13: PERC -> the sample machines -> (v0.26) PING, whose tail restores what PERC saved
+def test_smp_hands_on_to_the_inserts_and_writes_only_saved_registers():
+    # v0.13: PERC -> the sample machines -> (2026-11-09) the inserts -> (v0.26) PING, whose tail
+    # restores what PERC saved
     lines = _code_lines("smp")
-    assert f"JUMP {dsp.PING_SW:#x};" in lines
+    assert f"JUMP {dsp.INS_SW:#x};" in lines
     import re
     for ln in lines:
         m = re.match(r"(I|M|L|B)(\d+) =", ln)
@@ -337,6 +348,18 @@ def test_smp_hands_on_to_ping_and_writes_only_saved_registers():
             assert f"{m.group(1)}{m.group(2)}" in ("I0", "I1", "I2", "I3", "I4", "I5", "I12"), ln
         assert not re.search(r"\b(R1[6-9]|R[2-9]\d|F1[6-9]|USTAT|MODE1|MODE2|LCNTR)\b", ln), ln
         assert not re.search(r"DM\(I[035], M", ln), ln
+    assert not any(re.search(r"\bCALL\b|\bDO\b|\bRTS\b", ln) for ln in lines)
+
+
+def test_inserts_hand_on_to_ping_and_write_only_saved_registers():
+    import re
+    lines = _code_lines("inserts")
+    assert f"JUMP {dsp.PING_SW:#x};" in lines
+    for ln in lines:
+        m = re.match(r"(I|M|L|B)(\d+) =", ln)
+        if m:
+            assert f"{m.group(1)}{m.group(2)}" in ("I0", "I1", "I4", "I12"), ln
+        assert not re.search(r"\b(R1[6-9]|R[2-9]\d|F1[6-9]|USTAT|MODE1|MODE2|LCNTR)\b", ln), ln
     assert not any(re.search(r"\bCALL\b|\bDO\b|\bRTS\b", ln) for ln in lines)
 
 

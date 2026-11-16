@@ -1,14 +1,18 @@
 # The system meter (OS 1.12 fork, not released)
 
-Hold **FUNC** on any page: the title bar's right end shows
+Hold **FUNC** on any page: the title bar's right end (a white box, x 74..127, rows 54..63)
+shows three columns, each a figure over a bar 16 px wide filled to it:
 
-    D42 C61 H29M
+    D42     C61     M9
+    ######| ######:|  #       (| : the peak tick, the last 3 s's highest, on D and C)
+
+A figure not known yet reads `--`: its bar is a dotted floor and it has no tick.
 
 | | what | from |
 |---|---|---|
 | **D** | the DSP's load, percent, the last half second's peak; `--` with no reading for a second | the SHARC's idle packets, unit 18 (`guard.meter`, v0.32), `link.c` `smp_dsp_load()` |
 | **C** | the ColdFire's load, percent, over the last half second; `--` before the first window | idle time credited at the context switch, less the audio ISR's time inside it (`csrc/meter/hooks.S`, usbprobe's method, `docs/usbprobe.md`) |
-| **H** | the main buddy heap's free memory (K below 1000 K, then M) | the heap's free lists walked under its own mutex, as digihealth walks it (`csrc/meter/meter.c`) |
+| **M** | the main buddy heap's used share, percent: 1 - free / total | free: the heap's free lists walked under its own mutex, as digihealth walks it; total: the heap descriptor's `+0x14` in 16-byte units (stock 1.12: `0x200000`, 32 MB = 2^ the top order 21, read in the emulator) (`csrc/meter/meter.c`) |
 
 Let go of FUNC and stock's screen comes back as it was (one redraw at the release). While
 FUNC is held the corner is redrawn 4 times a second. The heap is walked at the press and then
@@ -47,6 +51,13 @@ failed on it.
 
 Cost: two new sites and two instructions in the link hook; the C chunk +~1.1 KB; USB image +1,111 B
 (11,603 B left under the 2 MiB limit). No DSP code.
+
+**The bars (2026-11-08, the owner on the unit: "make the meter visual").** The bar is the
+figure itself; the tick on D and C is its highest value over the last 3 s (`PEAK_HOLD`, kept
+in the meter's RAM block). D's figure was already the half second's peak, so its tick holds
+that peak longer. Emulator screenshots with C and its peak poked (the emulator has no DSP and
+no audio ISR, so D reads `--` and C is not measured there): a stock page, PERC, the
+Monomachine VO-6 and a sample page, each with FUNC held and after the release.
 
 ## Checked, and not
 

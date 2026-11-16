@@ -169,7 +169,10 @@ TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platfo
          "test/test_sampler_relatch.py", "test/test_pools.py",
          "test/test_gate_cache_foreign.py",                 # v0.48: the cache's cross-worktree guard and its control
          "test/test_slides.py",
-         "test/test_libtree.py", "test/test_web_tool.py"]   # v0.40: nested folders (the model, the page's levels)
+         "test/test_libtree.py", "test/test_web_tool.py",   # v0.40: nested folders (the model, the page's levels)
+         "test/test_fdn8.py",                                 # FDN8: its DSP program against the reference
+         "test/test_xdly.py",                                 # XDLY: the same
+         "test/test_inserts.py"]                              # the inserts: the same
 HIT = re.compile(r"^\s+([0-9a-f]{8}):", re.M)
 
 # v0.38 (owner, 2026-11-01): the steps by name, for --only and --list, in the order a full run
@@ -341,6 +344,13 @@ def own_inputs(own=None) -> dict[str, str]:
         if f.is_file():
             out[str(f)] = "f:" + hashlib.sha256(f.read_bytes()).hexdigest()
     return out
+
+
+def _mnm_rep(lo: int, top: int, n: int, c: int) -> int:
+    """csrc/sampler/fmt.c mnm_rep: a Monomachine control's coarse value in the middle of its
+    choice C of N (the knob k's choice is k x N >> 7)"""
+    ks = [k for k in range(128) if (k * n) >> 7 == c] or [0]
+    return lo + ((ks[0] + ks[-1]) // 2 * 2 * top + 127) // 254
 
 
 def main() -> int:
@@ -701,6 +711,7 @@ def main() -> int:
             if "smp_heads" in lay:
                 scen += ("live",)               # v0.38: 22 live adds and 3 recordings, each must play
                 scen += ("bulk",)               # LOAD TO PROJECT of 40 at once: all queued, loaded, played
+                scen += ("pvlat",)              # +DRIVE preview: periods to playback, short/long/second, bytes exact
             if "smp_lib_fpar" in lay:
                 scen += ("nest",)               # v0.40: folders inside folders over the link, power cuts
             if "smp_rs_done" in lay:
@@ -733,7 +744,7 @@ def main() -> int:
 
             def l16_body(tdir):
                 rc, out = run("link16", l16_cmd, logs, env=EMU_ENV, trace=tdir)
-                oks = re.findall(r"link16 (save|fast|dead|high|lowram|slices|lib|live|bulk|nest|recstore|norm): .*\"ok\": (true|false)", out)
+                oks = re.findall(r"link16 (save|fast|dead|high|lowram|slices|lib|live|bulk|pvlat|nest|recstore|norm): .*\"ok\": (true|false)", out)
                 good = rc == 0 and len(oks) == len(scen) and all(v == "true" for _, v in oks)
                 return good, ("save, fast (a lost packet resent); every byte loaded and saved; the frame's routing words stock's in "
                               "every period; v0.22: the RAM check first, past 128 MB loaded only when it "
@@ -1458,8 +1469,9 @@ def main() -> int:
                     # again stops it
                     "press:17", "wait:2", "press:10", "wait:6", mem(lay["smp_pv_state"]),
                     "release:10", "wait:2", "release:17", "wait:4", mem(lay["smp_pv_state"])]
-                ds += ([mem(lay["smp_fb_auto"]), "press:17", "wait:2", "press:10", "wait:4", "release:10", "wait:2",
-                        "release:17", "wait:4", mem(lay["smp_pv_state"]), mem(lay["smp_fb_auto"])] if "smp_fb_auto" in lay else [])
+                ds += ([mem(lay["smp_fb_auto"]), "png:auto_on", "press:17", "wait:2", "press:10", "wait:4", "release:10", "wait:2",
+                        "release:17", "wait:4", mem(lay["smp_pv_state"]), mem(lay["smp_fb_auto"]), "png:auto_off"]
+                       if "smp_fb_auto" in lay else [])
                 ds += [f"call:{fbm:#x}",
                     "right", "wait:6", "png:d4", "yes", "wait:6", mem(lay["smp_lp_queued"]),
                     "no", "wait:6", mem(lay["smp_fb_folder"]), mem(fbs), "no", "wait:6", mem(fbs),
@@ -1499,13 +1511,15 @@ def main() -> int:
                                  int(m[f"{S}@1"], 16) == 1 and d0[0:1] == [3],
                                  "YES: INCOMING's two samples": d0[1:2] == [2],
                                  "YES ticks one": d0[2:3] == [1],
-                                 ("auto preview: FUNC + YES turns it on (it plays, let go too), again off (it stops)"
+                                 ("auto preview: FUNC + YES turns it on (it plays, let go too, AUTO in the title), again off (it stops, AUTO gone)"
                                   if "smp_fb_auto" in lay else "v0.33: FUNC + YES held previews it; let go, it stops"):
                                  int(m[hex(lay["smp_pv_state"])], 16) in (1, 2, 3)
                                  and (int(m[f"{hex(lay['smp_pv_state'])}@3"], 16) in (1, 2, 3)
                                       and int(m[hex(lay["smp_fb_auto"])], 16) == 1
                                       and int(m[f"{hex(lay['smp_pv_state'])}@5"], 16) == 0
                                       and int(m[f"{hex(lay['smp_fb_auto'])}@6"], 16) == 0
+                                      and pathlib.Path(r["screens"]["auto_on"]).read_bytes()
+                                      != pathlib.Path(r["screens"]["auto_off"]).read_bytes()
                                       if "smp_fb_auto" in lay else int(m[f"{hex(lay['smp_pv_state'])}@3"], 16) == 0),
                                  "the preview ticks nothing (still one)": d0[3:4] == [1],
                                  "v0.33: MOVE SELECTED, MOVE HERE: DRUMS holds two": d0[4:5] == [2],
@@ -1723,8 +1737,9 @@ def main() -> int:
                           [n_cmd, sorted(EMU_ENV.items())], n_body)
 
         # 6h. v0.28: the Monomachine machines' pages drawn as the Monomachine's (each machine its
-        # own screen, none the stock grid), and their choices' detents (WPRS, two choices: four
-        # detents a choice, through smp_quant as the stock setter calls it)
+        # own screen, none the stock grid), and their choices' detents (SOPHIE's MODL since the
+        # DPRO machines went, 2026-11-08; DPRO-WAVE's WPRS before: four detents a choice, through
+        # smp_quant as the stock setter calls it)
         if "smp_quant" in lay:
             from dnfw.mnm import machines as MMx    # noqa: PLC0415
             from dnfw.perc import machines as PMx   # noqa: PLC0415
@@ -1733,8 +1748,8 @@ def main() -> int:
             st = ["wait:2", "png:stock"]
             for ty in MMx.TYPES:
                 st += [f"poke:{snd0 + 0xDE:#x}:{ty:02x}", "wait:20", f"png:m{ty}"]
-            wslot = PMx.PARAMS[3][1]             # DPRO-WAVE's WPRS: the fourth place
-            st += [f"poke:{snd0 + 0xDE:#x}:{MMx.TYPES[MMx.NAMES.index('DPRO-WAVE')]:02x}",
+            wslot = PMx.PARAMS[6][1]             # SOPHIE's MODL: the seventh place
+            st += [f"poke:{snd0 + 0xDE:#x}:{MMx.TYPES[MMx.NAMES.index('SOPHIE')]:02x}",
                    f"poke:{snd0 + 0x14 + 2 * wslot:#x}:0000", "wait:4"]
             st += [f"call:{lay['smp_quant']:#x}:sound0:{wslot}:0x100"] * 4
             js = work / "mnmpages.json"
@@ -1749,15 +1764,16 @@ def main() -> int:
                     shots = {n: pathlib.Path(r["screens"][n]).read_bytes() for n in r["screens"]}
                     pages = [shots[f"m{ty}"] for ty in MMx.TYPES]
                     d0 = [c["d0"] for c in r["direct_calls"]]
-                    top = PMx.PARAMS[3][3]
-                    on = (95 * 2 * top + 127) // 254 << 8
+                    lo, top = PMx.PARAMS[6][2], PMx.PARAMS[6][3]
+                    n = len(MMx.MACHINES[MMx.NAMES.index("SOPHIE")].MNM.MODELS)
+                    on = _mnm_rep(lo, top, n, 1) << 8
                     facts = {"each machine its own page, none the stock grid":
                              len(set(pages)) == len(pages) and shots["stock"] not in pages,
-                             "WPRS: three detents keep OFF, the fourth gives ON": d0 == [0, 0, 0, on]}
+                             "MODL: three detents keep FUSE, the fourth gives STAK": d0 == [0, 0, 0, on]}
                     good = all(facts.values())
                     why = str(facts) + f" d0 {d0}"
-                return good, ("the five Monomachine pages drawn, each its own; a two-choice control "
-                              "four detents a choice" if good else why)
+                return good, ("the Monomachine pages drawn, each its own; a choice control four "
+                              "detents a choice" if good else why)
             later("mnmpages", "Monomachine pages and detents (ColdFire)", "Monomachine pages and detents (ColdFire)", [mp_cmd, sorted(EMU_ENV.items())], mp_body)
 
             # 6h2. v0.53 (owner: PLAY's four choices took too much turning): PLAY two detents a
@@ -1886,10 +1902,12 @@ def main() -> int:
             snd0 = kit + 52
             clock, memcpy = 0x4058F8D4, 0x40134770
             ptch, other = PMf.PARAMS[0][1], PMf.PARAMS[2][1]
-            wprs, wlo, wtop = PMf.PARAMS[3][1], PMf.PARAMS[3][2], PMf.PARAMS[3][3]
-            w_on = wlo + (95 * 2 * wtop + 127) // 254
-            w_off = wlo + (31 * 2 * wtop + 127) // 254
-            dwave = MMf.TYPES[MMf.NAMES.index("DPRO-WAVE")]
+            # SOPHIE's MODL (seven choices) since DPRO-WAVE (its WPRS) went, 2026-11-08
+            wprs, wlo, wtop = PMf.PARAMS[6][1], PMf.PARAMS[6][2], PMf.PARAMS[6][3]
+            n_modl = len(MMf.MACHINES[MMf.NAMES.index("SOPHIE")].MNM.MODELS)
+            w_on = _mnm_rep(wlo, wtop, n_modl, 1)
+            w_off = _mnm_rep(wlo, wtop, n_modl, 0)
+            dwave = MMf.TYPES[MMf.NAMES.index("SOPHIE")]
             q = next(r for r in SMf.QUANT if r[1] == SMf.PLAY_REC and "ONESHOT" in r[0])
             play = SMf.RECORDS[SMf.PLAY_REC][0]
             p_from, p_to = q[3][0], q[3][1]
@@ -1908,8 +1926,8 @@ def main() -> int:
                 return s + [f"call:{lay['smp_quant']:#x}:sound0:{slot}:{value:#x}:{r}"]
             cases = [("PERC's first control: stock's octave jump kept", (5, ptch, 0x4000, 1, 1, True, 0x4C00), 0x4C00),
                      ("PERC, another control: it stays put", (5, other, 0x2000, 1, 1, True, 0x7F00), 0x2000),
-                     ("DPRO WAVE's WPRS, right: the next choice in one click", (dwave, wprs, w_off << 8, 1, 1, True, 0x0000), w_on << 8),
-                     ("DPRO WAVE's WPRS, left: back in one click", (dwave, wprs, w_on << 8, 1, -1, True, 0x7F00), w_off << 8),
+                     ("SOPHIE's MODL, right: the next choice in one click", (dwave, wprs, w_off << 8, 1, 1, True, 0x0000), w_on << 8),
+                     ("SOPHIE's MODL, left: back in one click", (dwave, wprs, w_on << 8, 1, -1, True, 0x7F00), w_off << 8),
                      ("ONESHOT's PLAY, right: the next mode in one click", (8, play, p_from << 8, 1, 1, True, 0x0000), p_to << 8),
                      ("no FUNC: as it is", (5, other, 0x2000, 0, 1, True, 0x2100), 0x2100),
                      ("a stale knob: as it is", (5, other, 0x2000, 1, 1, False, 0x2100), 0x2100),
@@ -2058,7 +2076,8 @@ def main() -> int:
         # 6o. v0.33: MACHINE SEL to a Monomachine machine gives it its own start (dnfw.mnm's
         # DEFAULTS: SID on PULS, PW at the middle), not the shared records' defaults. A real
         # MACHINE SEL first (6k's: ONESHOT to the next sample machine; its commit's arguments
-        # kept), then the commit called again for track 1 to SID: its eight records' words
+        # kept), then the commit called again for track 1 to SOPHIE (SID until 2026-11-08): its
+        # eight records' words
         if "smp_machine_commit" in lay:
             from dnfw.mnm import machines as MMo     # noqa: PLC0415
             from dnfw.perc import machines as PMo    # noqa: PLC0415
@@ -2066,9 +2085,9 @@ def main() -> int:
             kit = 0x4210D08C
             snd0 = kit + 52
             sa, ty = snd0 + 20 + 2 * 43, snd0 + 0xDE
-            sid = MMo.TYPES[MMo.NAMES.index("SID 6581")]
+            sid = MMo.TYPES[MMo.NAMES.index("SOPHIE")]
             cm = lay["smp_machine_commit"]
-            want = [PLo.knob_word(x, top, lo) for (_r, _s, lo, top), x in zip(PMo.PARAMS, MMo.DEFAULTS["SID 6581"])]
+            want = [PLo.knob_word(x, top, lo) for (_r, _s, lo, top), x in zip(PMo.PARAMS, MMo.DEFAULTS["SOPHIE"])]
             os_ = (f"wait:3,poke:{ty:#x}:08,poke:{sa:#x}:0500,wait:4,tap:2,wait:6,func-src,wait:20,down,wait:4,"
                    f"yes,wait:20,call:{cm:#x}:arg1@{cm:#x}:0:{sid}:arg4@{cm:#x}:arg5@{cm:#x},wait:10,types,"
                    + ",".join(f"mem:{snd0 + 20 + 2 * sl:#x}:2" for _r, sl, _lo, _t in PMo.PARAMS))
@@ -2084,10 +2103,10 @@ def main() -> int:
                     m = json.loads(ojs.read_text())["memory"]
                     types = m.get("types@0") or [None]
                     got = [int(m.get(f"{snd0 + 20 + 2 * sl:#x}", "0") or "0", 16) for _r, sl, _lo, _t in PMo.PARAMS]
-                    facts = {"track 1 is SID": types[0] == sid, "its eight controls at SID's own start": got == want}
+                    facts = {"track 1 is SOPHIE": types[0] == sid, "its eight controls at SOPHIE's own start": got == want}
                     good = all(facts.values())
                     why = f"{facts} got={[hex(g) for g in got]} want={[hex(w) for w in want]} types={types}"
-                return good, ("MACHINE SEL to SID: its eight controls at its own start (PULS, PW at the middle)"
+                return good, ("MACHINE SEL to SOPHIE: its eight controls at its own start (the factory snare)"
                               if good else why)
             later("mnmdefaults", "Monomachine start values (ColdFire)", "Monomachine start values (ColdFire)", [o_cmd, sorted(EMU_ENV.items())], o_body)
 

@@ -1822,11 +1822,13 @@ void smp_fb_draw(void *c, int samp)
         LABEL(c, 64, 57, "%.22s", fb_folder_name(smp_fb_folder));
     }
     extern int smp_fb_auto;
-    if (smp_fb_auto)                            /* auto preview on: a play mark (5 rows) at the right */
-        for (int j = 0; j < 3; j++) {
-            hline(c, 123, 123 + j, 57 + j, 0);
-            hline(c, 123, 123 + j, 61 - j, 0);
-        }
+    if (smp_fb_auto) {                          /* auto preview on: a boxed AUTO at the title's right, */
+        for (int y = 56; y <= 63; y++)          /* over whatever the title drew there */
+            for (int x = 100; x <= 127; x++)
+                SET_PIXEL(c, x, y, 0);
+        box(c, 101, 56, 127, 63, 0);
+        LABEL(c, 114, 57, "%s", "AUTO");
+    }
     hline(c, 0, 127, 55, 0);
     int n = smp_fb_count();
     if (n == 0) {

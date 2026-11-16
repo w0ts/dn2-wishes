@@ -81,6 +81,66 @@ feedback, noise, the models and the crusher), ported to the DSL in `src/dnfw/mnm
 > Copyright (c) 2026 Matt Estela
 > Copyright (c) 2026 digisophie contributors
 
+## Schwung 303 (GPL-3.0-only) and Open303 (MIT)
+
+<https://github.com/charlesvestal/schwung-303> -- Charles Vestal and contributors; its engine
+Open303 by Robin Schmidt (`src/dsp/open303/`, MIT), with jc303's Devilfish extensions.
+
+The TB303 machine's voice: Open303's getSample (the oscillator's two shapes, the TB-303 ladder,
+the envelopes, the filters, the 4x oversampling and the elliptic decimation filter) and its note
+handling, as Schwung 303's plugin.cpp configures it with the Devilfish modifications off and no
+drive, ported to the DSL in `src/dnfw/mnm/tb303.py` (`docs/tb303.md` says what changed).
+Schwung 303 is GPL-3.0-only; dn2mk2 is AGPL-3.0, which GPL-3.0 section 13 allows combining.
+
+> schwung-303 -- TB-303 emulator for Schwung. Copyright (C) 2026 Charles Vestal and contributors.
+> Copyright (C) midilab / jc303 contributors (Devilfish extensions to Open303).
+> This program is free software: you can redistribute it and/or modify it under the terms of the
+> GNU General Public License as published by the Free Software Foundation, version 3 of the
+> License.
+>
+> Open303: Copyright (c) 2009 Robin Schmidt (www.rs-met.com). Permission is hereby granted, free
+> of charge, to any person obtaining a copy of this software and associated documentation files
+> (the "Software"), to deal in the Software without restriction, including without limitation
+> the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+> the Software, and to permit persons to whom the Software is furnished to do so, subject to the
+> following conditions: The above copyright notice and this permission notice shall be included in
+> all copies or substantial portions of the Software. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT
+> WARRANTY OF ANY KIND, EXPRESS OR IMPLIED.
+
+## Mutable Instruments Plaits (MIT)
+
+<https://github.com/pichenettes/eurorack> (`plaits/`, and `stmlib/` from
+<https://github.com/pichenettes/stmlib>) -- Emilie Gillet.
+
+The PLAITS machine's two engines, WAVESHAPING and GRANULAR FORMANT
+(`plaits/dsp/engine/waveshaping_engine.cc`, `grain_engine.cc`, `dsp/oscillator/oscillator.h`,
+`grainlet_oscillator.h`; stmlib's poly-BLEP, parameter interpolator, one-pole filter), ported to
+the DSL in `src/dnfw/mnm/plaits.py` (`docs/plaits.md` says what was left out); its tables are
+rebuilt from `plaits/resources/lookup_tables.py`'s formulas.
+
+2026-11-09: eleven more of its engines, each in `src/dnfw/mnm/plaits_<name>.py` (`plk.py` their
+common ground): VIRTUAL ANALOG, FM, ADDITIVE, SWARM, NOISE, PARTICLE, STRING, MODAL, BASS DRUM,
+SNARE DRUM, HI-HAT (`plaits/dsp/engine/*_engine.cc` and the oscillators, noise sources, drums,
+physical models, diffuser and downsampler they use; stmlib's Random, SVF, polyblep, delay line).
+FM's frequency quantizer is rebuilt from `lookup_tables.py`'s formula.
+
+> Copyright 2016 Emilie Gillet.
+>
+> Permission is hereby granted, free of charge, to any person obtaining a copy of this software
+> and associated documentation files (the "Software"), to deal in the Software without
+> restriction, including without limitation the rights to use, copy, modify, merge, publish,
+> distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the
+> Software is furnished to do so, subject to the following conditions:
+>
+> The above copyright notice and this permission notice shall be included in all copies or
+> substantial portions of the Software.
+>
+> THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING
+> BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+> NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+> DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+> OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
 ## digihealth (GPL-2.0-or-later)
 
 <https://github.com/irpina/digihealth> -- irpina.

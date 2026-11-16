@@ -198,7 +198,9 @@ def check_bss(m: Map) -> list[str]:
 
 
 def files() -> list[str]:
-    out = list(FILES)
+    out = [f for f in FILES if (ROOT / f).exists()]
+    for f in sorted(set(FILES) - set(out)):           # v0.45 removed PING: nothing there to port
+        print(f"not in this tree (skipped): {f}")
     for d in C_DIRS:
         out += sorted(str(p.relative_to(ROOT)) for p in (ROOT / "csrc" / d).iterdir()
                       if p.suffix in (".c", ".h", ".S"))

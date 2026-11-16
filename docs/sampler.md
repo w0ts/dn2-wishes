@@ -665,6 +665,21 @@ the keyboard.
   the status's state word carries +16 while one plays. 219 bytes of the DSP's 1 MiB upload
   buffer are left.
 
+- **The preview over Overbridge / USB audio** (OS 1.12 branch, after the user heard the preview
+  on the outputs but not over Overbridge; depaffect's v0.42 report). Overbridge's main L / R are
+  TDM TX slots 0 / 1, filled by stock in the engine (sw 0x1c244d, loop A at 0x1c266c:
+  `fix(MIX_BUF x 1.4286, 31)`) on page `TDM_TX + (DM(TDM_PAGE) << 11)`, *before* the driver's
+  master-mix call where wr_pvmix adds the preview: the DAC page got it, the TX page never did.
+  wr_pvmix now also adds the same two frames to slots 0 and 1 of that page:
+  `TX = sat(TX + TRUNC(preview x 1.4286 x 2^31))` (`program.pv_overbridge`; it multiplies
+  |preview| and applies the sign with the ALU, so the multiplier's flags end the same whatever
+  the sample). Slots 2..13 (the per-track streams) and the DAC path are untouched. Cost while
+  a preview plays: +1,015 instructions a block (1,768 -> 2,783 from the site to the stock call,
+  32 frames); none otherwise. The SHARC runner's step 3f checks the TX words against the model
+  and against the formula (saturation both ways), the other slots and page untouched. Not
+  measured: the gain 1.4286 is the docs' reading of the channel table (the runner's arguments to
+  0x1c244d do not carry the instrument's main-mix pointer), and Overbridge itself on a unit.
+
 ### v0.25: GRID and SLICE: slices to the trigs, KEYBOARD's octave, GRID's icon
 
 - **ALLOCATE SLICE** (the DT2's, its manual A.2.6): YES on a GRID track's page opens

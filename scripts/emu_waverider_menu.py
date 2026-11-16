@@ -1394,7 +1394,7 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         out.update(res)
         out["ok"] = bool(res["ok"]) and not route.get("changed")
         out["routing_changed"] = route.get("changed", 0)
-    elif scenario in ("live", "bulk"):
+    elif scenario in ("live", "bulk", "pvlat"):
         # v0.38 (the testers: "after 10-20 added samples, new ones are silent until a restart";
         # v0.37: "nothing I record plays, though I see its waveform"): a pool of three samples
         # loaded at power-on (its count 3), then 22 samples added live one after another
@@ -1501,13 +1501,71 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         # again from this scenario's fresh +Drive, as at power-on)
         machine.write(syms["smp_lib_state"], bytes(4))
         _st, rf = sx(17, b"LIVE")
-        n_lib = 40 if scenario == "bulk" else 22
+        n_lib = {"bulk": 40, "pvlat": 0}.get(scenario, 22)
         sent = []
         for j in range(n_lib):
             data = bytes(rng.randrange(1, 256) for _ in range(2 * ((200 + 5 * j) if scenario == "bulk" else (400 + 37 * j))))
             sent.append((lib_send(f"LIVE{j:02d}", rf[0] if rf else 0, data), (200 + 5 * j) if scenario == "bulk" else 400 + 37 * j))
         uc.hook_del(hs)
-        if scenario == "bulk":
+        if scenario == "pvlat":
+            # +DRIVE preview latency: periods from the ask to the DSP's CMD_PREVIEW (playback
+            # starts), a short one-shot (40 KB), a long sample (300 KB), and a second short one
+            # asked while the long one still streams (the in-flight chunk ends first)
+            sizes = {"short": 20000, "long": 150000, "short2": 21000}
+            datas = {nm: bytes(rng.randrange(1, 256) for _ in range(2 * fr)) for nm, fr in sizes.items()}
+            hs2 = uc.hook_add(UC_HOOK_CODE, at_sender, begin=SYSEX_SENDER, end=SYSEX_SENDER)
+            idx = {nm: lib_send(nm.upper(), rf[0] if rf else 0, d) for nm, d in datas.items()}
+            uc.hook_del(hs2)
+            for _ in range(300):
+                period()
+                call("smp_boot")
+
+            def ask(nm, settle=True):
+                dsp.pop("previews", None)
+                call("smp_lib_preview", idx[nm])
+                asked = returned_d0() == 0
+                n = 0
+                while n < 20000:
+                    period()
+                    call("smp_boot")
+                    n += 1
+                    if any(pv[0] == 0xFFFF and pv[2] > 0 for pv in dsp.get("previews", [])):
+                        break
+                pv = [pv for pv in dsp.get("previews", []) if pv[0] == 0xFFFF and pv[2] > 0]
+                return asked, n, (pv[-1] if pv else None)
+
+            def streamed(nm, pv, want):
+                for _ in range(4000):
+                    period()
+                    call("smp_boot")
+                    if long("smp_lstate") in (0, 4):
+                        break
+                if not pv:
+                    return False
+                lo = (pv[1] - base) // 4 if pv[1] >= base else pv[1] // 4
+                got = b"".join(struct.pack("<I", pool.get(lo + j, 0)) for j in range((want + 3) // 4))[:want]
+                return got == datas[nm][:want]
+            r_short = ask("short")
+            ok_short = streamed("short", r_short[2], len(datas["short"]))
+            call("smp_lib_preview_stop")
+            for _ in range(200):
+                period()
+                call("smp_boot")
+            r_long = ask("long")
+            # the second asked while the long one still streams, as auto preview does on a move
+            call("smp_lib_preview_stop")
+            r_s2 = ask("short2")
+            ok_s2 = streamed("short2", r_s2[2], len(datas["short2"]))
+            call("smp_lib_preview_stop")
+            ms = lambda n: round(n / 1.5, 1)     # 1,500 periods a second
+            out.update(pv_short_periods=r_short[1], pv_short_ms=ms(r_short[1]),
+                       pv_long_periods=r_long[1], pv_long_ms=ms(r_long[1]),
+                       pv_second_periods=r_s2[1], pv_second_ms=ms(r_s2[1]),
+                       pv_asked=[r_short[0], r_long[0], r_s2[0]], pv_bytes_ok=[ok_short, ok_s2],
+                       retries=long("smp_retries"), routing_changed=route.get("changed", 0))
+            out["ok"] = bool(all(out["pv_asked"]) and all(out["pv_bytes_ok"]) and r_short[1] < 20000
+                             and r_long[1] < 20000 and r_s2[1] < 20000 and not route.get("changed"))
+        elif scenario == "bulk":
             # LOAD TO PROJECT on a folder of 40: the browser (smp_fb_load_project) queues every
             # ticked sample in one loop. Before the fix the queue held 16 and the rest were
             # dropped silently (a unit loaded 13 of a folder). Each must be queued, loaded, played.

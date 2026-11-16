@@ -133,7 +133,8 @@ def test_rows_5_to_12_of_the_name_table(applied):
     table = long_at(main, 0x400DC4A8)
     # v0.26: 6, 7 (and 14..) the Monomachine's machines (RESONATOR's and CZ's until v0.25)
     assert CF.MACHINE_NAMES[5] == ("Perc", "PRC") and CF.MACHINE_NAMES[13] == ("Slice", "SLC")
-    assert CF.MACHINE_NAMES[6] == ("SID 6581", "SID") and CF.MACHINE_NAMES[7] == ("DPRO Wave", "DPW")
+    assert CF.MACHINE_NAMES[6] == CF.MACHINE_NAMES[7] == ("Removed", "---")   # SID, DPRO-WAVE: removed, reserved
+    assert 6 not in CF.LIST_NEW and 7 not in CF.LIST_NEW and 17 in CF.LIST_NEW
     for row in CF.NEW_TYPES:
         lo, sh = (n.encode() + b"\0" for n in CF.MACHINE_NAMES[row])
         long_ptr, short_ptr = _clong(table + 12 * row), _clong(table + 12 * row + 4)

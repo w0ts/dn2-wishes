@@ -243,10 +243,7 @@ def test_v026_the_monomachine_costs_cover_what_each_voice_takes():
     random settings, over notes an octave apart"""
     import random
     from dnfw.md import core as MDK
-    from dnfw.mnm import dpro, machines as MM
-    from dnfw.mnm import rom as MROM
-    if not MROM.available():
-        pytest.skip("needs the owner's Monomachine OS")
+    from dnfw.mnm import machines as MM
     rnd = random.Random(1)
     for typ, k in PP.MNM_TYPES.items():
         name = MM.NAMES[k]
@@ -254,7 +251,6 @@ def test_v026_the_monomachine_costs_cover_what_each_voice_takes():
         for knobs in [list(MM.DEFAULTS[name]), [127] * 8, [0] * 8] + [[rnd.randrange(128) for _ in range(8)]
                                                                      for _ in range(3)]:
             h = PL.Harness()
-            h.words.update(dpro.bench_words(h.L.md.mnm))
             h.words[h.L.md.C["fill"]] = MDK.Z_N
             h.set_mnm(typ, knobs)
             for b in range(6):
@@ -279,25 +275,19 @@ def _f0(x, rate):
 
 def test_v026_the_monomachine_machines_play_the_dn2s_note():
     """on PERC's program (the model the runner holds the DSP to): each Monomachine machine
-    at note 60 near 261.6 Hz (DPRO-WAVE: an octave up, machines.TRANSPOSE) and note 72 an
+    at note 60 near 261.6 Hz and note 72 an
     octave over it, within 3 %"""
     from dnfw.md import core as MDK
-    from dnfw.mnm import dpro, machines as MNM
-    from dnfw.mnm import rom as MROM
-    if not MROM.available():
-        pytest.skip("needs the owner's Monomachine OS")
-    # plain settings: SID's TRI, WAVE's first wave, DDRW one wave, DENS one oscillator, VO-6's
-    # vowel with no consonant; TUNE 64
-    knobs = {"SID 6581": (64, 0, 0, 0, 0, 0, 64, 64), "DPRO-WAVE": (0, 0, 0, 0, 0, 0, 0, 64),
-             "DPRO-DDRW": (0, 0, 0, 0, 0, 0, 0, 64), "DPRO-DENS": (63, 63, 63, 0, 0, 0, 0, 64),
-             "VO-6": (64, 64, 127, 0, 0, 0, 0, 64),
-             "SOPHIE": (127, 0, 0, 0, 64, 0, 0, 64)}   # FUSE, no metal, no sweep: the carrier alone
+    from dnfw.mnm import machines as MNM
+    knobs = {"SOPHIE": (127, 0, 0, 0, 64, 0, 0, 64),   # FUSE, no metal, no sweep: the carrier alone
+             "PLAITS": (64, 0, 64, 0, 0, 64, 0, 64),   # WS, linear shape, the least fold; FINE (2026-11-09)
+                                                        # at its centre: 0 is -64 cents
+             "TB303": (127, 0, 0, 64, 0, 0, 0, 64)}    # the filter open, no resonance or env mod: the saw
     for typ, k in PP.MNM_TYPES.items():
         name = MNM.NAMES[k]
         f = []
         for note in (60, 72):
             h = PL.Harness()
-            h.words.update(dpro.bench_words(h.L.md.mnm))
             h.words[h.L.md.C["fill"]] = MDK.Z_N
             h.set_mnm(typ, knobs[name])
             out = []

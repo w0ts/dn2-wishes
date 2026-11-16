@@ -6,7 +6,7 @@ is shipped with it: the DN2 OS 1.12 file is patched, the DT2's DSP image (sectio
 OS 1.17), the Machinedrum's OS 1.63 and (v0.26 on) the Monomachine's OS 1.32B are read for
 their tables.
 
-    build(dn2, dt2, md, out, mnm=None) -> the sha256 of OUT
+    build(dn2, dt2, md, out, mnm=None) -> the sha256 of OUT   (mnm: ignored since 2026-11-08)
 """
 
 from __future__ import annotations
@@ -100,17 +100,9 @@ def build(dn2: str, dt2: str, md: str, out: str, mnm: str | None = None) -> str:
         rom.blocks()
     except Exception as e:                       # noqa: BLE001
         raise PatchError(f"that is not the Machinedrum UW OS 1.63 ({e})") from None
-    if mnm is not None:                          # v0.26: the Monomachine machines' tables
-        mb = WORK / "mnm_os132b.syx"
-        mb.write_bytes(unzip(pathlib.Path(mnm).read_bytes(), (".syx",)))
-        os.environ["MNM_OS"] = str(mb)
-        from dnfw.mnm import rom as mnm_rom
-        try:
-            mnm_rom.blocks()
-        except Exception as e:                   # noqa: BLE001
-            raise PatchError(f"that is not the Monomachine SFX-6 OS 1.32B ({e})") from None
-    else:                                        # (v0.24, v0.25: none)
-        os.environ["MNM_OS"] = str(WORK / "no-mnm")
+    # MNM (the Monomachine OS, v0.26..v0.43: its machines' tables) is no longer read: SID, the DPRO
+    # machines and VO-6 were removed (2026-11-08). Accepted and ignored, for older callers.
+    del mnm
     from dnfw.cli.main import main
     rc = main(["mods", "apply", dn2, "--mod", "waverider", "-o", out])
     if rc not in (0, None) or not pathlib.Path(out).is_file():

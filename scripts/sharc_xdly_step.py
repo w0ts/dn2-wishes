@@ -1,0 +1,221 @@
+"""The SHARC runner's xdly step (docs/xdly.md): the FX bus's delay call, sw 0x1c1c58 to its
+return at 0x1c1c5f, run on the stock section 7 and on the build, block after block.
+
+1. TYPE = stock (k 40 not 0): the build runs the stock delay, and every block's output, every
+   register at the return and every word written are the stock image's, but XDLY's own state
+   words; the stock delay's writes in its DDR state stay inside its sample area (which XDLY's
+   lines use, and the switch clears) or are its control words below / above it (counted).
+2. TYPE = XDLY: each block's output is dnfw.xdly.ref's, bit for bit, over noise, an impulse,
+   loud input into FDBK 127 (the knee), knob moves (the times bend); the lines' written words are
+   the reference's; every register the bus left is back at the return; the instructions per
+   block (the DSP cost in the emulator, which charges every access alike).
+3. The switches: XDLY -> stock clears the 4 MB sample area (256 blocks, silent), after which every
+   word of it is 0 and the stock delay on silence gives no more than a stock delay that never had
+   input; stock -> XDLY gives exact zeros on silence at once (nothing of the lines is read).
+"""
+
+from __future__ import annotations
+
+import random
+import struct
+
+import numpy as np
+
+from dnfw.waverider import dsp
+from dnfw.xdly import design as XD
+from dnfw.xdly import program as XP
+from dnfw.xdly import ref as XR
+
+SITE, BACK = dsp.DELAY_SITE_SW, 0x1C1C5F     # (the bus pushes the return address - 1, 0x1c1c5e)
+PAR, IO = 0x257934, 0x257E6C
+BUF = 0x83F00000                 # the test's own buffers (DDR, used by nothing)
+INL, INR, OUTL, OUTR, PAIRI, PAIRO = (BUF + k * 0x100 for k in range(6))
+MARK = 0x7FC00001
+REGS = {f"R{k}": (0x01010101 * (k + 3)) & 0xFFFFFFFF for k in range(16)}
+
+
+def fb(x) -> int:
+    return struct.unpack("<I", struct.pack("<f", float(x)))[0]
+
+
+def bf(w) -> float:
+    return struct.unpack("<f", struct.pack("<I", (w or 0) & 0xFFFFFFFF))[0]
+
+
+def script(n_stock=40, n_x=200, seed=11):
+    """(TYPE word, in L, in R, six parameters) per block"""
+    rnd = random.Random(seed)
+    par = [0.3, 0.0, 0.5, 0.6, 0.0, 1.0]
+    out = []
+    for b in range(n_stock + n_x):
+        tw = 0x12340100 if b < n_stock else 0x56780000       # the high half is k 41: not ours
+        k = b if b < n_stock else b - n_stock
+        loud = 2.0 if b >= n_stock and 60 <= k < 64 else 0.5
+        noisy = 2 <= k < 8 or (b >= n_stock and (10 <= k < 16 or 60 <= k < 64))
+        inl = [rnd.uniform(-loud, loud) if noisy else (1.0 if k == 30 and j == 5 else 0.0) for j in range(32)]
+        inr = [rnd.uniform(-loud, loud) if noisy else inl[j] for j in range(32)]
+        if b < n_stock and k == 20:
+            par = [0.05, 256.0, 0.8, 0.7, 0.2, 0.7]
+        if b == n_stock:
+            par = [0.1, 0.0, 0.15, 0.6, 0.3, 0.8]
+        if b >= n_stock and k == 50:
+            par = [0.12, 16384.0, 0.2, 1.0, 0.9, 0.6]
+        if b >= n_stock and k in (90, 91, 92, 93):
+            par = [par[0] + 0.01, par[1], par[2] - 0.01, 0.4, par[4], par[5]]
+        if b >= n_stock and k == 135:
+            par = [0.05, 0.0, 1.0, 0.5, 1.0, 1.0]
+        out.append((tw, inl, inr, [float(np.float32(x)) for x in par]))
+    return out
+
+
+def call(M5, r0, tw, inl, inr, par):
+    m2, fx = M5.m2, M5.fx
+    r = r0.fresh_call(SITE, regs={**REGS, "R4": XD.STOCK_STATE, "R8": PAR, "R12": IO})
+    m2.poke(r.state, XP.TYPE_WORD, tw & 0xFFFFFFFF)
+    for k in range(32):
+        m2.poke(r.state, INL + 4 * k, fb(inl[k]))
+        m2.poke(r.state, INR + 4 * k, fb(inr[k]))
+        m2.poke(r.state, OUTL + 4 * k, MARK)
+        m2.poke(r.state, OUTR + 4 * k, MARK)
+    for a, v in ((IO, 32), (IO + 4, PAIRI), (IO + 12, PAIRO), (PAIRI, INL), (PAIRI + 4, INR),
+                 (PAIRO, OUTL), (PAIRO + 4, OUTR)):
+        m2.poke(r.state, a, v)
+    for k, x in enumerate(par):
+        m2.poke(r.state, PAR + 4 * k, fb(x))
+    m2.poke(r.state, PAR + 0x18, fb(1.0))
+    entry = dict(r.state.uregs)
+    before = dict(r.state.overlay)
+    how = fx.run(r, 6_000_000, fx.Fixups(), stop_at=[BACK])
+    out = ([m2.word(r.state, OUTL + 4 * k) or 0 for k in range(32)],
+           [m2.word(r.state, OUTR + 4 * k) or 0 for k in range(32)])
+    wrote = {a for a in r.state.overlay if r.state.overlay.get(a) != before.get(a)}
+    return r, how, out, entry, wrote
+
+
+def own(a: int) -> bool:
+    for x in (a, a - dsp.LOAD_ALIAS):
+        if XP.STATE <= x < XP.STATE + XP.STATE_BYTES:
+            return True
+    return False
+
+
+def ddr(a: int) -> int:
+    return a if a >= 0x80000000 else a - dsp.LOAD_ALIAS
+
+
+def run(M5, snap, m2mach, m5img, stock_img) -> dict:
+    checks, numbers = {}, {}
+    seq = script()
+    n_stock = 40
+    # 1. TYPE = stock: build vs stock image
+    rs, rb = M5.init_on(snap, m2mach, stock_img), M5.init_on(snap, m2mach, m5img)
+    same_out = same_regs = no_stray = ok = True
+    outside, stray, cost_stock, heard_stock = set(), set(), [], 0
+    for b in range(n_stock):
+        tw, inl, inr, par = seq[b]
+        rs, hs, os_, _, ws = call(M5, rs, tw, inl, inr, par)
+        rb, hb, ob, _, wb = call(M5, rb, tw, inl, inr, par)
+        ok &= hs[0] == "stop" and hb[0] == "stop"
+        same_out &= os_ == ob
+        same_regs &= rs.state.uregs == rb.state.uregs
+        diff = {a for a in ws | wb if rs.state.overlay.get(a) != rb.state.overlay.get(a)}
+        s = {a for a in diff if not own(a)}
+        stray |= s
+        no_stray &= not s
+        cost_stock.append((hs[2], hb[2]))
+        heard_stock += sum(1 for w in os_[0] + os_[1] if w & 0x7FFFFFFF)
+        for a in ws:
+            o = ddr(a) - XD.STOCK_STATE
+            if 0 <= o < 0x800000 and not (XD.STOCK_AREA[0] <= o < XD.STOCK_AREA[1]):
+                outside.add(o)
+    checks["TYPE stock: both images make the call and come back to the bus"] = ok
+    checks["TYPE stock: every output word as the stock delay's (40 blocks: noise, an impulse, knobs moved)"] = same_out
+    checks["TYPE stock: the stock delay is heard in the test (not a run of zeros)"] = heard_stock > 200
+    checks["TYPE stock: every register at the return as stock's"] = same_regs
+    checks["TYPE stock: every word written as stock's, but XDLY's own state words"] = no_stray
+    numbers["stock: instructions per block (stock image, build): min, max"] = (
+        min(c[0] for c in cost_stock), max(c[0] for c in cost_stock),
+        min(c[1] for c in cost_stock), max(c[1] for c in cost_stock))
+    numbers["stock delay: words it wrote in its DDR state outside the sample area (offsets)"] = (
+        [hex(o) for o in sorted(outside)[:24]], len(outside))
+    numbers["stray words (first 8)"] = [hex(a) for a in sorted(stray)[:8]]
+    numbers["stock delay: the highest offset it wrote past the area"] = hex(max(outside, default=0))
+    # (measured: control words from +0x400008, and one word at +0x5fff04: the same on both images,
+    # and XDLY writes neither: checked below)
+
+    # 2. TYPE = XDLY on the build, against the reference
+    ref = XR.Ref()
+    for b in range(n_stock):
+        tw, inl, inr, par = seq[b]
+        ref.block(tw, inl, inr, [np.float32(x) for x in par])
+    exact, regs_back, heard, first_bad, cost, xd_out = True, True, 0, None, [], set()
+    for b in range(n_stock, len(seq)):
+        tw, inl, inr, par = seq[b]
+        rb, hb, ob, entry, wb = call(M5, rb, tw, inl, inr, par)
+        want = ref.block(tw, inl, inr, [np.float32(x) for x in par])
+        wbits = ([fb(x) for x in want[0]], [fb(x) for x in want[1]])
+        if hb[0] != "stop" or ob != wbits:
+            exact = False
+            first_bad = first_bad or (b, hb[0], [hex(w) for w in ob[0][:4]], [hex(w) for w in wbits[0][:4]])
+        keep = {f"R{k}" for k in range(16)} | {"I0", "I1", "I2", "I3", "I5"}
+        if any(rb.state.uregs.get(k) != entry.get(k) for k in entry if str(k) in keep):
+            regs_back = False
+        heard += sum(1 for w in wbits[0] + wbits[1] if w & 0x7FFFFFFF)
+        cost.append(hb[2])
+        for a in wb:
+            x = ddr(a)
+            if 0x80000000 <= x < 0xA0000000 and not (XD.LINE_A <= x < XD.LINE_B + 4 * XD.LINE) \
+                    and not BUF <= x < BUF + 0x600:
+                xd_out.add(x)
+    checks["TYPE XDLY: every output word as dnfw.xdly.ref's (200 blocks: noise, an impulse, the knee, "
+           "knob moves, TIME 2 at 10 s)"] = exact
+    checks["TYPE XDLY: the repeats are heard (not a run of zeros)"] = heard > 3000
+    checks["TYPE XDLY: every R, I0-I3 and I5 register the bus left is back at the return"] = regs_back
+    n = ref.fill + 4
+    lines_ok = True
+    for line, base in ((ref.a, XD.LINE_A), (ref.b, XD.LINE_B)):
+        idx = [(ref.wp - k) & XD.LINE_MASK for k in range(n)]
+        lines_ok &= [M5.m2.word(rb.state, base + 4 * i) or 0 for i in idx] == [fb(line[i]) for i in idx]
+    checks["TYPE XDLY: the lines' written words as the reference's"] = lines_ok
+    checks["TYPE XDLY: no DDR write outside its two lines (and the test's buffers)"] = not xd_out
+    numbers["XDLY: DDR words written outside its lines (first 8)"] = [hex(a) for a in sorted(xd_out)[:8]]
+    numbers["XDLY: first mismatch"] = first_bad
+    numbers["XDLY: instructions per block while running: min, mean, max"] = (
+        min(cost), round(sum(cost) / len(cost)), max(cost))
+
+    # 3. the switches, on silence
+    z = [0.0] * 32
+    par = seq[-1][3]
+    clear_blocks, silent, peak_after, cost_clear, nz = 0, True, 0.0, [], [-1]
+    for b in range(XD.STOCK_WORDS // XD.CHUNK + 40):
+        rb, hb, ob, _, _ = call(M5, rb, 0x100, z, z, par)
+        want = ref.block(0x100, z, z, [np.float32(x) for x in par])
+        if want != "stock":
+            clear_blocks += 1
+            silent &= all(w == 0 for w in ob[0] + ob[1])
+            cost_clear.append(hb[2])
+            if clear_blocks == XD.STOCK_WORDS // XD.CHUNK:          # the clear's last block: read it all
+                nz = [k for k in range(0, XD.STOCK_WORDS, 61)
+                      if (M5.m2.word(rb.state, XD.LINE_A + 4 * k) or 0) != 0]
+        else:
+            peak_after = max([peak_after] + [abs(bf(w)) for w in ob[0] + ob[1]])
+    rf = M5.init_on(snap, m2mach, stock_img)
+    fresh_peak = 0.0
+    for b in range(40):
+        rf, hf, of, _, _ = call(M5, rf, 0x100, z, z, par)
+        fresh_peak = max([fresh_peak] + [abs(bf(w)) for w in of[0] + of[1]])
+    checks["switch to stock: silent while its sample area clears"] = silent
+    checks["switch to stock: 256 clearing blocks, then no old tail (the peak on silence as a fresh "
+           "stock delay's)"] = clear_blocks == XD.STOCK_WORDS // XD.CHUNK and peak_after <= fresh_peak
+    checks["switch to stock: the sample area is 0 when the clear ends (every 61st word read)"] = not nz
+    numbers["switch to stock: words of the area not 0 after the clear (first 8 word indices)"] = nz[:8]
+    numbers["switch to stock: clearing blocks; the stock delay's peak on silence after (build, fresh)"] = (
+        clear_blocks, peak_after, fresh_peak)
+    numbers["XDLY: instructions per clearing block: min, max"] = (min(cost_clear), max(cost_clear))
+    zeros = True
+    for b in range(20):
+        rb, hb, ob, _, _ = call(M5, rb, 0, z, z, par)
+        ref.block(0, z, z, [np.float32(x) for x in par])
+        zeros &= hb[0] == "stop" and all(w == 0 for w in ob[0] + ob[1])
+    checks["switch back to XDLY: exact zeros on silence at once (nothing of the lines read)"] = zeros
+    return {"ok": all(checks.values()), "checks": checks, "numbers": numbers}

@@ -3082,7 +3082,7 @@ def program(L: Layout, next_sw: int, prefix: str = "sm") -> str:
     p.e("COMP(R0, R12);")
     p.jump("LT", top)
     G.end_mark(p)                            # v0.32: our voices' time, for the guard's limit
-    p.e(f"JUMP {next_sw:#x};", "ping.asm's wr_ping (which restores; v0.26: RESONATOR and CZ gone)")
+    p.e(f"JUMP {next_sw:#x};", "inserts.asm's wr_ins, then ping.asm's wr_ping (which restores; v0.26: RESONATOR and CZ gone)")
     p.emit_subs()
     p.raw(".wr_smp..end:")
     p.raw("      .type wr_smp.,STT_FUNC;")
@@ -3179,6 +3179,7 @@ def pvmix(p: Prog, L: Layout) -> None:
                     p.ldi(0, k, 1)
                     p.fop(0, 0, "+", x)
                     p.sti(k, 1, 0)
+                pv_overbridge(p, L)
                 p.ld(1, C["pvk"])
             p.if_(1, "LT", 2, one, kind="i")
             p.iconst(12, 1)
@@ -3212,6 +3213,81 @@ def pvmix(p: Prog, L: Layout) -> None:
             p.ifz(2, "NE", loop)
         p.ifz(0, "EQ", again)
     p.if_(0, "GT", 12, some, kind="i")
+
+
+# The preview over Overbridge / USB audio (the user on 1.12: heard on the outputs, not over
+# Overbridge). Overbridge's main L / R are TDM TX slots 0 / 1, which stock fills in the engine
+# (sw 0x1c244d, loop A: fix(MIX_BUF x 1.4286, 31), docs/link-research.md "Who writes which TX
+# slots") on the page TDM_TX + (DM(TDM_PAGE) << 11), before the driver's master-mix call where
+# pvmix adds the preview: so the TX page never had it. Here the same two frames the mix just
+# got are added to slots 0 and 1 of that page, at stock's gain for them (OB_GAIN), saturating
+# as an integer add: TX = sat(TX + TRUNC(preview x OB_GAIN x 2^31)). The per-track slots 2..13
+# and the analog path are untouched.
+OB_GAIN = 1.4286                            # the channel table's gain for k = 0..39 (link-research.md)
+OB_SCALE = OB_GAIN * 2.0 ** 31
+
+
+def pv_overbridge(p: Prog, L: Layout) -> None:
+    """TX slots 0 / 1 of frames 2k and 2k + 1 += the preview's F3 / F2 (k = R1, pvk), at
+    OB_SCALE, saturating. Uses R0, R1, R12, R13, I1 (all saved by wr_pvmix); keeps F2, F3."""
+    p.ld(13, SM.TDM_PAGE)
+    p.iconst(12, 1)
+    p.iop(13, 13, "AND", 12)
+    p.lsh(13, 13, 11)                         # the page: + 0 / 0x800
+    p.lsh(12, 1, 7)                           # frame 2k: 2k x 64 bytes
+    p.iop(13, 13, "+", 12)
+    p.iconst(12, SM.TDM_TX)
+    p.iop(13, 12, "+", 13)
+    p.seti(1, 13)                             # I1: slot 0 of frame 2k
+    p.fconst(12, OB_SCALE)
+    for x, slots in ((3, (0, 1)), (2, (16, 17))):      # frame 2k (F3), then 2k + 1 (F2)
+        # R1 = TRUNC(F_x x OB_SCALE), multiplying |F_x| so the multiplier's flags end the same
+        # (MN, MV, MU, MI all clear) whatever the sample: wr_pvmix restores ASTAT, and this
+        # keeps that exact even where only part of ASTAT is known (the SHARC runner)
+        p.e(f"F1 = ABS F{x};")
+        if p.run:
+            p.setF(1, abs(p.F(x)))
+        p.fop(1, 1, "*", 12)
+        p.trunc(1, 1)
+
+        def neg():
+            p.e("R1 = -R1;")
+            if p.run:
+                p.setR(1, -s32(p.r[1]))
+        p.ifz(x, "LT", neg)                   # the float's sign bit
+        for k in slots:
+            _ob_add(p, k)
+
+
+def _ob_add(p: Prog, k: int) -> None:
+    """word k at I1 = sat(word + R1), as a signed 32-bit integer. Uses R0, R13; keeps R1."""
+    p.ldi(0, k, 1)
+
+    def up():                             # q > 0: at most 0x7fffffff
+        p.iconst(13, 0x7FFFFFFF)
+        p.iop(13, 13, "-", 1)
+
+        def top():
+            p.iconst(0, 0x7FFFFFFF)
+
+        def add():
+            p.ipass(13, 0)
+            p.iop(0, 13, "+", 1)
+        p.if_(0, "GT", 13, top, add, kind="i")
+
+    def down():                           # q <= 0: at least -2^31
+        p.iconst(13, -(1 << 31))
+        p.iop(13, 13, "-", 1)
+
+        def bottom():
+            p.iconst(0, -(1 << 31))
+
+        def add():
+            p.ipass(13, 0)
+            p.iop(0, 13, "+", 1)
+        p.if_(0, "LT", 13, bottom, add, kind="i")
+    p.ifz(1, "GT", up, down)
+    p.sti(k, 1, 0)
 
 
 def _loop16(p: Prog, C, body, n: int = 16) -> None:

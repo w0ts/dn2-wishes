@@ -66,8 +66,7 @@ class Layout:
     """Where the Monomachine voices' shared buffers and tables are (DDR): IN, a render's
     internal samples (up to 192); C, the decimators' coefficients; the tables (`tables`)."""
 
-    def __init__(self, perc, scratch: int, tables: int, dt_at: int | None = None,
-                 render: int | None = None):
+    def __init__(self, perc, scratch: int, tables: int, render: int | None = None):
         self.perc, self.md = perc, perc.md          # PERC's layout (its EXP2, RECIP) and its MD voices'
         self.scratch, self.tables = scratch, tables
         # v0.43: the render scratch (IN .. DG, RENDER_BYTES) at RENDER (L1) when given; the
@@ -78,50 +77,23 @@ class Layout:
         self.YB = r + 4 * 384                 # 192 ints
         self.COEF = r + 4 * 576               # 10 floats
         self.W = {name: r + 4 * (592 + k) for k, name in enumerate(SC_WORDS)}
-        self.COMB = tables + 4 * 33 * 512           # SID's combined waveforms (floats), after the waves
-        # v0.26, DPRO-DENS / DPRO-DDRW (dnfw.mnm.dpro): scratch after the words, tables after COMB
+        # the render scratch keeps the removed machines' places (RENDER_BYTES, dsp.MNM_RENDER_BYTES:
+        # what follows it in L1, FDN8's state among it, stays where it is)
         at = r + 4 * (592 + 64)
         self.BUF, self.MIX, self.W1, self.W2 = at, at + 4 * 64, at + 4 * 96, at + 4 * 128   # 64, 32, 32, 32
-        self.DG = {name: at + 4 * (160 + k) for k, name in enumerate(("w", "l", "j", "c"))}   # the build's cursor
+        self.DG = {name: at + 4 * (160 + k) for k, name in enumerate(("w", "l", "j", "c"))}
         assert self.DG["c"] + 4 - r == RENDER_BYTES
-        t = self.COMB + 4 * 4096
-        # v0.36: the DPRO tables are where the fill writes them (DT_SRC, DDR, in the run of the
-        # Monomachine tables); with DT_AT given (L2), build() copies them there once and every
-        # reader reads them there (DDRW's and DENS's busiest DDR reads, docs/dsp-cost.md)
-        self.DT_SRC, self.DT = {}, {}
-        self.DT_WORDS = sum(n for _, n in DP_TABLES)
-        self.DT_FROM = t
-        self.DT_AT = dt_at
-        u = dt_at if dt_at is not None else t
-        for name, n in DP_TABLES:
-            self.DT_SRC[name] = t
-            self.DT[name] = u
-            t += 4 * n
-            u += 4 * n
-        self.DIGI = tables + DIGI_OFF               # the Digibank stand-in the DSP builds (ints)
-        # v0.26, VO-6 (dnfw.mnm.vo6): its tables after the DPRO ones (rom.vo6_words)
-        self.VO = {}
-        for name, n in VO_TABLES:
-            self.VO[name] = t
+        # the tables (dnfw.md.core TABLE_LAYOUT 'mnm', dnfw.mnm.tables): PLAITS's (SID's, the DPRO
+        # machines' and VO-6's until 2026-11-08)
+        from .tables import PL_TABLES
+        self.PL, t = {}, tables
+        for name, n in PL_TABLES:
+            self.PL[name] = t
             t += 4 * n
 
 
 # v0.43: the bytes of the render scratch Layout lays out (IN .. DG), what dsp.MNM_RENDER_BYTES holds
 RENDER_BYTES = 4 * (592 + 64 + 164)
-
-
-# the DPRO tables after COMB (dnfw.mnm.rom.dpro_words, floats as the fill stores them)
-DP_TABLES = (("interp", 320), ("dec2", 9), ("hb", 7), ("pch", 128), ("wid", 256), ("br", 256))
-# VO-6's tables after them (dnfw.mnm.rom.vo6_words): the gains, the cosines, the pulse shape,
-# the AGC's log mantissas, CLEN's terms, the 21 consonants' set-ups (16 words each) and
-# renderers (40 words each), these two field-major
-VO_TABLES = (("c1", 4 * 0x620), ("cos", 0x614), ("blit", 0x333 - 0x131 + 1), ("log", 256),
-             ("clen", 128), ("trig", 21 * 16), ("cons", 21 * 40))
-DIGI_WORDS = 32 * 2048
-DIGI_OFF = 0x46000
-"""The stand-in's 256 KB (32 x 2048 words, built by the DSP: dnfw.mnm.dpro.build), from the
-Monomachine tables' address: with them at the Machinedrum tables' +0x3A000 (dnfw.md.core
-TABLE_LAYOUT 'mnm'), 0x80000 past those, beyond their end (0x5FE14 now). Moves with them."""
 
 
 SC_WORDS = ("n4", "n5", "half", "inner", "shift", "tmp", "tmp2", "ph", "inc", "len", "hlf", "base",

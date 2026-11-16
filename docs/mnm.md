@@ -1,5 +1,17 @@
 # The Monomachine's synth machines on the DN2 (v0.26)
 
+> **Removed in this fork (2026-11-08, the User):** SID 6581, DPRO-WAVE, DPRO-DDRW, DPRO-DENS and
+> VO-6, to make room for PLAITS and the 303 (DSP code, USB image, their tables and the Digibank
+> stand-in's 256 KB of DDR). What stays: PERC's Monomachine voice plumbing (`dnfw.mnm.machines`,
+> `core`), SOPHIE (`docs/sophie.md`), the Monomachine-style page code. Their machine types
+> **6, 7, 14, 15, 16 stay reserved** (`machines.RESERVED`, never reused): the DSP's lookup sends a
+> track on one to the MIDI machine's engine slot, so the DSP renders nothing for it (in the SHARC
+> runner bit-identical to a stock MIDI track every block); its page is empty
+> (title Removed, eight unused places); MACHINE SEL no longer lists them. The build no longer
+> reads the Monomachine OS (`MNM_OS`, the patcher's `mnm` input: ignored). `test/test_mnm.py`
+> (the golden runs) and `scripts/mnm_identity.py` went with them. The rest of this page is the
+> history of the port.
+
 Owner, 2026-10-25: *"i want to build the digipro, sid, and VO synth machines from the
 elektron monomachine. you can erase the cz phase and resonator machines and just add these
 alongside the dn2 synth machines as synth engines"* -- each its own entry in MACHINE SEL,

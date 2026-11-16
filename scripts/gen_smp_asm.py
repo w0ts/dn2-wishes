@@ -28,7 +28,7 @@ OUT = ROOT / "csrc" / "waverider" / "sharc" / "smp.asm"
 
 
 def build() -> str:
-    return P.program(SL.layout(), dsp.PING_SW)     # entered from PERC's tail; on to PING (v0.26: RESONATOR and CZ gone)
+    return P.program(SL.layout(), dsp.INS_SW)      # entered from PERC's tail; on to the inserts, then PING (v0.26: RESONATOR and CZ gone)
 
 
 def main(argv=None) -> int:

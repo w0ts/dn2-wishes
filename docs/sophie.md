@@ -1,6 +1,6 @@
 # SOPHIE: Sophie's percussion on the DN2 (fork, not released)
 
-A sixth Monomachine-style machine, **Sophie / SOP** in MACHINE SEL (machine type 17), after
+A sixth Monomachine-style machine, **Sophie / SOP** in MACHINE SEL (machine type 20; 17 until v0.45, which gave 17 to upstream's BOUNCE), after
 VO-6. A port of Matt Estela's **Schwung Sophie** (github.com/mestela/schwung-sophie,
 `src/dsp/sophie.c`, MIT; THIRD-PARTY.md), the synth Overtone (complex-ping) also carries as its
 SOPHIE machine on OS 1.12. Overtone publishes no source for it (its patcher ships byte diffs),

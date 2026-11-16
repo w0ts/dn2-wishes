@@ -1,16 +1,19 @@
 /* The system meter (docs/meter.md), OS 1.12: while FUNC is held, on every page, a corner
  * reads the DSP's load, the ColdFire's load and the free ColdFire heap:
  *
- *     D42 C61 H812K
+ *     D42   C61   M9      (each figure over a bar of 16 px, filled to it; D and C with a
+ *     ####| ###|  #       tick at their peak over the last 3 s)
  *
  * - D: the DSP's load in percent, the last half second's peak (link.c smp_dsp_load, from
  *   the SHARC's idle packets, v0.32); "--" while none came in the last second.
  * - C: the ColdFire's load in percent over the last half second: 1 - (idle - ISR inside
  *   idle) / elapsed, from hooks.S's counters (usbprobe's method, measured on the unit).
- * - H: the main buddy heap's free bytes (K, or M from 1000 K), walked under its own lock
- *   as digihealth walks it (sysinfo.s: base of 16-byte units at +4, the free-list heads
- *   at +0xc, the highest order at +0x10; a block counted only when aligned to its order
- *   and its last word is its size, a link followed only through an intact header).
+ * - M: the main buddy heap's used share in percent: 1 - free / total. Free is walked under
+ *   the heap's own lock as digihealth walks it (sysinfo.s: base of 16-byte units at +4,
+ *   the free-list heads at +0xc, the highest order at +0x10; a block counted only when
+ *   aligned to its order and its last word is its size, a link followed only through an
+ *   intact header); the total is the descriptor's +0x14, in units (stock 1.12: 0x200000,
+ *   32 MB, = 2^(the top order 21); measured in the emulator).
  *
  * Nothing is drawn, and nothing walked, while FUNC is up. One subject: the three figures
  * and their corner. Called from page.c: mtr_poll (the UI loop's redraw test) and
@@ -44,6 +47,7 @@ enum {
     MTR_MAGIC_W, MTR_T_IN, MTR_ISR_IDLE, MTR_IDLE, MTR_I_ON, MTR_I_START, MTR_SWITCHES,   /* hooks.S's */
     MTR_CPU, MTR_HEAP, MTR_HEAP_OK, MTR_HEAP_FAULTS, MTR_DRAWS,                         /* the figures */
     MTR_W_AT, MTR_W_T, MTR_W_IDLE, MTR_W_ISR, MTR_W_SW, MTR_HEAP_AT, MTR_DRAW_NEXT, MTR_HELD_WAS,
+    MTR_HEAP_TOT, MTR_DPK, MTR_DPK_AT, MTR_CPK, MTR_CPK_AT,                             /* the bars */
     MTR_WORDS
 };
 _Static_assert(MTR_WORDS * 4 <= 256, "the meter's block");
@@ -64,6 +68,12 @@ _Static_assert(MTR_WORDS * 4 <= 256, "the meter's block");
 #define heap_at MTR[MTR_HEAP_AT]
 #define draw_next MTR[MTR_DRAW_NEXT]
 #define held_was MTR[MTR_HELD_WAS]
+#define mtr_heap_tot MTR[MTR_HEAP_TOT]
+#define dpk (*(volatile int *)&MTR[MTR_DPK])
+#define dpk_at MTR[MTR_DPK_AT]
+#define cpk (*(volatile int *)&MTR[MTR_CPK])
+#define cpk_at MTR[MTR_CPK_AT]
+#define PEAK_HOLD 4500u                 /* frames: a peak tick stays 3 s */
 
 static void cpu_window(void)
 {
@@ -105,8 +115,24 @@ static void heap_walk(void)
     }
     UNLOCK(HEAP_MTX);
     mtr_heap = units << 4;
+    mtr_heap_tot = HEAP_CB[5] << 4;             /* the heap's size, its units at +0x14 */
     mtr_heap_faults += faults;
     mtr_heap_ok = 1;
+}
+
+static int pct_of_pm(int pm)                    /* permille -> percent, -1 kept */
+{
+    return pm < 0 ? -1 : (pm + 5) / 10;
+}
+
+/* a peak held PEAK_HOLD frames, then following the figure down; -1 (no figure) once it
+ * has aged out */
+static void peak(volatile u32 *pk, volatile u32 *at, int v, u32 f)
+{
+    if ((v >= 0 && v >= (int)*pk) || f - *at > PEAK_HOLD) {
+        *pk = (u32)v;
+        *at = f;
+    }
 }
 
 /* the UI loop's redraw test, every pass: the windows, and a redraw asked for while FUNC is
@@ -117,6 +143,7 @@ void mtr_poll(void *screen)
         for (int k = 1; k < MTR_WORDS; k++)
             MTR[k] = 0;
         mtr_cpu = -1;
+        dpk = cpk = -1;
         MTR[MTR_MAGIC_W] = MTR_MAGIC;
     }
     u32 f = FRAMES;
@@ -124,6 +151,8 @@ void mtr_poll(void *screen)
         cpu_window();
         w_at = f ? f : 1u;
     }
+    peak(&MTR[MTR_DPK], &MTR[MTR_DPK_AT], smp_dsp_load(), f);
+    peak(&MTR[MTR_CPK], &MTR[MTR_CPK_AT], pct_of_pm(mtr_cpu), f);
     u32 held = smp_func_held != 0;
     if (held && (!held_was || f - heap_at >= 2u * WINDOW)) {
         heap_walk();                            /* at the press, then once a second */
@@ -190,69 +219,65 @@ static int percent(char *b, int n, int pm_or_pct, int is_pm)
     return put_num(b, n, p > 999u ? 999u : p);
 }
 
-static int heap_text(char *b, int n)
+static void glyphs(void *canvas, int x, int y_top, const char *b, int n)
 {
-    if (!mtr_heap_ok) {
-        b[n++] = '-';
-        b[n++] = '-';
-        return n;
+    for (int k = 0; k < n; k++) {
+        const u8 *g = GLYPH[gi(b[k])];
+        for (int r = 0; r < 5; r++)
+            for (int c = 0; c < 3; c++)
+                if (g[r] >> (2 - c) & 1)
+                    SET_PIXEL(canvas, x + c, y_top - r, 0);
+        x += 4;
     }
-    u32 k = mtr_heap >> 10;
-    if (k < 1000u) {
-        n = put_num(b, n, k);
-        b[n++] = 'K';
-    } else if (k < 10240u) {                    /* 1.0M .. 9.9M */
-        u32 t = (k * 10u) >> 10;
-        n = put_num(b, n, t / 10u);
-        b[n++] = '.';
-        b[n++] = (char)('0' + t % 10u);
-        b[n++] = 'M';
-    } else {
-        n = put_num(b, n, k >> 10);
-        b[n++] = 'M';
-    }
-    return n;
 }
 
-/* after stock's screen (page.c wr_screen): the corner, top right, while FUNC is held.
- * The canvas is 128 x 64, y counting up from the bottom. */
+#define COL_W 16                        /* a column: a letter and 3 digits; its bar */
+#define COL_GAP 2
+#define BOX_X0 (128 - 3 * COL_W - 2 * COL_GAP)   /* 76 */
+
+/* one column at x: LETTER and the percent (rows 63..59); two rows lower a bar (rows 56..54,
+ * 16 px) filled to the percent, the rest a dotted floor, and a tick (rows 57..54) at the
+ * peak PK; no bar fill and no tick while the figure is unknown ("--") */
+static void column(void *canvas, int x, char letter, int pct, int pk)
+{
+    char b[4];
+    int n = 0;
+    b[n++] = letter;
+    n = percent(b, n, pct, 0);
+    glyphs(canvas, x, 63, b, n);
+    int fill = pct < 0 ? 0 : (pct > 100 ? COL_W : (pct * COL_W + 50) / 100);
+    for (int k = 0; k < COL_W; k++) {
+        if (k < fill)
+            for (int y = 54; y <= 56; y++)
+                SET_PIXEL(canvas, x + k, y, 0);
+        else if (!(k & 1))
+            SET_PIXEL(canvas, x + k, 54, 0);
+    }
+    if (pct >= 0 && pk >= 0) {
+        int t = pk >= 100 ? COL_W - 1 : pk * COL_W / 100;
+        for (int y = 54; y <= 57; y++)
+            SET_PIXEL(canvas, x + t, y, 0);
+    }
+}
+
+/* after stock's screen (page.c wr_screen): the corner, top right, while FUNC is held: a
+ * white box over the title bar's right end (rows 54..63, where stock draws its tempo box,
+ * its full height so none of stock's edge shows under it), three columns in black. The
+ * canvas is 128 x 64, y counting up from the bottom. */
 void mtr_draw(void *canvas)
 {
     if (!smp_func_held)
         return;
-    char b[24];
-    int n = 0;
-    b[n++] = 'D';
-    n = percent(b, n, smp_dsp_load(), 0);
-    b[n++] = ' ';
-    b[n++] = 'C';
-    n = percent(b, n, mtr_cpu, 1);
-    b[n++] = ' ';
-    b[n++] = 'H';
-    n = heap_text(b, n);
-    int w = 0;
-    for (int k = 0; k < n; k++)
-        w += b[k] == '.' ? 2 : b[k] == ' ' ? 2 : 4;
-    /* stock's look: black text on a white box over the title bar's right end (where stock
-     * draws its tempo box, rows 54..63), the box its full height so none of stock's edge
-     * shows under it */
-    int x0 = 127 - w, y_top = 61;               /* the glyphs' top row */
     for (int y = 54; y <= 63; y++)
-        for (int x = x0 - 2; x < 128; x++)
+        for (int x = BOX_X0 - 2; x < 128; x++)
             SET_PIXEL(canvas, x, y, 1);
-    int x = x0;
-    for (int k = 0; k < n; k++) {
-        if (b[k] == ' ') {
-            x += 2;
-            continue;
-        }
-        const u8 *g = GLYPH[gi(b[k])];
-        int cols = b[k] == '.' ? 1 : 3, shift = b[k] == '.' ? 1 : 0;
-        for (int r = 0; r < 5; r++)
-            for (int c = 0; c < cols; c++)
-                if (g[r] >> (2 - c - shift) & 1)
-                    SET_PIXEL(canvas, x + c, y_top - r, 0);
-        x += cols + 1;
+    int mem = -1;
+    if (mtr_heap_ok && mtr_heap_tot >= mtr_heap && mtr_heap_tot >= 100u) {
+        u32 used = mtr_heap_tot - mtr_heap;
+        mem = (int)((used / (mtr_heap_tot / 100u) > 100u) ? 100u : used / (mtr_heap_tot / 100u));
     }
+    column(canvas, BOX_X0, 'D', smp_dsp_load(), dpk);
+    column(canvas, BOX_X0 + COL_W + COL_GAP, 'C', pct_of_pm(mtr_cpu), cpk);
+    column(canvas, BOX_X0 + 2 * (COL_W + COL_GAP), 'M', mem, -1);
     mtr_draws++;
 }

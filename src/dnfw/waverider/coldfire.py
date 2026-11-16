@@ -49,14 +49,14 @@ from ..mnm import machines as _mnm           # noqa: E402
 # PERC; the Monomachine's machines (docs/mnm.md: 6, 7, then 14.. after the sample machines);
 # the Digitakt II's sample machines (docs/sampler.md, 8..13): all WaveTone clones
 from ..sampler import machines as _smpm         # noqa: E402
-NEW_TYPES = tuple(range(5, max(13, *_mnm.TYPES, _smpm.BOUNCE_TYPE) + 1))   # v0.44: to 17, BOUNCE
+NEW_TYPES = tuple(range(5, max(13, *_mnm.CF_TYPES, _smpm.BOUNCE_TYPE) + 1))   # v0.44: BOUNCE 17; ours to 20, with the removed machines' reserved types
 CLONE = 1                               # WaveTone
 LONG_NAME, SHORT_NAME = "Perc", "PRC"           # v0.11: PERC in Waverider's place
 MACHINE_NAMES = {5: ("Perc", "PRC"),
                  8: ("Oneshot", "ONE"), 9: ("Werp", "WRP"), 10: ("Stretch", "STR"),
                  11: ("Repitch", "RPT"), 12: ("Grid", "GRD"), 13: ("Slice", "SLC"),
                  _smpm.BOUNCE_TYPE: ("Flex", "FLX"),       # v0.44: a section of its own, after the sample machines
-                 **{t: _mnm.LIST_NAMES[n] for t, n in zip(_mnm.TYPES, _mnm.NAMES)}}   # v0.26
+                 **{t: nm for t, nm in zip(_mnm.CF_TYPES, _mnm.CF_LIST_NAMES)}}   # v0.26; a reserved type: Removed
 if set(MACHINE_NAMES) != set(NEW_TYPES):
     raise ImportError(f"machine types {sorted(set(NEW_TYPES) - set(MACHINE_NAMES))} have no machine")
 # RESONATOR (2026-10-18): the shims, the name table, the attribute rows and the list
@@ -72,7 +72,7 @@ LIST_STOCK_VA = 0x401DE168             # {0, 2, 1, 3, 4}, five longs
 LIST_STOCK = (0, 2, 1, 3, 4)
 # PERC, RESONATOR, CZ after Swarmer; then the Digitakt II's sample machines in its own
 # order (v0.15: all five; v0.13 offered ONESHOT and GRID); then MIDI
-LIST_NEW = (0, 2, 1, 3, 5, *_mnm.TYPES, 8, 9, 10, 11, 13, 12, *((_smpm.BOUNCE_TYPE,) if _smpm.BOUNCE_LISTED else ()), 4)   # v0.19: SLICE before GRID, the DT2's order; v0.44 BOUNCE after them (group 3: its own divider)
+LIST_NEW = (0, 2, 1, 3, 5, *_mnm.TYPES, 8, 9, 10, 11, 13, 12, *((_smpm.BOUNCE_TYPE,) if _smpm.BOUNCE_LISTED else ()), 4)   # v0.19: SLICE before GRID, the DT2's order; v0.44 BOUNCE after them (group 3: its own divider); never a reserved type
 LIST_ALLOC = 0x4004D8E0                 # pea 0x14 -- the vector's storage, 5 longs
 LIST_END = 0x4004D900                   # pea 0x401de17c -- the copy's end
 LIST_CAP = 0x4004D906                   # lea %a0@(20),%a0 -- the vector's capacity
@@ -906,7 +906,13 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
                  # v0.40: folders inside folders
                  "smp_lib_fpar", "smp_fb_titletext", "smp_fb_delete",
                  # the system meter (csrc/meter): its hooks and the figures the checks read
-                 "mtr_isr_out", "mtr_switch", "mtr_poll", "mtr_draw"):   # the sample link's state (v0.15)
+                 "mtr_isr_out", "mtr_switch", "mtr_poll", "mtr_draw",
+                 # FDN8 (csrc/fdn8): the Reverb page's TYPE and names
+                 "rvt_poll", "rvt_cell", "rvt_state", "rvt_placed", "rvt_seen",
+                 # XDLY (csrc/xdly): the Delay page's TYPE and names
+                 "dlt_poll", "dlt_cell", "dlt_state", "dlt_placed", "dlt_seen",
+                 # the per-track inserts (csrc/inserts)
+                 "ins_pop", "ins_draw", "ins_visible", "ins_words", "ins_gen", "ins_up", "ins_sel", "ins_selv", "ins_mod", "ins_kv"):   # the sample link's state (v0.15)
         layout[name] = csyms[name]
     layout["mtr_ram"] = pages.METER_RAM      # the system meter's state block (csrc/meter/meter.c MTR_*)
     # v0.45: PING removed (owner, 2026-11-08): its chunk (the FLTR list's 'Ping', the filter

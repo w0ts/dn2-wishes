@@ -75,7 +75,9 @@ STATE_DM, STATE_BYTES = 0x2DDE00, 0x380      # save area, PERC's scratch, idle_l
 # 0x200fa000..0x200fdfff; the I-cache (enabled by the startup, docs/waverider-dsp-silence.md)
 # serves it. Its voices' state and scratch stay in L1, its tables in DDR.
 PERC_L2_LOAD = 0x200C0000
-PERC_L2_SPAN = 0x23800                       # 142 KB (SOPHIE: 143,450 B of code; 140 KB v0.24..v0.42, 80 KB v0.17..v0.23)
+PERC_L2_SPAN = 0x24C00                       # 147 KB (PLAITS VA+FM+ADD+SWARM+NOISE+PART+STRING+MODAL+BD+SD+HH, 2026-11-09: 149,892 B of code; VA 131,794; TB303: 128,282 B; PLAITS 123,128; 118,986 without SID, the DPRO machines and VO-6, 2026-11-08;
+                                             # 142 KB SOPHIE, 140 KB v0.24..v0.42, 80 KB v0.17..v0.23). The span is zero-padded into
+                                             # the DSP upload, so it is kept to the code
 PERC_SW = 0xB80000 + (PERC_L2_LOAD - 0x20000000) // 2       # 0xbe0000
 L2_IMAGE_END = 0x2008823C                    # the stock stream's last L2 byte
 L2_NOCACHE = 0x200FA000                      # the startup's non-cacheable L2 window starts here
@@ -96,7 +98,8 @@ MD_TABLES_DDR = 0x82000000
 MD_STATE_L2 = 0x200A0000
 MNM_SCRATCH_L2 = 0x200A4000
 MNM_SCRATCH_BYTES = 0x4000
-# v0.36: the DPRO tables (DDRW's and DENS's busiest DDR reads, dnfw.mnm.core DP_TABLES: 976
+# v0.36..v0.43: the DPRO tables' room (gone with DPRO-DDRW and -DENS, 2026-11-08; the address stays
+# so the main tap after it stays where it is). Before: (DDRW's and DENS's busiest DDR reads: 976
 # words), copied here from the Monomachine tables by the Digibank build, once
 MNM_DT_L2 = MNM_SCRATCH_L2 + MNM_SCRATCH_BYTES        # 0x200A8000
 MNM_DT_BYTES = 0x1000
@@ -104,11 +107,49 @@ MNM_DT_BYTES = 0x1000
 MAIN_TAP_L2 = MNM_DT_L2 + MNM_DT_BYTES                 # 0x200A9000
 MAIN_TAP_BYTES = 0x200
 MD_DELAY_DDR = 0x82200000                    # 16 slots x core.PI_DELAY_STRIDE
+# FDN8 (docs/fdn8.md, dnfw.fdn8): the reverb in the stock reverb's slot. Its code in L2 after the
+# main mix's tap (inside 0x20088400..0x200b0000, the range complex-ping's mods proved on units),
+# its state in L1 block 1's last 3 KB (after the Monomachine's render scratch), its ring in
+# DDR (256 KB of float32, zeros at power-on). The FX bus's CJUMP to the stock reverb (sw
+# 0x1c1d11) gets wr_fdn8 as its target; wr_fdn8 JUMPs on to the stock reverb unless TYPE (k 48)
+# asks for FDN8.
+FDN8_L2_LOAD = 0x200AA000
+FDN8_L2_SPAN = 0x2800                        # 10 KB (16 KB until XDLY took the rest)
+FDN8_SW = 0xB80000 + (FDN8_L2_LOAD - 0x20000000) // 2       # 0xbd5000
+FDN8_STATE_DM = 0x2E6400
+FDN8_RING_DDR = 0x82400000
+FDN8_RING_BYTES = 0x80000                   # 512 KB (256 KB until LONG)
+# XDLY (docs/xdly.md, dnfw.xdly): optimist's cross-modulated dual delay in the stock delay's slot.
+# Its code in L2 after FDN8's (up to 0x200b0000, the range proven on units), its words in the last
+# 512 B of FDN8's L1 block, its two lines in the stock delay's own 4 MB sample area in DDR. The FX
+# bus's call of the stock delay (sw 0x1c1c58) gets wr_xdly as its target; wr_xdly JUMPs on to the
+# stock delay unless TYPE (k 40, Delay FX Routing) asks for XDLY.
+XDLY_L2_LOAD = FDN8_L2_LOAD + FDN8_L2_SPAN   # 0x200ac800
+XDLY_L2_SPAN = 0x200AE000 - XDLY_L2_LOAD     # 6 KB (the per-track inserts' code follows at 0x200ae000)
+XDLY_SW = 0xB80000 + (XDLY_L2_LOAD - 0x20000000) // 2       # 0xbd6400
+XDLY_STATE_DM = 0x2E6E00
+DELAY_SITE_SW = 0x1C1C58                     # the FX bus: CALL 0xb8482c (DB), then its two pushes
+DELAY_SITE_STOCK = bytes.fromhex("0418b8002c48")
+STOCK_DELAY_SW = 0xB8482C
+# the per-track inserts (docs/inserts.md, dnfw.inserts): their pass in L2 after FDN8's span (inside
+# the range proven on units; XDLY's branch ends its span here), their state after the code. smp.asm's
+# tail JUMPs to wr_ins, which JUMPs on to PING.
+INS_L2_LOAD = 0x200AE000
+INS_L2_SPAN = 0x1800                         # the code; then the state (dnfw.inserts.program.STATE)
+INS_SW = 0xB80000 + (INS_L2_LOAD - 0x20000000) // 2          # 0xbd7000
+INS_STATE_L2 = INS_L2_LOAD + INS_L2_SPAN                     # 0x200af800
+REVERB_SITE_SW = 0x1C1D11                    # the FX bus: CJUMP 0xb836bc (DB), then its two pushes
+REVERB_SITE_STOCK = bytes.fromhex("0418b800bc36")
+STOCK_REVERB_SW = 0xB836BC
 # the sample machines (v0.13, docs/sampler.md): code in L2 after PERC's span, voices and
 # scratch in L1 (Waverider's former loop room), the sample pool in DDR from 64 MB in
-SMP_L2_LOAD = PERC_L2_LOAD + PERC_L2_SPAN    # 0x200e3800 (SOPHIE; 0x200e3000 v0.24..v0.42; 0x200d4000 v0.17..v0.23, 0x200d0000 until v0.16)
+# 2026-11-09 (PLAITS' eleven engines took PERC's code past 144 KB): the sample machines' code moved
+# below PERC, after FDN8's code (0x200aa000..0x200ae000), so PERC's span can grow up to the
+# non-cacheable window's 64 KB margin (the User's choice for this limit, 2026-11-08: move the
+# sample code down). Until then it followed PERC's span:
+SMP_L2_LOAD = 0x200B6000                     # 0x200e0400 (PLAITS VA; 0x200df800 TB303; 0x200de400 PLAITS; 0x200dd400 2026-11-08; 0x200e3800 SOPHIE; 0x200e3000 v0.24..v0.42; 0x200d4000 v0.17..v0.23, 0x200d0000 until v0.16)
 SMP_L2_SPAN = 0x6000                         # v0.28: 24 KB (the re-latch took the code past 19 KB; 20 KB v0.18..v0.27, 32 KB until v0.16)
-SMP_SW = 0xB80000 + (SMP_L2_LOAD - 0x20000000) // 2          # 0xbf1c00 (SOPHIE; 0xbf1800 v0.24..v0.42; 0xbea000 v0.17..v0.23)
+SMP_SW = 0xB80000 + (SMP_L2_LOAD - 0x20000000) // 2          # 0xbdb000 (below PERC, 2026-11-09; 0xbf0200 PLAITS VA; 0xbefc00 TB303; 0xbef200 PLAITS; 0xbeea00 2026-11-08; 0xbf1c00 SOPHIE; 0xbf1800 v0.24..v0.42; 0xbea000 v0.17..v0.23)
 PVMIX_L2_LOAD = SMP_L2_LOAD + SMP_L2_SPAN - 0x400           # v0.25: pvmix.asm (wr_pvmix)
 PVMIX_SW = 0xB80000 + (PVMIX_L2_LOAD - 0x20000000) // 2
 SMP_STATE_DM, SMP_STATE_STRIDE = 0x2DEF00, 128  # 16 voices x 128 bytes (v0.15)
@@ -191,11 +232,13 @@ LOOKUP_SITE_STOCK = bytes.fromhex("0f150025d748")   # parcels, MSW first
 LOOKUP16_DM = 0x2DEE04                       # 16 words; 0x2dee00 is the [-1] guard (0)
 from ..mnm import machines as _mnm_types    # noqa: E402
 from ..sampler import machines as _smp_types
-MACHINE_TYPES = max(16, max(_mnm_types.TYPES) + 1, max(_smp_types.TYPES) + 1)   # v0.26: 17 with a Monomachine machine at 16; v0.44: 18, BOUNCE at 17
+MACHINE_TYPES = max(16, max(_mnm_types.CF_TYPES) + 1, max(_smp_types.TYPES) + 1)   # v0.26: 17 with a Monomachine machine at 16; v0.44: BOUNCE at 17; the reserved types too
 SMP_ENGINE_SLOT = 5                          # the engine slot the sample machines borrow
 SMP_TYPES = _smp_types.TYPES                 # ONESHOT WERP STRETCH REPITCH GRID SLICE (v0.19); v0.44 BOUNCE (17)
 ENGINES = {5: "PERC", 8: "ONESHOT", 12: "GRID"}   # types with an engine of ours
 MNM_TYPES = _mnm_types.TYPES                 # v0.26: the Monomachine machines (PERC's voice, so PERC's slot)
+RESERVED_TYPES = tuple(_mnm_types.RESERVED)   # the removed machines' (2026-11-08): the MIDI engine's slot, silent
+MIDI_ENGINE_SLOT = 4                         # stock's MIDI machine: the DSP renders nothing for it
 
 IDLE_SITE_SW = 0xB88ABB                      # prvIdleTask's back edge: jump (pc,-0x10)
 IDLE_SITE_STOCK = bytes.fromhex("3e07ff00f0ff")
@@ -222,9 +265,15 @@ def lookup16() -> bytes:
     record's +0x1b4 copy indexes 8-entry tables at sw 0x1c299f and in the render code; 8
     and above would read past them). PERC and the sample machines tell themselves apart by
     the frame's own type word; one whose machine has no renderer yet stays silent on that
-    slot. Any other type reads 0 (FM Tone), as stock answers 5-7."""
+    slot. A removed machine's reserved type (2026-11-08) reads 4, the MIDI machine's: the DSP
+    renders nothing for it, so the track is silent (exactly 0 in the SHARC runner). In PERC's
+    slot it would have had the stock render for that slot (peak 0.02: what PERC does not
+    claim is not silent there), as engine 0 FM Tone. Any other type reads 0 (FM Tone), as
+    stock answers 5-7."""
     table = [t if t < 5 or t in ENGINES and t < 8 else
-             SMP_ENGINE_SLOT if t in SMP_TYPES or t in MNM_TYPES else 0 for t in range(MACHINE_TYPES)]
+             MIDI_ENGINE_SLOT if t in RESERVED_TYPES else
+             SMP_ENGINE_SLOT if t in SMP_TYPES or t in MNM_TYPES else 0
+             for t in range(MACHINE_TYPES)]
     return struct.pack(f"<{1 + MACHINE_TYPES}I", 0, *table)
 
 
@@ -252,7 +301,7 @@ def objects() -> dict[str, bytes]:
     return {name: sharc_object.load_bytes(bytes.fromhex(spec[name]["object_parcels_be"]))
             for name in ("perc", "smp", "entry_jump", "idle_load", "idle_jump", "block_count",
                          "entry_mark", "emark_jump", "lookup_ptr", "ping",
-                         "pvmix", "pvmix_jump")}
+                         "pvmix", "pvmix_jump", "fdn8", "xdly", "inserts")}
 
 
 def pvmix_object() -> bytes:
@@ -296,6 +345,8 @@ def spans() -> list[tuple[str, int, bytes]]:
         # machine of ours returns through it). PING's state span went with it; the stub pads
         # with zeros to REGION's end, so those bytes still load as zeros.
         ("ping.asm (wr_ping: the shared tail)", PING_CODE_DM, obj["ping"]),
+        ("FDN8 state: its words, the LFOs' phases, the stock buffers' chunk table", FDN8_STATE_DM, _fdn8_state()),
+        ("XDLY state: its words (zeros)", XDLY_STATE_DM, _xdly_state()),
     ]
     out = []
     for k, (what, at, payload) in enumerate(raw):
@@ -306,6 +357,42 @@ def spans() -> list[tuple[str, int, bytes]]:
             raise DspError(f"{what} leaves fewer than 64 bytes of NOP padding")
         out.append((what, dm_to_load(at), payload + bytes(end - at - len(payload))))
     return out
+
+
+def _fdn8_state() -> bytes:
+    from ..fdn8 import program as fdn8_program
+    assert fdn8_program.STATE == FDN8_STATE_DM and fdn8_program.RING == FDN8_RING_DDR
+    assert FDN8_STATE_DM >= MNM_RENDER_DM + MNM_RENDER_BYTES
+    return fdn8_program.state_bytes()
+
+
+def _xdly_state() -> bytes:
+    from ..xdly import program as xdly_program
+    from ..fdn8 import program as fdn8_program
+    assert xdly_program.STATE == XDLY_STATE_DM
+    assert fdn8_program.STATE + fdn8_program.STATE_BYTES <= XDLY_STATE_DM
+    return xdly_program.state_bytes()
+
+
+def delay_call() -> bytes:
+    """the FX bus's CALL at DELAY_SITE_SW with wr_xdly as its target: the same instruction
+    (parcels 0x1804, then the 24-bit address), only the address changed"""
+    if XDLY_SW >> 24:
+        raise DspError("wr_xdly is beyond a 24-bit address")
+    return DELAY_SITE_STOCK[:2] + struct.pack("<HH", XDLY_SW >> 16, XDLY_SW & 0xFFFF)
+
+
+def _ins():
+    from ..inserts import design as ins_design
+    return ins_design
+
+
+def reverb_cjump() -> bytes:
+    """the FX bus's CJUMP at REVERB_SITE_SW with wr_fdn8 as its target: the same instruction
+    (type 8a CJUMP (DB), parcels 0x1804, then the 24-bit address), only the address changed"""
+    if FDN8_SW >> 24:
+        raise DspError("wr_fdn8 is beyond a 24-bit address")
+    return REVERB_SITE_STOCK[:2] + struct.pack("<HH", FDN8_SW >> 16, FDN8_SW & 0xFFFF)
 
 
 def _shft_tables() -> bytes:
@@ -343,6 +430,8 @@ def ddr_spans() -> list[tuple[str, int, bytes]]:
         # the ColdFire at power-on (dnfw.mods.waverider's table chunk): not in this stream
         ("Machinedrum P-I delay lines: 16 slots x 8 KB (zeros; v0.32)", MD_DELAY_DDR,
          bytes(16 * _md_core().PI_DELAY_STRIDE)),
+        ("FDN8's ring: 64 K float32 (zeros)", FDN8_RING_DDR, bytes(FDN8_RING_BYTES)),
+        ("the inserts' TAPE rings: 16 tracks x 512 float32 (zeros)", _ins().TP_RING_DDR, bytes(16 * 4 * _ins().TP_RING)),
         ("sample pool: its empty directory's magic and count (v0.17: no test sounds; the +Drive's load in)",
          SMP_POOL_DDR, _smp_pool()[:8]),
         ("sample pool: the rest of its directory and names (zeros)", SMP_POOL_DDR + 8,
@@ -392,10 +481,24 @@ def l2_spans() -> list[tuple[str, int, bytes]]:
                 bytes(16 * _md_core().MD_STRIDE)))
     out.append(("Monomachine scratch and the voice order, in L2 (zeros; v0.32)", MNM_SCRATCH_L2,
                 bytes(MNM_SCRATCH_BYTES)))
-    out.append(("the DPRO tables' room in L2 (zeros, filled by the build; v0.36)", MNM_DT_L2,
-                bytes(MNM_DT_BYTES)))
     out.append(("the main mix's tap for the recorder's MAIN, in L2 (zeros; v0.37)", MAIN_TAP_L2,
                 bytes(MAIN_TAP_BYTES)))
+    code = obj["fdn8"]
+    if FDN8_L2_SPAN - len(code) < 64:
+        raise DspError(f"fdn8.asm ({len(code)} bytes) leaves fewer than 64 bytes of its L2 span")
+    out.append(("fdn8.asm (wr_fdn8), in L2", FDN8_L2_LOAD, code + bytes(FDN8_L2_SPAN - len(code))))
+    code = obj["xdly"]
+    if XDLY_L2_SPAN - len(code) < 64:
+        raise DspError(f"xdly.asm ({len(code)} bytes) leaves fewer than 64 bytes of its L2 span")
+    out.append(("xdly.asm (wr_xdly), in L2", XDLY_L2_LOAD, code + bytes(XDLY_L2_SPAN - len(code))))
+    code = obj["inserts"]
+    if INS_L2_SPAN - len(code) < 64:
+        raise DspError(f"inserts.asm ({len(code)} bytes) leaves fewer than 64 bytes of its L2 span")
+    out.append(("inserts.asm (wr_ins), in L2", INS_L2_LOAD, code + bytes(INS_L2_SPAN - len(code))))
+    from ..inserts import program as ins_program
+    assert ins_program.STATE == INS_STATE_L2
+    out.append(("the inserts' state: 16 tracks x 32 bytes, then the pass's words (zeros)", INS_STATE_L2,
+                ins_program.state_bytes()))
     return out
 
 
@@ -454,7 +557,15 @@ def placements() -> list[dict]:
             {"what": f"patch: the driver's call of 0x1c9d3f at sw {PVMIX_SITE_SW:#x} -> JUMP {PVMIX_SW:#x} "
                      "(the recorder's preview, then the same call)",
              "load_address": f"{sw_to_load(PVMIX_SITE_SW):#010x}", "bytes": len(PVMIX_SITE_STOCK),
-             "stock": PVMIX_SITE_STOCK.hex(), "new": (obj["pvmix_jump"] + PVMIX_SITE_STOCK[6:]).hex()}]
+             "stock": PVMIX_SITE_STOCK.hex(), "new": (obj["pvmix_jump"] + PVMIX_SITE_STOCK[6:]).hex()},
+            {"what": f"patch: the FX bus's CJUMP to the stock reverb at sw {REVERB_SITE_SW:#x} -> target {FDN8_SW:#x} "
+                     "(FDN8, which JUMPs on to the stock reverb when TYPE asks for it)",
+             "load_address": f"{sw_to_load(REVERB_SITE_SW):#010x}", "bytes": len(REVERB_SITE_STOCK),
+             "stock": REVERB_SITE_STOCK.hex(), "new": reverb_cjump().hex()},
+            {"what": f"patch: the FX bus's call of the stock delay at sw {DELAY_SITE_SW:#x} -> target {XDLY_SW:#x} "
+                     "(XDLY, which JUMPs on to the stock delay when TYPE asks for it)",
+             "load_address": f"{sw_to_load(DELAY_SITE_SW):#010x}", "bytes": len(DELAY_SITE_STOCK),
+             "stock": DELAY_SITE_STOCK.hex(), "new": delay_call().hex()}]
     return out
 
 
@@ -579,6 +690,10 @@ def section7(stock: bytes) -> bytes:
         raise DspError("sw 0x1c9fd2 is not the stock `CJUMP 0x1c9d3f (DB)` and its two pushes")
     if len(obj["pvmix_jump"]) != 6:
         raise DspError("the preview's JUMP is not one 48-bit instruction")
+    if bootstream.read_span(stock, sw_to_load(REVERB_SITE_SW), len(REVERB_SITE_STOCK)) != REVERB_SITE_STOCK:
+        raise DspError("sw 0x1c1d11 is not the stock `CJUMP 0xb836bc (DB)`")
+    if bootstream.read_span(stock, sw_to_load(DELAY_SITE_SW), len(DELAY_SITE_STOCK)) != DELAY_SITE_STOCK:
+        raise DspError("sw 0x1c1c58 is not the stock `CALL 0xb8482c (DB)`")
     if len(obj["emark_jump"]) != len(CALL_SITE_STOCK):
         raise DspError(f"the entry-mark JUMP is {len(obj['emark_jump'])} bytes, not {len(CALL_SITE_STOCK)}")
     lookup = struct.unpack("<8I", bootstream.read_span(stock, dm_to_load(LOOKUP_DM), 32))
@@ -602,6 +717,8 @@ def section7(stock: bytes) -> bytes:
     bootstream.write_span(out, l2_sw_to_load(IDLE_SITE_SW), obj["idle_jump"])
     bootstream.write_span(out, sw_to_load(CALL_SITE_SW), obj["emark_jump"])
     bootstream.write_span(out, sw_to_load(PVMIX_SITE_SW), obj["pvmix_jump"])
+    bootstream.write_span(out, sw_to_load(REVERB_SITE_SW), reverb_cjump())
+    bootstream.write_span(out, sw_to_load(DELAY_SITE_SW), delay_call())
     result = bytes(out)
     walked = bootstream.walk(result)
     if not walked.complete or walked.stopped_at != len(result):

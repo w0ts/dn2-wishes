@@ -60,7 +60,7 @@ SOUND_BASE, SOUND_STRIDE, SOUND_TYPE = 52, 1163, 0xDE
 NEW_TYPE, CLONE = 5, 1
 from ..mnm import machines as _mnm_types
 from ..sampler import machines as _smp
-TYPES_LAST = max(13, *_mnm_types.TYPES, _smp.BOUNCE_TYPE)   # dnfw.waverider.coldfire.TYPES_LAST: 5.. are ours (v0.20: 13,
+TYPES_LAST = max(13, *_mnm_types.CF_TYPES, _smp.BOUNCE_TYPE)   # dnfw.waverider.coldfire.TYPES_LAST: 5.. are ours (v0.20: 13,
                                   # SLICE, had been left out here: its track got WaveTone's pages;
                                   # v0.26: the Monomachine's from 14 on)
 GET_SHORT_NAME = 0x400372DA
@@ -125,71 +125,41 @@ def type_of(word: int) -> int:
 # v0.26: the Monomachine's machines (types 6, 7: docs/mnm.md), one page each, on PERC's
 # eight records (PARAM_IDS), named per machine while such a track is active
 from ..mnm import machines as _mnm
-MNM_LONG = {"PW": "Pulse Width", "PWAD": "PW Sweep", "PWRS": "PW Restart", "WAVE": "Waveform",
-            "MOD": "Modulation", "MSRC": "Mod Source", "MFRQ": "Mod Freq", "TUNE": "Tune",
-            "WP": "Wave Position", "WPM": "WP Mod", "WPRS": "WP Restart", "SYNC": "Sync",
-            "SFRQ": "Sync Freq", "---": "Unused",
-            # DPRO-DDRW, DPRO-DENS (v0.26)
-            "WAV1": "Wave 1", "MIX": "Wave Mix", "WAV2": "Wave 2", "TIME": "Fade Time",
-            "BR1": "Bit Reduce 1", "WID": "Detune Width", "BR2": "Bit Reduce 2",
-            "PCH2": "Pitch 2", "PCH3": "Pitch 3", "PCH4": "Pitch 4",
-            # VO-6 (v0.26)
-            "VOC1": "Vocal Freq 1", "VOC2": "Vocal Freq 2", "V-SW": "Vowel Switch",
-            "VOIC": "Voice Type", "CONS": "Consonant", "CLEN": "Cons Length", "CVOL": "Cons Volume",
+from ..mnm import plaits as _mnm_plaits
+MNM_LONG = {"TUNE": "Tune", "---": "Unused",
             # SOPHIE (docs/sophie.md)
             "DCAY": "Decay", "COLR": "Color", "METL": "Metal", "FBK": "Feedback", "SWEP": "Sweep",
-            "CRSH": "Crush", "MODL": "Model"}
+            "CRSH": "Crush", "MODL": "Model",
+            # PLAITS (docs/plaits.md)
+            "HARM": "Harmonics", "TIMB": "Timbre", "MORP": "Morph", "FINE": "Fine Tune",
+            # TB303 (docs/tb303.md)
+            "CUT": "Cutoff", "RES": "Resonance", "ENV": "Env Mod", "DEC": "Decay", "ACC": "Accent",
+            "SLID": "Slide", "WAVE": "Saw/Square"}
 # parameters the port does not run (DENS's chorus is the Monomachine's effect after the
 # machine): drawn as "-", as an unused one
 MNM_UNPORTED = {"CHRL", "CHRW"}
 
 
 def _pch_names() -> tuple[tuple[int, ...], tuple[str, ...]]:
-    """DENS's PCH2..4: the knob -> its choice (the ROM's ratio table runs, 33 of them),
-    and their names as the Monomachine's: semitones -12..+12, OFF for 1.0, else the ratio"""
-    import fractions
-    import itertools
-    import math
-    from ..mnm import rom as mrom
-    if not mrom.available():
-        return tuple(range(128)), tuple(str(k) for k in range(128))
-    t = mrom.words(*mrom.PCH)
-    idx, names = [], []
-    for v, g in itertools.groupby(t):
-        r = v / 0x200000
-        st = 12 * math.log2(r)
-        if abs(st - round(st)) < 1e-3:
-            n = "OFF" if round(st) == 0 else f"{round(st):+d}"
-        else:
-            f = fractions.Fraction(r).limit_denominator(6)
-            n = f"{f.numerator}/{f.denominator}"
-        idx += [len(names)] * len(list(g))
-        names.append(n)
-    return tuple(idx), tuple(names)
+    """DENS's PCH2..4 choices by table (MNM_PCH) went with DPRO-DENS (removed 2026-11-08); the
+    page code's table stays, unused (no control is MNM_PCH)"""
+    return tuple(0 for _ in range(128)), ()
+
+
 # the enumerated parameters: their choices by name, as the Monomachine shows them (0: a knob)
 MNM_CHOICES = {
-    "SID 6581": {"PWRS": ("OFF", "ON"), "WAVE": ("TRI", "SAW", "PULS", "MIX", "NOIS"),
-                 "MOD": ("OFF", "RING", "SYNC", "R+S"), "MSRC": ("MFRQ", "PRCH")},
-    "DPRO-WAVE": {"WAVE": 32, "WPRS": ("OFF", "ON"), "SYNC": ("OFF", "SFRQ", "PRCH")},
-    # the Digibank's 64 (here the ROM's 32, twice: S01..S32) and DENS's pitches (by table)
-    "DPRO-DDRW": {"WAV1": 64, "WAV2": 64},
-    "DPRO-DENS": {"WAVE": 64, "PCH2": "pch", "PCH3": "pch", "PCH4": "pch"},
-    # VO-6: its manual's names (Appendix A); V-SW below 64 ends the vowel
-    "VO-6": {"V-SW": ("OFF", "ON"), "CONS": ("-", "B", "D", "F", "G", "H", "J", "K", "L", "M", "N",
-                                            "P", "R", "RR", "S", "SJ", "T", "TJ", "TH", "V", "Z")},
     "SOPHIE": {"MODL": ("FUSE", "STAK", "SPLT", "SHRD", "PIPE", "BOOM", "KICK")},
+    "PLAITS": {"MODL": _mnm_plaits.MODELS, "TUNE": 49, "FINE": 128},   # TUNE, FINE: steps (MW_SEMIS, MW_CENTS)      # 2026-11-09: every engine ported (dnfw.mnm.plaits)
 }
 # v0.27: the controls the Monomachine draws as other than a knob (owner, 2026-10-27; 0 a knob,
-# 1 empty): 2 a grid the marker steps through row by row (DPRO-WAVE's WAVE, VO-6's CONS), 3 a
-# bar sliding along a line (DDRW's WAV1, WAV2; DENS's WAVE), 4 a needle at the bottom moving
-# left or right (DENS's PCH2..4), 5 a knob switch pointing at its position (SID's, DPRO-WAVE's
-# WPRS and SYNC, VO-6's V-SW)
-MNM_WIDGET = {("DPRO-WAVE", "WAVE"): 2, ("VO-6", "CONS"): 2,
-              ("DPRO-DDRW", "WAV1"): 3, ("DPRO-DDRW", "WAV2"): 3, ("DPRO-DENS", "WAVE"): 3,
-              ("DPRO-DENS", "PCH2"): 4, ("DPRO-DENS", "PCH3"): 4, ("DPRO-DENS", "PCH4"): 4,
-              ("SID 6581", "PWRS"): 5, ("SID 6581", "WAVE"): 5, ("SID 6581", "MOD"): 5,
-              ("SID 6581", "MSRC"): 5, ("DPRO-WAVE", "WPRS"): 5, ("DPRO-WAVE", "SYNC"): 5,
-              ("VO-6", "V-SW"): 5, ("SOPHIE", "MODL"): 5}
+# 1 empty): 2 a grid the marker steps through row by row, 3 a bar sliding along a line, 4 a
+# needle at the bottom moving left or right, 5 a knob switch pointing at its position (the
+# removed machines used 2..4; md_page.c keeps their drawing)
+MNM_WIDGET = {("SOPHIE", "MODL"): 5, ("PLAITS", "MODL"): 5,
+              # 2026-11-09: 6 MW_SEMIS, the step - n / 2 as +7 / -12 / 0 (the User, build #3: semitones,
+              # not the note name); 7 MW_CENTS, the step - n / 2 as +12c / -30c
+              ("PLAITS", "TUNE"): 6, ("PLAITS", "FINE"): 7}   # 2026-11-09: md_page.c draws a choice as a
+                                                               # knob with its choice's name; 5 marks it a choice
 MNM_WAVES = 32
 MNM_PCH = 255                       # mnm_choices' mark: the choice by mnm_pch_idx[knob]
 
@@ -197,17 +167,17 @@ MNM_PCH = 255                       # mnm_choices' mark: the choice by mnm_pch_i
 # the Monomachine's machines (v0.26; kinds 2 and 3 were RESONATOR's and CZ's until v0.25):
 # is_wr's kind is the type - 4, so 2, 3 (types 6, 7) and 10.. (types 14..); one page of
 # PERC's eight records each, labelled per machine
-MNM_KINDS = tuple(t - 4 for t in _mnm_types.TYPES)
+MNM_KINDS = tuple(t - 4 for t in _mnm_types.CF_TYPES)   # the reserved types' too (empty pages)
 MNM_PAGE = PARAM_IDS
 MNM_LABELS = [{r: (sh if sh != "---" and sh not in MNM_UNPORTED else "-") for r, sh in zip(PARAM_IDS, M.PNAMES)}
-              for M in _mnm.MACHINES]
-MNM_TITLES = tuple(_mnm.LIST_NAMES[n][1] for n in _mnm.NAMES)
-MNM_SUBTITLES = tuple(_mnm.LIST_NAMES[n][0] for n in _mnm.NAMES)
+              for M in _mnm.CF_MACHINES]
+MNM_TITLES = tuple(sh for _lo, sh in _mnm.CF_LIST_NAMES)
+MNM_SUBTITLES = tuple(lo for lo, _sh in _mnm.CF_LIST_NAMES)
 
 
 def mnm_named(k: int) -> dict[int, tuple[str, str]]:
     """record -> (long, short) on a Monomachine machine's track"""
-    M = _mnm.MACHINES[k]
+    M = _mnm.CF_MACHINES[k]
     out = {r: ((MNM_LONG.get(sh, sh), sh) if sh != "---" and sh not in MNM_UNPORTED else (UNUSED_LONG, "-"))
            for r, sh in zip(PARAM_IDS, M.PNAMES)}
     out.update({r: (UNUSED_LONG, UNUSED_SHORT) for r in range(238, 263) if r not in out})
@@ -217,7 +187,7 @@ def mnm_named(k: int) -> dict[int, tuple[str, str]]:
 def mnm_c_header() -> str:
     q = chr(34)
     names, rows_n, rows_at = [], [], []
-    for M in _mnm.MACHINES:
+    for M in _mnm.CF_MACHINES:
         ch = MNM_CHOICES.get(M.NAME, {})
         n_row, at_row = [], []
         for sh in M.PNAMES:
@@ -239,10 +209,15 @@ def mnm_c_header() -> str:
     def arr(rows):
         return ", ".join("{" + ", ".join(map(str, r)) + "}" for r in rows)
     labels = ", ".join("{" + ", ".join(q + (sh if sh != "---" and sh not in MNM_UNPORTED else "-") + q
-                                       for sh in M.PNAMES) + "}" for M in _mnm.MACHINES)
+                                       for sh in M.PNAMES) + "}" for M in _mnm.CF_MACHINES)
     pidx = _pch_names()[0]
     lines = [
-        f"#define MNM_N {len(_mnm.MACHINES)}",
+        f"#define MNM_N {len(_mnm.CF_MACHINES)}",
+        # the machine's name in the track box (MACHINE SEL's long name, in capitals; a reserved
+        # type's REMOVED), one per place: generated so a machine added or removed cannot leave a hole
+        f"static const char *const mnm_name_upper[MNM_N] = {{{', '.join(q + lo.upper() + q for lo, _sh in _mnm.CF_LIST_NAMES)}}};",
+        # 2026-11-09: the left panel's track box (stock's SYN place): MACHINE SEL's short name
+        f"static const char *const mnm_name_short[MNM_N] = {{{', '.join(q + sh.upper() + q for _lo, sh in _mnm.CF_LIST_NAMES)}}};",
         "/* is_wr's kind -> the Monomachine machine's index, -1 for any other kind */",
         "static inline int mnm_index(int kind)",
         "{",
@@ -264,9 +239,9 @@ def mnm_c_header() -> str:
         # v0.33: each machine's own start (dnfw.mnm's DEFAULTS), set by MACHINE SEL (rec.c), as
         # the words the eight records take (perc.live.knob_word), and the records' ids
         f"static const unsigned short mnm_rid[8] = {{{', '.join(str(r) for r, _s, _lo, _t in _perc.PARAMS)}}};",
-        f"static const unsigned short mnm_default[MNM_N][8] = {{{arr([[_knob_word(x, t, lo) for (_r, _s, lo, t), x in zip(_perc.PARAMS, _mnm.DEFAULTS[M.NAME])] for M in _mnm.MACHINES])}}};",
-        "enum { MW_KNOB, MW_EMPTY, MW_GRID, MW_SLIDE, MW_VU, MW_SWITCH };",
-        f"static const unsigned char mnm_widget[MNM_N][8] = {{{arr([[MNM_WIDGET.get((M.NAME, sh), 1 if sh == '---' or sh in MNM_UNPORTED else 0) for sh in M.PNAMES] for M in _mnm.MACHINES])}}};",
+        f"static const unsigned short mnm_default[MNM_N][8] = {{{arr([[_knob_word(x, t, lo) for (_r, _s, lo, t), x in zip(_perc.PARAMS, d)] for d in _mnm.CF_DEFAULTS])}}};",
+        "enum { MW_KNOB, MW_EMPTY, MW_GRID, MW_SLIDE, MW_VU, MW_SWITCH, MW_SEMIS, MW_CENTS };",
+        f"static const unsigned char mnm_widget[MNM_N][8] = {{{arr([[MNM_WIDGET.get((M.NAME, sh), 1 if sh == '---' or sh in MNM_UNPORTED else 0) for sh in M.PNAMES] for M in _mnm.CF_MACHINES])}}};",
     ]
     return "\n".join(lines) + "\n"
 
@@ -343,7 +318,7 @@ def c_header() -> str:
     ids = ",\n".join(" {" + ", ".join(str(r) for r in page) + "}" for page in PAGES)
     names = ",\n".join(" {" + ", ".join(f'"{label(r)}"' for r in page) + "}" for page in PAGES)
     wr = {r: (lo, sh) for r, lo, sh in named()}
-    mnm = [mnm_named(k) for k in range(len(_mnm.MACHINES))]
+    mnm = [mnm_named(k) for k in range(len(_mnm.CF_MACHINES))]
     smp = [smp_named(n) for n in _smp.NAMES]
     order = sorted(set(wr) | set(PARAM_IDS) | {r for m in mnm + smp for r in m})
     # by kind (is_wr: the type - 4), from 1: PERC, the sample machines at SMP_FIRST_KIND..,

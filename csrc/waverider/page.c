@@ -201,6 +201,12 @@ void wr_screen(void *screen, void *canvas)
         smp_fb_draw(canvas, smp_samp_of(UI_TRACK));
     else if (smp_list_visible())                /* v0.25: the sample list, over the title bar too */
         smp_list_draw(canvas);
+    else {
+        extern int ins_visible(void);
+        extern void ins_draw(void *canvas);
+        if (ins_visible())                      /* the per-track inserts' page (csrc/inserts) */
+            ins_draw(canvas);
+    }
     extern void mtr_draw(void *canvas);
     mtr_draw(canvas);                           /* the system meter's corner, over everything */
 }
@@ -222,6 +228,10 @@ int wr_poll(void *screen)
     jmp_poll();                                 /* DIRECT JUMP's setting, read and written (csrc/jump) */
     rec_poll();
     wr_names();
+    extern void rvt_poll(void);
+    rvt_poll();                                 /* FDN8: the Reverb page's TYPE and names (csrc/fdn8) */
+    extern void dlt_poll(void);
+    dlt_poll();                                 /* XDLY: the Delay page's TYPE and names (csrc/xdly) */
     /* the RECORDER's meter and state move: a redraw asked for as stock asks (the dirty
      * byte), 25 times a second. v0.15..v0.19 answered 1 here without setting the byte:
      * the loop then pushed its other buffer undrawn (0x4011d60a draws only when the byte
@@ -500,6 +510,10 @@ void wr_cell(void *view, void *canvas, int x0, int y0, u32 id)
 {
     extern void sl_cell(void *view, void *canvas, int x, int y, u32 id);
     sl_cell(view, canvas, x0, y0, id);          /* parameter slides: SLD/SLEN on TRIG page 2 */
+    extern void rvt_cell(void *view, void *canvas, int x, int y, u32 id);
+    rvt_cell(view, canvas, x0, y0, id);         /* FDN8: the Reverb page's TYPE (csrc/fdn8) */
+    extern void dlt_cell(void *view, void *canvas, int x, int y, u32 id);
+    dlt_cell(view, canvas, x0, y0, id);         /* XDLY: the Delay page's TYPE (csrc/xdly) */
 }
 
 void wr_page_draw(void *view, void *canvas)

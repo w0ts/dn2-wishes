@@ -4,23 +4,25 @@ machine there has (host, init, trig, render), around each machine module's own
 
 - host: the eight 14-bit inputs (knob << 7) -> W[1..8], each knob / 128 (the Monomachine's
   parameter word, knob << 16, as a Q23 fraction);
-- render: the pitch word F from the note (VW pitch, float semitones) and TUNE, the
-  increment A the Monomachine's kernel would hand the render, the previous slot's F (PRCH,
-  MSRC), the machine's own increments (`pitch`), then two of its 16-frame blocks into the
-  stream at OUT0.
+- render: the machine's own pitch (`pitch`, from VW pitch), then two of its 16-frame blocks
+  into the stream at OUT0.
 
-F = note x 2048 / 12 + TUNE x 683 / 128 (TUNE 64: in tune), 0..0x5800; A = 2^(F / 2048) x
-0x1D22A / 2^14 (the kernel's exp table and scaling, in float).
+Removed (2026-11-08, the User, to make room for PLAITS and the 303): the five machines ported
+from the Monomachine's own DSP code, SID 6581, DPRO-WAVE, DPRO-DDRW, DPRO-DENS and VO-6, with
+their tables, the Digibank stand-in and the Monomachine kernel's pitch words (F, A, pre) only
+they read. Their machine types stay RESERVED (never reused): the DSP's lookup makes a track on
+one the MIDI machine's slot (nothing renders it: a stock MIDI track, bit for bit) and its page
+is empty.
 """
 
 from __future__ import annotations
 
 from . import core as C
-from . import ddrw, dens, sid, sophie, vo6, wave
+from . import plaits, sophie, tb303
 from ..md import core as K
 from ..perc.dsl import Prog
 
-MODULES = (sid, wave, ddrw, dens, vo6, sophie)   # their types: TYPES below (6, 7, 14, 15, 16, 17)
+MODULES = (sophie, plaits, tb303)        # their types: TYPES below (20, 18, 19)
 F_TOP = 0x5800
 
 
@@ -83,55 +85,6 @@ def _host_ddrw(p: Prog, L: K.Layout) -> None:
     p.st(W["gl"], 3)
 
 
-# v0.26: semitones added to the DN2's note, so each machine's note 60 is 261.6 Hz as the
-# DN2's own: on the Monomachine, for the same pitch, DPRO-WAVE sounds an octave under SID,
-# DDRW, DENS and VO-6
-TRANSPOSE = {"DPRO-WAVE": 12}
-
-
-def _pitch(p: Prog, L: K.Layout, transpose: int = 0) -> None:
-    """VW F, A and pre from VW pitch and TUNE. Clobbers R0-R3, R12-R15, I1, I12."""
-    from ..perc import machines as PM
-    C.vw(p, 1, "pitch")
-    if transpose:
-        p.fconst(12, float(transpose))
-        p.fop(1, 1, "+", 12)
-    p.fconst(12, 2048.0 / 12.0)
-    p.fop(1, 1, "*", 12)
-    C.knob(p, 2, 7)
-    p.iconst(12, 0)
-    p.float_(2, 2, 12)
-    p.fconst(12, 683.0 / 128.0)
-    p.fop(2, 2, "*", 12)
-    p.trunc(2, 2)
-    p.iconst(12, 0)
-    p.float_(2, 2, 12)
-    p.fop(1, 1, "+", 2)
-    p.fconst(12, 0.0)
-    p.fop(1, 1, "MAX", 12)
-    p.fconst(12, float(F_TOP))
-    p.fop(1, 1, "MIN", 12)
-    p.trunc(1, 1)
-    C.vws(p, "F", 1)
-    p.iconst(12, 0)
-    p.float_(1, 1, 12)
-    p.fconst(12, 1.0 / 2048.0)
-    p.fop(1, 1, "*", 12)
-    PM.exp2(p, L.mnm.perc, 1, 1)
-    p.fconst(12, 0x1D22A / 2.0 ** 14)
-    p.fop(1, 1, "*", 12)
-    C.vws(p, "A", 1)
-    # the previous slot's F (slot 15's for slot 0): PRCH, MSRC
-    p.ld(1, L.C["mdb"])
-    p.iconst(12, -K.MD_STRIDE)
-    p.iop(1, 12, "+", 1)
-    p.iconst(12, L.state)
-    p.if_(1, "LT", 12, lambda: (p.iconst(12, 16 * K.MD_STRIDE), p.iop(1, 12, "+", 1)), kind="i")
-    p.seti(1, 1)
-    p.ldi(2, C.VW["F"], 1)
-    C.vws(p, "pre", 2)
-
-
 def _render(M):
     def render(p: Prog, L: K.Layout) -> None:
         mL = L.mnm
@@ -141,7 +94,6 @@ def _render(M):
         if p.run:
             p.r[0] = p.i[4]
         p.st(mL.W["i4s"], 0)
-        _pitch(p, L, TRANSPOSE.get(M.NAME, 0))
         M.pitch(p, mL)
         p.iconst(0, 0)
         p.st(mL.W["half"], 0)
@@ -181,13 +133,33 @@ MACHINES = tuple(_adapter(M) for M in MODULES)
 NAMES = tuple(M.NAME for M in MACHINES)
 DEFAULTS = {M.NAME: M.DEFAULTS for M in MODULES}
 
-# each machine its own machine type (MACHINE SEL entry), in MODULES order: CZ's and
-# RESONATOR's former types, then the ones after the sample machines (8..13). One table for
-# the ColdFire (dnfw.waverider.coldfire, pages), the DSP's lookup (dnfw.waverider.dsp) and
-# PERC's voice (dnfw.perc.program).
-TYPE_SLOTS = (6, 7, 14, 15, 16, 17)       # 17: SOPHIE (docs/sophie.md)
+# each machine its own machine type (MACHINE SEL entry), in MODULES order. One table for the
+# ColdFire (dnfw.waverider.coldfire, pages), the DSP's lookup (dnfw.waverider.dsp) and PERC's
+# voice (dnfw.perc.program).
+# v0.45 (2026-11-09, the User: keep upstream dn2mk2's numbers): BOUNCE is upstream's type 17, so
+# SOPHIE moved 17 -> 20; PLAITS and TB303 keep 18 and 19
+TYPE_SLOTS = (20, 18, 19)                 # 20: SOPHIE (docs/sophie.md), 18: PLAITS (docs/plaits.md), 19: TB303 (docs/tb303.md)
 TYPES = TYPE_SLOTS[:len(MACHINES)]
+# the removed machines' types (2026-11-08): reserved, never reused, so every other machine keeps
+# its number and a project's track on one stays on it (silent, its page empty)
+RESERVED = {6: "SID 6581", 7: "DPRO-WAVE", 14: "DPRO-DDRW", 15: "DPRO-DENS", 16: "VO-6"}
+assert not set(RESERVED) & set(TYPES)
+from ..sampler import machines as _smp  # noqa: E402
+assert not set(_smp.TYPES) & (set(TYPES) | set(RESERVED)), "a machine type of ours is a sample machine's (v0.44 BOUNCE: 17)"
 # MACHINE SEL's names (long, short), as the DN2 lists its own
-LIST_NAMES = {"SID 6581": ("SID 6581", "SID"), "DPRO-WAVE": ("DPRO Wave", "DPW"),
-              "DPRO-DDRW": ("DPRO Ddrw", "DDW"), "DPRO-DENS": ("DPRO Dens", "DNS"),
-              "VO-6": ("VO-6", "VO6"), "SOPHIE": ("Sophie", "SOP")}
+LIST_NAMES = {"SOPHIE": ("Sophie", "SOP"), "PLAITS": ("Plaits", "PLT"), "TB303": ("TB-303", "303")}
+REMOVED_NAMES = ("Removed", "---")       # a reserved type's name (MACHINE SEL never lists it)
+
+
+class Removed:
+    """A reserved type's place in the ColdFire's tables (no DSP code): eight unused controls."""
+    NAME, PNAMES, DEFAULTS = "REMOVED", ("---",) * 8, (0,) * 8
+
+
+# the ColdFire's Monomachine places, one per type 6, 7, 14.. in type order (its page code turns a
+# type into this index by arithmetic: dnfw.waverider.pages is_wr): the live machines and the
+# reserved types' placeholders
+CF_TYPES = tuple(sorted(set(TYPES) | set(RESERVED)))
+CF_MACHINES = tuple(MACHINES[TYPES.index(t)] if t in TYPES else Removed for t in CF_TYPES)
+CF_LIST_NAMES = tuple(LIST_NAMES[M.NAME] if M is not Removed else REMOVED_NAMES for M in CF_MACHINES)
+CF_DEFAULTS = tuple(DEFAULTS.get(M.NAME, Removed.DEFAULTS) for M in CF_MACHINES)
