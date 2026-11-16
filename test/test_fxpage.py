@@ -252,6 +252,7 @@ def test_link_has_a_word_source_for_every_packet_kind():
     body = src[src.index("void smp_tdm(u32 h)"):]
     body = body[:body.index("smp_tdm_sent++;")]
     kinds = re.findall(r"\bint (is_\w+) = ", body)
+    kinds = [k for k in kinds if k != "is_rt"]                  # (a kind of command: is_cmd := is_rt || ..., its words are cw[])
     sel = re.search(r"u32 w = (.*?);", body, re.S).group(1)
     assert "is_fxp" in kinds
     for k in kinds:
