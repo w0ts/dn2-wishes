@@ -71,11 +71,14 @@ FRESH = GUARD + 0xE4                # (v0.52 merge: after v0.49's RESERVE .. RES
 # longer lowers the voices' LIMIT; instead each insert runs in a block only if it is expected to end
 # before INS_DEADLINE (cycles after MARK0: P - P/8 - TAIL, the end of the frame less the guard's margin
 # and the stock's own tail), else it passes the sound through for that block (INS_SKIPS counts them)
-INS_DEADLINE = GUARD + 0xE8
-INS_ACC = GUARD + 0xEC
-INS_T0 = GUARD + 0xF0
-INS_SKIPS = GUARD + 0xF4
-END = GUARD + 0xF8
+REST_OUT = GUARD + 0xF0          # 2026-11-11: the stock's time after the bus pass (the output stage), held at its peak
+INS_BUSEND = GUARD + 0xEC        # 2026-11-11: EMUCLK as the bus pass (the last insert pass) ended
+INS_DLP = GUARD + 0xE8           # 2026-11-11: this pass's deadline (ins_start), 0 when none is known
+INS_DEADLINE = GUARD + 0xE8 + 0xD8
+INS_ACC = GUARD + 0xEC + 0xDC
+INS_T0 = GUARD + 0xF0 + 0xE0
+INS_SKIPS = GUARD + 0xF4 + 0xE4
+END = GUARD + 0xF8 + 0xF4
 assert END <= 0x2DE100
 
 
@@ -170,7 +173,8 @@ def tail_limit(p) -> None:
     TAIL: the last frame's busy stretch after our entry (idle_load's AFTER moved on: the idle
     task ran since) less our own time then (OURS_END - PREV_MARK), held at its peak and eased
     by 1/4096 a frame; a reading that is not between 0 and 0.7 P is not taken. With no reading
-    (the runner, or no idle time at all) TAIL stays 0 and the limit 0.6 P, as before.
+    (the runner, or no idle time at all) TAIL stays 0 and the limit 0.6 P, as before. 2026-11-11: and
+    REST_OUT, the stretch from the bus pass's end (INS_BUSEND) to the busy end (under P/4), held the same way.
     Emit only (as the rest of the guard). Clobbers R8, R10-R13."""
     p.comment("v0.32: the stock's tail after our voices, measured, sets the limit")
     no = p.label("tno")
@@ -181,6 +185,19 @@ def tail_limit(p) -> None:
     p.st(PREV_AFTER, 8)
     p.e("R8 = R8 - R10;", "AFTER's move: the last stretch from our entry")
     p.jump("EQ", no)
+    rno = p.label("rno")                       # 2026-11-11: REST_OUT, the stretch after the bus pass
+    p.ld(11, PREV_MARK)
+    p.e("R11 = R11 + R8;", "the last frame's busy end ..")
+    p.ld(12, INS_BUSEND)
+    p.e("R11 = R11 - R12;", ".. less the bus pass's end")
+    p.jump("LE", rno)
+    p.lsh(12, 13, -2)
+    p.e("COMP(R11, R12);")
+    p.jump("GE", rno)                          # not under P/4: not taken
+    p.ld(12, REST_OUT)
+    p.iop(11, 11, "MAX", 12)
+    p.st(REST_OUT, 11)
+    p.place(rno)
     p.ld(10, OURS_END)
     p.ld(11, PREV_MARK)
     p.e("R10 = R10 - R11;", "our own time then")
@@ -199,6 +216,10 @@ def tail_limit(p) -> None:
     p.iop(8, 8, "MAX", 10)
     p.st(TAIL, 8)
     p.place(no)
+    p.ld(8, REST_OUT)
+    p.lsh(10, 8, -12)
+    p.e("R8 = R8 - R10;", "REST_OUT eased as TAIL")
+    p.st(REST_OUT, 8)
     p.ld(8, TAIL)
     p.lsh(10, 8, -12)
     p.e("R8 = R8 - R10;", "eased by 1/4096 (about 3 s)")
@@ -537,18 +558,47 @@ def around(p, t_word: int, cost: int, buffers: int, voice, rests: int | None = N
 
 # -- 2026-11-10: the inserts (dnfw.inserts): their time apart, and their deadline ---------------------
 def ins_start(p) -> None:
-    """an insert pass begins: INS_T0 = EMUCLK. Emit only. Clobbers R8."""
+    """an insert pass begins: INS_T0 = EMUCLK, and INS_DLP = this pass's deadline (cycles after MARK0; 0
+    when none is known yet). 2026-11-11 (the unit's telemetry: FDN8/XDLY on the bus passed through for
+    thousands of blocks at a 60 % frame, no voice skipped): INS_DEADLINE leaves room for the WHOLE stock
+    tail (TAIL), but a pass that starts late in it (the post pass at the sends, the bus pass before the
+    output stage) has part of that tail behind it. The stock's time done since our voices and before this
+    pass, INS_T0 - OURS_END - INS_ACC (the earlier passes' time out), is added back, held to 0 .. TAIL -
+    REST_OUT (what follows the last pass, the output stage, measured: TAIL can read low, as its readings
+    over 0.7 P are not taken). Emit only. Clobbers R8, R9."""
     if p.run:
         return
+    z = p.label("isz")
     p.e("R8 = EMUCLK;", "the inserts' time: this pass from here")
     p.st(INS_T0, 8)
+    p.ld(9, OURS_END)
+    p.e("R8 = R8 - R9;", "since our voices ..")
+    p.ld(9, INS_ACC)
+    p.e("R8 = R8 - R9;", ".. the stock's time done before this pass")
+    p.ld(9, REST_OUT)
+    p.e("R8 = R8 + R9;")
+    p.ld(9, TAIL)
+    p.iop(8, 8, "MIN", 9)
+    p.ld(9, REST_OUT)
+    p.e("R8 = R8 - R9;", "held to TAIL - REST_OUT: the output stage is always to come")
+    p.iconst(9, 0)
+    p.iop(8, 8, "MAX", 9)
+    p.ld(9, INS_DEADLINE)
+    p.e("R9 = PASS R9;")
+    p.jump("EQ", z)
+    p.e("R9 = R9 + R8;", "no longer to come")
+    p.place(z)
+    p.st(INS_DLP, 9)
 
 
-def ins_end(p) -> None:
-    """an insert pass ends: INS_ACC += EMUCLK - INS_T0. Emit only. Clobbers R8, R9."""
+def ins_end(p, last: bool = False) -> None:
+    """an insert pass ends: INS_ACC += EMUCLK - INS_T0; LAST (the bus pass): INS_BUSEND = EMUCLK too (2026-11-11,
+    REST_OUT). Emit only. Clobbers R8, R9."""
     if p.run:
         return
     p.e("R8 = EMUCLK;")
+    if last:
+        p.st(INS_BUSEND, 8)
     p.ld(9, INS_T0)
     p.e("R8 = R8 - R9;", "this pass's time")
     p.ld(9, INS_ACC)
@@ -557,16 +607,16 @@ def ins_end(p) -> None:
 
 
 def ins_admit(p, cost: int, run) -> None:
-    """RUN() if the insert is expected to end before INS_DEADLINE (EMUCLK - MARK0 + COST), or no
-    deadline is known yet (0: the runner, a frame not measured); else INS_SKIPS + 1 and the insert
-    left out of this block (the sound passes as it is). The model always runs it (the runner's clock
+    """RUN() if the insert is expected to end before its pass's deadline (INS_DLP: EMUCLK - MARK0
+    + COST), or no deadline is known yet (0: the runner, a frame not measured); else INS_SKIPS + 1 and the
+    insert left out of this block (the sound passes as it is). The model always runs it (the runner's clock
     does not move either). Clobbers R8-R10 before RUN."""
     if p.run:
         run()
         return
     go = p.label("iago")
     done = p.label("iadone")
-    p.ld(10, INS_DEADLINE)
+    p.ld(10, INS_DLP)
     p.e("R10 = PASS R10;")
     p.jump("EQ", go)
     p.e("R8 = EMUCLK;")

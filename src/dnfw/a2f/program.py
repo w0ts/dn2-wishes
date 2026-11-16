@@ -399,14 +399,14 @@ def _filter(p: Prog, X: M.Ctx) -> None:
 
 def _admit(p: Prog, run) -> None:
     """RUN() if the pass of the slot (its cost in C["cost"], cycles) is expected to end before the guard's
-    INS_DEADLINE, or no deadline is known yet (the runner, the model); else INS_SKIPS + 1 and the slot
+    INS_DLP (its pass's deadline), or no deadline is known yet (the runner, the model); else INS_SKIPS + 1 and the slot
     left dry. (dnfw.perc.guard.ins_admit with the bound from a word.) Clobbers R8-R10 before RUN."""
     if p.run:
         run()
         return
     go = p.label("a2go")
     done = p.label("a2done")
-    p.ld(10, G.INS_DEADLINE)
+    p.ld(10, G.INS_DLP)                          # 2026-11-11: this pass's deadline (guard.ins_start)
     p.e("R10 = PASS R10;")
     p.jump("EQ", go)
     p.e("R8 = EMUCLK;")
@@ -414,8 +414,7 @@ def _admit(p: Prog, run) -> None:
     p.e("R8 = R8 - R9;", "into the frame")
     p.ld(9, C["cost"])
     p.e("R8 = R8 + R9;", "and this model's bound")
-    p.ld(9, G.INS_DEADLINE)
-    p.e("COMP(R8, R9);")
+    p.e("COMP(R8, R10);")
     p.jump("LE", go)
     p.ld(8, G.INS_SKIPS)
     p.iconst(9, 1)

@@ -399,7 +399,7 @@ def program(prefix: str = "ib") -> str:
     save(p)
     G.ins_start(p)
     body(p)
-    G.ins_end(p)
+    G.ins_end(p, last=True)                      # 2026-11-11: its end time too (the guard's REST_OUT)
     restore(p)
     p.jump_abs("", OUT_SW, "the output stage, entered as the engine called it")
     p.emit_subs()

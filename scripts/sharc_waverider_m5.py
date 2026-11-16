@@ -768,6 +768,11 @@ def main(argv=None):
             bus_step = importlib.import_module("sharc_insbus_step")
             results["3k_insbus"] = bus_step.run(sys.modules[__name__], snap, m2mach, m5, sound, machines)
             show(results["3k_insbus"])
+        if "insdl" in steps:
+            print("\n-- step 3k2: the insert guard's deadline on a moving clock (2026-11-11) --")
+            dl_step = importlib.import_module("sharc_insdl_step")
+            results["3k2_insdl"] = dl_step.run(sys.modules[__name__], snap, m2mach, m5, sound, machines)
+            show(results["3k2_insdl"])
 
         if "tdm" in steps:
             print("\nstep 3e: the fast link (TDM)")

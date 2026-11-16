@@ -367,6 +367,16 @@ the voices' LIMIT from the next frame on (and a sudden one could run past the fr
   XDLY 20,000, CHOR 13,000, TAPE 8,200 ..); one that would not end in time is left out of that block (the
   sound passes dry; its state kept; `INS_SKIPS` counts). Until a frame is measured (and in the runner,
   whose clock stands still) every insert runs.
+- **2026-11-11 fix (`guard.ins_start`, `INS_DLP`):** INS_DEADLINE leaves room for the WHOLE stock tail, but only the
+  pre pass and a2f run at its start. The post pass runs at the FX sends and the bus pass (FDN8/XDLY) just
+  before the output stage, with most of the tail already done, so it was counted twice. The unit's
+  telemetry showed it: the bus inserts passed through for thousands of blocks at a 60 % frame, no voice
+  skipped. Each pass's deadline now adds back the stock's time done since our voices and before the pass,
+  `INS_T0 - OURS_END - INS_ACC`, held to 0 .. TAIL - REST_OUT. REST_OUT is the stretch from the bus pass's end
+  to the frame's busy end (the output stage), measured like TAIL. It is always kept in reserve, because
+  TAIL can read low: its readings over 0.7 P are not taken. The runner's `insdl` step (moving clock, idle_load's
+  AFTER moved, so TAIL is measured) shows the old rule skipping both bus inserts in every block with one
+  ANALOG2 voice and the frame ending at 54 % of P; numbers in the step's report.
 - Measured on the unit (b5diag): LIMIT about 355,000 and the rest of the DN2 about 43,000 a block, so with
   P about 592,000 the inserts have about 120,000 before the deadline when the voices use all of theirs
   (about three FDN8 at their bound), more when they do not. An FDN8 left out of a block is a gap in its
