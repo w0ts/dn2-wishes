@@ -453,9 +453,34 @@ def model_of(knob: int) -> int:
     return (knob * N_MODELS) >> 7
 
 
+def knob_value(knob: int) -> int | None:
+    """2026-11-12: the smallest value of MODL's record (page 1 H, 0..TOP) whose knob, as the page shows it
+    (v / TOP x 127, rounded: dnfw.perc.live.knob_word), is KNOB; None for a knob no value reaches (the record has
+    TOP + 1 values for 128 knobs)."""
+    from ..perc import machines as PM
+    _rid, _slot, _lo, top = PM.PARAMS[MODL_K]
+    return next((v for v in range(top + 1) if int(v / top * 127 + 0.5) == knob), None)
+
+
+def dsp_model(value: int) -> int:
+    """the model the DSP plays for MODL's record value VALUE: dnfw.perc.program's param (v x 1/TOP, float32),
+    dnfw.md.voice.inputs' knob (trunc(x 127 + 0.5), the page's own rounding; the Monomachine host passes it on
+    as knob / 128), then half's choice (knob x N >> 7)"""
+    from ..perc import machines as PM
+    from ..perc.dsl import f32
+    _rid, _slot, _lo, top = PM.PARAMS[MODL_K]
+    x = f32(f32(float(value)) * f32(1.0 / top))
+    knob = min(max(int(f32(f32(x * 127.0) + 0.5)), 0), 127)
+    return (knob * N_MODELS) >> 7
+
+
 def knob_of(model: int) -> int:
-    """the smallest knob that chooses MODEL"""
-    return next(k for k in range(128) if model_of(k) == model)
+    """the smallest knob that chooses MODEL and that the unit can hold: a value of MODL's record shows it on the
+    page and the DSP plays MODEL for that value. 2026-11-12: was the smallest knob of the page's choice alone,
+    which for ADD (40) no value reaches (the harness's nearest value plays FM: every check through knob_of measured
+    FM twice and never ADD)."""
+    return next(k for k in range(128) if model_of(k) == model and (v := knob_value(k)) is not None
+                and dsp_model(v) == model)
 
 
 def half(p: Prog, L: C.Layout) -> None:
