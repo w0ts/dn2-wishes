@@ -1575,6 +1575,13 @@ def render_stretch(p: Prog, L: Layout) -> None:
     its own start (the DT2's STRETCH has no LOOP)."""
     C = L.C
     buffer(p, L)
+    # 2026-11-16 (v0.56.1, FLEXPOOL: STRETCH plays the FLEX buffers too): a TRK take (SLA_HEAD) plays TAKE_HEAD
+    # louder, as in render(); LEV with it in C['tmp'] for the block (no make-up: the two-tap reads sum to 1)
+    p.ld(0, C["lev"])
+    v(p, 9, "sla")
+    p.lsh(9, 9, 1)
+    p.ifz(9, "LT", lambda: (p.fconst(12, SM.TAKE_HEAD), p.fop(0, 0, "*", 12)))
+    p.st(C["tmp"], 0)
     # the jump this block: (T - rate) 2048, by the play direction
     p.ld(0, C["sr"])
     p.fconst(12, T_MIN)
@@ -1717,7 +1724,7 @@ def render_stretch(p: Prog, L: Layout) -> None:
             p.fconst(12, 0.0)
             p.fop(0, 0, "MAX", 12)
             vs(p, "gp1", 0)
-            p.ld(3, C["lev"])
+            p.ld(3, C["tmp"])                   # LEV (x TAKE_HEAD for a TRK take, above)
             p.fop(4, 4, "*", 3)
             faded(p, L, 4)
             out(p, L, 4)

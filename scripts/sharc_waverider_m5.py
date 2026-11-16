@@ -3102,7 +3102,7 @@ def step_flexlevel(init, sound, machines) -> dict:
 
     hot = {90: 0x7F00, 84: 0x7F00}                  # v0.54.3's hot source: VOL 127, AMP SUS 127 (and LEV, LEVEL 127)
 
-    def run(gidx, loud=False, saved=False):
+    def run(gidx, loud=False, saved=False, play=ONE):
         state = {"b": 0}
         snd = {**amp, **(hot if loud else {})}
         lp = {**loop, **({SM.LEV_REC: 127} if loud else {})}
@@ -3122,7 +3122,7 @@ def step_flexlevel(init, sound, machines) -> dict:
                 f = base_frame(sound, machines, t0=ONE, trigger=b == 1, overrides={**snd, **smp_words(lp)})
             else:
                 take = {**lp, SM.SAMP_REC: SM.REC_FIRST + 1}
-                f = base_frame(sound, machines, t0=ONE, trigger=b == n + gap, overrides={**snd, **smp_words(take)})
+                f = base_frame(sound, machines, t0=play, trigger=b == n + gap, overrides={**snd, **smp_words(take)})
             if loud:
                 f.header(FR.LEVEL, 0, 0x7F00)
             for t in range(16):                         # each track to its own slot of 0x1c244d's buffer
@@ -3154,6 +3154,9 @@ def step_flexlevel(init, sound, machines) -> dict:
     unity, recorder, minus6 = run(SM.GAIN_ZERO), run(0), run(SM.GAIN_ZERO - 6)
     loud, saved = run(SM.GAIN_ZERO, loud=True), run(SM.GAIN_ZERO, saved=True)
     quiet = run(SM.GAIN_ZERO - 18, loud=True)
+    # v0.56.1 (FLEXPOOL: every sample machine plays the FLEX buffers): the same take played on a STRETCH track
+    STR = SM.TYPE_OF["STRETCH"]
+    st_unity, st_saved = run(SM.GAIN_ZERO, play=STR), run(SM.GAIN_ZERO, saved=True, play=STR)
     head_db = 20 * _m.log10(8.0)                    # v0.54.3's requirement: stored x 1/8, played x 8 (SM.TAKE_HEAD)
     checks = {
         f"2026-11-15: a FLEX take of a track (GAIN 0) at its source's level as the unit measures it: the take's "
@@ -3176,10 +3179,16 @@ def step_flexlevel(init, sound, machines) -> dict:
         f"v0.54.3: the take with its entry as a save writes it (int16, no mark) plays {head_db:.2f} dB under the "
         f"marked take (within 0.1 dB): a saved take is played as stored":
             unity is not None and saved is not None and abs(saved["out_db"] - unity["out_db"] + head_db) <= 0.1,
+        "v0.56.1 (FLEXPOOL): the GAIN 0 take played on a STRETCH track at its level on ONESHOT (out of the amp, "
+        "within 1 dB): STRETCH's renderer applies the take's mark too":
+            unity is not None and st_unity is not None and abs(st_unity["out_db"] - unity["out_db"]) <= 1.0,
+        f".. and on STRETCH the saved take (no mark) plays {head_db:.2f} dB under the marked one (within 0.1 dB)":
+            st_unity is not None and st_saved is not None
+            and abs(st_saved["out_db"] - st_unity["out_db"] + head_db) <= 0.1,
     }
     return {"ok": all(checks.values()), "checks": checks,
             "numbers": {"unity": unity, "recorder": recorder, "minus6": minus6, "loud": loud, "quiet": quiet,
-                        "saved": saved}}
+                        "saved": saved, "stretch": st_unity, "stretch_saved": st_saved}}
 
 
 def show_flexlevel(step) -> None:
