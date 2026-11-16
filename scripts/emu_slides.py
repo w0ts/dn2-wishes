@@ -254,6 +254,16 @@ def main() -> int:
                 uc.mem_map(page, 0x100000, UC_PROT_ALL)
             except UcError:
                 pass                                          # (already mapped)
+        # 2026-11-14 (the 1.12 gate): and every run-time area the build declares (dnfw.mods.waverider.ram()), for
+        # the same reason: from a snapshot that booted stock, a page the build reads before it writes was not there
+        # (ours' matrix at pages.MX_RAM: a read-unmapped fault from mx_env_off). Zeros, as at power-on
+        from dnfw.mods import waverider as Wr                 # noqa: PLC0415
+        for e in Wr.ram():
+            for page in range(e.start & ~0xFFFFF, e.start + e.length, 0x100000):
+                try:
+                    uc.mem_map(page, 0x100000, UC_PROT_ALL)
+                except UcError:
+                    pass                                      # (already mapped)
         machine.flush()
         lay = json.loads(pathlib.Path(a.layout).read_text())["layout"]
         print(f"  installed {len(runs)} run(s) from {a.build}")
