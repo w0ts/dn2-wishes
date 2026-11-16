@@ -311,7 +311,7 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("wishes", "the wishes record through stock's SAVE, LOAD, memcpy, memset (ColdFire)"),
        ("wishitems", "the wishes record on kits, patterns, songs and the project settings (ColdFire)"),
        ("matrix", "the matrix's routes heard as stock's route 1, at a constant cost (ColdFire)"),
-       ("paravmenu", "PARA on the VOICE menu's B: stock's places as stock's, B's steps and cap (ColdFire)"),
+       ("paravmenu", "PARA on the VOICE menu's B: stock's places as stock's, B OFF / ON on ANALOG 2 and JUNO (ColdFire)"),
        ("envclone", "ENV1/ENV2's clone against stock's own AMP envelope (SHARC runner)"),
        ("engine", "engine + LOAD/SAVE"),
        ("boot", "boot from reset"),
@@ -1025,8 +1025,8 @@ def main() -> int:
                 r = json.loads(pv_js.read_text()) if pv_js.exists() else {}
                 return True, (f"stock's places untouched, B right {r.get('right')}, left {r.get('left')}, "
                               f"vm_sets {r.get('vm_sets')}")[:800]
-            later("paravmenu", "PARA on the VOICE menu's B: stock's places as stock's, B's steps and cap (ColdFire)",
-                  "PARA on the VOICE menu's B: stock's places as stock's, B's steps and cap (ColdFire)",
+            later("paravmenu", "PARA on the VOICE menu's B: stock's places as stock's, B OFF / ON on ANALOG 2 and JUNO (ColdFire)",
+                  "PARA on the VOICE menu's B: stock's places as stock's, B OFF / ON on ANALOG 2 and JUNO (ColdFire)",
                   [pv_cmd, sorted(EMU_ENV.items())], pv_body)
 
             # 2026-11-12: ENV1/ENV2 (the User: ENV1 is stock's AMP envelope, ENV2 its clone): the clone's model against

@@ -3,9 +3,10 @@
  * places: top VOICE STEAL, ---, ---, REUSE (knobs A..D); bottom VOICES, UNISON STATE, V.AMNT, SPREAD (E..H). Its B
  * is an empty place: stock draws "---" there and a turn of B changes nothing (measured in the emulator, 2026-11-15).
  *
- * On a track whose machine plays PARA (para.h: ANALOG 2, JUNO), B is PARA: OFF 2 3 4, the track's sound's record MOD,
- * set through the knob's own path (setValue: undo, the kit and the frame all see it), one step per four detents as
- * every choice knob. On any other track nothing here draws or takes a turn: the menu is stock's, pixel for pixel.
+ * On a track whose machine plays PARA (para.h: ANALOG 2, JUNO), B is PARA: OFF / ON (2026-11-15, the User: "i would
+ * have expected the para (in voice page) to be on or off ?"; ON a chord of 4 notes), the track's sound's record MOD (0,
+ * or PARA_ON stored; an older project's 1 or 2 shows and plays as ON), set through the knob's own path (setValue:
+ * undo, the kit and the frame all see it), one step per four detents as every choice knob. On any other track nothing here draws or takes a turn: the menu is stock's, pixel for pixel.
  *
  * The hooks, as the send pages' (csrc/fxpage): vm_begin / vm_draw (page.c wr_screen, before and after stock's
  * screen), vm_pop (rec.c smp_ui_pop, before stock sees an item), and vm_seen_hook (hooks.S, in VoiceMenuView's draw
@@ -79,13 +80,13 @@ int vm_pop(u8 *it)
     acc += delta;
     int n = acc / 4;
     acc -= n * 4;
-    int t = UI_TRACK, v = para_value(t) + n;
-    v = v < 0 ? 0 : v > 3 ? 3 : v;
-    if (n && v != para_value(t)) {
+    int t = UI_TRACK, on = para_value(t) != 0, v = on + n;
+    v = v < 0 ? 0 : v > 1 ? 1 : v;
+    if (n && v != on) {
         u32 owner = UI_OWNER();
         u32 ps = owner ? PARAM_SET(owner, PARA_RECORD, (u32)t) : 0;
         if (ps) {
-            SET_VALUE(ps, PARA_RECORD, (u32)v << 8, (u32)t, 0, 0, 1);
+            SET_VALUE(ps, PARA_RECORD, (u32)(v ? PARA_ON : 0) << 8, (u32)t, 0, 0, 1);
             vm_sets++;
         }
     }
@@ -103,13 +104,12 @@ static void fill(void *c, int x0, int y0, int x1, int y1, int on)
 }
 
 /* page.c wr_screen, after stock's screen: B as PARA, over stock's "---". The menu's middle above B and C is its 16
- * voice circles, so the value goes in B's label row with the name: "PARA OFF" .. "PARA 4", centred on B (x 33..73,
+ * voice circles, so the value goes in B's label row with the name: "PARA OFF" or "PARA ON", centred on B (x 33..73,
  * clear of C's "---" at x 75; the emulator's capture, 2026-11-15) */
 void vm_draw(void *c)
 {
     if (!vm_seen || !para_track(UI_TRACK))
         return;
-    static const char *const names[4] = {"OFF", "2", "3", "4"};
     fill(c, B_X0, B_LABEL_Y, B_X1, B_LABEL_Y + 7, 0);                       /* stock's "---" */
-    WG_TEXT(c, FONT_LABEL, (B_X0 + B_X1) / 2, B_LABEL_Y, 2, "PARA %s", names[para_value(UI_TRACK)]);
+    WG_TEXT(c, FONT_LABEL, (B_X0 + B_X1) / 2, B_LABEL_Y, 2, "PARA %s", para_value(UI_TRACK) ? "ON" : "OFF");
 }

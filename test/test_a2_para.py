@@ -190,16 +190,30 @@ def test_para_off_and_a_chord_of_one_play_as_today(engine):
 
 
 @pytest.mark.parametrize("engine", ENGINES)
-def test_the_oldest_n_play_and_the_rest_are_dropped(engine):
-    slots = [0, 1, 2]
-    notes = {0: 48.0, 1: 55.0, 2: 62.0}
-    h = setup(slots, para=1, engine=engine)                                                # 2 pitches
-    outs = [block(h, slots, notes, on=0b111 if b == 0 else 0) for b in range(16)]
+def test_the_oldest_four_play_and_the_rest_are_dropped(engine):
+    """2026-11-15 (the User: PARA OFF / ON): ON is a chord of PITCHES (4) notes; a fifth is dropped"""
+    slots = [0, 1, 2, 3, 4]
+    notes = {0: 48.0, 1: 55.0, 2: 62.0, 3: 65.0, 4: 69.0}
+    h = setup(slots, para=PARA.ON_VALUE, engine=engine)
+    outs = [block(h, slots, notes, on=0b11111 if b == 0 else 0) for b in range(16)]
     r = outs[0][1]
-    assert role_of(r[2]) == PARA.LEADER and r[2] & 0xFFFF == 0b010          # the highest leads, the next joins
-    assert role_of(r[1]) == PARA.MEMBER and role_of(r[0]) == PARA.DROPPED
-    assert all(o[0] == [0] * 32 and o[1] == [0] * 32 for o, _r in outs)
-    assert [o[2] for o, _r in outs] == reference(notes, 2, [1], len(outs), engine)
+    assert role_of(r[4]) == PARA.LEADER and r[4] & 0xFFFF == 0b01110        # the highest leads, the next three join
+    assert all(role_of(r[u]) == PARA.MEMBER for u in (1, 2, 3)) and role_of(r[0]) == PARA.DROPPED
+    assert all(o[u] == [0] * 32 for o, _r in outs for u in (0, 1, 2, 3))
+    assert [o[4] for o, _r in outs] == reference(notes, 4, [1, 2, 3], len(outs), engine)
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize("old", [1, 2])
+def test_an_older_projects_para_value_plays_as_on(engine, old):
+    """an older project's PARA 2 or 3 pitches (stored 1, 2) plays as ON (stored PARA.ON_VALUE), every block"""
+    slots = [0, 1, 2, 3, 4]
+    notes = {0: 48.0, 1: 55.0, 2: 62.0, 3: 65.0, 4: 69.0}
+    runs = {}
+    for v in (old, PARA.ON_VALUE):
+        h = setup(slots, para=v, engine=engine)
+        runs[v] = [block(h, slots, notes, on=0b11111 if b == 0 else 0) for b in range(12)]
+    assert runs[old] == runs[PARA.ON_VALUE]
 
 
 @pytest.mark.parametrize("engine", ENGINES)

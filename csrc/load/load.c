@@ -267,7 +267,7 @@ static u32 para_join_cost(int t, u32 one)
             held++;
     if (!held)
         return one;
-    if (held > para_value(t))                   /* N = PARA + 1 notes play */
+    if (held > para_value(t))                   /* ON: PARA_ON + 1 = 4 notes play */
         return LOAD_PARA_DROPPED;
     return para_member(t) + (para_type(t) == PARA_TYPE_JUNO ? LOAD_PARA_JUNO_ADD : LOAD_PARA_ADD);
 }

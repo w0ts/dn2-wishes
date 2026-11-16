@@ -29,7 +29,8 @@ stole, as every voice was released, and judged by a fixed LOAD_AVAIL the unit's 
 2026-11-15 (ANALOG 2's PARA, docs/paraphonic.md; track 0 on ANALOG 2, two of its notes held, hold.c's para_live):
 13. a note joining the held chord is priced as a member (LOAD_PARA_MEMBER + LOAD_PARA_ADD) and its chord's slots at a
     member's each: a kit where it fits takes stock's result exactly; the same kit with PARA OFF steals;
-14. a note past the chord's N (PARA 2 pitches, two held) is priced as dropped (LOAD_PARA_DROPPED);
+14. PARA OFF / ON (2026-11-15, the User): an older project's value 1 (2 pitches then) reads as ON: with two notes held a
+    third joins as a member; ON with four held, a fifth is past the chord's 4 and priced as dropped (LOAD_PARA_DROPPED);
 15. with none of the track's notes held, the note starts a chord: priced as the track's voice;
 16. a heavy note's further releases never take a PARA chord's voice (HOLD keeps its note-off back); with PARA OFF they
     take the chord's next oldest;
@@ -283,12 +284,12 @@ def para_checks(e: Emu, sym, res) -> None:
         e.write(snd0 + 0xDE, bytes([typ]))
         e.write(snd0 + MOD_AT, struct.pack(">H", v << 8))
 
-    def chord(value, fill, n1=10, held=True, typ=A2_TYPE):
-        """track 0 (a voice 10,000): notes 60, 64 held, its chord; track 1: N1 notes of FILL; PARA VALUE"""
+    def chord(value, fill, n1=10, held=True, typ=A2_TYPE, notes=(60, 64)):
+        """track 0 (a voice 10,000): NOTES held, its chord; track 1: N1 notes of FILL; PARA VALUE"""
         def build():
             cost = [10000] + [fill] * 15
             k = Kit(e, sym, cost)
-            for nn in (60, 64):
+            for nn in notes:
                 k.play(0, nn, hook=False)
             k.chord = e.r32(HELD)
             for nn in range(n1):
@@ -315,7 +316,11 @@ def para_checks(e: Emu, sym, res) -> None:
               f"need {c['last_need']}, took {off:#06x} of held {held0:#06x}")
         twin(e, sym, chord(1, fill), 0, 67)
         need = counters(e, sym)["last_need"]
-        check("14 PARA 2 pitches, two held: a third note is dropped, priced as such", need == pc["dropped"],
+        check("14 an older project's PARA 1 (2 pitches then) reads as ON: two held, a third note joins as a member",
+              need == join, f"need {need} (a member {join})")
+        twin(e, sym, chord(3, fill, notes=(60, 64, 67, 71)), 0, 74)
+        need = counters(e, sym)["last_need"]
+        check("14 ... ON, four held: a fifth note is past the chord's 4, priced as dropped", need == pc["dropped"],
               f"need {need} (dropped {pc['dropped']})")
         twin(e, sym, chord(3, fill, held=False), 0, 67)
         need = counters(e, sym)["last_need"]

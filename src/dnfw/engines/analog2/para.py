@@ -3,12 +3,12 @@
 level "Louder with more notes"): design A of docs/paraphonic-study.md, slot groups on the DSP (docs/paraphonic.md).
 
 A note still takes a voice slot of its own (the allocator, glide, velocity and steal are stock's). On a track whose
-PARA (page 3, stock record MOD: 0 OFF, 1..3 = 2..4 pitches) is on, a CHORD of the track's ANALOG 2 slots plays on its
+PARA (VOICE menu knob B, stock record MOD: 0 OFF, any other ON) is on, a CHORD of the track's ANALOG 2 slots plays on its
 LEADER, the slot whose note started it: its MEMBERS run their oscillators, noise and drive into their own 44.1 kHz
 stream (their filter, knee and side skipped) and write silence to their voice buffer; the leader adds their
 post-drive halves to its own, at full level, one member at a time in slot order, before its filter and knee, and
 after its block gives the members its stream position, so they move their streams in the same blocks. The first N
-of a chord play (N the PARA value + 1: the leader and the members that joined first); the rest are DROPPED: silent,
+of a chord play (N = PITCHES, 4: the leader and the members that joined first); the rest are DROPPED: silent,
 not rendered.
 
 The chords (CUR, MEM): a note on a PARA track's ANALOG 2 slot joins its track's current chord while one of that
@@ -47,7 +47,9 @@ WORDS = 1 + 16 + 16 + 16
 MEMBER, LEADER, DROPPED = 1, 2, 3
 ROLE_SHIFT, LEAD_SHIFT = 24, 16                  # a member's leader at bits 16..19; a leader's places left there
 RENDERED = 1 << 20                               # a member's own word: its half rendered this block (the guard let it)
-PARA_REC = PM.P3_RECS[5]                         # MOD (id 248, slot 37, 0..0x300, default 0): PARA OFF 2 3 4
+PARA_REC = PM.P3_RECS[5]                         # MOD (id 248, slot 37, 0..0x300, default 0): PARA OFF / ON
+PITCHES = 4                                      # ON: a chord's notes that play (2026-11-15, the User: OFF / ON; the cap)
+ON_VALUE = 3                                     # what the VOICE menu stores for ON (an older build reads it as 4 pitches)
 # the engines PARA plays (2026-11-15, the User: ANALOG 2 first, then JUNO; not SOPHIE, SID 6581, DPRO-DDRW or
 # DPRO-DENS; DPRO-WAVE decided later): an
 # engine joins by its name here and one call of `stage` in its half, round its shared stage (the filter and what
@@ -97,8 +99,9 @@ def types() -> tuple[int, ...]:
 
 
 def _pitches(p: Prog, d: int, u: int, kinds: tuple[int, ...]) -> None:
-    """Rd = the chord's pitches on slot Ru (PARA 1..3 -> 2..4); 0 when PARA is off or the slot's machine is not one
-    of KINDS (the frame's types). Ru in R8, R9, R14 or R15. Clobbers R10..R13, I1."""
+    """Rd = the chord's pitches on slot Ru: 4 when PARA is ON (any value but 0: 2026-11-15, the User, OFF / ON; an
+    older project's 1 or 2 plays as ON); 0 when PARA is off or the slot's machine is not one of KINDS (the frame's
+    types). Ru in R8, R9, R14 or R15. Clobbers R10..R13, I1."""
     p.iop(11, u, "+", u)                         # 2 u
     _frame_half(p, d, 148, 11)                   # the slot's machine type
 
@@ -109,10 +112,8 @@ def _pitches(p: Prog, d: int, u: int, kinds: tuple[int, ...]) -> None:
         p.lsh(12, u, 1)
         p.iop(11, 11, "+", 12)
         _frame_half(p, d, PM.frame_offset(PARA_REC[1]), 11)
-        p.lsh(d, d, -8)                          # 0..3 (the record's 0..0x300)
-        p.iconst(12, 3)
-        p.iop(d, d, "MIN", 12)
-        p.ifz(d, "NE", lambda: (p.iconst(12, 1), p.iop(d, 12, "+", d)))
+        p.lsh(d, d, -8)                          # the record's value (0..3 stored)
+        p.ifz(d, "NE", lambda: p.iconst(d, PITCHES))
     p.iconst(10, 0)
     for k in kinds:
         p.iconst(12, k)

@@ -10,10 +10,13 @@ not redraw after a turn), the VOICE key (panel code 49) on track 0:
 2. an ANALOG 2 track (type 22), MOD 0: the screen differs from (1)'s only inside B's label row (x 33..73, y 27..34),
    where PARA OFF is drawn;
 3. one held push of B a step (the harness passes about one step a hold, stock's own knob E too; measured
-   2026-11-15), four detents each: right five times -> MOD 0x0100 0x0200 0x0300 0x0300 0x0300 (the cap at PARA 4),
-   then left four times -> 0x0200 0x0100 0x0000 0x0000; vm_sets counts the three steps up and the three down;
+   2026-11-15), four detents each. PARA is OFF / ON (2026-11-15, the User; ON stored as 0x0300, a chord of 4): right
+   three times -> MOD 0x0300 0x0300 0x0300, the screen then differs from OFF's inside B's row only (PARA ON); left
+   twice -> 0x0000 0x0000; vm_sets counts the one step up and the one down;
 4. a JUNO track (type 23, 2026-11-15), MOD 0: the screen the ANALOG 2 track's (PARA OFF in B's row); one held push
-   of B right sets MOD 0x0100.
+   of B right sets MOD 0x0300 and draws PARA ON as on the ANALOG 2 track; one left sets 0x0000, the screen as before;
+5. an older project's value (MOD 0x0100, 2 pitches then) on an ANALOG 2 track: the screen is a fresh PARA ON track's
+   (MOD 0x0300), and one held push of B left sets MOD 0x0000.
 
 Built from the integrator's driver (side-session-notes paraphonic-voice-menu/build-para3/para_vmenu3.py). Prints PASS
 or FAIL with each check; --json writes the numbers.
@@ -34,8 +37,8 @@ ENC_B, ENC_C = 1, 2
 MOD_AT = 20 + 2 * 37                                                 # the sound's MOD (PARA) value
 WAVETONE, ANALOG2, JUNO = 1, 22, 23
 B_ROW = (33, 27, 73, 34)                                             # B's label row (x0, y0, x1, y1), bottom-up
-STEPS_RIGHT = (0x0100, 0x0200, 0x0300, 0x0300, 0x0300)
-STEPS_LEFT = (0x0200, 0x0100, 0x0000, 0x0000)
+STEPS_RIGHT = (0x0300, 0x0300, 0x0300)                              # OFF -> ON (stored 3), held at ON
+STEPS_LEFT = (0x0000, 0x0000)                                        # ON -> OFF, held at OFF
 HOLD_GAP = 60_000_000          # the UI settled between holds (the integrator, 2026-11-15: shorter, a later hold's
                                # first ~7 detents never arrive, stock's knob E too; with it every hold gives all 4)
 FAILS: list[str] = []
@@ -82,14 +85,14 @@ def main() -> int:
         return 1
     from emu_waverider_menu import frames_va
 
-    def setup(machine_type: int):
+    def setup(machine_type: int, mod0: int = 0):
         m = MO.machine(a.build, a.snapshot)
         p = Panel(m, png_dir=a.png_dir)
         p.frame_clock(frames_va(root))
         p.settle(3_000_000)
         s = m.long(MO.KIT) + 52
         m.write(s + 0xDE, bytes([machine_type]))
-        m.write(s + MOD_AT, struct.pack(">H", 0))
+        m.write(s + MOD_AT, struct.pack(">H", mod0))
         m.flush()
         p.tap(VOICE)
         p.settle(20_000_000)
@@ -132,27 +135,49 @@ def main() -> int:
     for _ in STEPS_RIGHT:
         held_turn(m, p, ENC_B, +1, 4)
         got_r.append(mod(m, s))
+    on_screen = frame(p)
     p.screen("3_para_right")
     for _ in STEPS_LEFT:
         held_turn(m, p, ENC_B, -1, 4)
         got_l.append(mod(m, s))
     p.screen("3_para_left")
-    check("B right, a step a hold: PARA 2 3 4, capped at 4", tuple(got_r) == STEPS_RIGHT, str([hex(v) for v in got_r]))
-    check("B left, a step a hold: PARA 3 2 OFF, held at OFF", tuple(got_l) == STEPS_LEFT, str([hex(v) for v in got_l]))
-    check("vm_sets: three steps up, three down", m.long(sym["vm_sets"]) == 6, str(m.long(sym["vm_sets"])))
+    check("B right, a step a hold: PARA ON (stored 0x0300), held at ON", tuple(got_r) == STEPS_RIGHT,
+          str([hex(v) for v in got_r]))
+    check("B left, a step a hold: PARA OFF, held at OFF", tuple(got_l) == STEPS_LEFT, str([hex(v) for v in got_l]))
+    check("vm_sets: one step up, one down", m.long(sym["vm_sets"]) == 2, str(m.long(sym["vm_sets"])))
+    on_diff = outside_b_row(para_screen, on_screen)
+    check("PARA ON: the screen differs from OFF's only inside B's label row, and does differ", not on_diff
+          and on_screen != para_screen, f"{len(on_diff)} pixels outside")
     # 4. a JUNO track
     m, p, s = setup(JUNO)
     juno_screen = frame(p)
     p.screen("4_juno_voice")
     check("JUNO track: the screen as the ANALOG 2 track's (PARA OFF in B's row)", juno_screen == para_screen)
     held_turn(m, p, ENC_B, +1, 4)
-    check("JUNO track: B right, a step: PARA 2", mod(m, s) == 0x0100, hex(mod(m, s)))
+    check("JUNO track: B right, a step: PARA ON", mod(m, s) == 0x0300, hex(mod(m, s)))
+    juno_on = frame(p)
+    p.screen("4_juno_on")
+    check("JUNO track: PARA ON drawn as on the ANALOG 2 track", juno_on == on_screen)
+    held_turn(m, p, ENC_B, -1, 4)
+    check("JUNO track: B left, a step: PARA OFF, the screen as before", mod(m, s) == 0x0000
+          and frame(p) == juno_screen, hex(mod(m, s)))
+    report["juno"] = {"on": juno_on == on_screen, "mod_after_left": hex(mod(m, s))}
+    # 5. an older project's value, against a fresh ON (stored 0x0300)
+    m, p, s = setup(ANALOG2, 0x0300)
+    fresh_on = frame(p)
+    m, p, s = setup(ANALOG2, 0x0100)
+    old_screen = frame(p)
+    p.screen("5_old_value")
+    check("an older project's MOD 0x0100 (2 pitches then): drawn as PARA ON (a fresh ON track's screen)",
+          old_screen == fresh_on and fresh_on != para_screen)
+    held_turn(m, p, ENC_B, -1, 4)
+    check("... B left, a step: PARA OFF", mod(m, s) == 0x0000, hex(mod(m, s)))
     report.update({"right": [hex(v) for v in got_r], "left": [hex(v) for v in got_l],
                    "vm_sets": m.long(sym["vm_sets"]), "outside_b_row": len(diff)})
     report["ok"] = not FAILS
     if a.json:
         pathlib.Path(a.json).write_text(json.dumps(report, indent=1))
-    print(("FAIL: " + "; ".join(FAILS)) if FAILS else "PASS: PARA on the VOICE menu (stock places as stock's, B steps and cap)")
+    print(("FAIL: " + "; ".join(FAILS)) if FAILS else "PASS: PARA on the VOICE menu (stock places as stock's, B OFF / ON, older values ON)")
     return 1 if FAILS else 0
 
 

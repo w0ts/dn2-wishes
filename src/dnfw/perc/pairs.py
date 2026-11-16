@@ -261,6 +261,11 @@ def _find(p, L) -> None:
         p.iconst(12, P.MNM_QUIET_BLOCKS)
         p.if_(0, "LT", 12, then, kind="i")
 
+    def no_chord(then):                          # 2026-11-15 (PARA, dnfw.engines.analog2.para): a slot with a chord
+        from ..engines.analog2 import para as PA # role this block is never a partner: a leader adds its members'
+        PA.role(p, 0, _w(L, U))                  # halves in its own turn, after theirs (rendered ahead, it would add
+        p.ifz(0, "EQ", then)                     # them before they ran); its members and dropped notes stay in order
+
     def unchanged(then):
         _same(p, L, _w(L, U))
         p.ifz(7, "EQ", then)
@@ -287,7 +292,7 @@ def _find(p, L) -> None:
         p.ld(10, G.LIMIT_PERC)                   # (v0.52 merge: PERC's limit after v0.49's sample share)
         p.if_(8, "LE", 10, then, kind="i")
 
-    checks = [not_self, same_machine, not_ahead, flags, no_trig, not_resting, unchanged, in_time]
+    checks = [not_self, same_machine, not_ahead, flags, no_trig, not_resting, no_chord, unchanged, in_time]
 
     def body():
         p.ld(0, _w(L, J))

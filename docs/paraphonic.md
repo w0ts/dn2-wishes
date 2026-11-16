@@ -8,8 +8,9 @@ level "Louder with more notes" (each note at full level, no scaling of the sum).
 
 ## What it does
 
-- **The control:** the VOICE menu (the VOICE key: VOICE SETUP), knob B: **PARA OFF 2 3 4** (how many notes a chord
-  takes), on a track playing a PARA engine (ANALOG 2, JUNO). The User, 2026-11-15: "i would put the voice page, for the
+- **The control:** the VOICE menu (the VOICE key: VOICE SETUP), knob B: **PARA OFF / ON** (2026-11-15, the User:
+  "i would have expected the para (in voice page) to be on or off ?"; ON: a chord of 4 notes, later notes dropped;
+  stored as MOD 3, so an older build plays it as 4 pitches; an older project's 1 or 2 shows and plays as ON), on a track playing a PARA engine (ANALOG 2, JUNO). The User, 2026-11-15: "i would put the voice page, for the
   synth that support it. on B knob". Stock leaves B empty ("---"; a turn of it changes nothing, measured in the
   emulator: top row VOICE STEAL, ---, ---, REUSE; bottom VOICES, UNISON STATE, V.AMNT, SPREAD). On any other track
   the menu is stock's. One step per four detents, as every choice knob, through the knob's own path (setValue: undo,
@@ -100,7 +101,7 @@ a member's stream is its own.
 - ColdFire emulator, `scripts/emu_matrix.py` scenario `para` (the gate's step 6x): the note-off rule frame by frame.
 - The gate's step `paravmenu` (`scripts/emu_para_vmenu.py`, needs the panel's frame clock, 4c7a49ff): on a stock
   machine's track the VOICE menu as before after turns of B and C; on an ANALOG 2 track only B's label row differs;
-  B steps PARA 2 3 4 (capped) and back to OFF, one held push a step.
+  B steps OFF to ON (stored 3) and back, one held push a step; an older project's 1 shows as ON.
 - The VOICE menu (`csrc/para/vmenu.c`; the hook `vm_seen_hook` at 0x400285C0 replaces stock's `pea "---"` for B
   with the same push), test builds v0.53-para1..3 in the ColdFire emulator (the integrator, 2026-11-15;
   side-session-notes paraphonic-voice-menu/build*/):
