@@ -80,7 +80,7 @@ class Layout:
     internal samples (up to 192); C, the decimators' coefficients; the tables (`tables`)."""
 
     def __init__(self, perc, scratch: int, tables: int, dt_at: int | None = None,
-                 render: int | None = None):
+                 render: int | None = None, interp_at: int | None = None):
         self.perc, self.md = perc, perc.md          # PERC's layout (its EXP2, RECIP) and its MD voices'
         self.scratch, self.tables = scratch, tables
         # v0.43: the render scratch (IN .. DG, RENDER_BYTES) at RENDER (L1) when given; the
@@ -115,6 +115,11 @@ class Layout:
             self.DT[name] = u
             t += 4 * n
             u += 4 * n
+        # v0.52 (speed): the interpolator's table also in L1 (INTERP_AT, with DT_AT: build() copies it
+        # there too), where interp reads it
+        self.INTERP_AT = interp_at if dt_at is not None else None
+        if self.INTERP_AT is not None:
+            self.DT["interp"] = self.INTERP_AT
         self.DIGI = tables + DIGI_OFF               # the Digibank stand-in the DSP builds (ints)
         # v0.26, VO-6 (dnfw.mnm.vo6): its tables after the DPRO ones (rom.vo6_words)
         self.VO = {}

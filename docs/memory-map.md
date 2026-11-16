@@ -334,7 +334,7 @@ listed (`scratch/juno-engine/l1consts.py`) and F1, F2 re-checked against them (R
 |---|---|---|---|---|---|
 | L2 `0x200A0000..0x200A1800` | 6,144 | opt-samples | (their claim) | (theirs) | taken |
 | L1 `0x2E0080..0x2E0100` | 128 | opt-samples | (their claim) | (theirs) | taken |
-| L1 F2 `0x2E1200..0x2E1700` | 1,280 | opt-mnm | DPRO's interp table (`dsp.MNM_INTERP_DM`; trackbuf's span cut to `0x2E1200`) | measured (dsp_cost.py, engine): DPRO-DDRW -5,120 a voice, DPRO-DENS -2,560 (a 3-PCH chord ~-10k) | released (v0.52 merge: opt-mnm dropped, main's rule b) |
+| L1 F2 `0x2E1200..0x2E1700` | 1,280 | DPRO speed (v0.52) | DPRO's interp table (`dsp.MNM_INTERP_DM`; trackbuf's span cut to `0x2E1200`) | measured on v0.52's engines (dsp_cost.py, engine): DPRO-DDRW -2,560 a voice (12,444 -> 9,884), DPRO-DENS -1,280 (5,735 -> 4,455) | used (re-allotted 2026-11-13) |
 | L1 F2 `0x2E1700..0x2E1750` | 80 | opt-host | the inserts' refusal telemetry (round 13): per-type skip counts (`guard.INS_TSKIP`, 16 words) and each insert pass's least room (`guard.INS_ROOM`, 4 words); a span (`dsp.INS_TSKIP_DM`) | (telemetry, not a saving) | used (claude/instel; the arbiter allotted 0x2E1700..0x2E1980, the rest given back) |
 | L1 F1 `0x2E0640..0x2E0E44` | 2,052 | opt-synths | PERC's exp2 table | SOPHIE -2.2..3.9k a voice (with tan), MD too | allotted |
 | L1 `0x2E4050..0x2E53D0` | 4,992 | inserts (bus) | the bus FDN8 instances' stores (`inserts.bus.FD_L1`), live across blocks | (perf 2026-11-11) | used |
@@ -348,7 +348,7 @@ listed (`scratch/juno-engine/l1consts.py`) and F1, F2 re-checked against them (R
 | L2 `0x200A7400..0x200A7440` (MNM scratch +0x3400) | 64 | clicks | `VEL_OFF`: per-slot velocity (16 words; plus frame slot 62 of our voices, types 5..31) | - | allotted (claude/velocity) |
 | L2 128 KB, place open | 131,072 | opt-md | DSP2's sine table (no exact smaller form: no symmetry) | EFM-CY -2.5k a voice, FM / TRX | **decision**: no 128 KB contiguous anywhere today; see below |
 
-Left free: F1 `0x2E0E44..0x2E1000` (444 B), F2 `0x2E1700..0x2E1C00` (1,280 B), F3: none (FDN8 stores),
+Left free: F1 `0x2E0E44..0x2E1000` (444 B), F2 `0x2E1750..0x2E1C00` (1,200 B), F3: none (FDN8 stores),
 L2 `0x2009B400..0x200A0000` (19,456 B) and `0x200A2800..0x200A4000` (6,144 B), both taken by perc-layout: with them,
 nothing is left inside dsp.py's L2 floor but the small gaps between spans.
 

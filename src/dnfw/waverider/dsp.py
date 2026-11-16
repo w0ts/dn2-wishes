@@ -297,8 +297,11 @@ PING_SW = PING_CODE_DM // 2                                  # 0x170280
 # tables that hold their addresses. Its code is in the free span between ping.asm's tail and there.
 TRACKBUF_CODE_DM = 0x2E1000
 TRACKBUF_SW = TRACKBUF_CODE_DM // 2                          # 0x170800
+# DPRO's interpolator table (320 words: DDRW's and DENS's busiest reads) in L1, copied there once by
+# dnfw.mnm.dpro.build beside the L2 copy (hole F2 after trackbuf.asm, whose span ends here; docs/memory-map.md)
+MNM_INTERP_DM, MNM_INTERP_BYTES = 0x2E1200, 0x500
 # 2026-11-12 (round 13, opt-host): the inserts' per-type skip counts (dnfw.perc.guard.INS_TSKIP), in L1 hole F2 after
-# trackbuf.asm (v0.52 merge: opt-mnm's interp copy, which it followed, was dropped; trackbuf's span pads to it)
+# trackbuf.asm and DPRO's interp table (MNM_INTERP_DM), which it follows
 INS_TSKIP_DM, INS_TSKIP_BYTES = 0x2E1700, 0x50       # then each insert pass's least room (guard.INS_ROOM)
 TRACKBUF_DM, TRACKBUF_BYTES = 0x2E1D00, 16 * 128             # to 0x2e2500
 TRACKBUF_DDR = 0x804ACF90                                    # where the stock puts them
@@ -516,6 +519,7 @@ def _raw_spans() -> list[tuple[str, int, bytes]]:
         ("ping.asm (wr_ping: the shared tail)", PING_CODE_DM, obj["ping"]),
         ("PERC's exp2 table, its L1 copy (2026-11-12)", PERC_EXP2_DM, _perc_exp2()),
         ("trackbuf.asm (wr_trackbuf: the stock track buffers to L1, once)", TRACKBUF_CODE_DM, obj["trackbuf"]),
+        ("DPRO's interpolator table in L1 (zeros, filled by the build)", MNM_INTERP_DM, bytes(MNM_INTERP_BYTES)),
         ("the inserts' per-type skip counts (zeros), each pass's least room (none seen; 2026-11-12, round 13)",
          INS_TSKIP_DM, bytes(64) + (0x7FFFFFFF).to_bytes(4, "little") * 4),
         ("the stock track buffers in L1 (zeros; 256 B extra block, then 16 x 128 B)", TRACKAUX_DM,

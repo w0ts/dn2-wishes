@@ -580,6 +580,12 @@ def build(p: Prog, L: C.Layout) -> None:
                     p.ldpost(3, 1)
                     p.stpost(2, 3)
                 p.loop(W["osc"], L.DT_WORDS, word)
+                if L.INTERP_AT is not None:      # the interpolator's table to L1 too
+                    p.iconst(1, L.DT_SRC["interp"])
+                    p.seti(1, 1)
+                    p.iconst(1, L.INTERP_AT)
+                    p.seti(2, 1)
+                    p.loop(W["osc"], dict(C.DP_TABLES)["interp"], word)
                 p.iconst(1, 1)
                 p.st(L.DG["c"], 1)
             p.ld(1, L.DG["c"])
@@ -649,5 +655,8 @@ def bench_words(L: C.Layout) -> dict[int, int]:
         k0 = (L.DT_FROM - L.tables) // 4
         for j in range(L.DT_WORDS):
             out[L.DT_AT + 4 * j] = bits(words[k0 + j] * C.Q23)
+        if L.INTERP_AT is not None:              # and the interpolator's in L1
+            for j in range(dict(C.DP_TABLES)["interp"]):
+                out[L.INTERP_AT + 4 * j] = bits(words[k0 + j] * C.Q23)
         out[L.DG["c"]] = 1
     return out
