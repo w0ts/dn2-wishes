@@ -499,6 +499,12 @@ REC_COMBO_STOCK = bytes.fromhex("2f2a00a44eb940046bfe")
 REC_COMBO_EXIT = 0x4005FC50             # the handler's common exit (the key offered to the base)
 LFO_MASK_LEA = 0x40039570               # the LFO destination list's lea 0x400dc472,%a2 (v0.22)
 LFO_MASK_STOCK = 0x400DC472
+# 2026-11-11, LFOs modulating the LFOs above them (csrc/modulation, docs/modulation-more.md):
+# the frame's call of the LFO evaluator, and the evaluator's write of one LFO into its DEST cell
+MOD_EVAL_SITE = 0x400272D4              # jsr 0x40137a06 (its seven arguments pushed before)
+MOD_EVAL_STOCK = bytes.fromhex("4eb940137a06")
+MOD_WB_SITE = 0x40137D7A                # movea.l 52(%sp),%a0 ; mvs.w 82(%a4),%d1
+MOD_WB_STOCK = bytes.fromhex("206f0034736c0052")
 KB_REC_SITES = (0x40072D74, 0x40072DCA)    # v0.48: the RECORD key's jsr 0x40055cca (grid recording on?), both toggles
 KB_REC_STOCK = bytes.fromhex("4eb940055cca")
 KEYNOTES_SITE = 0x40058BE8              # v0.23: KeyboardView's jsr 0x40034460(kbd, &notes, key)
@@ -799,13 +805,34 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
          "the per-frame modulation apply: stock's 0x400db390, then a sample machine's modulated SAMP "
          "moved through the loaded slots", MODAPPLY_STOCK)
 
-    # v0.22: the LFOs' destination list leaves out the WaveTone records our machines do not use
+    # v0.22: the LFOs' destination list leaves out the WaveTone records our machines do not use;
+    # 2026-11-11: it offers the 13 closed records (page.c), and each LFO the other LFOs' controls
+    # (csrc/modulation/cascade.c, through hooks.S's mod_mask_hook, which reads the builder's want)
     _need(content, LFO_MASK_LEA, bytes.fromhex("45f9400dc472"), "the destination list: lea 0x400dc472,%a2")
     _need(content, LFO_MASK_LEA + 0x30, bytes.fromhex("4e92"), "... called once a slot (jsr %a2@)")
-    edit(LFO_MASK_LEA + 2, _long(csyms["wr_lfo_mask"]),
-         "the LFO destination list's mask lookup: wr_lfo_mask answers 0 for a record our "
-         "machine leaves unused (named -), stock's 0x400dc472 for everything else",
+    _need(content, LFO_MASK_LEA + 0x2e, bytes.fromhex("2f004e924680c0af0038"),
+          "... with the record pushed, want at 56(%sp) (move.l %d0,-(%sp) ; jsr (%a2) ; not.l %d0 ; and.l 56(%sp),%d0)")
+    _need(content, 0x4003951E, bytes.fromhex("4fefffd448d77c7c2a6f0030"),
+          "the builder's frame: lea -44(%sp),%sp ; movem.l (10 registers) ; movea.l 48(%sp),%a5")
+    edit(LFO_MASK_LEA + 2, _long(csyms["mod_mask_hook"]),
+         "the LFO destination list's mask lookup: mod_lfo_mask(record, want): 0 for a record our "
+         "machine leaves unused (named -), 0x1e00 for the 13 closed ones, another LFO's control "
+         "offered to every LFO, stock's 0x400dc472 for everything else",
          _long(LFO_MASK_STOCK))
+    # 2026-11-11: a lower LFO's write into a higher LFO's control, heard one frame later
+    _need(content, MOD_EVAL_SITE - 4, bytes.fromhex("132c2f0a"), "the frame pushes the evaluator's mirror (move.l %a2,-(%sp))")
+    _need(content, MOD_EVAL_SITE + 6, bytes.fromhex("4fef001c"), "... and pops its seven arguments")
+    edit(MOD_EVAL_SITE, bytes.fromhex("4eb9") + _long(csyms["mod_eval"]),
+         "the frame's LFO evaluator: the lower LFOs' last writes into higher LFOs' controls added "
+         "into the mirror first (mod_eval_pre), then stock's 0x40137a06", MOD_EVAL_STOCK)
+    _need(content, MOD_WB_SITE - 0x10, bytes.fromhex("752c004a72647f4225470068b2876538"),
+          "the write: DEST = mvs.b 74(%a4) into d7, bound-checked against 100")
+    _need(content, MOD_WB_SITE + 8, bytes.fromhex("4df07a00"), "... the cell: lea (%a0,%d7.l*2),%fp")
+    _need(content, 0x40137DC2, bytes.fromhex("53af0030"), "the LFO counter at 48(%sp), 2 down to 0")
+    _need(content, 0x40137DEA, bytes.fromhex("528dd3af0034"), "the voice row in %a5, its slot 0 at 52(%sp)")
+    edit(MOD_WB_SITE, bytes.fromhex("4eb9") + _long(csyms["mod_wb"]) + bytes.fromhex("4e71"),
+         "the LFO evaluator's DEST write: a lower LFO's into a higher LFO's control goes to a "
+         "shadow cell (mod_wb_cell), carried into the mirror next frame", MOD_WB_STOCK)
 
     # v0.38: per-project pools: the four detours, entered by jmp (the stack as stock left it)
     _need(content, PJ_BEGIN_SITE + 8, bytes.fromhex("262f0028"), "the load goes on: move.l 40(%sp),%d3")
@@ -953,6 +980,9 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
                  "sl_lock_get", "sl_lock_set", "sl_v", "sl_cap", "sl_started", "sl_ticks", "sl_pasted", "sl_tclip", "sl_paste",
                  "sl_draw_sld", "sl_draw_slen"):
         layout[name] = csyms[name]
+    for name in ("mod_mask_hook", "mod_lfo_mask", "mod_eval", "mod_eval_pre", "mod_wb", "mod_wb_cell",
+                 "mv_begin", "mv_cell", "mv_poll", "sl_lastv", "wr_screen"):
+        layout[name] = csyms[name]              # 2026-11-11: csrc/modulation (the checks call them)
     layout.update(playout)
     # W2: where the C renderer's code ends (its rodata and data follow): the ship gate
     # checks [C_LOAD, c_text_end) as code

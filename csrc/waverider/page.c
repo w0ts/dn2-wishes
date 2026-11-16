@@ -94,6 +94,18 @@ static int wr_active(void)
  * wr_names) answers 0, and is left out of the list. Every other record, and every other
  * track, as stock. */
 #define STOCK_MASK ((u32 (*)(u32))0x400DC472u)
+
+/* 2026-11-11 (owner: "Open 13 closed controls"; docs/modulation-more.md): the thirteen per-voice
+ * records stock 1.12 ships with mask 0 are offered with an ordinary parameter's 0x1e00, to every
+ * LFO and to MOD SETUP: PTIM, PORT, the amp envelope's DEL, MODE and RSET, and FM TONE's ATRG,
+ * ARST, BTRG, BRST, PHRT, KSA, KSB1, KSB2. Only the list changes: the evaluator never reads the
+ * mask, and on 1.11 the same thirteen, opened in the table, listed and modulated on the unit
+ * (docs/modulation-mask.md, 2026-09-12). Every list goes through this lookup (the builder
+ * 0x4003951e is the only reader of a non-DEST record's mask; the step code and the cascades read
+ * the DEST records' bits 16..18 only). */
+static const unsigned short wr_opened[] = {34, 35, 61, 73, 74, 221, 222, 224, 225, 226, 235, 236, 237};
+#define WR_OPEN_MASK 0x1E00u
+
 u32 wr_lfo_mask(u32 rec)
 {
     if (rec >= 238u && rec <= 262u && wr_active()) {
@@ -101,7 +113,12 @@ u32 wr_lfo_mask(u32 rec)
         if (sh && sh[0] == '-' && sh[1] == 0)
             return 0;
     }
-    return STOCK_MASK(rec);
+    u32 m = STOCK_MASK(rec);
+    if (m == 0)
+        for (unsigned k = 0; k < sizeof wr_opened / sizeof wr_opened[0]; k++)
+            if (wr_opened[k] == rec)
+                return WR_OPEN_MASK;
+    return m;
 }
 
 /* TYPE's value (0..0x7f00) -> the machine, as the DSP reads it (dnfw.perc.program) */
@@ -301,6 +318,8 @@ void wr_screen(void *screen, void *canvas)
     wpop_begin();                               /* the list popup: offered as the page draws */
     ins_title();                                /* the FX key's page names (csrc/inserts) */
     sl_screen(0, 0);
+    extern void mv_begin(void);
+    mv_begin();                                 /* moving controls: this draw's cells (csrc/modulation) */
     SCREEN_DRAW(screen, canvas);
     extern int sn_up(void);
     if (sn_up()) {                              /* v0.54: the stock NAME screen: nothing of ours over it */
@@ -351,6 +370,7 @@ int wr_poll(void *screen)
     extern void smp_er_poll(void);
     extern void mtr_poll(void *screen);
     mtr_poll(screen);                           /* the system meter: FUNC held, every page (csrc/meter) */
+    { extern void mv_poll(void *screen); mv_poll(screen); }   /* moving controls: a line moved (csrc/modulation) */
     { extern void scope_poll(void *screen); scope_poll(screen); }   /* AMP page 2's scope, 25 a second */
     extern void wpop_poll(void *screen);
     wpop_poll(screen);                          /* the list popup's redraws (popup.c) */
@@ -658,6 +678,8 @@ void wr_cell(void *view, void *canvas, int x0, int y0, u32 id)
 #endif
     extern void wpop_stock_cell(void *view, int x0, int y0, u32 id, int ours);
     wpop_stock_cell(view, x0, y0, id, id == 122u || id == 131u);   /* a stock list: the popup (popup_stock.c) */
+    extern void mv_cell(void *canvas, int x0, int y0, u32 id);
+    mv_cell(canvas, x0, y0, id);                /* moving controls: the heard value's line (csrc/modulation) */
 }
 
 static const char *perc_name(int i, int arg)

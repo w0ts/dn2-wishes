@@ -655,6 +655,10 @@ assert C_LOAD + C_SPAN <= MDUI_LOAD and MDUI_LOAD + 0x8000 <= 0x46B00000, "rende
 METER_RAM = 0x46AFF000                          # the system meter's state (csrc/meter), 256 B: its counters change
 METER_BYTES = 0x100                             # at every context switch, so they live outside every CODE chunk
 assert MDUI_LOAD + 0x8000 <= METER_RAM and METER_RAM + METER_BYTES <= 0x46B00000, "MD graphics, meter, mirror"
+MOD_RAM = 0x46AF8000                            # 2026-11-11: csrc/modulation's state (the LFO cascade's
+MOD_BYTES = 0x800                               # shadow cells, written in the audio ISR; the moving controls'
+MOD_CASCADE_BYTES = 0x500                       # cells): RAM above BSS, like the meter's
+assert MDUI_LOAD + 0x8000 <= MOD_RAM and MOD_RAM + MOD_BYTES <= METER_RAM, "MD graphics, modulation, meter"
 MD_FX_NIBBLES = 0x31313311                      # AMD-AMF, EQF-EQG, FLTF-FLTW-FLTQ clipped, as the MD's
 TRACK_LEVEL_ID = 10                             # record 10, "Track Level" / LEV, 0..0x7f00 (read from the 1.11 record table)
 

@@ -169,6 +169,7 @@ TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platfo
          "test/test_sampler_relatch.py", "test/test_pools.py",
          "test/test_gate_cache_foreign.py",                 # v0.48: the cache's cross-worktree guard and its control
          "test/test_slides.py",
+         "test/test_modulation.py",                           # 2026-11-11: the lists, the cascade, the moving controls
          "test/test_libtree.py", "test/test_web_tool.py",   # v0.40: nested folders (the model, the page's levels)
          "test/test_fdn8.py",                                 # FDN8: its DSP program against the reference
          "test/test_xdly.py",                                 # XDLY: the same
@@ -228,6 +229,7 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("mute", "FLEX MUTE SRC: the SRC track out of the mix, still recorded, on both processors (coupled)"),
        ("fineswap", "STRT/LEN/LOOP fine records swapped in and out (ColdFire)"),
        ("fineknob", "STRT's knob against stock's fine FREQ (ColdFire)"),
+       ("modulation", "modulation: the destination lists, the LFO cascade, the moving controls (ColdFire)"),
        ("link16", "sample link (ColdFire)"),
        ("pools", "per-project pools (ColdFire)"),
        ("erase", "ERASE MOD DATA (ColdFire)"),
@@ -2591,6 +2593,28 @@ def main() -> int:
             return True, last[6:]
         later("fineknob", "STRT's knob against stock's fine FREQ (ColdFire)",
               "STRT's knob against stock's fine FREQ (ColdFire)", [fk_cmd, sorted(EMU_ENV.items())], fk_body)
+
+        # 2026-11-11 (owner: "Open 13 closed controls, Moving controls, Feedback is okay for lfo";
+        # docs/modulation-more.md, scripts/emu_modulation.py): the destination builder called for
+        # LFO1-3 and MOD SETUP on WaveTone, FM TONE and PERC against stock's lists; the frame's LFO
+        # path called by hand with LFO1 <-> LFO2 SPD at full depth (heard one frame late, bounded,
+        # also at the speeds' extremes), and its cost against its bounds; the FLTR page's FREQ cell
+        # drawing its heard-value line
+        mo_js = work / "modulation.json"
+        mo_cmd = [a.venv, "-u", "scripts/emu_modulation.py", "--build", a.build, "--snapshot", snap, "--json", mo_js]
+
+        def mo_body(tdir):
+            rc, out = run("modulation", mo_cmd, logs, env=EMU_ENV, trace=tdir)
+            last = out.strip().splitlines()[-1] if out.strip() else ""
+            if rc != 0 or not last.startswith("PASS"):
+                return False, "\n".join(l for l in out.splitlines() if "FAIL" in l)[-900:] or out[-900:]
+            return True, (f"{last[6:]}: every stock list kept, the 13 closed records and the other LFOs' "
+                          f"controls added (never an LFO's own, never DEST); LFO1 -> LFO2 SPD heard one frame "
+                          f"late, every cell in range, the cost under its bounds; the heard-value line drawn, "
+                          f"redrawn and let go")
+        later("modulation", "modulation: the destination lists, the LFO cascade, the moving controls (ColdFire)",
+              "modulation: the destination lists, the LFO cascade, the moving controls (ColdFire)",
+              [mo_cmd, sorted(EMU_ENV.items())], mo_body)
 
         # the setup is done: from here on, nothing may import a module of ours (cached())
         setup_mods |= repo_modules()

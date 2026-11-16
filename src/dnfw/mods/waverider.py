@@ -133,7 +133,9 @@ def ram() -> list[Extent]:
             + [Extent(RAM, SM.MIRROR, SM.MIRROR_BYTES,
                       "the sample link's mirror of the pool (csrc/sampler/link.c, v0.14)")]
             + [Extent(RAM, PG.METER_RAM, PG.METER_BYTES,
-                      "the system meter's state: its counters and figures (csrc/meter)")])
+                      "the system meter's state: its counters and figures (csrc/meter)")]
+            + [Extent(RAM, PG.MOD_RAM, PG.MOD_BYTES,
+                      "modulation's state: the LFO cascade's shadow cells, the moving controls (csrc/modulation)")])
 
 
 def _main_os(original: bytes) -> bytes:

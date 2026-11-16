@@ -314,11 +314,18 @@ def test_the_recorder_screen_hooks_replace_exactly_the_stock_calls():
     assert CF.REC_COMBO_SITE + 8 + struct.unpack(">h", new[8:10])[0] == CF.REC_COMBO_EXIT
 
 
-def test_the_lfo_list_asks_wr_lfo_mask_which_asks_stock():
+def test_the_lfo_list_asks_mod_mask_hook_which_asks_stock():
+    # 2026-11-11: the lookup goes to hooks.S's mod_mask_hook (csrc/modulation), which passes the
+    # builder's want (60(%sp)) to mod_lfo_mask; that asks page.c's wr_lfo_mask, which asks stock
     e = _edit(CF.LFO_MASK_LEA + 2)
     assert struct.unpack(">I", bytes.fromhex(e["stock"]))[0] == CF.LFO_MASK_STOCK
     target = struct.unpack(">I", bytes.fromhex(e["new"]))[0]
-    assert struct.pack(">I", CF.LFO_MASK_STOCK) in _chunked(target, 128)
+    lay = waverider.SPEC["layout"]
+    assert target == lay["mod_mask_hook"]
+    hook = _chunked(target, 18)
+    assert hook[:4] == bytes.fromhex("2f2f003c")                   # move.l 60(%sp),-(%sp): want
+    assert bytes.fromhex("4eb9") + struct.pack(">I", lay["mod_lfo_mask"]) in hook
+    assert struct.pack(">I", CF.LFO_MASK_STOCK) in bytes.fromhex(waverider.SPEC["c_chunk"]["code"])
 
 
 def test_trk_clear_reads_the_real_machine():
