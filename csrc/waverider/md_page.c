@@ -187,15 +187,17 @@ static void wg_lit(void *c, int s)
     invert(c, wg_x(s) - 3, wg_y(s), wg_x(s) + 21, wg_y(s) + 26);
 }
 
-/* PAGE 0: the machine's eight; PAGE 1: AMD AMF EQF EQG / FLTF FLTW FLTQ TYPE */
+/* PAGE 0: the machine's first seven, TYPE; PAGE 1: AMD AMF EQF EQG / FLTF FLTW FLTQ, the machine's eighth
+ * (2026-11-11, the User: the engine on page 1 knob H on every machine with engines) */
 int md_page_draw(void *view, void *c, int page, int type)
 {
     if (!ok() || page < 0 || page > 1 || type < 0 || type >= PERC_N)
         return 0;
     const u8 *mach = MDUI + MDUI_MACH + MDUI_MACH_BYTES * type;
-    u32 nib = (u32)mach[0] << 24 | (u32)mach[1] << 16 | (u32)mach[2] << 8 | mach[3];
+    u32 mnib = (u32)mach[0] << 24 | (u32)mach[1] << 16 | (u32)mach[2] << 8 | mach[3], nib = mnib;
     if (page == 1)
         nib = MD_FX_NIBBLES;
+    nib = (nib & ~15u) | (page == 0 ? 1u : (mnib & 15u));   /* H: TYPE always; the eighth where the machine has it */
     fill(c, 0, 0, 127, 53, 0);
     for (int s = 0; s < 8; s++) {
         int n = nib >> (28 - 4 * s) & 15, x0 = wg_x(s), base = wg_y(s);
@@ -480,6 +482,18 @@ static const char *mnm_pop_name(int i, int arg)     /* arg: mi * 8 + j; i: a pla
     return mnm_value_text(mi, j, c);
 }
 
+static const char *mnm_pop_tag(int i, int arg)      /* 2026-11-11: the tag beside a choice, as PERC's TYPE list */
+{
+    int mi = arg >> 3, j = arg & 7, r = mnm_retired_at(mi, j);
+    int c = r >= 0 && i >= r ? i + 1 : i;
+    for (int k = 0; k < MNM_TAG_LISTS; k++)
+        if (mnm_tag_list[k][0] == mi && mnm_tag_list[k][1] == j) {
+            const char *t = mnm_choice_tags[mnm_tag_list[k][2] + c];
+            return t[0] ? t : 0;
+        }
+    return 0;
+}
+
 void mnm_pop_offer(void *view, int mi)
 {
     if (mi < 0 || mi >= MNM_N)
@@ -496,7 +510,7 @@ void mnm_pop_offer(void *view, int mi)
             if (ch >= r)
                 ch--;
         }
-        wpop_offer(s, mnm_labels[mi][s], cnt, ch, mnm_pop_name, 0, mi * 8 + s);
+        wpop_offer(s, mnm_labels[mi][s], cnt, ch, mnm_pop_name, mnm_pop_tag, mi * 8 + s);
     }
 }
 

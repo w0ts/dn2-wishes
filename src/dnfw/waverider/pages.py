@@ -80,10 +80,12 @@ SUBTITLE = "Perc"
 TYPE_ID = _perc.TYPE_REC[0]                                  # 252, DRIF
 PARAM_IDS = tuple(r for r, _slot, _lo, _top in _perc.PARAMS)  # 238 242 254 253 256 257 260 240
 FX_IDS = tuple(r for r, _slot, _lo, _top in _perc.FX_PARAMS)   # 239 246 250 244 243 258 253
+# 2026-11-11 (the User): the engine on page 1 knob H on every machine with engines: TYPE on page 1 H, the machine's
+# eighth parameter on page 2 H (TYPE's place since v0.20, SRR's on the Machinedrum). The records stay theirs.
 PAGES = (
-    PARAM_IDS,                                  # the machine's eight, as the Machinedrum's page
-    (*FX_IDS, TYPE_ID),                         # AMD AMF EQF EQG / FLTF FLTW FLTQ, TYPE: the
-)                                               # Machinedrum's FX page, TYPE in SRR's place (v0.20)
+    (*PARAM_IDS[:7], TYPE_ID),                  # the machine's first seven, TYPE
+    (*FX_IDS, PARAM_IDS[7]),                    # AMD AMF EQF EQG / FLTF FLTW FLTQ, the machine's eighth
+)
 # no static labels: wr_label hands every PERC record to the stock getShortName, which
 # reads the names wr_names swapped in
 LABELS: dict[int, str] = {}
@@ -320,9 +322,22 @@ def mnm_default_words(d, M) -> list[int]:
     return out
 
 
+# 2026-11-11 (the User: MACHINEDRUM's engine list "is nice": its rows say what each machine is): the same tag beside
+# each engine in PLAITS' and SOPHIE's list popups, 11 characters at most (our words; SOPHIE's from Schwung Sophie's
+# source comments: Fuse two modulators in series, Stack a dense FM stack, Split parallel operators, Shard a 12-bit
+# wavetable/noise hybrid, PIPE an FM carrier with an inharmonic ring, BOOM a clean fundamental with a metallic skin)
+MNM_CHOICE_TAGS = {
+    ("PLAITS", "MODL"): ("WAVESHAPER", "", "ANALOG VCOS", "2-OP FM", "ADDITIVE", "SAW SWARM", "FILT NOISE",
+                         "PARTICLES", "STRING", "RESONATOR", "BASS DRUM", "SNARE", "HI-HAT"),
+    ("SOPHIE", "MODL"): ("SERIES FM", "FM STACK", "PARALLEL FM", "12-BIT WAVE", "FM + RING", "METAL SKIN",
+                         "TUNED KICK"),
+}
+TAG_MAX = 11                                    # popup.c TAG_X 64 .. the box's edge, "%.11s"
+
+
 def mnm_c_header() -> str:
     q = chr(34)
-    names, rows_n, rows_at = [], [], []
+    names, tags, tag_lists, rows_n, rows_at = [], [], [], [], []
     for M in _mnm.CF_MACHINES:
         ch = MNM_CHOICES.get(M.NAME, {})
         n_row, at_row = [], []
@@ -339,6 +354,11 @@ def mnm_c_header() -> str:
                 n_row.append(len(c))
                 at_row.append(len(names))
                 names += list(c)
+                tg = MNM_CHOICE_TAGS.get((M.NAME, sh))
+                if tg:
+                    assert len(tg) == len(c) and all(len(t) <= TAG_MAX for t in tg), (M.NAME, sh)
+                    tag_lists.append((_mnm.CF_MACHINES.index(M), mnm_pnames(M).index(sh), len(tags)))
+                    tags += list(tg)
         rows_n.append(n_row)
         rows_at.append(at_row)
 
@@ -378,6 +398,11 @@ def mnm_c_header() -> str:
         f"static const unsigned char mnm_choices[MNM_N][MNM_J] = {{{arr(rows_n)}}};",
         f"static const unsigned char mnm_choice_at[MNM_N][MNM_J] = {{{arr(rows_at)}}};",
         f"static const char mnm_choice_names[{max(1, len(names))}][5] = {{{', '.join(q + n + q for n in names)}}};",
+        # 2026-11-11: the list popup's tag beside each choice, as PERC's TYPE list's: only the lists that have them
+        # (machine, control, first tag); "" none
+        f"#define MNM_TAG_LISTS {max(1, len(tag_lists))}",
+        f"static const unsigned char mnm_tag_list[MNM_TAG_LISTS][3] = {{{', '.join('{%d, %d, %d}' % t for t in tag_lists) or '{255, 255, 0}'}}};",
+        f"static const char mnm_choice_tags[{max(1, len(tags))}][{TAG_MAX + 1}] = {{{', '.join(q + t + q for t in tags) or q + q}}};",
         # v0.27: the frame slot of each of the eight (smp_quant's 4 detents a choice), and each
         # control's widget as the Monomachine draws it (docs/mnm-pages-plan.md)
         f"static const unsigned char mnm_slot[MNM_J] = {{{', '.join(str(sl) for _r, sl, _lo, _t in MNM_RECS)}}};",

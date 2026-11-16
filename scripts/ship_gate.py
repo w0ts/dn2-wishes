@@ -1766,7 +1766,7 @@ def main() -> int:
             st = ["wait:2", "png:stock"]
             for ty in MMx.TYPES:
                 st += [f"poke:{snd0 + 0xDE:#x}:{ty:02x}", "wait:20", f"png:m{ty}"]
-            wslot = PMx.PARAMS[6][1]             # SOPHIE's MODL: the seventh place
+            wslot = PMx.PARAMS[7][1]             # SOPHIE's MODL: the eighth place (H, 2026-11-11)
             st += [f"poke:{snd0 + 0xDE:#x}:{MMx.TYPES[MMx.NAMES.index('SOPHIE')]:02x}",
                    f"poke:{snd0 + 0x14 + 2 * wslot:#x}:0000", "wait:4"]
             st += [f"call:{lay['smp_quant']:#x}:sound0:{wslot}:0x100"] * 4
@@ -1782,7 +1782,7 @@ def main() -> int:
                     shots = {n: pathlib.Path(r["screens"][n]).read_bytes() for n in r["screens"]}
                     pages = [shots[f"m{ty}"] for ty in MMx.TYPES]
                     d0 = [c["d0"] for c in r["direct_calls"]]
-                    lo, top = PMx.PARAMS[6][2], PMx.PARAMS[6][3]
+                    lo, top = PMx.PARAMS[7][2], PMx.PARAMS[7][3]
                     n = len(MMx.MACHINES[MMx.NAMES.index("SOPHIE")].MNM.MODELS)
                     on = _mnm_rep(lo, top, n, 1) << 8
                     facts = {"each machine its own page, none the stock grid":
@@ -1921,7 +1921,7 @@ def main() -> int:
             clock, memcpy = 0x4058F8D4, 0x40134770
             ptch, other = PMf.PARAMS[0][1], PMf.PARAMS[2][1]
             # SOPHIE's MODL (seven choices) since DPRO-WAVE (its WPRS) went, 2026-11-08
-            wprs, wlo, wtop = PMf.PARAMS[6][1], PMf.PARAMS[6][2], PMf.PARAMS[6][3]
+            wprs, wlo, wtop = PMf.PARAMS[7][1], PMf.PARAMS[7][2], PMf.PARAMS[7][3]   # MODL on H (2026-11-11)
             n_modl = len(MMf.MACHINES[MMf.NAMES.index("SOPHIE")].MNM.MODELS)
             w_on = _mnm_rep(wlo, wtop, n_modl, 1)
             w_off = _mnm_rep(wlo, wtop, n_modl, 0)

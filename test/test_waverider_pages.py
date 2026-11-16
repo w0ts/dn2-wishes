@@ -60,17 +60,19 @@ def test_the_strings_carry_an_unshareable_header():
         assert struct.unpack(">IIi", CHUNK[at - 12:at]) == (len(text), len(text), -1)
 
 
-def test_perc_pages_are_the_eight_parameters_then_type_and_the_effects():
-    # v0.12: page 1 is the machine's eight (the Machinedrum's page); page 2 TYPE, then
-    # AMD AMF EQF / EQG FLTF FLTW FLTQ
-    assert pages.PAGES[0] == tuple(r for r, *_ in PM.PARAMS)
-    # v0.20: the Machinedrum's FX page, AMD AMF EQF EQG / FLTF FLTW FLTQ, TYPE in SRR's place
-    assert pages.PAGES[1] == (*(r for r, *_ in PM.FX_PARAMS), PM.TYPE_REC[0])
+def test_perc_pages_are_seven_parameters_and_type_then_the_effects_and_the_eighth():
+    # 2026-11-11 (the User): the engine on page 1 knob H on every machine with engines. Page 1 the machine's
+    # first seven and TYPE; page 2 the Machinedrum's FX page, AMD AMF EQF EQG / FLTF FLTW FLTQ, and the
+    # machine's eighth in H (TYPE's place v0.20..2026-11-11, SRR's on the Machinedrum). The records stay theirs
+    params = tuple(r for r, *_ in PM.PARAMS)
+    assert pages.PAGES[0] == (*params[:7], PM.TYPE_REC[0])
+    assert pages.PAGES[1] == (*(r for r, *_ in PM.FX_PARAMS), params[7])
     used = set(pages.PAGES[0]) | set(pages.PAGES[1])
     assert len(used) == 16 and not used & set(pages.UNUSED)
     assert pages.LABELS == {}                       # every label comes from the record's name
     named = {r: sh for r, _lo, sh in pages.named()}
-    assert [named[r] for r in pages.PAGES[1]] == ["AMD", "AMF", "EQF", "EQG", "FLTF", "FLTW", "FLTQ", "TYPE"]
+    assert named[pages.PAGES[0][7]] == "TYPE"
+    assert [named[r] for r in pages.PAGES[1][:7]] == ["AMD", "AMF", "EQF", "EQG", "FLTF", "FLTW", "FLTQ"]
 
 
 def test_every_machine_names_its_eight_parameters():

@@ -8,14 +8,21 @@ type has a name (12 characters at most: two 61-pixel columns, the list's own 3 x
 """
 from __future__ import annotations
 
-# the names (the User's E, 2026-11-11): what each machine is, at most 12 characters
+# the names, at most 12 characters (the User, 2026-11-11, mock-up E4: each of ours by what it is, "ANALOG everywhere";
+# "drone and tb303 are not monomachine!"; one MONOMACHINE entry, its engine chosen inside it, as MACHINEDRUM's: until
+# upstream-v048's host joins them, the five Monomachine ports stay their own entries, below). Elektron's machines and
+# the sample machines keep stock's names. PERC is the Machinedrum's machines (its own type 5)
 MACHINE_NAMES = {0: "FM TONE", 1: "WAVETONE", 2: "FM DRUM", 3: "SWARMER", 4: "MIDI",
-                 5: "PERC MD KIT", 20: "SOPHIE PERC", 18: "PLAITS MACRO", 19: "TB-303 ACID",
-                 21: "DRONE SINES", 22: "ANALOG 2 VA",
+                 5: "MACHINEDRUM",
                  6: "SID 6581", 7: "DPRO-WAVE", 14: "DPRO-DDRW", 15: "DPRO-DENS", 16: "VO-6 VOICE",
                  8: "ONESHOT", 9: "WERP", 10: "STRETCH", 11: "REPITCH", 12: "GRID", 13: "SLICE", 17: "BOUNCE"}
+# our other Monomachine-style machines by their module's NAME (dnfw.mnm.machines), whatever type they get: SOPHIE is
+# Schwung Sophie, PLAITS Mutable's Plaits, TB303 Open303, DRONE and ANALOG2 Optimist's; MONOMACHINE the host
+# upstream-v048 builds for the five ports (listed once a module of that NAME is in)
+OUR_NAMES = {"SOPHIE": "SOPHIE", "PLAITS": "PLAITS", "TB303": "TB-303", "DRONE": "DRONE", "ANALOG2": "ANALOG",
+             "MONOMACHINE": "MONOMACHINE"}
 FILTER_NAMES = {0: "MULTI-MODE", 1: "LOWPASS 4", 2: "EQUALIZER", 3: "COMB -", 4: "LEGACY LP/HP", 5: "COMB +",
-                7: "A2 SVF", 8: "A2 LADDER", 9: "A2 OTA", 10: "A2 DIODE", 11: "A2 MS-20"}
+                7: "ANALOG SVF", 8: "ANALOG LADR", 9: "ANALOG OTA", 10: "ANALOG DIODE", 11: "ANALOG MS-20"}
 # the icons, 7 x 5, rows top to bottom (scratch/lists/mock_e.py, the mock-up the User approved)
 MACHINE_ICONS = {
     0: [".#.....", "#.#....", "...#...", "....#.#", ".....#."],      # FM TONE: a sine
@@ -24,11 +31,6 @@ MACHINE_ICONS = {
     3: ["#.#.#.#", ".#.#.#.", "#.#.#.#", ".#.#.#.", "#.#.#.#"],      # SWARMER: a swarm
     4: [".#####.", "#.#.#.#", "#.....#", "#..#..#", ".#####."],      # MIDI: the DIN socket
     5: [".#####.", "#.....#", "#######", "#.....#", ".#####."],      # PERC: a drum
-    20: ["...#...", "..#.#..", ".#...#.", "#.....#", "###.###"],     # SOPHIE: a ping
-    18: ["#...#..", ".#.#.#.", "..#...#", ".#.#.#.", "#...#.."],     # PLAITS: a braid
-    19: [".#...#.", ".......", "#.....#", ".#...#.", "..###.."],     # TB-303: the acid smiley
-    21: ["#######", ".......", "#######", ".......", "#######"],     # DRONE: held tones
-    22: ["...#..#", "..##.##", ".#.#.#.", "#..##..", "...#..."],     # ANALOG 2: two saws
     6: ["#.#.#.#", "#######", "#.....#", "#######", "#.#.#.#"],      # SID 6581: the chip, its pins
     7: ["###.###", "#.#.#..", "#.#.#..", "#.#.#..", "#.###.."],      # DPRO-WAVE: a pulse
     14: ["....##.", "...#.#.", "..#.#..", ".#.#...", "##....."],     # DPRO-DDRW: a pencil's stroke
@@ -42,6 +44,30 @@ MACHINE_ICONS = {
     13: ["#.#.#.#", "#.#.#.#", "#.#.#.#", "#.#.#.#", "#.#.#.#"],     # SLICE: cuts
     17: ["#.....#", ".#...#.", "..#.#..", ".#...#.", "#.....#"],     # BOUNCE (when listed)
 }
+OUR_ICONS = {
+    "SOPHIE": ["...#...", "..#.#..", ".#...#.", "#.....#", "###.###"],      # a ping
+    "PLAITS": ["#...#..", ".#.#.#.", "..#...#", ".#.#.#.", "#...#.."],      # a braid
+    "TB303": [".#...#.", ".......", "#.....#", ".#...#.", "..###.."],       # the acid smiley
+    "DRONE": ["#######", ".......", "#######", ".......", "#######"],       # held tones
+    "ANALOG2": ["...#..#", "..##.##", ".#.#.#.", "#..##..", "...#..."],     # two saws
+    "MONOMACHINE": ["#######", "#.#.#.#", "#.#.#.#", "#.....#", "#######"],  # a keyboard
+}
+
+
+def _ours() -> dict[int, str]:
+    """type -> our module's NAME, for those of this build's Monomachine-style machines OUR_NAMES names"""
+    from ..mnm import machines as MM
+    return {t: M.NAME for M, t in zip(MM.ALL_MODULES, MM.ALL_TYPE_SLOTS) if M.NAME in OUR_NAMES}
+
+
+def machine_names() -> dict[int, str]:
+    return {**MACHINE_NAMES, **{t: OUR_NAMES[n] for t, n in _ours().items()}}
+
+
+def machine_icons() -> dict[int, list[str]]:
+    return {**MACHINE_ICONS, **{t: OUR_ICONS[n] for t, n in _ours().items()}}
+
+
 FILTER_ICONS = {
     0: ["##....#", "..#..#.", "...##..", "..#..#.", "##....#"],      # MULTI-MODE
     1: ["####...", "....#..", ".....#.", "......#", "......#"],      # LOWPASS 4
@@ -101,7 +127,7 @@ def c_header() -> str:
            f"#define MSEL_MROWS {len(mrows)}", f"#define MSEL_FROWS {len(frows)}",
            "static const signed char msel_mrows[MSEL_MROWS] = {" + ", ".join(map(str, mrows)) + "};",
            "static const signed char msel_frows[MSEL_FROWS] = {" + ", ".join(map(str, frows)) + "};"]
-    for kind, names, icons, rows in (("m", MACHINE_NAMES, MACHINE_ICONS, mrows), ("f", FILTER_NAMES, FILTER_ICONS, frows)):
+    for kind, names, icons, rows in (("m", machine_names(), machine_icons(), mrows), ("f", FILTER_NAMES, FILTER_ICONS, frows)):
         top = max(t for t in rows if t >= 0) + 1
         for t in rows:
             if t >= 0:

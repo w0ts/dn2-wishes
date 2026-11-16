@@ -18,7 +18,8 @@ Sines are PERC's sine table (256 a turn, linear) where Plaits' is 512; exp2 PERC
 division PERC's reciprocal. The tables (WS's five shapes, the fold) ship in zpack
 (dnfw.mnm.tables, Q23).
 
-Parameters: HARM TIMB MORP --- --- --- MODL TUNE.
+Parameters: HARM TIMB MORP --- --- FINE TUNE MODL (2026-11-11, the User: the engine on page 1 knob H on every
+machine with engines, as MACHINEDRUM's TYPE; MODL and TUNE swapped places, old projects not converted).
 """
 
 from __future__ import annotations
@@ -30,7 +31,8 @@ from ..perc import guard as G
 from ..perc.dsl import Prog
 
 NAME, ID = "PLAITS", 65
-PNAMES = ("HARM", "TIMB", "MORP", "---", "---", "FINE", "MODL", "TUNE")   # FINE 2026-11-09
+PNAMES = ("HARM", "TIMB", "MORP", "---", "---", "FINE", "TUNE", "MODL")   # FINE 2026-11-09; MODL on H 2026-11-11
+TUNE_K, MODL_K = 6, 7                                                      # their places (G, H)
 WS, RETIRED = range(2)
 # 2026-11-09: Plaits' other engines, each its own module (dnfw.mnm.plk their common ground), after
 # WS and the retired choice in MODL's choices
@@ -48,7 +50,7 @@ N_MODELS = len(MODELS)
 OUT_GAIN = {"VA": 0.8, "FM": 0.6, "ADD": 0.8, "SWRM": -3.0, "NOIS": -1.0, "PART": -2.0, "STRG": -1.0,
             "MDAL": -1.0, "BD": 0.8, "SD": 0.8, "HH": 0.8}
 POST = True                                     # False: the raw engines (the references' comparisons)
-DEFAULTS = (64, 64, 64, 0, 0, 64, 0, 64)
+DEFAULTS = (64, 64, 64, 0, 0, 64, 64, 0)
 
 SR = 44100.0
 F_MAX, F_MIN = 0.25, 0.000001                    # plaits::kMaxFrequency, kMinFrequency
@@ -180,7 +182,7 @@ def pitch(p: Prog, L: C.Layout) -> None:
     both by the same arithmetic (pages.MNM_CHOICES, md_page.c MW_SIGNED). At 64 / 64 the sum is 0.0,
     so the note is the one it was."""
     C.vw(p, 1, "pitch")
-    C.par(p, 2, 7)                               # knob / 128, exactly
+    C.par(p, 2, TUNE_K)                          # knob / 128, exactly
     _mulk(p, 2, 2, 49.0)
     p.trunc(2, 2)                                # (knob x 49) >> 7 (exact in float32)
     p.iconst(12, -24)
@@ -460,7 +462,7 @@ def half(p: Prog, L: C.Layout) -> None:
     """16 samples at I4: the model MODL chooses (the choice, knob x N >> 7, as the page's). A
     model other than WS starts (its init) when it is chosen; the trigger is this half's. Choice 1
     (GRAN until 2026-11-09, RETIRED) plays WS."""
-    C.knob(p, 0, 6)
+    C.knob(p, 0, MODL_K)
     p.iconst(1, N_MODELS)
     p.mul_ssi(0, 0, 1)
     p.lsh(0, 0, -7)

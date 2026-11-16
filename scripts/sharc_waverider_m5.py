@@ -1521,7 +1521,7 @@ def step_poly16(init, sound, machines, blocks=20) -> dict:
             if not name or (only and name not in only):
                 continue
             knobs = list(MMx.DEFAULTS["PLAITS"])
-            knobs[6] = PLT.knob_of(m)
+            knobs[PLT.MODL_K] = PLT.knob_of(m)
             words = mnm_words(k, knobs)
             b_now = {"b": 0}
             skips = {}
@@ -1727,7 +1727,7 @@ def step_notestart(init, sound, machines) -> dict:
             knobs = None
             if m is not None:
                 knobs = list(MMx.DEFAULTS[name])
-                knobs[6] = PLT.knob_of(m)
+                knobs[PLT.MODL_K] = PLT.knob_of(m)
             words = mnm_words(k, knobs)
             b_now = {"b": 0}
             costs, ours = [], []
@@ -1880,7 +1880,7 @@ def step_rotate(init, sound, machines, names=("PLAITS", "PLAITS:PART", "SOPHIE",
             if eng:                                  # PLAITS at one MODL engine
                 from dnfw.mnm import plaits as PLT
                 knobs = list(MMx.DEFAULTS[base_name])
-                knobs[6] = PLT.knob_of(PLT.MODELS.index(eng))
+                knobs[PLT.MODL_K] = PLT.knob_of(PLT.MODELS.index(eng))
             words = mnm_words(k, knobs)
             # PART / STRG defer their DDR clear (dnfw.mnm.plk): four / two blocks silent on a voice
             # starting the engine
@@ -4094,11 +4094,11 @@ def step_mnm(init, sound, machines, blocks) -> dict:
     from dnfw.mnm import plaits as PLm
     pk = MM.NAMES.index("PLAITS")
     for ix in range(1, PLm.N_MODELS):
-        kn = [40, 90, 100, 0, 0, 0, PLm.knob_of(ix), 64]
+        kn = [40, 90, 100, 0, 0, 0, 64, PLm.knob_of(ix)]                 # TUNE G, MODL H (2026-11-11)
         runs[f"PLAITS_{PLm.MODELS[ix]}"] = _slim(run_blocks(init, frames(pk, trig=(1, 4), knobs=kn), blocks))
 
     def plaits_walk(b):
-        kn = [70, 30, 60, 0, 0, 0, PLm.knob_of((b // 2) % PLm.N_MODELS), 64]
+        kn = [70, 30, 60, 0, 0, 0, 64, PLm.knob_of((b // 2) % PLm.N_MODELS)]
         return base_frame(sound, machines, t0=types[pk], overrides=mnm_words(pk, kn),
                           trigger=b % 2 == 1).to_bytes()
     runs["PLAITS_walk"] = _slim(run_blocks(init, plaits_walk, max(blocks, 2 * PLm.N_MODELS + 2)))

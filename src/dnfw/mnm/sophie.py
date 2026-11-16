@@ -15,7 +15,8 @@ division is PERC's reciprocal (dnfw.perc.machines).
 
 MODL (seven choices): FUSE, STAK, SPLT, SHRD, PIPE, BOOM (Sophie's models 0..5), KICK (Sophie's
 pad-1 kick topology with model 0). State: S0.. below; per-half values from the knobs after them.
-Parameters: DCAY COLR METL FBK SWEP CRSH MODL TUNE.
+Parameters: DCAY COLR METL FBK SWEP CRSH TUNE MODL (2026-11-11, the User: the engine on page 1 knob H on every
+machine with engines, as MACHINEDRUM's TYPE; MODL and TUNE swapped places, old projects not converted).
 """
 
 from __future__ import annotations
@@ -26,12 +27,13 @@ from . import core as C
 from ..perc.dsl import Prog
 
 NAME, ID = "SOPHIE", 64
-PNAMES = ("DCAY", "COLR", "METL", "FBK", "SWEP", "CRSH", "MODL", "TUNE")
+PNAMES = ("DCAY", "COLR", "METL", "FBK", "SWEP", "CRSH", "TUNE", "MODL")
+TUNE_K, MODL_K = 6, 7                                                      # their places (G, H)
 MODELS = ("FUSE", "STAK", "SPLT", "SHRD", "PIPE", "BOOM", "KICK")
 FUSE, STAK, SPLT, SHRD, PIPE, BOOM, KICK = range(7)
 # Sophie's factory snare-ish start: decay 0.24 s, color 52, metal 76, feedback 18, sweep 28,
 # crush 30 (pad 3), FUSE, in tune
-DEFAULTS = (61, 66, 97, 23, 82, 38, 0, 64)
+DEFAULTS = (61, 66, 97, 23, 82, 38, 64, 0)
 
 SR = 44100.0
 TAU = 2.0 * math.pi
@@ -179,7 +181,7 @@ def pitch(p: Prog, L: C.Layout) -> None:
     """S_BASE = the note's frequency in turns a sample: 440 x 2^((note - 69 + TUNE) / 12),
     TUNE -24..+24 semitones (64 in tune), 20..10000 Hz as Sophie."""
     C.vw(p, 1, "pitch")
-    C.par(p, 2, 7)
+    C.par(p, 2, TUNE_K)
     _mulk(p, 2, 2, 48.0)
     _addk(p, 2, 2, -24.0)                        # TUNE: knob x 48 / 128 - 24
     p.fop(1, 1, "+", 2)
@@ -216,7 +218,7 @@ def _params(p: Prog, L: C.Layout) -> None:
     _mulk(p, 7, 6, 18.0 / TAU)
     _sv(p, D_IX1, 7)
     # MODL: the choice (knob x 7) >> 7, as the page's (fmt.c mnm_ch)
-    C.knob(p, 0, 6)
+    C.knob(p, 0, MODL_K)
     p.lsh(1, 0, 3)
     p.iop(0, 1, "-", 0)                          # knob x 7
     p.lsh(0, 0, -7)

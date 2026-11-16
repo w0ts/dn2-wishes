@@ -23,7 +23,8 @@ typedef unsigned char u8;
                                                  * locking a trig): FWD .. RLOOP in 6 detents, not 12 */
 #define SOUND_TYPE 0xDE                         /* the sound's machine type byte */
 #define SOUND_VALUES 0x14                       /* its values, a 16-bit word a slot */
-#define MNM_TUNE_J 7                            /* TUNE: knob H on every Monomachine machine */
+#define MNM_TUNE_J 7                            /* TUNE: knob H on the Monomachine's own machines (PLAITS' and SOPHIE's
+                                                 * on G since 2026-11-11; only read under MNM_TUNE_MONO, off) */
 #define MNM_TUNE_REC 240u                       /* its record (perc_param_ids[7]) */
 /* Ours (the User, 2026-11-10: TUNE "as in b6"): v0.47's TUNE (the signed header, FUNC + turn by
  * semitones) is for the Monomachine's own machines, whose TUNE spans +-2 semitones (32 knob steps
