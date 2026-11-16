@@ -67,7 +67,7 @@ def script(n_stock=40, n_fdn=230, seed=7):
     return out
 
 
-def call(M5, r0, tw, inl, inr, par):
+def call(M5, r0, tw, inl, inr, par, pokes=None):
     m2, fx = M5.m2, M5.fx
     r = r0.fresh_call(SITE, regs={**REGS, "R4": FR.STOCK_STATE, "R8": PAR, "R12": IO})
     m2.poke(r.state, FP.TYPE_WORD, tw & 0xFFFFFFFF)
@@ -82,6 +82,8 @@ def call(M5, r0, tw, inl, inr, par):
     for k, x in enumerate(par):
         m2.poke(r.state, PAR + 4 * k, fb(x))
     m2.poke(r.state, PAR + 0x18, fb(1.0))                 # the bus writes 1.0 there before its call
+    for a, v in (pokes or {}).items():
+        m2.poke(r.state, a, v)
     entry = dict(r.state.uregs)
     before = dict(r.state.overlay)
     how = fx.run(r, 3_000_000, fx.Fixups(), stop_at=[BACK])
@@ -171,6 +173,26 @@ def run(M5, snap, m2mach, m5img, stock_img) -> dict:
     checks["TYPE FDN8: every R, I0-I3 and I5 register the bus left is back at the return"] = regs_back
     ring = [M5.m2.word(rb.state, dsp.FDN8_RING_DDR + 4 * k) or 0 for k in range(FD.RING_WORDS)]
     checks["TYPE FDN8: the ring, word for word, as the reference's"] = ring == [fb(x) for x in ref.ring]
+    if FP.QUIET_GATE:
+        # 2026-11-11 (perf): the quiet gate's skip path, on the state after the run (qn set as if QUIET_BLOCKS
+        # silent blocks had passed; the tail in the ring is left as it is): the wet is zeros, only the LFOs'
+        # phases move, the ring is untouched; a block with an input runs again (qn back to 0)
+        tw_q, _, _, par_q = seq[-1]
+        ph0 = [M5.m2.word(rb.state, FP.C[f"ph{k}"]) or 0 for k in range(8)]
+        rq, hq, oq, entry_q, _ = call(M5, rb, tw_q, [0.0] * 32, [0.0] * 32, par_q, {FP.C["qn"]: FP.QUIET_BLOCKS})
+        ph1 = [M5.m2.word(rq.state, FP.C[f"ph{k}"]) or 0 for k in range(8)]
+        ring_q = [M5.m2.word(rq.state, dsp.FDN8_RING_DDR + 4 * k) or 0 for k in range(FD.RING_WORDS)]
+        keep_q = {f"R{k}" for k in range(16)} | {"I0", "I1", "I2", "I3", "I5"}
+        checks["FDN8 quiet gate: a silent block with qn at QUIET_BLOCKS writes a wet of zeros, moves only the "
+               "LFOs' phases (by LFO_INC), leaves the ring word for word"] = (
+            hq[0] == "stop" and all(w == 0 for w in oq[0] + oq[1])
+            and ph1 == [(a + FD.LFO_INC[k]) & 0xFFFFFFFF for k, a in enumerate(ph0)] and ring_q == ring)
+        checks["FDN8 quiet gate: the skip path gives back every R, I0-I3 and I5 register as it came"] = not any(
+            rq.state.uregs.get(k) != entry_q.get(k) for k in entry_q if str(k) in keep_q)
+        rq2, hq2, oq2, _, _ = call(M5, rb, tw_q, [0.3] * 32, [0.2] * 32, par_q, {FP.C["qn"]: FP.QUIET_BLOCKS})
+        checks["FDN8 quiet gate: a block with an input runs (the wet is not zeros) and qn goes back to 0"] = (
+            hq2[0] == "stop" and any(w & 0x7FFFFFFF for w in oq2[0] + oq2[1])
+            and (M5.m2.word(rq2.state, FP.C["qn"]) or 0) == 0)
     numbers["FDN8: first mismatch"] = first_bad
     numbers["FDN8: instructions per block while running: min, mean, max"] = (
         min(cost_run), round(sum(cost_run) / len(cost_run)), max(cost_run))

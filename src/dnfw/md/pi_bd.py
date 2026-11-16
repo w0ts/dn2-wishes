@@ -67,12 +67,21 @@ def _split(p: Prog, x: int, hi: int, lo: int) -> None:
 
 
 def _mac_body(p: Prog) -> None:
-    _split(p, 0, 0, 1)
-    _split(p, 2, 2, 3)
-    for x, y, acc in ((0, 2, 8), (0, 3, 9), (1, 2, 9), (1, 3, 10)):
-        p.fop(13, x, "*", y)
-        p.trunc(13, 13)
-        p.iop(acc, acc, "+", 13)
+    """R8 += floor(A B / 2^24), R10 += A B mod 2^24, for the words A = F0 2^23, B = F2 2^23. perf, 2026-11-11: on the
+    fixed-point multiplier (SSF on A 2^7 and B; SSI's low word), was the 12-bit halves in R8 (hh), R9 (m), R10
+    (n): the sums are the same P = R8 2^24 + R10 exactly. R9 stays 0."""
+    p.fconst(12, 2.0 ** 23)
+    p.fop(1, 0, "*", 12)
+    p.trunc(1, 1)
+    p.fop(3, 2, "*", 12)
+    p.trunc(3, 3)
+    p.lsh(0, 1, 7)
+    p.mul_ssf(13, 0, 3)
+    p.iop(8, 8, "+", 13)
+    p.mul_ssi(13, 1, 3)
+    p.iconst(12, 0xFFFFFF)
+    p.iop(13, 13, "AND", 12)
+    p.iop(10, 10, "+", 13)
 
 
 def _mac(p: Prog, a: int, b: int, neg: bool = False) -> None:
@@ -90,9 +99,7 @@ def _mac(p: Prog, a: int, b: int, neg: bool = False) -> None:
 
 def _floor(p: Prog, d: int, sh: int) -> None:
     """Rd = floor(P / 2^sh) (12 < sh <= 24). Clobbers R12, R13 (d not R12, R13)."""
-    p.ash(13, 10, -12)
-    p.iop(13, 9, "+", 13)
-    p.ash(13, 13, -(sh - 12))
+    p.lsh(13, 10, -sh)                        # (R10 >= 0: the sum of the products' low 24 bits)
     p.lsh(d, 8, 24 - sh)
     p.iop(d, 13, "+", d)
 

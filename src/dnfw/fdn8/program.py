@@ -45,7 +45,7 @@ STOCK_STATE = R.STOCK_STATE
 MASK4 = D.RING_MASK << 2
 
 _NAMES = (["ring", "mode", "im", "cur", "clr", "pos", "force", "p4", "pd4", "xw", "gd1", "gd2", "gh", "ah", "al", "hs", "ls",
-           "dq", "io", "par", "went", "t0", "t1", "t2", "t3", "t4", "t5", "t6", "t7"]
+           "dq", "io", "par", "went", "qin", "qn", "t0", "t1", "t2", "t3", "t4", "t5", "t6", "t7"]
           + [f"{n}{k}" for n in ("ph", "ro", "eta", "ap", "lp", "c", "g", "f") for k in range(8)]
           + [f"last{k}" for k in range(6)] + [f"pr{k}" for k in range(6)]
           + [f"sv{k}" for k in range(16)] + ["svi0", "svi1", "svi2", "svi3", "svi4", "svi12", "sva"])
@@ -566,7 +566,82 @@ def io_ptrs(p: Prog) -> None:
     p.seti(3, 15)
 
 
+# 2026-11-11 (perf): a block is skipped (its wet written as zeros, nothing else moves: the ring, the LFOs'
+# phases and the pointer stand still) once the input has been exactly zero and the wet below 2^-24 (-144 dB) for
+# QUIET_BLOCKS blocks in a row. NOT bit-exact to the ungated program once the tail is that small: declared
+# sound-neutral (a tail under -144 dB is cut; the LFOs' phases keep moving); False: the old program
+QUIET_GATE = True
+QUIET_BLOCKS = 4224               # > the ring's length in blocks (RING_WORDS 2^17 / 32 = 4096, 3 s): a delay line holds nothing younger
+QUIET_SMALL = 0x33800000          # 2^-24
+
+
+def _lfo_phases(p: Prog) -> None:
+    """a skipped block: only the LFOs' phases move (lfo() does these first; the rest it recomputes from them)"""
+    for k in range(8):
+        p.ld(0, C[f"ph{k}"])
+        p.iconst(12, D.LFO_INC[k])
+        p.iop(0, 12, "+", 0)
+        p.st(C[f"ph{k}"], 0)
+
+
+def _quiet_scan_in(p: Prog) -> None:
+    """C["qin"] = the OR of the input's 64 words' bits (0: exactly +0.0 throughout). Clobbers R0, R9, R11, I0-I4"""
+    io_ptrs(p)
+    p.iconst(9, 0)
+
+    def pair():
+        p.ldpost(0, 0)
+        p.iop(9, 9, "OR", 0)
+        p.ldpost(0, 1)
+        p.iop(9, 9, "OR", 0)
+    p.loop_r(11, D.BLOCK, pair)
+    p.st(C["qin"], 9)
+
+
+def _quiet_after(p: Prog) -> None:
+    """after a block run on a silent input: qn + 1 when the wet is below 2^-24 throughout, else 0"""
+    def on():
+        io_ptrs(p)
+        p.iconst(9, 0)
+        p.iconst(12, 0x7FFFFFFF)
+
+        def pair():
+            p.ldpost(0, 2)
+            p.iop(0, 0, "AND", 12)
+            p.iop(9, 9, "MAX", 0)
+            p.ldpost(0, 3)
+            p.iop(0, 0, "AND", 12)
+            p.iop(9, 9, "MAX", 0)
+        p.loop_r(11, D.BLOCK, pair)
+        p.iconst(1, QUIET_SMALL)
+
+        def small():
+            p.ld(8, C["qn"])
+            p.iconst(10, 1)
+            p.iop(8, 8, "+", 10)
+            p.st(C["qn"], 8)
+        p.if_(9, "LT", 1, small, lambda: (p.iconst(0, 0), p.st(C["qn"], 0)), kind="i")
+    p.ld(0, C["qin"])
+    p.ifz(0, "EQ", on)
+
+
 def fdn8_block(p: Prog) -> None:
+    if not QUIET_GATE:
+        _fdn8_block(p)
+        return
+    _quiet_scan_in(p)
+    p.ld(9, C["qin"])
+    p.iconst(3, 0)
+
+    def silent_in():
+        p.ld(1, C["qn"])
+        p.iconst(2, QUIET_BLOCKS)
+        p.if_(1, "GE", 2, lambda: p.iconst(3, 1), kind="i")
+    p.ifz(9, "EQ", silent_in, lambda: (p.iconst(0, 0), p.st(C["qn"], 0)))
+    p.ifz(3, "NE", lambda: (_lfo_phases(p), silence(p)), lambda: (_fdn8_block(p), _quiet_after(p)))
+
+
+def _fdn8_block(p: Prog) -> None:
     # the parameters, when one changed (or after a switch)
     p.ld(3, C["force"])
     p.ld(4, C["par"])

@@ -183,3 +183,101 @@ idle in that table) down to ~0.4k, MD machines -23..-45 %. Left, in order of cyc
 Not ours to cut: the stock tail (352k idle floor, 53 % of the frame: stock per-track chain 103k, stock sends/mixer
 85k) except by patching stock code (skip empty slots), which needs a per-slot exactness proof. With that floor
 no per-voice optimisation alone reaches 16 x any synth x two inserts: a stated ceiling or skip logic is needed too.
+
+## 2026-11-11 additions (same branch; shas in order)
+
+| commit | what | est cycles a block, before -> after | proof |
+|---|---|---|---|
+| `321852fa` | pre and post insert passes' state, scratch and records in L1 (0x2e3000..0x2e4044; were L2) | FUZZ 9,949 -> 5,089, TAPE 11,794 -> 6,988, FOLD 9,807 -> 5,419, HARM 8,817 -> 4,541; CHOR one voice 17,007 -> 9,303, four 59,113 -> 33,168 | bit-exact (addresses only): runner inserts/inspost/insbus PASS, tests, preflight set 13/13 |
+| `ec700812` | FDN8 quiet gate (declared; `fdn8.program.QUIET_GATE`): input exactly +0.0 and wet < 2^-24 for 4,224 blocks (> the 4,096-block ring) => skip, wet zeros, only the LFO phases move | idle FDN8 13.7k instr + 1,220 DDR (est 24.7k) -> 376 instr; active blocks +375 instr | model A/B 5,600 blocks, woken reverb output identical word for word; runner fdn8 PASS with 3 checks on the assembled skip path; xdly, insbus PASS |
+
+The first FDN8 gate (output small for 4 blocks, LFO phases frozen) was wrong twice: the ring holds a delay-line
+tail the output does not show (predelay), and frozen phases made the woken reverb differ from the ungated one by
+1.4x the signal. Both rules in the commit fix that. A real decayed tail below -144 dB is cut (declared).
+
+A2 filters are on branch `sophie-v047-os112-a2fperf` (see docs/a2f-perf.md there): state in L1 (`c81690f4`), ONE_VOICE off and
+silent-slot skip (`5fc821f5`).
+
+| `7ab83407` | PI-RC / PI-CC / PI-HH: the slot's XB block (DSP2's X memory) in L1 during render, the first 64 words (8..37 are state between blocks) copied in and out | PI-RC 21,141 -> 16,176, PI-CC 21,230 -> 16,244, PI-HH 19,509 -> 14,779 (-23..-24 %) | output identical to base (golden, and under poison); runner voice/guard/garbage/wipe PASS; preflight set 13/13. A first attempt differed from block 1: `excite` had one direct address into XB; found by bisecting the render stages with the redirect on one stage at a time |
+| `15f957ea` | TB303's elliptic decimator run section by section over the four oversampled samples (coefficients and states loaded once for four samples) | TB303 44,597 -> 39,176 (-12.2 %) | output identical to base (golden, poison); runner voice/garbage/wipe/chords PASS; preflight set 13/13; perc.asm +3.5 KB |
+
+Remaining repeated DDR accesses per block after these (ddrhot.py, words touched more than once): PLT-PART 195 (~1.8k est),
+SOPHIE 168 (1.5k), PI-RC/CC/HH ~100 (0.9k), PLT-STRG 94, PLT-SWRM 90, PLT-WS 61: no machine has a big repeated set left; what is
+left in DDR is state and tables touched once a block.
+
+### How the PI-RC lead was found (for the next machine)
+520 of PI-RC's 1,029 DDR accesses a block were 38 words (slot XB words 0..37, each touched 14 times). ddrhot.py lists, per
+machine, the words touched more than once and whether the first access in a block is a write (scratch) or a read (state);
+pircfirst.py does it per word. Words read first are state between blocks (copy them in and out); words written first can
+live in the shared L1 rows (poison.py proves it: the rows are filled with garbage before every block). Every address into
+the block must go through the one accessor: bisecting the stages with the redirect on one stage at a time (PIRC_STAGE) found
+the stray direct address. The scripts are in `~/GitHub/dn2mk2-scratch/perf/`.
+
+## Final state of the branch (2026-11-11 morning)
+
+Commits, in order, on `sophie-v047-os112-perf` (base 6e726aac): f7b045b2 MD fixed-point products, a0dd1d17 P-I scratch in L1,
+9f692b8c insert-pass walk skip, 5f4cb9ef regenerate, 321852fa pre/post insert state in L1, ec700812 FDN8 quiet gate (declared),
+7ab83407 PI-RC/CC/HH XB in L1, 15f957ea TB303 decimator section-major, 77cd8ab4 PI-ML/PI-MA xmul on SSF/SSI, 594933ca PI-SD/PI-RS
+_prod on SSF/SSI, c754ebad PI-BD/PI-MT accumulators on SSF/SSI. Every one: output identical to the base for all 49 machines
+(golden hash; and under poison), except the FDN8 gate (declared; identical across a wake from a never-used ring). The final
+tree: 49/49 identical to the base, 49/49 under poison.
+
+Proof pattern per commit: golden_all.py / poison.py (scratch perf/), the old and new helper compared on thousands of random and
+extreme inputs, the runner's voice/guard/garbage/wipe (and chords, inserts, fdn8 steps where touched), then the preflight steps
+(preflight, code-fresh, rebuild, dsp-identity, hwrules, symbols, coldfire, overbridge) on a build of the tree. A full 23-step runner
+pass of the head through ec700812: 231 PASS, 1 FAIL (sharc 3b ONESHOT/KICK, also failing on the unmodified base). Not run on any:
+the full ship_gate and the boot step (which fails identically on the base here). No build from this branch is cleared to flash.
+
+All 49 machines, base -> now (est cycles a block, one voice, steady):
+
+| machine | base | now | change |
+|---|---|---|---|
+| TRX-BD | 4,731 | 4,685 | -1.0 % |
+| TRX-B2 | 6,604 | 6,543 | -0.9 % |
+| TRX-SD | 7,596 | 7,471 | -1.6 % |
+| TRX-XT | 4,137 | 4,112 | -0.6 % |
+| TRX-CP | 19,488 | 11,180 | -42.6 % |
+| TRX-RS | 7,589 | 7,530 | -0.8 % |
+| TRX-CB | 12,438 | 8,439 | -32.2 % |
+| TRX-CH | 17,569 | 12,904 | -26.6 % |
+| TRX-OH | 17,353 | 12,865 | -25.9 % |
+| TRX-CY | 27,159 | 17,320 | -36.2 % |
+| TRX-MA | 19,344 | 12,343 | -36.2 % |
+| TRX-CL | 6,120 | 6,061 | -1.0 % |
+| TRX-XC | 4,082 | 4,057 | -0.6 % |
+| TRX-S2 | 23,972 | 13,357 | -44.3 % |
+| EFM-BD | 13,823 | 8,733 | -36.8 % |
+| EFM-SD | 14,726 | 11,300 | -23.3 % |
+| EFM-XT | 15,312 | 10,222 | -33.2 % |
+| EFM-CP | 15,871 | 10,299 | -35.1 % |
+| EFM-RS | 17,666 | 13,462 | -23.8 % |
+| EFM-CB | 19,651 | 13,279 | -32.4 % |
+| EFM-HH | 13,901 | 10,474 | -24.7 % |
+| EFM-CY | 29,717 | 19,373 | -34.8 % |
+| GND-SN | 3,589 | 3,559 | -0.8 % |
+| GND-NS | 3,164 | 3,164 | +0.0 % |
+| GND-IM | 2,848 | 2,848 | +0.0 % |
+| PI-BD | 24,633 | 16,547 | -32.8 % |
+| PI-SD | 41,616 | 20,374 | -51.0 % |
+| PI-MT | 27,961 | 18,382 | -34.3 % |
+| PI-ML | 20,405 | 17,213 | -15.6 % |
+| PI-MA | 11,402 | 7,427 | -34.9 % |
+| PI-RS | 40,996 | 20,024 | -51.2 % |
+| PI-RC | 21,141 | 16,176 | -23.5 % |
+| PI-CC | 21,230 | 16,244 | -23.5 % |
+| PI-HH | 19,509 | 14,779 | -24.2 % |
+| SOPHIE | 18,338 | 18,338 | +0.0 % |
+| PLT-WS | 10,146 | 10,146 | +0.0 % |
+| PLT- | 10,161 | 10,161 | +0.0 % |
+| PLT-VA | 9,454 | 9,454 | +0.0 % |
+| PLT-FM | 16,211 | 16,211 | +0.0 % |
+| PLT-ADD | 14,180 | 14,180 | +0.0 % |
+| PLT-SWRM | 11,712 | 11,712 | +0.0 % |
+| PLT-NOIS | 9,042 | 9,042 | +0.0 % |
+| PLT-PART | 21,318 | 21,318 | +0.0 % |
+| PLT-STRG | 18,946 | 18,946 | +0.0 % |
+| PLT-MDAL | 19,836 | 19,836 | +0.0 % |
+| PLT-BD | 10,683 | 10,683 | +0.0 % |
+| PLT-SD | 12,015 | 12,015 | +0.0 % |
+| PLT-HH | 8,557 | 8,557 | +0.0 % |
+| TB303 | 44,597 | 39,176 | -12.2 % |

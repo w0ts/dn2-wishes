@@ -69,13 +69,41 @@ LSTRIDE = 288                    # a line: 256 words and the first 32 again (rea
 XB = 4 * LSTRIDE                 # DSP2's internal X:$00..$FF
 NZ = XB + 256                    # the noise words (Y:$00..$21), ints << 8
 SB = XB + 0x40                   # the mix's 32 outputs
+XB_WORDS = 256
+XB_KEEP = 64                     # words copied between the slot and L1 (perf)
+
+
+_L1 = [False]                    # emit-time: inside render() XB is the L1 rows (host / init keep the slot's)
 
 
 def _xb(p: Prog, L: K.Layout, d: int, k: int = 0) -> None:
-    """Rd = the address of XB word k. Clobbers R12."""
+    """Rd = the address of XB word k. Clobbers R12. perf, 2026-11-11: in a PERC layout XB is the render scratch's
+    L1 rows (core.Layout.pi_scr, shared: every voice renders alone) and not the slot's DDR delay area: its words
+    0..XB_KEEP-1 (read-first in a block: state that lives from block to block, 8..37 observed) are copied in from
+    the slot at the start of render and back at its end (_xb_copy); the rest are written before they are read"""
+    if _L1[0] and L.pi_scr is not None:
+        assert XB_WORDS <= K.PI_SCR_WORDS
+        p.iconst(d, L.pi_scr + 4 * k)
+        return
     p.ld(d, L.C["k"])
     p.iconst(12, 4 * (XB + k))
     p.iop(d, 12, "+", d)
+
+
+def _xb_copy(p: Prog, L: K.Layout, to_l1: bool) -> None:
+    """XB_KEEP words between the slot's DDR XB (C['k']) and the L1 rows. Clobbers R3, R11, R12, I1, I2"""
+    p.ld(12, L.C["k"])
+    p.iconst(3, 4 * XB)
+    p.iop(12, 12, "+", 3)
+    src, dst = (12, None) if not to_l1 else (12, None)
+    p.seti(1 if to_l1 else 2, 12)
+    p.iconst(12, L.pi_scr)
+    p.seti(2 if to_l1 else 1, 12)
+
+    def one():
+        p.ldpost(3, 1)
+        p.stpost(2, 3)
+    p.loop_r(11, XB_KEEP, one)
 
 
 def _qf(p: Prog, x: int) -> None:
@@ -315,6 +343,9 @@ class _Cym:
         C = L.C
         K.delay_base(p, L, 0)
         p.st(C["k"], 0)
+        _L1[0] = L.pi_scr is not None
+        if _L1[0]:
+            _xb_copy(p, L, True)
         cls._envelopes(p, L)
         cls._noise(p, L)
         if cls.KIND == "RC":
@@ -327,6 +358,9 @@ class _Cym:
         cls._gain(p, L)
         cls._lines(p, L)
         cls._click(p, L)
+        if _L1[0]:
+            _xb_copy(p, L, False)
+        _L1[0] = False
 
     # 1 ---------------------------------------------------------------------------------
     @classmethod
@@ -528,8 +562,7 @@ class _Cym:
         p.iconst(12, 4 * NZ)
         p.iop(1, 12, "+", 0)
         p.seti(1, 1)
-        p.iconst(12, 4 * (XB + 8))
-        p.iop(1, 12, "+", 0)
+        _xb(p, L, 1, 8)                         # (R0 = the slot's base: _xb loads it again)
         p.seti(2, 1)
         s(p, 10, ENV)
 

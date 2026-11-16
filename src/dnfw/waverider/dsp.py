@@ -377,6 +377,16 @@ def pvmix_object() -> bytes:
     return code[:-len(PVMIX_SITE_STOCK)] + site + after
 
 
+def _ins_state_spans() -> list[tuple[str, int, bytes]]:
+    """the pre and post insert passes' state in L1 (2026-11-11, perf: they were in L2). Not all zeros: the pre
+    pass's holds GATER's rate and pattern tables (ports), which perf's zero fill did not load"""
+    from ..inserts import post as ins_post
+    from ..inserts import program as ins_program
+    return [("the inserts' state: 32 records' words, GATER's tables, the unpacked records, the flags (L1)",
+             INS_STATE_DM, ins_program.state_bytes()),
+            ("the stereo inserts' state (L1)", POST_STATE_DM, ins_post.state_bytes())]
+
+
 def _a2f_state_span(obj) -> tuple[str, int, bytes]:
     """the region's first 2 KB: the A2 filters' state and mix tables when that pass is built (2026-11-11,
     perf: they were in L2), else free since v0.11 (Waverider's reader and osc 2; zeros)"""
@@ -416,6 +426,7 @@ def spans() -> list[tuple[str, int, bytes]]:
         ("trackbuf.asm (wr_trackbuf: the stock track buffers to L1, once)", TRACKBUF_CODE_DM, obj["trackbuf"]),
         ("the stock track buffers in L1 (zeros; 256 B extra block, then 16 x 128 B)", TRACKAUX_DM,
          bytes(TRACKAUX_BYTES + TRACKBUF_BYTES)),
+        *_ins_state_spans(),
         ("FDN8 state: its words, the LFOs' phases, the stock buffers' chunk table", FDN8_STATE_DM, _fdn8_state()),
         ("XDLY state: its words (zeros)", XDLY_STATE_DM, _xdly_state()),
         ("Machinedrum / Monomachine voices: 16 slots x 1 KB (zeros; L2 until 2026-11-10)", MD_STATE_DM,

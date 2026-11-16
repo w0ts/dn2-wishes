@@ -120,12 +120,12 @@ def _first_and_later(name, params):
     seen, rendered = [], []
 
     def trig(p, L):
-        seen.append([p.mem.get(p.i[3] + 4 * k) for k in range(MDK.NW)])
+        seen.append([p.mem.get(p.i[3] - 4 * PP.I3_BIAS + 4 * k) for k in range(MDK.NW)])
         return trig0(p, L)
 
     def render(p, L):
         x = render0(p, L)
-        rendered.append([struct.unpack("<f", struct.pack("<I", p.mem.get(p.i[3] + 4 * (MDK.OUT0 + j))))[0]
+        rendered.append([struct.unpack("<f", struct.pack("<I", p.mem.get(p.i[3] - 4 * PP.I3_BIAS + 4 * (MDK.OUT0 + j))))[0]
                          for j in range(32)])
         return x
     M.trig, M.render = trig, render

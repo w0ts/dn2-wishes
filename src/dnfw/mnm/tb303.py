@@ -88,6 +88,8 @@ S_END = S_E + 12
 (D_CUT, D_ESC, D_EOF, D_RES, D_BL) = range(S_END, S_END + 5)
 # per sample (slot words)
 (T_INC, T_RINC, T_B0, T_K, T_G, T_AMP, T_X, T_OSN, T_INCI) = range(S_END + 5, S_END + 14)
+# (perf, 2026-11-11) the oversampled samples' ladder outputs, the elliptic decimator's four inputs
+T_Y0 = S_END + 14
 
 
 def _pm():
@@ -602,6 +604,37 @@ def _ellip(p: Prog, x: int) -> None:
         p.fpass(x, 6)
 
 
+def _ellip4(p: Prog) -> None:
+    """F4 = the elliptic decimation filter's output for the fourth of the four ladder outputs (T_Y0..), the
+    first three run through it for its states. perf, 2026-11-11: section by section over the four samples
+    (a section's five coefficients and two states loaded once, not four times), the same operations in the same
+    order on every sample, so bit for bit what _ellip did sample by sample. Clobbers R0-R3, R5-R15."""
+    xs = (13, 14, 15, 11)
+    for j, r in enumerate(xs):
+        _ld(p, r, T_Y0 + j)
+        _mulk(p, r, r, ELLIP_GAIN)
+    for k, (b0, b1, b2, a1, a2) in enumerate(ELLIP):
+        s0, s1 = S_E + 2 * k, S_E + 2 * k + 1
+        for reg, c in ((0, b0), (1, b1), (2, b2), (3, -a1), (10, -a2)):
+            p.fconst(reg, c)
+        _ld(p, 5, s0)
+        _ld(p, 7, s1)
+        for r in xs:
+            p.fop(6, r, "*", 0)
+            p.fop(6, 6, "+", 5)                  # y = b0 x + s0
+            p.fop(8, r, "*", 1)
+            p.fop(8, 8, "+", 7)
+            p.fop(9, 6, "*", 3)
+            p.fop(5, 8, "+", 9)                  # s0 = b1 x - a1 y + s1 (F5's old s0 is used up)
+            p.fop(8, r, "*", 2)
+            p.fop(9, 6, "*", 10)
+            p.fop(7, 8, "+", 9)                  # s1 = b2 x - a2 y
+            p.fpass(r, 6)
+        _sv(p, s0, 5)
+        _sv(p, s1, 7)
+    p.fpass(4, 11)
+
+
 def _sample(p: Prog, L: C.Layout) -> None:
     """One sample at I4."""
     _control(p, L)
@@ -620,16 +653,16 @@ def _sample(p: Prog, L: C.Layout) -> None:
     p.if_(4, "GE", 12, dc)
     _sv(p, T_OSN, 5)
 
-    def one():
+    def one(j: int):
         _osc(p, L)
         p.fconst(12, 0.0)
         p.fop(4, 12, "-", 4)                     # Open303 negates the oscillator
         _onepole(p, 4, HP1, S_H1X, S_H1Y)
         _ladder(p, 4)
-        _ellip(p, 4)
-        p.st(L.W["tmp2"], 4)
-    p.loop(L.W["n5"], OS, one)
-    p.ld(4, L.W["tmp2"])
+        _sv(p, T_Y0 + j, 4)
+    for j in range(OS):                          # (perf: unrolled; the decimator runs after the four)
+        one(j)
+    _ellip4(p)                                   # F4 = the last sample's output (the others are dropped)
     _onepole(p, 4, AP, S_APX, S_APY)
     _onepole(p, 4, HP2, S_H2X, S_H2Y)
     _biquad(p, 4, NOTCH, S_NX1, S_NX2, S_NY1, S_NY2)

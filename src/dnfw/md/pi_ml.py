@@ -42,50 +42,34 @@ MAXW, MINW = 0x7FFFFF, -0x800000
 def _xmul_body(p: Prog, sh: int, two: bool, rne: bool) -> None:
     """R2 = floor((R4 R5 [+ R6 R7] + R3) / 2^sh) (signed 24-bit words; |R3| < 2^25), or
     with RNE the 56300's convergent rounding of it (R3 = 2^(sh-1)). Clobbers R0, R1,
-    R8-R15."""
-    def split(x, lo, hi):
-        p.iconst(12, 4095)
-        p.iop(lo, x, "AND", 12)
-        p.ash(hi, x, -12)
+    R8-R15.
 
-    def floats():
-        p.iconst(12, 0)
-        for r in (0, 1, 8, 9):
-            p.float_(r, r, 12)
-    split(4, 0, 1)                            # al, ah
-    split(5, 8, 9)                            # bl, bh
-    floats()
-    p.fop(10, 1, "*", 9)                      # ah bh (|.| <= 2^24: exact)
-    p.trunc(10, 10)
-    p.fop(11, 1, "*", 8)                      # ah bl
-    p.trunc(11, 11)
-    p.fop(13, 0, "*", 9)                      # al bh
-    p.trunc(13, 13)
-    p.iop(11, 11, "+", 13)                    # m
-    p.fop(13, 0, "*", 8)                      # al bl
-    p.trunc(13, 13)
-    p.iop(13, 13, "+", 3)                     # n (+ K)
+    perf, 2026-11-11: on the fixed-point multiplier. A product is q 2^sh + r: q = floor(A B / 2^sh) by SSF on
+    A 2^7 and B 2^(24 - sh) (both stay 32-bit words for |A|, |B| < 2^24), r = the low word's low sh bits by SSI; the sum is
+    q1 (+ q2) + floor((r1 (+ r2) + K) / 2^sh), exactly what the 12-bit halves gave. A tie (the low sh bits of
+    the sum + K all zero) goes to the even word."""
+    mask = (1 << sh) - 1
+
+    def prod(a: int, b: int, q: int, r: int) -> None:
+        p.lsh(0, a, 7)                        # |A| < 2^24 (a difference of two words is that wide)
+        p.lsh(1, b, 24 - sh)
+        p.mul_ssf(q, 0, 1)
+        p.mul_ssi(r, a, b)
+        p.iconst(12, mask)
+        p.iop(r, r, "AND", 12)
+    prod(4, 5, 2, 8)
     if two:
-        split(6, 0, 1)
-        split(7, 8, 9)
-        floats()
-        for a, b, acc in ((1, 9, 10), (1, 8, 11), (0, 9, 11), (0, 8, 13)):
-            p.fop(14, a, "*", b)
-            p.trunc(14, 14)
-            p.iop(acc, acc, "+", 14)
+        prod(6, 7, 9, 10)
+        p.iop(8, 8, "+", 10)
+        p.iop(2, 9, "+", 2)
+    p.iop(8, 8, "+", 3)                       # r (+ r') + K
     if rne:
-        p.iconst(12, 4095)
-        p.iop(15, 13, "AND", 12)
-    p.ash(14, 13, -12)
-    p.iop(14, 11, "+", 14)                    # t = m + (n >> 12)
-    p.ash(11, 14, -(sh - 12))
-    p.lsh(10, 10, 24 - sh)
-    p.iop(2, 10, "+", 11)
-    if rne:                                   # a tie (the bits below are exactly a half): even
-        p.iconst(12, (1 << (sh - 12)) - 1)
-        p.iop(14, 14, "AND", 12)
-        p.iop(14, 14, "OR", 15)
-        p.ifz(14, "EQ", lambda: (p.iconst(12, -2), p.iop(2, 2, "AND", 12)))
+        p.iconst(12, mask)
+        p.iop(11, 8, "AND", 12)               # zero: a tie
+    p.ash(8, 8, -sh)
+    p.iop(2, 8, "+", 2)
+    if rne:
+        p.ifz(11, "EQ", lambda: (p.iconst(12, -2), p.iop(2, 2, "AND", 12)))
 
 
 def xmul(p: Prog, sh: int = 23, two: bool = False, rne: bool = False) -> None:

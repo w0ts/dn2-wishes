@@ -332,8 +332,18 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
     def fx_params():                          # 2026-11-10 (poly16): only PERC's voices read them (fx)
         for k, (_rid, slot, lo, top) in enumerate(M.FX_PARAMS, start=len(M.PARAMS)):
             param(k, slot, lo, top)
+    # 2026-11-11 (the merge, found by the runner's DRONE glide check): the page-2 words (q0..q6) feed PERC's own
+    # machines AND the Monomachine machines that have a second page (DRONE's GLID/GLTY/HOLD, ANALOG2's
+    # SWRM SEMI SDTN SYNC WAV2 DRFT FLT): the poly16 skip for every Monomachine machine left them 0
+    from ..mnm import machines as _MNMM
+    page2 = [k + 1 for k, _m in enumerate(_MNMM.MACHINES) if hasattr(_m, "PNAMES2")]
     p.ld(5, C["mnm"])
-    p.ifz(5, "EQ", fx_params)
+    p.iconst(6, 0)
+    p.ifz(5, "EQ", lambda: p.iconst(6, 1))
+    for idx in page2:
+        p.iconst(12, idx)
+        p.if_(5, "EQ", 12, lambda: p.iconst(6, 1), kind="i")
+    p.ifz(6, "NE", fx_params)
     # the Machinedrum machine (v0.17, docs/md.md): its slot's words at I3
     p.ld(9, C["t"])
     p.lsh(12, 9, 10)

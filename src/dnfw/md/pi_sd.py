@@ -192,53 +192,15 @@ def _asl(p: Prog, h: int, lo: int) -> None:
 
 
 def _prod_body(p: Prog) -> None:
-    p.iconst(12, 0)
-    p.float_(8, 4, 12)
-    p.float_(13, 5, 12)
-    p.fop(8, 8, "*", 13)                       # the product's sign
-    p.iop(13, 12, "-", 4)
-    p.iop(13, 13, "MAX", 4)
-    p.iop(14, 12, "-", 5)
-    p.iop(14, 14, "MAX", 5)
-    p.iconst(12, 4095)
-    p.iop(1, 13, "AND", 12)
-    p.lsh(0, 13, -12)
-    p.iop(3, 14, "AND", 12)
-    p.lsh(2, 14, -12)
-    for r in (0, 1, 2, 3):
-        p.iconst(12, 0)
-        p.float_(r, r, 12)
-    p.fop(13, 0, "*", 3)
-    p.fop(14, 1, "*", 2)
-    p.trunc(13, 13)
-    p.trunc(14, 14)
-    p.iop(13, 13, "+", 14)                     # m
-    p.fop(14, 1, "*", 3)
-    p.trunc(14, 14)                            # n
-    p.lsh(15, 13, 13)
-    p.lsh(12, 14, 1)
-    p.iop(15, 12, "+", 15)
+    """(R6, R7) = 2 R4 R5 as (floor / 2^24, mod 2^24). perf, 2026-11-11: the fixed-point multiplier: R6 = SSF of
+    R4 2^8 and R5 = floor(R4 R5 / 2^23), R7 = the low word of R4 R5, doubled, low 24 bits (was the 12-bit halves
+    and a sign fix-up, ~170 instructions)."""
+    p.lsh(0, 4, 8)
+    p.mul_ssf(6, 0, 5)
+    p.mul_ssi(7, 4, 5)
+    p.lsh(7, 7, 1)
     p.iconst(12, 0xFFFFFF)
-    p.iop(7, 15, "AND", 12)                    # low
-    p.lsh(14, 14, -12)
-    p.iop(13, 13, "+", 14)
-    p.lsh(13, 13, -11)
-    p.fop(14, 0, "*", 2)
-    p.trunc(14, 14)
-    p.lsh(14, 14, 1)
-    p.iop(6, 13, "+", 14)                      # high
-
-    def neg():
-        p.iconst(12, 0)
-        p.iop(6, 12, "-", 6)
-
-        def borrow():
-            p.iconst(12, -1)
-            p.iop(6, 12, "+", 6)
-            p.iconst(12, 1 << 24)
-            p.iop(7, 12, "-", 7)
-        p.ifz(7, "NE", borrow)
-    p.ifz(8, "LT", neg, kind="f")
+    p.iop(7, 7, "AND", 12)
 
 
 def _prod(p: Prog) -> None:
