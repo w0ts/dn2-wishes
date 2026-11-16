@@ -63,7 +63,7 @@ EXT_SLOTS, EXT_PARAMS = 256, 8
 ROOT = "/mnt/d/01_Code/Z_Personal/dn2_firmware"
 SYX = f"{ROOT}/00_Resources/00_Firmware/Digitone_II_OS1.11_dist/Digitone_II_OS1.11.syx"
 REPORTER = 0x4011ED4A
-STACK, SCRATCH = 0x46A00000, 0x46A10000       # above BSS end 0x466b74d0
+STACK, SCRATCH = 0x46A00000, 0x46A10000       # above BSS end 0x466b84d0
 
 
 class After:

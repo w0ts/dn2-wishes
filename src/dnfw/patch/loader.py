@@ -45,7 +45,7 @@ def install(stock: bytes, chunks: list[tuple[bytes, bytes]],
     """Stock MAIN OS -> MAIN OS with the loader, its startup call and the area."""
     if BASE + len(stock) != area.AREA_VA:
         raise LoaderError(f"MAIN OS ends at 0x{BASE + len(stock):08x}, not 0x{area.AREA_VA:08x}: "
-                          "not stock Digitone II 1.11, or something is already appended")
+                          "not stock Digitone II 1.12, or something is already appended")
     content = bytearray(stock)
     at = CALLS_VA - BASE
     if content[at:at + 8] != CALLS_STOCK:

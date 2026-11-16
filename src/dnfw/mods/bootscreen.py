@@ -174,7 +174,7 @@ def apply(firmware, images: list[bytes], slow: int = 4, fast: int = 3,
     have = bytes(content[va - BASE:va - BASE + 8]).hex()
     if have != stock:
         raise ModError(f"0x{va:08x} holds {have}, not {stock} (intro copy routine); "
-                       "this mod is for Digitone II 1.11, or the boot screen is already applied")
+                       "this mod is for Digitone II 1.12, or the boot screen is already applied")
     for va, stock_scale in ((SPEC["tunnel_x_va"], STOCK_TUNNEL[0]), (SPEC["tunnel_y_va"], STOCK_TUNNEL[1])):
         have = bytes(content[va - BASE:va - BASE + 6])
         if have[2:] != struct.pack(">f", stock_scale):

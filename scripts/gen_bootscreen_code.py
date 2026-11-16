@@ -333,7 +333,7 @@ def generate() -> dict:
     if len(code) > CODE_CAP:
         raise SystemExit(f"code {len(code)} B does not fit below the data window")
     return {
-        "os": "Digitone II 1.11",
+        "os": "Digitone II 1.12",
         "load": LOAD_VA, "code": code.hex(), "stamp": addrs["stamp"],
         "aniz_show": addrs["aniz_show"], "zst": addrs["zst"], "aniz_drawn": addrs["aniz_drawn"],
         "anzl_chunk": ANZL.decode(), "source_data_ptr": SOURCE_DATA_PTR,

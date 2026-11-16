@@ -93,12 +93,12 @@ def split(content: bytes) -> tuple[bytes, list[tuple[bytes, bytes]]]:
     """
     if len(content) < STOCK_LENGTH:
         raise ModError(f"MAIN OS is {len(content):,} B, shorter than {STOCK_LENGTH:,}: "
-                       "not Digitone II 1.11")
+                       "not Digitone II 1.12")
     if len(content) == STOCK_LENGTH:
         return bytes(content), []
     if not installed(content):
         raise ModError("MAIN OS carries appended data but not the platform loader: "
-                       "it was built by something else; start from stock 1.11")
+                       "it was built by something else; start from stock 1.12")
     try:
         chunks = area.parse(bytes(content[STOCK_LENGTH:]))
     except area.AreaError as exc:
@@ -228,7 +228,7 @@ def write(content: bytearray, chunks: list, va: int, stock: bytes, new: bytes, w
     at = va - BASE
     if bytes(content[at:at + len(stock)]) != stock:
         raise ModError(f"{label} is not stock ({bytes(content[at:at + 12]).hex()}...); another "
-                       "mod has changed it, or this is not Digitone II 1.11")
+                       "mod has changed it, or this is not Digitone II 1.12")
     content[at:at + len(new)] = new
 
 
