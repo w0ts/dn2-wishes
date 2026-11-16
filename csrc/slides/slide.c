@@ -110,11 +110,15 @@ u32 sl_started D;                               /* slides begun (a counter for t
 u32 sl_ticks D;                                 /* frames the tick has run */
 
 /* 2026-11-12, velocity on OUR machines (the User: "like Sophie, and our other synths too"): each voice's note
- * velocity, latched at its note (the track's VELOCITY cell, vel x 256, set at 0x40026ac0 before sl_pre's
+ * velocity, latched at its note (the VOICE's VELOCITY cell, vel x 256, set at 0x40026ac0 before sl_pre's
  * 0x40026bac), is written every frame into frame slot SL_VEL_SLOT of a voice on one of our machine types (5 and up;
  * the slot is FM TONE's KSA on a stock voice, which is left alone). The DSP's voice host latches it at the voice's
- * trig and scales the voice by vel/127 (dnfw.perc.program vel_latch). 0: no note yet, full level. */
-#define VELOCITY ((volatile u16 *)0x8000DD40u)       /* per track (docs/modulation-matrix.md) */
+ * trig and scales the voice by vel/127 (dnfw.perc.program vel_latch). 0: no note yet, full level.
+ * 2026-11-14 (the unit, r5: every note played at the track default 100, MIDI and sequencer): the cell is indexed by
+ * the VOICE. 0x40026ac0 is `move.w %d0,(0x8000dd40,%d2.l*2)`, and %d2 is the voice: the same block stores %d3 (the
+ * track) at 0x80005308 + 4 %d2 (0x40026a3c, the voice's track) and hands %d2 to sl_pre as v (0x40026bac). Reading
+ * it at the track gave the velocity of whatever note last took voice t (or the default). */
+#define VELOCITY ((volatile u16 *)0x8000DD40u)       /* per VOICE, written at the note (0x40026ac0) */
 u16 sl_vel[NV] D;
 
 static void capture(u32 t, u32 from_voice)
@@ -132,7 +136,7 @@ void sl_pre(u32 v, u32 t)
 {
     if (v >= NV || t >= NV)
         return;
-    sl_vel[v] = VELOCITY[t];
+    sl_vel[v] = VELOCITY[v];                    /* the voice's own cell (not the track's) */
     sl_v[v].n = 0;
     u32 f = FRAMES;
     if (sl_cap_frame[t] != f) {

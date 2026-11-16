@@ -1,6 +1,6 @@
 """Velocity on our machines (2026-11-12, the User: "like Sophie, and our other synths too"; Schwung's Sophie: dry *= vel/127).
 
-The ColdFire writes each voice's note velocity (vel x 256, its track's VELOCITY cell at the note) into frame slot
+The ColdFire writes each voice's note velocity (vel x 256, the voice's own VELOCITY cell at the note, 0x8000dd40 + 2 v) into frame slot
 dnfw.perc.machines.VEL_SLOT for our machine types (csrc/slides/slide.c); the voice host latches it at the voice's
 trig and scales the voice by vel/127 at its output guard. No word (0: an older ColdFire, a slot never played) is full
 level, bit for bit as before.

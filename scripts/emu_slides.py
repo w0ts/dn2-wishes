@@ -718,10 +718,20 @@ def main() -> int:
         panel.screen("stock_trig2_idle")
 
     if build:
-        # ---- 11. velocity on our voices (2026-11-12, slide.c sl_vel; last: its trigs must not disturb the checks above): the track's VELOCITY cell, latched at the
+        # ---- 11. velocity on our voices (2026-11-12, slide.c sl_vel; last: its trigs must not disturb the checks above): the VOICE's VELOCITY cell, latched at the
         # note (sl_pre), in the voice's frame slot SL_VEL_SLOT every frame for our machine types only; a stock
-        # sound's slot (FM TONE's KSA) is the smoother's, as stock leaves it ---------------------------------
-        vel_cell, vel_slot = 0x8000DD40 + 2 * T, 62
+        # sound's slot (FM TONE's KSA) is the smoother's, as stock leaves it. 2026-11-14: the cell is the voice's
+        # (0x40026ac0 indexes it by %d2, the voice); the unit's T14 notes took voices 12, 3, 4, 15 and every one read
+        # the track's cell (the default 100). So each note here is also handed to sl_pre as on another track
+        # (T_OTHER), whose cell holds a decoy: the voice's velocity must win -----------------------------------
+        T_OTHER, DECOY = 3, 33 << 8
+        vel_cell, vel_slot = 0x8000DD40 + 2 * V, 62
+        assert T_OTHER not in (V, T)
+        put16(0x8000DD40 + 2 * T_OTHER, DECOY)
+
+        def vtrig(step, frames_now):
+            trig(step, frames_now)
+            call(lay["sl_pre"], V, T_OTHER)          # the same voice's note block, its track not its number
         vs_was = machine.long(VSOUND + 4 * V)
         type_at = snd + 0xDE
         type_was = machine.read(type_at, 1)
@@ -731,24 +741,24 @@ def main() -> int:
             return machine.word(CF_FRAME + 218 + 146 * V + 2 * (vel_slot - 25))
         call(SYNC, snd, V)
         put16(vel_cell, 80 << 8)
-        trig(0, f0 + 2600)
+        vtrig(0, f0 + 2600)
         frame(), frame()
         w_stock, src_stock = vel_word(), machine.word(SRC + 2 * idx(V, vel_slot))
         machine.write(type_at, bytes([5]))
-        trig(0, f0 + 2700)
+        vtrig(0, f0 + 2700)
         frame(), frame()
         w_ours = vel_word()
-        put16(vel_cell, 20 << 8)                         # the track's next note's velocity, no note on this voice
+        put16(vel_cell, 20 << 8)                         # the voice's next note's velocity, no note yet
         frame(), frame()
         w_kept = vel_word()
-        trig(0, f0 + 2800)
+        vtrig(0, f0 + 2800)
         frame(), frame()
         w_new = vel_word()
         machine.write(type_at, type_was)
         put32(VSOUND + 4 * V, vs_was)
         check("velocity: a stock (FM TONE) voice's frame slot 62 is the smoother's, untouched",
               w_stock == src_stock and w_stock != 80 << 8, f"{w_stock:#x} (source {src_stock:#x})")
-        check("velocity: our voice's frame slot 62 is the note's velocity, latched at the note",
+        check("velocity: our voice's frame slot 62 is the note's velocity (the voice's cell, not its track's), latched at the note",
               w_ours == 80 << 8 and w_kept == 80 << 8 and w_new == 20 << 8,
               f"{w_ours:#x}, kept {w_kept:#x}, next note {w_new:#x}")
         report["velocity_words"] = [w_stock, w_ours, w_kept, w_new]
