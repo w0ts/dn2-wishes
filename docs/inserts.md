@@ -57,7 +57,7 @@ OFF 0..14 .. XDLY 114..127). A saved record keeps the type; loaded, M.SEL sits i
 | HARM | AMNT | FREQ | EVEN | TONE | | |
 | FDN8 | PRE | SIZE | DAMP | MOD | HPF | LPF |
 | XDLY | TIM1 | TIM2 | FDBK | MOD | TONE | |
-| SUB | | BAND | TONE | OCT | | |
+| SUB | BAND | TONE | OCT | | | |
 | DIST | DRIV | TONE | BIAS | LOW | PGAIN | |
 | GATR (GATER) | DPTH | PATN | RATE | SHPE | SWNG | |
 | RING | FREQ | SHPE | AM | | | |

@@ -77,11 +77,14 @@ static const char *const LABEL[TYPES][6] = {
     {"AMNT", "FREQ", "EVEN", "TONE", "", ""},
     {"PRE", "SIZE", "DAMP", "MOD", "HPF", "LPF"},     /* FDN8 (docs/fdn8.md's knobs) */
     {"TIM1", "TIM2", "FDBK", "MOD", "TONE", ""},      /* XDLY (docs/xdly.md's knobs) */
-    {"", "BAND", "TONE", "OCT", "", ""},              /* SUB (docs/inserts.md, ported from Optimist); LEV (K1) and DRY (K5) off the page 2026-11-11 */
+    {"BAND", "TONE", "OCT", "", "", ""},              /* SUB (docs/inserts.md, ported from Optimist); stored LEV (K1) and DRY (K5) off the page 2026-11-11, so place k is stored field k + 1 (DOFF) */
     {"DRIV", "TONE", "BIAS", "LOW", "PGAIN", ""},       /* DIST */
     {"DPTH", "PATN", "RATE", "SHPE", "SWNG", ""},     /* GATER */
     {"FREQ", "SHPE", "AM", "", "", ""},              /* RING (LEV, K4, off the page 2026-11-11) */
 };
+/* the knob PLACES of a type start at its stored field DOFF (the DSP reads the fields by position, so a hidden first field
+ * is skipped on the page, never moved): SUB 1 (LEV hidden), the rest 0. LABEL[y][k] is place k, stored field k + DOFF(y). */
+#define DOFF(y) ((y) == 9)
 static const u8 DEFAULT[TYPES][6] = {
     {0, 0, 0, 0, 0, 0}, {64, 90, 0, 30, 0, 100}, {50, 30, 20, 25, 50, 10}, {80, 64, 0, 100, 100, 0},
     {50, 50, 40, 64, 100, 0}, {90, 20, 40, 80, 0, 0}, {50, 70, 64, 80, 100, 0},
@@ -263,8 +266,10 @@ static void turn(int knob, int delta)
     } else {
         touched = knob - 2;
         int y = ins_sel[t][j];
-        if (y && LABEL[y][knob - 2][0])
-            ins_kv[t][j][y][knob - 2] = (u8)clamp(ins_kv[t][j][y][knob - 2] + delta, 0, 127);
+        if (y && LABEL[y][knob - 2][0]) {
+            u8 *v = &ins_kv[t][j][y][knob - 2 + DOFF(y)];
+            *v = (u8)clamp(*v + delta, 0, 127);
+        }
     }
     ins_gen++;
     ins_edits++;
@@ -479,8 +484,9 @@ void ins_draw(void *c)
     for (int k = 0; k < 6; k++) {
         if (!LABEL[y][k][0])
             continue;
-        wg_knob(c, k + 1, ins_kv[t][j][y][k]);
-        const char *vt = (smp_values_held() || k == touched) ? mu_ins(y, k, ins_kv[t][j][y][k]) : 0;   /* the knob turned last (or SYN held): its value in its unit */
+        int f = k + DOFF(y);                    /* the stored field of place k */
+        wg_knob(c, k + 1, ins_kv[t][j][y][f]);
+        const char *vt = (smp_values_held() || k == touched) ? mu_ins(y, f, ins_kv[t][j][y][f]) : 0;   /* the knob turned last (or SYN held): its value in its unit */
         wg_label(c, k + 1, vt ? vt : LABEL[y][k]);
     }
     wg_knob(c, 7, ins_mod[t][j]);

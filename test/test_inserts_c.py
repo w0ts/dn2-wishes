@@ -137,4 +137,4 @@ def test_knobs_off_the_page_are_still_saved_and_sent(exe):
 def test_new_sub_starts_without_the_dry():
     src = (ROOT / "csrc" / "inserts" / "ins.c").read_text()
     assert "{100, 85, 59, 0, SUB_DRY, 0}" in src and "#define SUB_DRY   0 " in src
-    assert '{"", "BAND", "TONE", "OCT", "", ""}' in src
+    assert '{"BAND", "TONE", "OCT", "", "", ""}' in src      # compact: place k is stored field k + 1 (test_ins_sub_compact.py)
