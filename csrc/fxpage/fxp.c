@@ -20,8 +20,9 @@
  *
  * 2026-11-12 (the User): the send CHORUS page's TYPE on its empty place E: STOCK (first) or JUNO (Optimist's
  * Juno-106 chorus, dnfw.inserts.jsend). The chorus has no spare stock record (its kit slots 25..31 are all its
- * knobs'; record 111 "Chorus Mix Vol." shares 110's index), so TYPE is ours, the project's: fxp_v[0][7] (the Delay
- * page 2's unused place H, saved with the rest), sent as the twelfth word (w[11]; 0 until sent: STOCK). The page
+ * knobs'; record 111 "Chorus Mix Vol." shares 110's index), so TYPE is the KIT's wishes record (csrc/wishes, tag
+ * 0x0101, u8 0 STOCK / 1 JUNO; no field: STOCK), travelling with the kit as delay / reverb TYPE do; chr_get /
+ * chr_set are its only readers and writer. Sent as the twelfth word (w[11]; 0 until sent: STOCK). The page
  * is known by stock drawing its DPTH cell (fxp_cell). With JUNO, DPTH is the MIX and SPD the MODE (I / II / I+II):
  * their values stay stock's, kit-stored; their labels are drawn over and their names and value texts swapped
  * (fxp_chorus_poll; stock 1.12's own pointers as constants, never saved at run time). */
@@ -40,7 +41,13 @@ typedef signed char s8;
 #define PAGE_REVERB 2                           /* the Reverb page (FDN8 / LONG) */
 #define CHR_DPTH  105u                          /* the Chorus page's DPTH record: its cell drawn = the page is up */
 #define CHR_SPD   106u
-#define CHR_TYPE  fxp_v[0][7]                   /* the chorus send's TYPE: 0 STOCK, 1 JUNO (dnfw.inserts.design.JS_*) */
+#define CHR_TAG   0x0101u                       /* the chorus send's TYPE in the kit's wishes record: 0 STOCK, 1 JUNO */
+#ifndef CHR_KIT                                 /* (the host test defines its own) */
+#define CHR_KIT   (*(volatile u32 *)0x42C5B9ACu) /* the kit the sequencer plays (wish.h WISH_KIT_PLAYING) */
+#endif
+extern int wish_get(u32 item, u32 tag, u8 *out, u32 max);              /* csrc/wishes/wish.h */
+extern int wish_put(u32 item, u32 tag, const u8 *v, u32 vlen);
+extern volatile u32 wish_edits;
 #define CHR_PLACE 4                             /* E */
 
 #include "../waverider/widgets.h"
@@ -65,6 +72,35 @@ static int touched __attribute__((section(".data"))) = -1;
 static int inited __attribute__((section(".data"))) = 0;
 static int chr_seen __attribute__((section(".data"))) = 0;     /* stock drew the Chorus page this time */
 static int chr_touched __attribute__((section(".data"))) = 0;
+static u32 chr_kit __attribute__((section(".data"))) = 0;       /* chr_get's cache: the kit and wish_edits it read */
+static u32 chr_ed __attribute__((section(".data"))) = 0xFFFFFFFFu;
+static u8 chr_val __attribute__((section(".data"))) = 0;
+static int chr_sent __attribute__((section(".data"))) = 0;     /* the TYPE the last words carried */
+
+/* the playing kit's chorus TYPE (0 STOCK, 1 JUNO): read again only when the kit or a record changed */
+static int chr_get(void)
+{
+    u32 kit = CHR_KIT, ed = wish_edits;
+    if (kit != chr_kit || ed != chr_ed) {
+        u8 t = 0;
+        chr_val = kit && wish_get(kit, CHR_TAG, &t, 1) == 1 && t == 1;
+        chr_kit = kit;
+        chr_ed = ed;
+    }
+    return chr_val;
+}
+
+/* TYPE V into the playing kit's record (STOCK: the field removed, as a kit that never had one). The record is
+ * linked into the stored kit at stock's next save of it (KitActive's mirror, kit SAVE, project SAVE) */
+static void chr_set(int v)
+{
+    u32 kit = CHR_KIT;
+    u8 t = (u8)v;
+    if (!kit || v == chr_get())
+        return;
+    wish_put(kit, CHR_TAG, &t, v ? 1u : 0u);
+    chr_ed = 0xFFFFFFFFu;                       /* read it back */
+}
 
 static const char *text(int page, int i, int v);
 
@@ -151,7 +187,8 @@ void fxp_words(u32 *w)
     }
     w[9] = fbits(wl);
     w[10] = fbits(wr);
-    w[11] = CHR_TYPE ? 1u : 0u;                 /* the chorus send's TYPE (dnfw.inserts.design.JS_TYPE) */
+    w[11] = (u32)chr_get();                     /* the chorus send's TYPE (dnfw.inserts.design.JS_TYPE) */
+    chr_sent = (int)w[11];
 }
 
 /* page.c wr_poll, once a UI loop: with JUNO, records 105 / 106 named Mix / Mode, their values MIX % and I / II / I+II;
@@ -174,7 +211,7 @@ static void put(char *b, const char *s)
 
 static void chr_mix(int v, char *b)
 {
-    if (!CHR_TYPE) {
+    if (!chr_get()) {
         ((void (*)(int, char *))STOCK_FMT)(v, b);
         return;
     }
@@ -184,7 +221,7 @@ static void chr_mix(int v, char *b)
 static void chr_mode(int v, char *b)
 {
     static const char *const m[3] = {"I", "II", "I+II"};
-    if (!CHR_TYPE) {
+    if (!chr_get()) {
         ((void (*)(int, char *))STOCK_FMT)(v, b);
         return;
     }
@@ -194,7 +231,9 @@ static void chr_mode(int v, char *b)
 void fxp_chorus_poll(void)
 {
     init();
-    int j = CHR_TYPE != 0;
+    int j = chr_get();
+    if (j != chr_sent)
+        fxp_gen++;                              /* TYPE moved (turned, or another kit / record): the link sends */
     if (j == chr_state)
         return;
     REC_FMT(CHR_DPTH) = (void *)chr_mix;
@@ -212,7 +251,7 @@ int fxp_active(void)
         for (int k = 0; k < 8; k++)
             if (fxp_v[g][k] != table(g + 1)[k].def)
                 return 1;
-    return 0;
+    return chr_get();
 }
 
 /* page.c wr_screen: before stock draws */
@@ -231,8 +270,7 @@ void fxp_cell(u32 id)
 
 int fxp_chorus_type(void)
 {
-    init();
-    return CHR_TYPE ? 1 : 0;
+    return chr_get();
 }
 
 /* fdn8/ui.c rvt_cell, xdly/ui.c dlt_cell: stock drew the TYPE cell of page PAGE, whose type is ours (1) or stock's (0) */
@@ -304,12 +342,8 @@ int fxp_pop(u8 *it)
     if (it[0] == IT_KNOB) {
         armed = 0;
         if (chr_seen && code == CHR_PLACE + 1) {        /* the Chorus page's TYPE: a turn right JUNO, left STOCK */
-            int v = (s8)it[8] > 0 ? 1 : (s8)it[8] < 0 ? 0 : CHR_TYPE;
-            if (v != CHR_TYPE) {
-                CHR_TYPE = (u8)v;
-                fxp_gen++;
-                ins_edits++;
-            }
+            int v = (s8)it[8] > 0 ? 1 : (s8)it[8] < 0 ? 0 : chr_get();
+            chr_set(v);
             chr_touched = 1;
             smp_overlay_dirty = 1;
             return 1;
@@ -360,7 +394,7 @@ static const char *text(int page, int i, int v)
 /* the Chorus page: TYPE at E; with JUNO, A and B relabelled MIX and MODE */
 static void chorus_draw(void *c)
 {
-    int j = CHR_TYPE != 0;
+    int j = chr_get();
     fill(c, wg_x(CHR_PLACE) - 2, wg_y(CHR_PLACE), wg_x(CHR_PLACE) + 24, wg_y(CHR_PLACE) + 26, 0);
     wg_choice(c, CHR_PLACE, j ? "JUNO" : "STCK");
     wg_label(c, CHR_PLACE, "TYPE");

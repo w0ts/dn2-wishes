@@ -20,6 +20,12 @@ HARNESS = r"""
 #include <stdio.h>
 typedef unsigned int u32;
 typedef unsigned char u8;
+/* the kit wishes record (csrc/wishes): no kit has a field here */
+volatile u32 wish_edits = 0;
+int wish_get(u32 item, u32 tag, unsigned char *out, u32 max) { return -1; }
+int wish_put(u32 item, u32 tag, const unsigned char *v, u32 vlen) { return 0; }
+u32 host_kit = 0x1000;
+
 int smp_overlay_dirty = 0;
 u32 ins_edits = 0;
 int smp_values_held(void) { return 0; }
@@ -60,8 +66,10 @@ def exe(tmp_path_factory):
         pytest.skip("no host C compiler")
     d = tmp_path_factory.mktemp("fxp")
     (d / "h.c").write_text(HARNESS)
+    (d / "pre.h").write_text("extern unsigned int host_kit;\n")
     out = d / "h"
-    r = subprocess.run([cc, "-O1", "-w", "-ffp-contract=off", "-Dsection(x)=aligned(4)", "-o", str(out), str(d / "h.c"),
+    r = subprocess.run([cc, "-O1", "-w", "-ffp-contract=off", "-Dsection(x)=aligned(4)", "-DCHR_KIT=host_kit",
+                        "-include", str(d / "pre.h"), "-o", str(out), str(d / "h.c"),
                         str(ROOT / "csrc" / "fxpage" / "fxp.c")], capture_output=True, text=True)
     if r.returncode:
         pytest.fail(r.stderr[-2000:])
@@ -114,6 +122,25 @@ int smp_overlay_dirty = 0;
 u32 ins_edits = 0;
 int smp_values_held(void) { return 0; }
 int func_down = 0;
+/* the kit wishes record, faked (csrc/wishes): two kits, a field per kit, -1 when it has none */
+volatile u32 wish_edits = 0;
+u32 host_kit = 0x1000;
+static int kit_field[2] = {-1, -1};
+int wish_get(u32 item, u32 tag, unsigned char *out, u32 max)
+{
+    int k = item == 0x2000;
+    if (tag != 0x0101 || kit_field[k] < 0 || max < 1) return -1;
+    out[0] = (unsigned char)kit_field[k];
+    return 1;
+}
+int wish_put(u32 item, u32 tag, const unsigned char *v, u32 vlen)
+{
+    int k = item == 0x2000;
+    if (tag != 0x0101) return -1;
+    kit_field[k] = vlen ? v[0] : -1;
+    wish_edits++;
+    return 0;
+}
 int host_key_held(u32 c) { return c == 17 && func_down; }
 extern int fxp_up;
 extern u8 fxp_v[2][8];
@@ -146,6 +173,8 @@ int main(void)
         else if (c == 'v') { scanf("%d %d", &a, &b); printf("v=%d\n", fxp_v[a][b]); }
         else if (c == 'c') { scanf("%d", &a); fxp_begin(); fxp_cell((u32)a); }        /* stock drew cell A */
         else if (c == 'w') { u32 w[12]; fxp_words(w); printf("w11=%u\n", w[11]); }
+        else if (c == 'K') { scanf("%d", &a); host_kit = a ? 0x2000 : 0x1000; }   /* the playing kit: 0 or 1 */
+        else if (c == 'f') { printf("f=%d,%d\n", kit_field[0], kit_field[1]); }
     }
     return 0;
 }
@@ -159,9 +188,10 @@ def tap(tmp_path_factory):
         pytest.skip("no host C compiler")
     d = tmp_path_factory.mktemp("tap")
     (d / "h.c").write_text(TAP)
-    (d / "pre.h").write_text("extern int host_key_held(unsigned int);\n")
+    (d / "pre.h").write_text("extern int host_key_held(unsigned int);\nextern unsigned int host_kit;\n")
     out = d / "h"
     r = subprocess.run([cc, "-O1", "-w", "-ffp-contract=off", "-Dsection(x)=aligned(4)", "-DKEY_HELD=host_key_held",
+                        "-DCHR_KIT=host_kit",
                         "-include", str(d / "pre.h"), "-o", str(out), str(d / "h.c"), str(ROOT / "csrc" / "fxpage" / "fxp.c")],
                        capture_output=True, text=True)
     if r.returncode:
@@ -242,6 +272,12 @@ ACTIVE = r"""
 #include <stdio.h>
 typedef unsigned int u32;
 typedef unsigned char u8;
+/* the kit wishes record (csrc/wishes): no kit has a field here */
+volatile u32 wish_edits = 0;
+int wish_get(u32 item, u32 tag, unsigned char *out, u32 max) { return -1; }
+int wish_put(u32 item, u32 tag, const unsigned char *v, u32 vlen) { return 0; }
+u32 host_kit = 0x1000;
+
 int smp_overlay_dirty = 0;
 u32 ins_edits = 0;
 int smp_values_held(void) { return 0; }
@@ -271,7 +307,9 @@ def test_active_means_not_at_the_defaults(tmp_path):
     if not cc:
         pytest.skip("no host C compiler")
     (tmp_path / "h.c").write_text(ACTIVE)
-    r = subprocess.run([cc, "-O1", "-w", "-Dsection(x)=aligned(4)", "-o", str(tmp_path / "h"), str(tmp_path / "h.c"),
+    (tmp_path / "pre.h").write_text("extern unsigned int host_kit;\n")
+    r = subprocess.run([cc, "-O1", "-w", "-Dsection(x)=aligned(4)", "-DCHR_KIT=host_kit", "-include", str(tmp_path / "pre.h"),
+                        "-o", str(tmp_path / "h"), str(tmp_path / "h.c"),
                         str(ROOT / "csrc" / "fxpage" / "fxp.c")], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr[-1500:]
     out = subprocess.run([str(tmp_path / "h")], capture_output=True, text=True, check=True).stdout.split()
@@ -282,11 +320,18 @@ CHORUS_PAGE = "c 105"                                       # stock drew the Cho
 
 
 def test_the_chorus_page_takes_knob_e_for_its_type(tap):
-    """2026-11-12: the Chorus page's TYPE on E (knob 5): right JUNO, left STOCK; the twelfth word carries it (0 until
-    then); E is stock's (nothing there) off the Chorus page, and the other knobs stay stock's on it"""
+    """2026-11-12: the Chorus page's TYPE on E (knob 5): right JUNO, left STOCK, in the playing kit's wishes record
+    (tag 0x0101; STOCK removes the field); the twelfth word carries it (0 until then); E is stock's (nothing there)
+    off the Chorus page, and the other knobs stay stock's on it"""
     assert feed(tap, "w ") == ["w11=0"]
-    assert feed(tap, f"{CHORUS_PAGE} k 5 1 v 0 7 w ") == ["took=1", "v=1", "w11=1"]
-    assert feed(tap, f"{CHORUS_PAGE} k 5 1 {CHORUS_PAGE} k 5 -2 v 0 7 w ") == ["took=1", "took=1", "v=0", "w11=0"]
-    assert feed(tap, f"{CHORUS_PAGE} k 1 3 k 2 -3 k 6 2 v 0 7 ") == ["took=0", "took=0", "took=0", "v=0"]
-    assert feed(tap, "c 113 k 5 1 v 0 7 ") == ["took=0", "v=0"]           # the Delay page: not ours
-    assert feed(tap, f"{CHORUS_PAGE} c 0 k 5 1 v 0 7 ") == ["took=0", "v=0"]     # the page left
+    assert feed(tap, f"{CHORUS_PAGE} k 5 1 f w ") == ["took=1", "f=1,-1", "w11=1"]
+    assert feed(tap, f"{CHORUS_PAGE} k 5 1 {CHORUS_PAGE} k 5 -2 f w ") == ["took=1", "took=1", "f=-1,-1", "w11=0"]
+    assert feed(tap, f"{CHORUS_PAGE} k 1 3 k 2 -3 k 6 2 f ") == ["took=0", "took=0", "took=0", "f=-1,-1"]
+    assert feed(tap, "c 113 k 5 1 f ") == ["took=0", "f=-1,-1"]                # the Delay page: not ours
+    assert feed(tap, f"{CHORUS_PAGE} c 0 k 5 1 f ") == ["took=0", "f=-1,-1"]   # the page left
+
+
+def test_the_chorus_type_follows_the_playing_kit(tap):
+    """JUNO set on kit 0; kit 1 plays STOCK (no field); back on kit 0, JUNO again: TYPE is the kit's, not the project's"""
+    assert feed(tap, f"{CHORUS_PAGE} k 5 1 w K 1 w K 0 w f ") == ["took=1", "w11=1", "w11=0", "w11=1", "f=1,-1"]
+    assert feed(tap, f"K 1 {CHORUS_PAGE} k 5 1 f K 0 w ") == ["took=1", "f=-1,1", "w11=0"]

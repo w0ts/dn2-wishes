@@ -357,11 +357,15 @@ page's **DPTH** is the **MIX** and **SPD** the **MODE** (I / II / I+II); their l
 long names and value texts follow (Mix %, I / II / I+II). HPF, WDTH, DEL, REV, VOL keep doing what the bus does with
 them (VOL the return's level, DEL / REV its sends on); HPF and WDTH are the stock chorus's own and do nothing to JUNO.
 
-- **Why TYPE is ours, not a stock record** (delay and reverb use their spare stock records 122 / 131): the stock
+- **Why TYPE is not a stock record** (delay and reverb use their spare stock records 122 / 131): the stock
   parameter table gives the chorus kit slots 25..31, all its knobs'. Record 111 "Chorus Mix Vol." has no slot of its
-  own: its index word is 0x1f, the same as 110 "Reverb Send"'s (as 120 "Delay Mix Vol." shares 119's). So TYPE is the
-  project's (`csrc/fxpage`: `fxp_v[0][7]`, the Delay page 2's unused place H, saved with the send pages' values in
-  the inserts' record sector), not the kit's; MIX and MODE are DPTH and SPD, stock's, kit-stored.
+  own: its index word is 0x1f, the same as 110 "Reverb Send"'s (as 120 "Delay Mix Vol." shares 119's). So TYPE is in
+  the **kit's wishes record** (`csrc/wishes`, docs/wishes-record.md "Every item type"): tag **0x0101**, u8 0 STOCK /
+  1 JUNO, no field = STOCK (every kit made before, and STOCK removes the field). It travels with the kit as delay /
+  reverb TYPE do (copy, kit SAVE / LOAD, project, SysEx). `fxp.c` `chr_get` / `chr_set` are its only reader and writer
+  (the playing kit, `0x42c5b9ac`; cached on the kit and `wish_edits`). **The record reaches the stored kit at stock's
+  next save of it** (KitActive's mirror on a stock kit edit, kit SAVE, project SAVE); a TYPE turn alone with no save
+  after it is lost at power-off. MIX and MODE are DPTH and SPD, stock's, kit-stored.
 - **ColdFire** (`csrc/fxpage/fxp.c`): the page is known by stock drawing its DPTH cell (`fxp_cell`, from page.c
   `wr_cell`); knob E's turns are ours there (right JUNO, left STOCK); `fxp_draw` draws TYPE's box and the MIX / MODE
   labels; `fxp_chorus_poll` (page.c `wr_poll`) swaps records 105 / 106's long names and formatters (stock 1.12's own
