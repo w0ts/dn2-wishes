@@ -144,33 +144,38 @@ class Sched:
                 at[j] = cyc
                 group.append(j)
                 writes.update(ops[j].writes)
-            for j in cand:
-                o = ops[j]
-                if o.kind == "k" or not ok(j) or set(o.writes) & writes:
-                    continue
-                if o.kind in ("ld", "st"):
-                    if move is None and o.i in range(4) and -32 <= o.k < 32:
-                        move = j
-                        place(j)
-                    continue
-                if comp is None:
-                    # a compute: look for a partner among the ready ones for the multifunction form
-                    partner = None
-                    for q in cand:
-                        if q == j or q in at or ops[q].kind == "k" or not ok(q) or set(ops[q].writes) & (writes | set(o.writes)):
-                            continue
-                        pr = (self._pairable(o, ops[q]) if o.kind == "*" else
-                              self._pairable(ops[q], o) if ops[q].kind == "*" else None)
-                        if pr is not None:
-                            partner = q
-                            break
-                    if partner is not None:
-                        comp = ("pair", j if o.kind == "*" else partner, partner if o.kind == "*" else j)
-                        place(j)
-                        place(partner)
-                    else:
-                        comp = ("single", j)
-                        place(j)
+            while True:                                  # again until nothing more joins: an op placed here can
+                before = len(group)                      # free another for this same instruction (write after read)
+                cand = sorted((j for j in range(n) if ok(j)), key=lambda j: (-prio[j], j))
+                for j in cand:
+                    o = ops[j]
+                    if o.kind == "k" or not ok(j) or set(o.writes) & writes:
+                        continue
+                    if o.kind in ("ld", "st"):
+                        if move is None and o.i in range(4) and -32 <= o.k < 32:
+                            move = j
+                            place(j)
+                        continue
+                    if comp is None:
+                        # a compute: look for a partner among the ready ones for the multifunction form
+                        partner = None
+                        for q in cand:
+                            if q == j or q in at or ops[q].kind == "k" or not ok(q) or set(ops[q].writes) & (writes | set(o.writes)):
+                                continue
+                            pr = (self._pairable(o, ops[q]) if o.kind == "*" else
+                                  self._pairable(ops[q], o) if ops[q].kind == "*" else None)
+                            if pr is not None:
+                                partner = q
+                                break
+                        if partner is not None:
+                            comp = ("pair", j if o.kind == "*" else partner, partner if o.kind == "*" else j)
+                            place(j)
+                            place(partner)
+                        else:
+                            comp = ("single", j)
+                            place(j)
+                if len(group) == before:
+                    break
             if not group:
                 cyc += 1
                 continue

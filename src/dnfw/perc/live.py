@@ -35,7 +35,9 @@ def layout(state=None, scratch=None, tables=None, sin=None) -> M.Layout:
                     mnm_tables=dsp.MD_TABLES_DDR + MDC.TABLE_LAYOUT["mnm"][0],
                     mnm_dt=dsp.MNM_DT_L2, mnm_render=dsp.MNM_RENDER_DM,
                     md_shipped=dsp.SMP_POOL_DDR + SM.TABLE_AREA,
-                    md_ready=dsp.SMP_POOL_DDR + SM.TABLE_READY)
+                    md_ready=dsp.SMP_POOL_DDR + SM.TABLE_READY,
+                    l1_exp2=dsp.PERC_EXP2_DM, l1_tan=dsp.PERC_TAN_DM,
+                    sin_at=dsp.STOCK_SINE_DM)
 
 
 def table_words(L: M.Layout) -> dict[int, int]:
@@ -46,13 +48,20 @@ def table_words(L: M.Layout) -> dict[int, int]:
     data = M.stream_tables() if L.shipped else M.tables_bytes()[0]
     for k in range(len(data) // 4):
         out[L.tables + 4 * k] = struct.unpack_from("<I", data, 4 * k)[0]
-    if not L.shipped:                            # else tan and the sine are shipped: MDB.table_mem
+    if not L.shipped and getattr(L, "sin_at", None) is None:   # else shipped (MDB.table_mem) / stock's (below)
         sdata, sat = SL.tables_bytes()
         base = L.sin - sat["sin"]
         for k in range(len(sdata) // 4):
             out[base + 4 * k] = struct.unpack_from("<I", sdata, 4 * k)[0]
     from ..md import bench as MDB                 # the Machinedrum's tables, the sine filled (v0.17)
     out.update(MDB.table_mem(L.md))
+    for at, data in ((getattr(L, "l1_exp2", None), lambda: M.tables_bytes()[0][:4 * M.EXP2_N]),   # 2026-11-12:
+                     (getattr(L, "l1_tan", None), lambda: M.tables_bytes()[0][4 * M.EXP2_N:]),   # the L1 copies,
+                     (getattr(L, "sin_at", None), dsp.stock_sine)):                              # stock's sine
+        if at is not None:
+            d = data()
+            for k in range(len(d) // 4):
+                out[at + 4 * k] = struct.unpack_from("<I", d, 4 * k)[0]
     return out
 
 

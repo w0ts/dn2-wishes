@@ -99,14 +99,14 @@ def frac(p: Prog, x: int) -> None:
 
 
 def softclip(p: Prog, d: int, x: int) -> None:
-    """Fd = x / (1 + |x|). Clobbers R4, R5, R12-R15, I12; d, x not R4/R5."""
+    """Fd = x / (1 + |x|). Clobbers R4, R5, R12-R15, I12; d, x not R4/R5/R15."""
     p.fconst(4, 0.0)
     p.fop(4, 4, "-", x)
     p.fop(4, 4, "MAX", x)                        # |x|
-    _addk(p, 4, 4, 1.0)
+    _addk(p, 15, 4, 1.0)                         # (perf, 2026-11-12: in and out through F15, no copies)
     p.fpass(5, x)
-    _pm().recip(p, 4, 4)
-    p.fop(d, 5, "*", 4)
+    _pm().recip(p, 15, 15)
+    p.fop(d, 5, "*", 15)
 
 
 def noise(p: Prog, d: int) -> None:
@@ -317,10 +317,10 @@ def _advance(p: Prog, L: C.Layout) -> None:
     """The swept frequency, then the four phases (turns, wrapped)."""
     _ld(p, 4, D_SWP)
     _ld(p, 5, S_PEN)
-    p.fop(4, 4, "*", 5)
-    _pm().exp2(p, L.perc, 4, 4)
+    p.fop(15, 4, "*", 5)
+    _pm().exp2(p, L.perc, 15, 15)
     _ld(p, 5, S_BASE)
-    p.fop(4, 4, "*", 5)
+    p.fop(4, 15, "*", 5)
     _k(p, 12, 18.0 / SR)
     p.fop(4, 4, "MAX", 12)
     _k(p, 12, 18000.0 / SR)
@@ -344,18 +344,18 @@ def _mods(p: Prog, L: C.Layout) -> None:
     _ld(p, 5, D_FBK)
     p.fop(4, 4, "*", 5)
     _ld(p, 5, S_M1)
-    p.fop(4, 4, "+", 5)
-    sinw(p, L, 4, 4)
-    _sv(p, T_M1, 4)
+    p.fop(15, 4, "+", 5)                         # (perf, 2026-11-12: the sines in and out through F15)
+    sinw(p, L, 15, 15)
+    _sv(p, T_M1, 15)
     _ld(p, 5, D_M25)
-    p.fop(4, 4, "*", 5)
+    p.fop(4, 15, "*", 5)
     _ld(p, 5, S_M2)
-    p.fop(4, 4, "+", 5)
-    sinw(p, L, 4, 4)
-    _sv(p, T_M2, 4)
-    _ld(p, 4, S_M3)
-    sinw(p, L, 4, 4)
-    _sv(p, T_M3, 4)
+    p.fop(15, 4, "+", 5)
+    sinw(p, L, 15, 15)
+    _sv(p, T_M2, 15)
+    _ld(p, 15, S_M3)
+    sinw(p, L, 15, 15)
+    _sv(p, T_M3, 15)
     # b: the metal envelope for PIPE and BOOM (Sophie's shaped models), else the pitch one
     _ld(p, 4, S_PEN)
     _ld(p, 0, D_MOD)
@@ -374,17 +374,20 @@ def _mods(p: Prog, L: C.Layout) -> None:
 def _op(p: Prog, L: C.Layout, d: int, car_mul: float, idx_mul: float, m: int | None) -> None:
     """Fd = sin(car x CAR_MUL + index x IDX_MUL x m) (turns). Clobbers R0-R3, R6, R7, R12,
     R15, I1, I12."""
-    _ld(p, 6, S_CAR)
-    if car_mul != 1.0:
-        _mulk(p, 6, 6, car_mul)
+    if m is None and car_mul == 1.0:             # (perf, 2026-11-12: the argument made in F15, no copy in)
+        _ld(p, 15, S_CAR)
+    else:
+        _ld(p, 6, S_CAR)
+        if car_mul != 1.0:
+            _mulk(p, 6 if m is not None else 15, 6, car_mul)
     if m is not None:
         _ld(p, 7, T_IDX)
         if idx_mul != 1.0:
             _mulk(p, 7, 7, idx_mul)
         _ld(p, 0, m)
         p.fop(7, 7, "*", 0)
-        p.fop(6, 6, "+", 7)
-    sinw(p, L, d, 6)
+        p.fop(15, 6, "+", 7)
+    sinw(p, L, d, 15)
 
 
 def _fuse(p: Prog, L: C.Layout) -> None:
@@ -396,9 +399,9 @@ def _fuse(p: Prog, L: C.Layout) -> None:
     _ld(p, 9, T_IDX)
     p.fop(8, 8, "*", 9)
     _ld(p, 9, S_CAR)
-    p.fop(8, 8, "+", 9)
-    sinw(p, L, 8, 8)
-    _sv(p, T_OUT, 8)
+    p.fop(15, 8, "+", 9)
+    sinw(p, L, 15, 15)
+    _sv(p, T_OUT, 15)
 
 
 def _stak(p: Prog, L: C.Layout) -> None:
@@ -447,8 +450,8 @@ def _shrd(p: Prog, L: C.Layout) -> None:
     _mulk(p, 7, 7, 0.55)
     _ld(p, 0, T_M1)
     p.fop(7, 7, "*", 0)
-    p.fop(6, 6, "+", 7)
-    sinw(p, L, 8, 6)
+    p.fop(15, 6, "+", 7)
+    sinw(p, L, 8, 15)
     _ld(p, 9, D_MET)
     _mulk(p, 10, 9, -0.25)
     _addk(p, 10, 10, 0.85)
@@ -498,8 +501,8 @@ def _kick(p: Prog, L: C.Layout) -> None:
     _mulk(p, 9, 10, 2.2)
     _addk(p, 9, 9, 1.0)
     p.fop(9, 9, "*", 8)
-    _mulk(p, 9, 9, 1.0 / TAU)
-    sinw(p, L, 9, 9)                             # folded = sin(body (1 + 2.2 color))
+    _mulk(p, 15, 9, 1.0 / TAU)
+    sinw(p, L, 9, 15)                            # folded = sin(body (1 + 2.2 color))
     _ld(p, 10, D_COL)
     _mulk(p, 11, 10, -0.08)
     _addk(p, 11, 11, 0.86)
@@ -516,8 +519,8 @@ def _kick(p: Prog, L: C.Layout) -> None:
     _ld(p, 0, T_M2)
     p.fop(9, 9, "*", 0)
     _ld(p, 6, S_CAR)
-    p.fop(9, 9, "+", 6)
-    sinw(p, L, 9, 9)
+    p.fop(15, 9, "+", 6)
+    sinw(p, L, 9, 15)
     _ld(p, 10, D_MET)
     p.fop(9, 9, "*", 10)
     _mulk(p, 9, 9, 0.18)
@@ -541,6 +544,11 @@ BODIES = ((FUSE, _fuse), (STAK, _stak), (SPLT, _splt), (SHRD, _shrd), (PIPE, _pi
 
 def _model(p: Prog, L: C.Layout) -> None:
     """T_OUT = the model's output (D_MOD), a chain of tests."""
+    if MODEL_TREE:
+        _ld(p, 0, D_MOD)
+        _tree(p, L, list(BODIES))
+        return
+
     def chain(k: int) -> None:
         mod, body = BODIES[k]
         if k == len(BODIES) - 1:
@@ -550,6 +558,21 @@ def _model(p: Prog, L: C.Layout) -> None:
         p.iconst(1, mod)
         p.if_(0, "EQ", 1, lambda: body(p, L), lambda: chain(k + 1), kind="i")
     chain(0)
+
+
+MODEL_TREE = True                                # (perf, 2026-11-12) _tree; False = the chain of tests
+
+
+def _tree(p: Prog, L: C.Layout, arms) -> None:
+    """the body of the model in R0 (D_MOD) among ARMS (model, body) sorted by model: halves by a test on the
+    middle, at most three tests for seven (the chain made KICK, the last, pass six); a model outside them plays
+    the last arm, as the chain does. The bodies leave R0 alone until they start, so R0 is loaded once."""
+    if len(arms) == 1:
+        arms[0][1](p, L)
+        return
+    mid = len(arms) // 2
+    p.iconst(1, arms[mid][0])
+    p.if_(0, "LT", 1, lambda: _tree(p, L, arms[:mid]), lambda: _tree(p, L, arms[mid:]), kind="i")
 
 
 def _crush(p: Prog) -> None:

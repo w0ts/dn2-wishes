@@ -483,6 +483,20 @@ def _ladder_half(p: Prog, X: Ctx) -> None:
     p.fop(15, 12, "+", 15)
     recip(p)
     _st(p, X, "inv", 15)
+    ladder_core(p, X)
+
+
+def ladder_core(p: Prog, X: Ctx) -> None:
+    """The ladders' 16 samples from the words G, H, k, G4, inv, cin, ota, mode, buf, zp (2026-11-12: one leaf
+    subroutine, a2lad, its tanh inlined, shared by ANALOG2 and JUNO in PERC; the same operations in the same order
+    as before). JUNO's drive d rides on the words: H d, k / d and G4 d give u = x - (k / d) tanh(d (G4 t + S)),
+    t = (x - k S) inv unchanged (dnfw.mnm.juno). Clobbers every register but I3's caller copy, R12, I12."""
+    p.call("a2lad", lambda: _ladder_loop(p, X))
+
+
+def _ladder_loop(p: Prog, X: Ctx) -> None:
+    both = "LADR" in X.models and "OTA" in X.models
+    only_ota = "OTA" in X.models and not both
     _rowi(p, X, "lmix")
     _states_in(p, X, (1, 2, 3, 4))
     _ld(p, X, 5, "G")
@@ -490,17 +504,14 @@ def _ladder_half(p: Prog, X: Ctx) -> None:
     _ld(p, X, 7, "k")
     _buf_in(p, X)
 
-    def ota_u():                                 # u = x - k tanh(G4 t + S)
+    def ota_in():                                # tanh's argument: G4 t + S
         _ld(p, X, 10, "G4")
         p.fop(15, 10, "*", 9)
         p.fop(15, 15, "+", 8)
-        tanh(p)
+
+    def ota_out():                               # u = x - k tanh(G4 t + S)
         p.fop(15, 7, "*", 15)
         p.fop(15, 0, "-", 15)
-
-    def ladr_u():                                # u = tanh(t)
-        p.fpass(15, 9)
-        tanh(p)
 
     def one():
         p.ldi(0, 0, 0)
@@ -517,13 +528,19 @@ def _ladder_half(p: Prog, X: Ctx) -> None:
         p.fop(9, 0, "-", 9)
         _ld(p, X, 10, "inv")
         p.fop(9, 9, "*", 10)                     # t = (x - k S) inv
-        if both:
+        if both:                                 # LADR: u = tanh(t)
             _ld(p, X, 10, "ota")
-            p.ifz(10, "NE", ota_u, ladr_u)
+            p.ifz(10, "NE", ota_in, lambda: p.fpass(15, 9))
+            _tanh_body(p)
+            _ld(p, X, 10, "ota")
+            p.ifz(10, "NE", ota_out)
         elif only_ota:
-            ota_u()
+            ota_in()
+            _tanh_body(p)
+            ota_out()
         else:
-            ladr_u()
+            p.fpass(15, 9)
+            _tanh_body(p)
         for z, yin, y in ((1, 15, 8), (2, 8, 13), (3, 13, 14), (4, 14, 10)):   # four one-poles
             p.fop(9, yin, "-", z)
             p.fop(9, 9, "*", 5)
@@ -604,6 +621,16 @@ def _diod_half(p: Prog, X: Ctx) -> None:
     _ld(p, X, 5, "gd")
     _buf_in(p, X)
 
+    if SCHED:
+        _xi(p, X)
+
+        def one():
+            _diod_sample(p, X)
+            p.stpost(0, 10)
+        _loop16(p, one)
+        _states_out(p, X, (1, 2, 3, 4))
+        return
+
     def one():
         p.ldi(0, 0, 0)
         _ld(p, X, 10, "ip1")
@@ -644,6 +671,96 @@ def _diod_half(p: Prog, X: Ctx) -> None:
         p.stpost(0, 10)
     _loop16(p, one)
     _states_out(p, X, (1, 2, 3, 4))
+
+
+SCHED = True                                     # (perf, 2026-11-12) the per-sample loops on dnfw.mnm.sched; False = as before
+X_MID = WORDS.index("G")                         # I2 at this word while a scheduled loop runs: every word within -32..31
+
+
+def _xi(p: Prog, X: Ctx) -> None:
+    """I2 = the words' X_MID (the states are in registers by now; _states_out points I2 back). Clobbers R12."""
+    p.iconst(12, X.C[WORDS[X_MID]])
+    p.seti(2, 12)
+
+
+def _tanh_ops(s) -> None:
+    """_tanh_body's operations onto the scheduler S (dnfw.mnm.sched), on F15, the same order and registers"""
+    s.const(12, 3.0)
+    s.fop(15, 15, "MIN", 12)
+    s.const(12, -3.0)
+    s.fop(15, 15, "MAX", 12)
+    s.mul(13, 15, 15)                            # x^2
+    s.const(12, 9.0)
+    s.mul(14, 12, 13)
+    s.const(12, 27.0)
+    s.add(14, 12, 14)                            # 27 + 9 x^2
+    s.add(13, 12, 13)
+    s.mul(13, 15, 13)                            # x (27 + x^2)
+    s.raw(lambda q: q.iconst(12, RECIP_MAGIC), (), (12,))
+    s.raw(lambda q: q.iop(15, 12, "-", 14), (12, 14), (15,))
+    for _ in range(3):                           # _newton(14, 15, 12)
+        s.mul(12, 14, 15)
+        s.mul(12, 15, 12)
+        s.add(15, 15, 15)
+        s.sub(15, 15, 12)
+    s.mul(15, 13, 15)
+
+
+def _diod_sample(p: Prog, X: Ctx) -> None:
+    """one sample of _diod_half's loop, F10 its output (not yet stored): the same operations on the same values
+    (so bit for bit), each loaded word in a temporary of its own (F10 F12 F13 F14 in turn, never F11, the loop's count, where the plain loop
+    reuses F10) and scheduled (dnfw.mnm.sched), so the words' loads, through I2 (_xi), ride on the computes."""
+    from ..mnm.sched import Sched
+    w = lambda name: WORDS.index(name) - X_MID   # noqa: E731
+    tmp = [10, 14, 12]
+    s = Sched()
+    s.ld(0, 0, 0)
+    s.ld(10, w("ip1"), 2)
+    s.mul(6, 1, 10)                              # e1 = s1 / p1
+    for n, (i, e_prev, st, e) in enumerate(((2, 6, 2, 7), (3, 7, 3, 8), (4, 8, 4, 9))):
+        t = tmp[(n + 1) % 3]
+        s.ld(t, w(f"ip{i}"), 2)
+        s.mul(e, 5, e_prev)
+        s.add(e, st, e)
+        s.mul(e, e, t)                           # e_i = (s_i + g e_i-1) / p_i
+    s.ld(10, w("cin"), 2)
+    s.ld(12, w("k"), 2)
+    s.ld(14, w("inv"), 2)
+    s.mul(15, 0, 10)
+    s.mul(13, 12, 9)
+    s.sub(15, 15, 13)
+    s.mul(15, 15, 14)
+    _tanh_ops(s)                                 # u = tanh((x cin - k e4) inv), a2th's operations inline
+    tmp = [10, 12, 13, 14]
+    n = 0
+    for h, e in (("h1", 6), ("h2", 7), ("h3", 8), ("h4", 9)):
+        t = tmp[n % 4]; n += 1
+        s.ld(t, w(h), 2)
+        s.mul(t, t, 15)
+        s.add(e, e, t)                           # e_i + h_i u (y4 in F9)
+    for gp, y, y_next in (("gp3", 8, 9), ("gp2", 7, 8), ("h1", 6, 7)):
+        t = tmp[n % 4]; n += 1
+        s.ld(t, w(gp), 2)
+        s.mul(t, t, y_next)
+        s.add(y, y, t)                           # y_i = d_i + g / p_i y_i+1
+    for st, y in ((1, 6), (2, 7), (3, 8), (4, 9)):
+        t = tmp[n % 4]; n += 1
+        s.add(t, y, y)
+        s.sub(st, t, st)                         # s = 2 y - s
+    s.ld(10, 0, 3)
+    s.mul(10, 10, 15)
+    for k, y in ((1, 6), (2, 7), (3, 8), (4, 9)):
+        t = (12, 13, 14, 12)[k - 1]
+        s.ld(t, k, 3)
+        s.mul(t, t, y)
+        s.add(10, 10, t)
+    s.ld(12, w("gout"), 2)
+    s.mul(10, 12, 10)
+    s.const(12, OUT_MAX)
+    s.fop(10, 10, "MIN", 12)
+    s.const(12, -OUT_MAX)
+    s.fop(10, 10, "MAX", 12)
+    s.emit(p)
 
 
 # -- MS20: the Sallen-Key 2-pole (a2m_ms20) ----------------------------------------------------

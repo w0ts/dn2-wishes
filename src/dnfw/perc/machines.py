@@ -167,7 +167,7 @@ class Layout:
 
     def __init__(self, state, scratch, tables, sin, md_state=None, md_tables=None,
                  mnm_scratch=0, mnm_tables=0, md_shipped=None, md_ready=None, md_delay=None,
-                 mnm_dt=None, mnm_render=None):
+                 mnm_dt=None, mnm_render=None, l1_exp2=None, l1_tan=None, sin_at=None):
         self.state, self.tables, self.sin = state, tables, sin
         self.C = {w: scratch + 4 * k for k, w in enumerate(SC_WORDS)}
         _, at = tables_bytes()
@@ -187,6 +187,15 @@ class Layout:
                 k = [x for x, _ in TABLES].index(n)
                 at_ += 4 * len(TABLES[k][1]())
             self.sin = at_
+        # 2026-11-12 (perf): the L1 copies (dnfw.waverider.dsp PERC_EXP2_DM, PERC_TAN_DM) read instead, and the sine
+        # at SIN_AT (stock's L1 sine, dsp.STOCK_SINE_DM: sin_ reads within one turn, its 257 points suffice)
+        self.l1_exp2, self.l1_tan, self.sin_at = l1_exp2, l1_tan, sin_at
+        if l1_exp2 is not None:
+            self.T["exp2"] = l1_exp2
+        if l1_tan is not None:
+            self.T["tan"] = l1_tan
+        if sin_at is not None:
+            self.sin = sin_at
         # v0.26: the Monomachine machines' buffers and tables (dnfw.mnm, docs/mnm.md)
         from ..mnm import core as MNC
         self.md.mnm = MNC.Layout(self, mnm_scratch, mnm_tables, dt_at=mnm_dt,   # v0.36: DPRO tables in L2
@@ -225,14 +234,13 @@ def interp(p: Prog, d: int, x: int, base: int, top: float, scale: float) -> None
     p.fconst(12, top)
     p.fop(x, x, "MIN", 12)
     p.trunc(0, x)
-    p.iconst(12, 0)
-    p.float_(1, 0, 12)
-    p.fop(1, x, "-", 1)
+    p.float0(1, 0)                             # (perf, 2026-11-12: FLOAT R0 BY 0 without a zero in R12)
     p.lsh(0, 0, 2)
     p.iconst(12, base)
     p.iop(0, 12, "+", 0)
     p.seti(1, 0)
     p.ldi(2, 0, 1)
+    p.fop(1, x, "-", 1)                        # (perf, 2026-11-12: after the first load, so the second rides on it)
     p.ldi(3, 1, 1)
     p.fop(3, 3, "-", 2)
     p.fop(3, 1, "*", 3)
@@ -262,10 +270,9 @@ def exp2(p: Prog, L: Layout, d: int, x: int) -> None:
 
 
 def frac(p: Prog, x: int) -> None:
-    """Fx = x - floor(x). Clobbers R0, R1, R12."""
+    """Fx = x - floor(x). Clobbers R0, R1, R12 (on a negative x)."""
     p.trunc(0, x)
-    p.iconst(12, 0)
-    p.float_(1, 0, 12)
+    p.float0(1, 0)                             # (perf, 2026-11-12: FLOAT R0 BY 0 without a zero in R12)
     p.if_(x, "LT", 1, lambda: (p.fconst(12, 1.0), p.fop(1, 1, "-", 12)))
     p.fop(x, x, "-", 1)
 

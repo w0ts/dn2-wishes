@@ -982,6 +982,24 @@ def _tanh(p: Prog) -> None:
     p.call("a2tp", body)
 
 
+# (perf, 2026-11-12) _out's knee: a2tp's polynomial inline, its eight lower coefficients held in these registers for
+# the half (the loop's free ones), the same operations; () = a2tp called as before
+KNEE_REGS = (0, 3, 4, 6, 7, 8, 9, 10)
+
+
+def _tanh_regs(p: Prog) -> None:
+    """_tanh's operations inline on F15, TANH_P[k] read from KNEE_REGS[k] (k < 8) where a2tp loads it into R12: the
+    same values. Clobbers F12-F14."""
+    _k(p, 15, 15, "MIN", 2.0)
+    _k(p, 15, 15, "MAX", -2.0)
+    p.fop(14, 15, "*", 15)
+    p.fconst(13, TANH_P[-1])
+    for k in range(len(TANH_P) - 2, -1, -1):
+        p.fop(13, 13, "*", 14)
+        p.fop(13, 13, "+", KNEE_REGS[k])
+    p.fop(15, 15, "*", 13)
+
+
 def _noise(p: Prog, L: C.Layout) -> None:
     """b += NOIS's noise (a2_noise: xorshift32, (n >> 17) - 16384)"""
     _ld(p, 5, D_NZ)
@@ -1018,6 +1036,10 @@ def _drive(p: Prog, L: C.Layout) -> None:
         p.ld(0, L.W[WN["bv"]])
         p.seti(0, 0)
 
+        if DRV2:
+            p.loop_r(11, M.N // 2, lambda: _drive2(p))
+            return
+
         def one():
             p.ldi(1, 0, 0)
             p.fop(15, 1, "*", 5)
@@ -1029,6 +1051,46 @@ def _drive(p: Prog, L: C.Layout) -> None:
             p.stpost(0, 1)
         p.loop_r(11, M.N, one)
     p.if_(6, "NE", 12, run)
+
+
+DRV2 = True                                      # (perf, 2026-11-12) _drive2; False = sample by sample, a2tp called
+
+
+def _drive2(p: Prog) -> None:
+    """two of _drive's samples (b at I0, I0 two words on): its operations on the same values (so bit for bit),
+    a2tp's polynomial inlined and the two run side by side (dnfw.mnm.sched): each coefficient loaded once for
+    both, one's multiply with the other's add in one instruction. F5 drive, F6 dw kept; R11 the loop's."""
+    from .sched import Sched
+    s = Sched()
+    for x, y, s2, am, aa in ((1, 10, 4, 0, 8), (2, 13, 7, 3, 9)):
+        s.ld(x, x - 1, 0)
+        s.mul(y, x, 5)
+        s.const(12, 2.0)
+        s.fop(y, y, "MIN", 12)
+        s.const(12, -2.0)
+        s.fop(y, y, "MAX", 12)
+        s.mul(s2, y, y)
+    s.const(0, TANH_P[-1])
+    s.const(3, TANH_P[-1])
+    for c in TANH_P[-2::-1]:
+        s.mul(8, 0, 4)
+        s.mul(9, 3, 7)
+        s.const(12, c)
+        s.add(0, 8, 12)
+        s.add(3, 9, 12)
+    for x, y, a, t in ((1, 10, 0, 15), (2, 13, 3, 14)):
+        s.mul(t, y, a)                           # tanh's curve
+        s.const(12, 0.5)
+        s.mul(t, t, 12)
+        s.sub(t, t, x)
+        s.mul(t, t, 6)
+        s.add(x, x, t)
+        s.st(x - 1, 0, x)
+    s.emit(p)
+    p.geti(12, 0)
+    p.iconst(13, 8)
+    p.iop(12, 12, "+", 13)
+    p.seti(0, 12)
 
 
 def _filter(p: Prog, L: C.Layout, side: bool = False) -> None:
@@ -1080,6 +1142,9 @@ def _out(p: Prog, L: C.Layout) -> None:
     p.ld(0, L.W[WN["bv"]])
     p.seti(0, 0)
     p.fconst(5, KNEE)
+    if KNEE_REGS:
+        for r, c in zip(KNEE_REGS, TANH_P):
+            p.fconst(r, c)
 
     def one():
         p.ldi(1, 0, 0)
@@ -1088,7 +1153,10 @@ def _out(p: Prog, L: C.Layout) -> None:
         def knee():
             p.fop(15, 2, "-", 5)
             p.fop(15, 15, "+", 15)
-            _tanh(p)
+            if KNEE_REGS:
+                _tanh_regs(p)
+            else:
+                _tanh(p)
             _k(p, 15, 15, "*", 0.5)
             p.fop(2, 5, "+", 15)
             p.ifz(1, "LT", lambda: (p.fconst(12, 0.0), p.fop(1, 12, "-", 2)), lambda: p.fpass(1, 2), kind="f")

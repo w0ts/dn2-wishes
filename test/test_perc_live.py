@@ -291,7 +291,9 @@ def test_v026_the_monomachine_machines_play_the_dn2s_note():
     knobs = {"SID 6581": (64, 0, 0, 0, 0, 0, 64, 64), "DPRO-WAVE": (0, 0, 0, 0, 0, 0, 0, 64),
              "DPRO-DDRW": (0, 0, 0, 0, 0, 0, 0, 64), "DPRO-DENS": (63, 63, 63, 0, 0, 0, 0, 64),
              "VO-6": (64, 64, 127, 0, 0, 0, 0, 64),
-             "SOPHIE": (127, 0, 0, 0, 64, 0, 0, 64),   # FUSE, no metal, no sweep: the carrier alone
+             # FUSE, no metal, no sweep: the carrier alone; TUNE (G) 64, MODL (H) 0 -- since 2026-11-11 the knobs are
+             # DCAY COLR METL FBK SWEP CRSH TUNE MODL (the old order here played SHRD at TUNE -24: 247 Hz for C4)
+             "SOPHIE": (127, 0, 0, 0, 64, 0, 64, 0),
              "PLAITS": (64, 0, 64, 0, 0, 64, 64, PLT.knob_of(PLT.MODELS.index("WS"))),   # WS, linear shape, the
                                                         # least fold; FINE (2026-11-09) at its centre: 0 is -64 cents;
                                                         # TUNE G, MODL H (2026-11-11: plaits.MODL_K)

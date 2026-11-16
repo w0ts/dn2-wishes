@@ -546,11 +546,28 @@ def test_every_table_perc_reads_is_loaded_by_a_span():
         return base <= lo and lo + len(data) <= base + len(shipped) \
             and shipped[lo - base:lo - base + len(data)] == data
     sdata, at = SL.tables_bytes()
-    assert sent(L.sin, sdata[at["sin"]:at["pow2"]]), "PERC's sine (AMD) is not shipped"
     pdata, pat = PM.tables_bytes()
-    assert sent(L.T["tan"], pdata[pat["tan"]:]), "PERC's tan is not shipped"
-    assert loaded(L.tables, pdata[:pat["tan"]]), "PERC's exp2 is not loaded"
-    assert L.T["exp2"] == L.tables
+    sine, tan, exp2 = sdata[at["sin"]:at["pow2"]], pdata[pat["tan"]:], pdata[:pat["tan"]]
+    # 2026-11-12 (perf): the program reads L1 copies of exp2 and tan (dsp.PERC_EXP2_DM, PERC_TAN_DM), loaded by REGION
+    # spans, and stock's own L1 sine (dsp.STOCK_SINE_DM, loaded by stock's stream); the DDR originals and the link's
+    # shipping stay
+    l1 = [(a, a + len(b), b) for _, a, b in dsp.spans()]
+
+    def in_l1(lo, data):
+        lo = dsp.dm_to_load(lo)
+        for a, z, b in l1:
+            if a <= lo and lo + len(data) <= z:
+                return b[lo - a:lo - a + len(data)] == data
+        return False
+    base_sin = base + len(shipped) - len(sine)
+    assert sent(base_sin, sine), "PERC's sine (AMD) is not shipped"
+    assert sent(base_sin - len(tan), tan), "PERC's tan is not shipped"
+    assert loaded(L.tables, exp2), "PERC's exp2 is not loaded"
+    assert L.sin == dsp.STOCK_SINE_DM and len(dsp.stock_sine()) == 4 * 257, "PERC's sine is not stock's S1"
+    s1 = struct.unpack("<257f", dsp.stock_sine())
+    assert max(abs(x - math.sin(2 * math.pi * k / 256)) for k, x in enumerate(s1)) < 1e-6, "S1 is not a sine"
+    assert in_l1(L.T["tan"], tan), "PERC's tan is not in its L1 copy"
+    assert in_l1(L.T["exp2"], exp2), "PERC's exp2 is not in its L1 copy"
 
 
 def test_v037_the_recorders_main_tap_is_one_place():
