@@ -81,7 +81,8 @@ failure:
    byte and closes; YES keeps the previewed machine; with the setting off, MACHINE SEL is stock's.
 6s. **DIRECT JUMP** (`emu_jump.py`, docs/jump.md): the sequencer ticked through stock's own ISR;
    off is stock's state every tick; on, every track goes on from its own step (Elektron's rule); a cue
-   that is not the PTN view's stays stock's; the setting persists in its sector.
+   that is not the PTN view's stays stock's; the setting persists in its sector. Rapid fire (83 cues) runs on
+   the coupled emulator (`emu_jump_coupled.py`, the same checks: the UI and the audio ISR every period).
 6q. **UI fuzz** (v0.33, `emu_fuzz_ui.py`): the sample pages driven at random, two seeds.
    v0.34 (docs/timing-model.md): with the audio interrupt firing on its own at its real
    cadence through the real vectors, preempting the mod's UI code; a CPU exception, the
@@ -2742,6 +2743,12 @@ def main() -> int:
             jcmds = [[a.venv, "-u", "scripts/emu_jump.py", "--build", bdir, "--snapshot", jsnap, "--scenario", sc,
                       "--variant", var, "--png-dir", jdir / "screens", "--json", jdir / f"{sc}_{var}_{'stock' if st else 'build'}.json"]
                      + (["--stock"] if st else []) for sc, var, st in jruns]
+            # 2026-11-14 (the 1.12 gate's blind spots): rapid on the coupled emulator (scripts/emu_jump_coupled.py:
+            # emu_jump's own rapid() and checks, the UI and the audio ISR every period). In emu_jump the switch to A04
+            # starts a kit load that never completes (no TDM side), and no key reaches stock's cue after it
+            jcmds[jruns.index(("rapid", "pp", False))] = [
+                a.venv, "-u", "scripts/emu_jump_coupled.py", "--build", a.build, "--stock", a.stock, "--snapshot", jsnap,
+                "--png-dir", jdir / "screens_rapid", "--json", jdir / "rapid_pp_build.json"]
 
             def jump_body(tdir):
                 res = {}
