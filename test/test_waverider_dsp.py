@@ -153,9 +153,15 @@ def test_the_five_patches_and_nothing_else_in_the_stock_blocks(stock7, built):
     assert bootstream.read_span(stock7, dl, 6) == dsp.DELAY_SITE_STOCK
     assert bootstream.read_span(built, dl, 6) == dsp.delay_call()
     rv_off, dl_off = bootstream.spans(stock7, rv, 6)[0][0], bootstream.spans(stock7, dl, 6)[0][0]
+    # CHOR/WIDE (b6): the engine's CJUMP to the FX sends, its target wr_inpost
+    sn = dsp.sw_to_load(dsp.SENDS_SITE_SW)
+    assert bootstream.read_span(stock7, sn, 6) == dsp.SENDS_SITE_STOCK
+    assert bootstream.read_span(built, sn, 6) == dsp.sends_cjump()
+    sn_off = bootstream.spans(stock7, sn, 6)[0][0]
     allowed = (set(range(entry_off, entry_off + 8)) | set(range(look_off, look_off + 6))
                | set(range(idle_off, idle_off + 6)) | set(range(call_off, call_off + 6))
-               | set(range(pv_off, pv_off + 6)) | set(range(rv_off, rv_off + 6)) | set(range(dl_off, dl_off + 6)))
+               | set(range(pv_off, pv_off + 6)) | set(range(rv_off, rv_off + 6)) | set(range(dl_off, dl_off + 6))
+               | set(range(sn_off, sn_off + 6)))
     assert diff and set(diff) <= allowed
 
 
