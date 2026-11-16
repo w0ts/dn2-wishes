@@ -11,9 +11,12 @@ The runner's other steps call the per-block routine directly and never pass entr
 slot 0 only, so none saw it. Here, per image, three blocks of WaveTone on every track; the build first runs
 wr_emark's first pass (TWIN cleared) as the firmware does. At the output stage's call of the third block: route[s]
 = s for all 16 slots, the retrigger flags 0, and a marker (s + 1) / 64 in the 32 words of the buffer slot s's chain
-writes (DM 0x254a60 + 4 s). Then:
+writes (DM 0x254a60 + 4 s); at the second block's, the same with 3 (s + 1) / 64 (G17, 2026-11-15: the output stage
+clears the buckets every block before it adds the slots in; the runner cleared only their even words, so a bucket
+held every block it had received and FLEX's TRK takes recorded that sum). Then:
 
-- stock: bucket s holds its marker x 11.627 (the B gain), all 16 (the probe's own check);
+- stock: bucket s holds the last block's marker x 11.627 (the B gain) in all 32 words, nothing of the block before,
+  all 16 (the probe's own check, and the clear's);
 - the build: all 16 buckets bit-identical to stock's, and the pointer table at 0x257ea8 the 16 L1 buffers in order;
 - control: the build with the pre-2026-11-15 layout written back after the first pass must be seen (buckets differ).
 """
@@ -55,7 +58,7 @@ def _first_pass(M5, r) -> None:
 def _run(M5, init, sound, machines, *, first_pass: bool, old_layout: bool) -> dict:
     m2, m4, fx = M5.m2, M5.m4, M5.fx
     frame = M5.base_frame(sound, machines, t0=1, others={t: 1 for t in range(1, 16)}).to_bytes()
-    seen = {"armed": False}
+    seen = {"armed": 0}
 
     def at_output(r):
         if not seen["armed"]:
@@ -69,7 +72,7 @@ def _run(M5, init, sound, machines, *, first_pass: bool, old_layout: bool) -> di
         seen["ptr_b"] = [m2.word(st, PTR_B + 4 * s) or 0 for s in range(16)]
         for s in range(16):
             for k in range(32):
-                m2.poke(st, seen["ptr_a"][s] + 4 * k, _f2w((s + 1) / 64.0))
+                m2.poke(st, seen["ptr_a"][s] + 4 * k, _f2w(seen["armed"] * (s + 1) / 64.0))
         seen["poked"] = True
 
     state = init
@@ -81,7 +84,7 @@ def _run(M5, init, sound, machines, *, first_pass: bool, old_layout: bool) -> di
                 for t in range(16):
                     m2.poke(r.state, _old_layout(t), dsp.TRACKBUF_DM + 0x80 * t)
             r = m4.unpack_call(r, frame)
-        seen["armed"] = b == BLOCKS - 1
+        seen["armed"] = 1 if b == BLOCKS - 1 else 3 if b == BLOCKS - 2 else 0   # G17: last block's marker, x 3 before it
         res = fx.run(r, 40_000_000, M5.fixups({OUTPUT_CALL_SW: at_output}))
         if not (res[0] == "halt" and res[1].pc_sw == m4.UNPACK_RETURN):
             return {"ok": False, "halt": f"block {b}: {res[:2]}"}
@@ -114,7 +117,8 @@ def run(M5, snap, m2mach, m5img, stockimg, sound, machines) -> dict:
     l1 = [dsp.TRACKBUF_DM + 0x80 * t for t in range(16)]
     checks = {
         "the three runs (stock, build, control) return every block and reach the output stage": ok,
-        "stock: every bucket holds its own slot's marker x 11.627, 16 of 16": stock_marked == 16,
+        "stock: every bucket holds its own slot's last marker x 11.627 in all 32 words (the block before cleared), "
+        "16 of 16": stock_marked == 16,
         "build after trackbuf.asm's first pass: the pointer tables at 0x254a60 and 0x257ea8 are the L1 buffers in order":
             ok and runs["build"]["ptr_a"] == l1 and runs["build"]["ptr_b"] == l1,
         "build: the 16 TRK buckets (0x259f68 + 0x100 k, FLEX's TRK sources) bit-identical to stock's, 16 of 16":

@@ -193,7 +193,12 @@ REC_GAIN = 0x2DF7F4                        # v0.50: a FLEX take's GAIN index (0 
 # came out 1.8 dB short; a first estimate, x 12.44 from the chain's -21.9 dB, clipped). Not
 # measured on hardware: the runner does not model everything after the per-track buffer; GAIN's
 # range (-24..+38 dB) covers either way
-TRK_UNITY = 0.1696 / 0.0725                # 2.339 (+7.4 dB): x the 1 / TRK_GAIN the RECORDER keeps
+# 2026-11-15: that 2.339 came from the runner's own fault (G17 in scripts/sharc_dn2_fixups.py: the output stage's
+# clear of the per-track buffers left their odd words, so the bucket summed every block). On the unit (v0.53.11,
+# the init sound in its amp sustain, ONESHOT looping, VEL 127, GAIN 0, played back on the same track) the take came
+# out 17.86 dB under its source; the User: GAIN 0 is the source's level on the unit. So x 10^(17.86 / 20)
+TRK_UNITY_UNIT_DB = 17.86                  # the unit's shortfall at 2.339 (unit-now, 2026-11-15)
+TRK_UNITY = 0.1696 / 0.0725 * 10.0 ** (TRK_UNITY_UNIT_DB / 20.0)   # 18.28 (+25.2 dB): x the 1 / TRK_GAIN
 GAIN_ZERO = 25                             # the index of 0 dB: 1..63 is -24..+38 dB
 CMD_OFFSET = 0xF00                         # the command block in the pool's directory page:
 CMD_WORDS = 6                              #   seq, cmd, src, chan, thres (0..32767), dest << 24 | frames

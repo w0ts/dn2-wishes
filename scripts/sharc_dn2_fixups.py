@@ -113,6 +113,21 @@ post-fix), or replaces the step outright:
       stockout stays bit-identical. Conditional 6b in SIMD still runs PEx
       only (G6's conditional path), and so does Type 6a: neither is
       measured on the DN2 image yet.
+  G17 (2026-11-15) G12's rule for every memory form: in SIMD a store of a
+      register with no PEy complement (M, I, L, B, ...) stores the same
+      register at the companion address too. The output stage 0x1c244d
+      clears the per-track buffers 0x259f68 (FLEX's TRK sources, Overbridge's
+      raw track channels) with M12 = 0 in SIMD through 15b, 3a and 3b, then
+      adds each slot's block x 11.627 into its track's buffer: the runner
+      cleared only the even words, so each buffer summed every block it had
+      ever received (measured: a WaveTone note's TRK1 0.065, 0.20, 0.36 ..
+      1.01 RMS over nine blocks while the slot's block stayed at 0.029; the
+      same on stock). A FLEX take of a track recorded that sum, and step 3f
+      and TRK_UNITY were calibrated on it (the unit: a GAIN 0 take 17.9 dB
+      under its source). 3b and 15a such stores are run by the two-pass;
+      the warm snapshot is rebuilt (INIT_REV). Runner step 4k (trkbuf)
+      checks the clear: two blocks' markers, only the last one's in the
+      buffers.
 
 Two accelerations, each measured against the emulated code it replaces:
 
@@ -172,7 +187,7 @@ def cond_of(f) -> int:
 
 # the warm snapshot (sharc_waverider_voice.py's engine init) depends on these fixups: its file name carries this, so
 # a snapshot built under older ones is never taken (G13 changed what the init leaves in slots 1..15)
-INIT_REV = "_g16"
+INIT_REV = "_g17"
 # a bisection aid: DNFW_FIXUPS_OFF=G12,G13a,G13b,G13d,G14,G14d,G16 runs those as before them (a snapshot built so is named apart)
 OFF = {x for x in os.environ.get("DNFW_FIXUPS_OFF", "").split(",") if x}
 if OFF:
@@ -219,6 +234,8 @@ SIMD_NATIVE = {"2c", "2a_short", "14a", "3b", "15a"}
 MEM_NO_COMPANION = {"3a", "4a", "4b", "15b", "3c", "3d", "4d"}
 # G12: the forms whose companion is one access width on (G1's others: the next word, + 4)
 BY_WIDTH = {"3d", "4d"}
+# G17: the native companion forms whose store of a register with no PEy complement the runner leaves PEx-only
+G17_NATIVE = {"3b", "15a"}
 WIDTH_BYTES = {"byte": 1, "byte-sign-extended": 1, "short-word": 2, "short-word-sign-extended": 2}
 FLOW = {"12a_imm", "12a_ureg", "11c", "11a", "9a_abs", "9b_abs", "25c_rframe", "9a_rel",
         "25a_direct", "25a_pcrel", "8a_abs", "8a_rel", "13a"}
@@ -302,6 +319,9 @@ class Fixups:
         pc = s.pc_sw
         blank = t == "7a" and blank_modify(f) and getattr(s, "assume_nw32", False) and "G13a" not in OFF \
             and l1_target(s, f)
+        if in_simd and t in G17_NATIVE and "G17" not in OFF and F(f, "d") and not F(f, "l") \
+                and not self.is_long(t, f) and fm._cureg_code(F(f, "ureg")) is None:
+            return ("replace", lambda r: self.two_pass(r, insn, memory=True))
         if in_simd and t not in SIMD_NATIVE and t not in ("17a", "17b"):
             if t in MEM_NO_COMPANION and not self.is_long(t, f) and not ("G12" in OFF and t in BY_WIDTH):
                 return ("replace", lambda r: self.two_pass(r, insn, memory=True))
@@ -538,7 +558,9 @@ class Fixups:
                 x.special[b] = y.special[a]
         # G12: a 3d/4d store of a register with no PEy complement (M13 in the trig cells' clear) stores the same
         # register at the companion address too: the firmware clears the odd cells with it
-        if memory and (comp or insn.type_name in BY_WIDTH) and isinstance(y.overlay, COW):
+        # G17: so does every memory form's store of such a register (the output stage's clear of the per-track
+        # buffers stores M12 in SIMD through 15b, 3a and 3b: without it their odd words were never cleared)
+        if memory and (comp or insn.type_name in BY_WIDTH or "G17" not in OFF) and isinstance(y.overlay, COW):
             own = y.overlay.own()
             if own:
                 x.overlay.update(own)

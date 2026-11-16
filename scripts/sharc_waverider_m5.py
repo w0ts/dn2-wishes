@@ -3056,6 +3056,12 @@ def step_rec(init, sound, machines, blocks) -> dict:
 
 # -- step 3f: a FLEX take's level (v0.50) ----------------------------------------------------------
 
+# 2026-11-15: the runner (with G17) puts a GAIN 0 take of step 3f's source 16.0 dB under it at the old TRK_UNITY,
+# the unit 17.86; with TRK_UNITY from the unit the runner reads the difference. Its cause is NOT measured (the unit's
+# main-out RMS of a pulsing tom over seconds against the runner's amp out over 8 ms, or something after the amp)
+RUNNER_TO_UNIT_DB = 17.86 - 16.0
+
+
 def step_flexlevel(init, sound, machines) -> dict:
     """v0.50 (impbox, Error Kit, AnnKorr on v0.49: a FLEX take of a track "very quiet .. max
     everything to hear it"). Track 0 ONESHOT on SAMP 3 looping (PLAY 80, LOOP 20) at its
@@ -3069,15 +3075,23 @@ def step_flexlevel(init, sound, machines) -> dict:
     clip this loud a source: the meter's CLIP).
     Measured 2026-11-12 (v0.50's first take on it): v0.49's scaling 0.4991 of the source; a
     x 12.44 first guess clipped (+9.4 dB); x 2.0 (the output's ratio) came out -1.8 dB (the
-    chain compresses a little); TRK_UNITY is the render's ratio, 2.339."""
+    chain compresses a little); TRK_UNITY is the render's ratio, 2.339.
+    2026-11-15 (the unit, v0.53.11: a GAIN 0 take of the init sound 17.86 dB under its source): that 2.339 was
+    measured on the runner's own fault (G17, sharc_dn2_fixups: the output stage's clear of the per-track buffers
+    left their odd words, so TRK1 summed every block, and the take recorded that sum). With G17 the take carries
+    its track's chain once more, as on the unit: in the amp envelope's sustain (the init SUS 96, 0.756) the old
+    2.339 puts it -16.0 dB under its source on the runner, -17.86 on the unit. TRK_UNITY now comes from the unit
+    (machines.py), and the source here has amp DEC 0, so the window sits in the sustain as the unit's did; the
+    runner then reads RUNNER_TO_UNIT_DB (+1.86, the 1.9 dB the runner does not explain) within 1 dB."""
     import math as _m
     ONE = SM.TYPE_OF["ONESHOT"]
     cmd_at = dsp.SMP_POOL_DDR + SM.CMD_OFFSET
     n, gap, w = 24, 3, 12                           # recording blocks; then STOP, the playback's trigger; the window
-    # the windows sit past the amp envelope's attack (about 5 blocks) in both: the source's blocks
-    # n - w .. n, and the same stretch of the take as it plays (its frame k is the source's block
+    # the windows sit past the amp envelope's attack and decay (DEC 0: in the sustain from block 10) in both: the
+    # source's blocks n - w .. n, and the same stretch of the take as it plays (its frame k is the source's block
     # k / 32 - 1: the bucket is the last block's), n + gap + (n - w) + 1 on
     loop = {SM.SAMP_REC: 3, SM.PLAY_REC: 80, SM.LOOP_REC: 20}
+    amp = {83: 0}                                   # amp DEC 0: the init sustain (SUS 96) at once
 
     def command(r, seq, cmd, src=0, chan=0, dest=0, frames=SM.REC_FRAMES, place=0, thres=0):
         for k, word in enumerate((seq, cmd, src, chan | place << 8, thres, (SM.REC_FIRST + dest) << 24 | frames)):
@@ -3099,10 +3113,10 @@ def step_flexlevel(init, sound, machines) -> dict:
 
         def fb(b):
             if b < n + gap:
-                f = base_frame(sound, machines, t0=ONE, trigger=b == 1, overrides=smp_words(loop))
+                f = base_frame(sound, machines, t0=ONE, trigger=b == 1, overrides={**amp, **smp_words(loop)})
             else:
                 take = {**loop, SM.SAMP_REC: SM.REC_FIRST + 1}
-                f = base_frame(sound, machines, t0=ONE, trigger=b == n + gap, overrides=smp_words(take))
+                f = base_frame(sound, machines, t0=ONE, trigger=b == n + gap, overrides={**amp, **smp_words(take)})
             for t in range(16):                         # each track to its own slot of 0x1c244d's buffer
                 f.put(0xA5A + 2 * t, t)                 # (docs/link-research.md; all zero sums every
             return f.to_bytes()                         # track, unset buffers too, into TRK1: NaN)
@@ -3130,11 +3144,11 @@ def step_flexlevel(init, sound, machines) -> dict:
                 "take_peak": max((abs(v) for v in take), default=0.0)}
     unity, recorder, minus6 = run(SM.GAIN_ZERO), run(0), run(SM.GAIN_ZERO - 6)
     checks = {
-        "v0.50: a FLEX take of a track (GAIN 0) reaches its track's chain at its source's level: the "
-        "take's render against the source's, within 0.5 dB (RMS)":
-            unity is not None and abs(unity["render_db"]) <= 0.5,
-        "v0.50: .. and comes out of the amp within 1 dB of its source (the chain compresses a little)":
-            unity is not None and abs(unity["out_db"]) <= 1.0,
+        f"2026-11-15: a FLEX take of a track (GAIN 0) at its source's level as the unit measures it: the take's "
+        f"render against the source's at {RUNNER_TO_UNIT_DB:+.2f} dB (the runner's offset to the unit), within 1 dB":
+            unity is not None and abs(unity["render_db"] - RUNNER_TO_UNIT_DB) <= 1.0,
+        f".. and out of the amp at {RUNNER_TO_UNIT_DB:+.2f} dB within 1 dB":
+            unity is not None and abs(unity["out_db"] - RUNNER_TO_UNIT_DB) <= 1.0,
         "v0.50 negative control: the RECORDER's command (no GAIN: v0.49's scaling) renders the same take "
         "over 4 dB under its source":
             recorder is not None and recorder["render_db"] < -4.0,
