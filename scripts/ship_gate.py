@@ -2399,9 +2399,13 @@ def main() -> int:
         if "colsw" in lay:
             kit = 0x4210D08C
             ty = kit + 52 + 0xDE
-            rs = (f"wait:3,poke:{ty:#x}:01,wait:4,tap:2,wait:6,func-src,wait:20," + "down,wait:3," * 9
+            # (2026-11-14, the 1.12 gate: down to GRID's row as stock reads it, not nine rows: 1.11's gate snapshot
+            # holds v0.14's MACHINE SEL rows, a 1.12 per-build one this build's (LIST_NEW), GRID further down)
+            rs = (f"wait:3,poke:{ty:#x}:01,wait:4,tap:2,wait:6,func-src,wait:20,down-to:12,wait:3,"
                   + "png:r0,yes,wait:20,right,wait:20,png:r1,left,wait:20,png:r2,right,wait:20,png:r3,types,"
-                  + "no,wait:10,png:v0,press:2,wait:30,png:v1,release:2,wait:10,png:v2")   # v0.35: SYN held (O14)
+                  # (2026-11-14: 300 M after NO and after SYN's release: stock shows the page's title a while after
+                  # a key, then the pattern's name; both pictures are taken once the title has settled)
+                  + "no,wait:300,png:v0,press:2,wait:30,png:v1,release:2,wait:300,png:v2")   # v0.35: SYN held (O14)
             rjs = work / "colsw.json"
             r_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
                      "--snapshot", snap, "--steps", rs, "--png-dir", work / "colsw", "--json", rjs]

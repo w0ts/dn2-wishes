@@ -103,6 +103,7 @@ TYPE_READS = {0x400254B4: 2, 0x40031BD2: 0, 0x40031C1C: 0, 0x40036478: 0, 0x4003
               0x400B17CC: 0}
 GETTER_RTS = 0x4003647C                 # rts of the machine-type getter 0x40036462
 TRACK_GETTER_EXIT = 0x4004B81E          # getMachineType(track) 0x4004b7f2: the common exit
+MSEL_FOLLOW, MSEL_ROW_TYPE = 0x4005A956, 0x4005B162   # MACHINE SEL: UP/DOWN's scroll-follow(view); the cursor row's type(view)
 ISR = 0x40025E36                        # the audio frame handler: modulation, frame, send
 ISR_RTE = 0x40027BC6                    # its only rte (docs/usbprobe.md)
 SEQ_ISR, SEQ_VECTOR = 0x400D99DE, 121   # the sequencer's timer ISR (emu_jump.py)
@@ -2039,6 +2040,11 @@ def main() -> int:
         def took(uc_, address, size, user):
             entry_args[address] = tuple(arg(4 * n) & 0xFFFFFFFF for n in range(1, 6))
         uc.hook_add(UC_HOOK_CODE, took, begin=int(va, 0), end=int(va, 0))
+    # MACHINE SEL's view, as UP / DOWN hand it to the scroll-follow (the down-to: step)
+    msel_view: dict[str, int] = {}
+    down_to: list[list] = []
+    uc.hook_add(UC_HOOK_CODE, lambda uc_, ad, sz, us: msel_view.__setitem__("view", arg(4) & 0xFFFFFFFF),
+                begin=MSEL_FOLLOW, end=MSEL_FOLLOW)
 
     track_getter5: dict[str, int] = {}
 
@@ -2261,6 +2267,26 @@ def main() -> int:
             panel.let_go(FUNC)
         elif step in KEYS:
             panel.tap(KEYS[step])
+        elif step.startswith("down-to:"):
+            # down-to:TYPE[:MOST] (2026-11-14, the 1.12 gate): DOWN in MACHINE SEL until the cursor's row is TYPE,
+            # read as stock reads it (0x4005b162(view)), at most MOST presses; not a count of rows, which is the
+            # snapshot's list (1.11's gate snapshot holds v0.14's rows, a per-build one this build's). The JSON's
+            # down_to: [TYPE, presses, the row's type] each
+            parts = step.split(":")
+            want, most = int(parts[1], 0), int(parts[2]) if len(parts) > 2 else 40
+            presses, row = 0, None
+            while presses < most:
+                panel.tap(KEYS["down"])
+                presses += 1
+                if "view" not in msel_view:
+                    raise SystemExit("down-to: no MACHINE SEL view seen (is MACHINE SEL open?)")
+                guest_call(MSEL_ROW_TYPE, msel_view["view"])
+                row = returned["d0"]
+                row = row - (1 << 32) if row & 0x80000000 else row
+                if row == want:
+                    break
+            down_to.append([want, presses, row])
+            print(f"  down-to {want}: {presses} DOWN, the row's type {row}")
         elif step.startswith("png:"):
             shots[step[4:]] = panel.screen(step[4:])
         elif step.startswith("alive:"):          # v0.33: a liveness checkpoint
@@ -2674,7 +2700,7 @@ def main() -> int:
               "setter_writes": writes,
               "mirror_type_writes": mirror_writes, "type_writes": type_writes,
               "direct_calls": calls_made,
-              "frames": frames, "memory": mems, "labels": labels, "pixel_callers": pixels, "access": access, "counts": counts,
+              "frames": frames, "memory": mems, "down_to": down_to, "labels": labels, "pixel_callers": pixels, "access": access, "counts": counts,
               "screen_frames": panel.frames() - frames_at_reset[0],
               "panel_writers": panel_writers, "items": items,
               "alive": alive, "fault_reports": reported, "stack_frees": stack_frees[:10],
