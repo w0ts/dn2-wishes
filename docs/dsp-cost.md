@@ -121,7 +121,7 @@ Proof: `scripts/perc_host_identity.py` (every engine through mnm_ages + the voic
 slot parities, notes, knobs, effects, a machine change, rests, a NaN wipe, every type word on the other tracks;
 outputs and the voices' state hashed): 58 of 58 identical to main. Unit tests test_perc_live, test_perc_mf,
 test_md, test_mnm: the same 448 pass and the same 4 fail on main. Hardware rules on the regenerated section 7: PASS.
-On the regenerated tree (gpufarm, 2026-11-12): runner decode, map, voice, guard, garbage, wipe 50/50 PASS; mnm,
+On the regenerated tree (the farm, 2026-11-12): runner decode, map, voice, guard, garbage, wipe 50/50 PASS; mnm,
 frame, stress, chords, smp 51 PASS and 1 FAIL, `v0.18: ONESHOT plays KICK from the pool` (sample machines), which
 fails the same on main f649683c (smp step run there). Measured in the runner after: TRX-CY's host 3,425 -> 2,938
 (runner map), PERC's entry 4,846 -> 2,317 with no voice and 13,128 -> 10,199 with 16, the slot loop 1,305 -> 953

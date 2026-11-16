@@ -18,7 +18,7 @@ docs/circ-unit-test.md, was the first).
   other than the source without `(NW)`, silently dropped before, is refused. A selas test holds four forms to
   ADI's words. selache's own tests pass (its one failing doctest fails without the patch too).
 - **`tools/selache/apply.sh SELACHE TARGET`** applies our patches to a selache checkout (idempotent) and
-  rebuilds selas: on gpufarm `tools/selache/apply.sh ~/dn2mk2-bench/Z/selache ~/dn2mk2-bench/tools/selache-target`.
+  rebuilds selas: on the farm `tools/selache/apply.sh ~/dn2mk2-bench/Z/selache ~/dn2mk2-bench/tools/selache-target`.
 - **`sharc_waverider_m3.check_modify`**: every generator's assembly (`_selas`) refuses a MODIFY in any form but
   `Id=MODIFY (Is,Mm)(NW)`, and holds its bytes to the SHARC+ word computed apart (`modify_nw_word`), whatever
   selas the bench has.

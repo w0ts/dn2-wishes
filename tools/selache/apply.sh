@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Our patches to selache (github.com/js216/selache, GPL-3.0; the bench's SHARC+ assembler), applied to a
 # checkout of it and selas rebuilt (docs/selas-encoding.md). Idempotent: a patch already in the checkout is
-# skipped. On gpufarm: tools/selache/apply.sh ~/dn2mk2-bench/Z/selache ~/dn2mk2-bench/tools/selache-target
+# skipped. On the farm: tools/selache/apply.sh ~/dn2mk2-bench/Z/selache ~/dn2mk2-bench/tools/selache-target
 #   SELACHE  the selache checkout (base 2b26d3b, "cosmetic change")
 #   TARGET   cargo's target directory (the bench's selas is TARGET/release/selas)
 set -euo pipefail

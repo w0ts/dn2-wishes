@@ -215,7 +215,7 @@ MNM_EXC_TREES = {"src/dnfw/mnm": "c27c4179af8142a94794fcafac097b5b99edd267",
 # module); its 366 golden cases are not collected at all (measured on v0.39's tree, 2026-11-05)
 MNM_EXC_REST = 8
 # dn2-wishes (the User, 2026-11-11, "Skip it, report it"): upstream's Monomachine golden runs are not available to
-# the fork (not on the Mac nor gpufarm), and the exception above covers only v0.39's DSP image. Without them the unit
+# the fork (not on the Mac nor the farm), and the exception above covers only v0.39's DSP image. Without them the unit
 # step runs every other test and reports the golden cases as not checked, instead of refusing every v0.48 build.
 NO_MNM_GOLDEN = -1
 TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platform.py",

@@ -163,7 +163,7 @@ TAPE 11,788 -> 11,794, FOLD 9,801 -> 9,807, HARM 8,812 -> 8,817 (+6, the flag te
 
 ## Next hot spots (planned, none started; ranked by the worst-case budget table)
 
-Source: `~/GitHub/dn2mk2-scratch/combined/budget-table.md` (SHARC runner, gpufarm, combined build WITHOUT this
+Source: `~/GitHub/dn2mk2-scratch/combined/budget-table.md` (SHARC runner, farm, combined build WITHOUT this
 branch's changes, cycles on the runner clock, frame 666,667). Its worst case (16 x PI-SD + DIOD + CHOR/TAPE +
 FDN8/XDLY) is 1,987k = 298 %: 16 voices 710k, A2 filter 241k, inserts 685k, idle floor 352k. This branch took
 from it: PI-SD/PI-RS ~-46 % per voice (DDR 2.1k -> 0.26k a block), the idle CHOR/WIDE and bus passes (13k + 12k
@@ -449,7 +449,7 @@ free; the python models run natively on the Mac with `MD_OS_BIN/MNM_OS/DT2_*` fr
 
 ## PLAITS PART / STRG at 16 voices (2026-11-11, plaits16, branch claude/plaits16-a61ad4 on main 65edf070)
 
-Runner poly16 step (`DNFW_POLY16_ONLY=PART,STRG`, gpufarm): **PASS for both** (PART 16/16 sounding from block 2,
+Runner poly16 step (`DNFW_POLY16_ONLY=PART,STRG`, farm): **PASS for both** (PART 16/16 sounding from block 2,
 STRG from block 4, no guard skip from block 4). Main's: PART sounds from block 10, STRG from block 6 (the
 deferred clear with CLEAR_SPREAD), so both FAILed there whatever the speed. Two parts:
 
@@ -520,7 +520,7 @@ memory frees up (the PERC constant pool, a layout change):
    if a 5 KB gap is ever free (the largest free one today is 3.5 KB; main as the arbiter, 2026-11-14: none to allot,
    the User's reserve off limits).
 
-Checked before the two tables went in: r52-r5's generated assembly (every `.asm`, regenerated on gpufarm) addresses
+Checked before the two tables went in: r52-r5's generated assembly (every `.asm`, regenerated on the farm) addresses
 nothing inside `0x200A9200..0x200A9C88` or `0x200B5800..0x200B6000`; a2f.asm's state is all L1 (`0x2DD600..`).
 ## 2026-11-14: the insert FX, bit-identical (session insfx, branch `claude/insfx-fast` on `r52-r5` 464361e2)
 
@@ -551,7 +551,7 @@ inserts.asm 8,572 -> 8,398 B of its 8,576 (the riding moves make the code smalle
 pass) were left as they are: an earlier session already holds their loops in registers (17 instructions a
 sample-voice for CHOR); what is left there needs multifunction instructions.
 
-Tests (all on gpufarm): `test_fdn8` (model = reference: FDN8, LONG, the second page), `test_fdn8_stages` (A/B with a
+Tests (all on the farm): `test_fdn8` (model = reference: FDN8, LONG, the second page), `test_fdn8_stages` (A/B with a
 random ring and every tap across the ring's start at 6 places), `test_xdly` + `test_xdly_stages`, `test_inserts`
 (model = reference), `test_inserts_held` (A/B of every held loop: buffers and every memory word), `test_inserts_bus`,
 `test_inserts_order`.

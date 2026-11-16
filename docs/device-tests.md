@@ -270,7 +270,7 @@ Branch `claude/autotest-device-c6da3b`. Everything is committed; nothing is push
   `~/GitHub/dn2mk2-scratch/DN2mod_v0.47-ours-NOBOOT-1.12-combined-telemetry_UNGATED_OS1.12.syx`, sha256 `c87ec50e3bfb8d25093ae8215ac7fda9fff5f048cf4cfb4e29e91f8fead00a2c`
   (source 9019f236, regenerated files d7a2d62b). Build recipe: `~/GitHub/dn2mk2-scratch/autotest/build_tree.sh NAME COMMIT`
   (needs a commit hash from this repo, not the main checkout's HEAD). Emulator check: `scripts/check_tlm_replies.py` on the replies of
-  `emu_waverider_menu.py`'s `sysex:` step (`~/GitHub/dn2mk2-scratch/autotest/farm_tlm.sh` ran it on gpufarm).
+  `emu_waverider_menu.py`'s `sysex:` step (`~/GitHub/dn2mk2-scratch/autotest/farm_tlm.sh` ran it on the farm).
 - Driver `tools/dn2test.py` + `tools/dn2test/`: function scenarios, `--bench` / `--compare`, `--peak` / `--peak-compare`, `--audio`, `--dry-run`,
   `--serve-fake`. 23 pytest tests (`tools/dn2tools/tests`, the project `.venv` has pytest and numpy).
 - The audio-analysis scenarios and the peak / wake-up scenarios are NOT queued: they are written and tested (sections above).

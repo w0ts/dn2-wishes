@@ -1,8 +1,9 @@
 """The run queue's hosts (scripts/runq.py, docs/runq.md): the User's limits, the tree's snapshot,
-and starting, watching, stopping and collecting a job on the Mac or on gpufarm."""
+and starting, watching, stopping and collecting a job on the Mac or on the farm."""
 
 from __future__ import annotations
 
+import getpass
 import glob
 import hashlib
 import io
@@ -16,11 +17,13 @@ import subprocess
 import tarfile
 import time
 
-FARM = os.environ.get("RUNQ_FARM_HOST", "gpufarm")
-FARM_HOME = os.environ.get("RUNQ_FARM_HOME", "/home/mots")
+# the farm: an ssh host name (an alias in ~/.ssh/config, or set RUNQ_FARM_HOST), and the home directory
+# there (RUNQ_FARM_HOME; by default /home/ plus RUNQ_FARM_USER, else the local user name)
+FARM = os.environ.get("RUNQ_FARM_HOST", "farm")
+FARM_HOME = os.environ.get("RUNQ_FARM_HOME", "/home/" + os.environ.get("RUNQ_FARM_USER", getpass.getuser()))
 FARM_BENCH = FARM_HOME + "/dn2mk2-bench"
 FARM_ROOT = FARM_BENCH + "/runq"                 # the job trees, and seed/ (the runner's engine snapshot)
-# the User's rule (2026-11-12): ours, all together, of gpufarm's 64 cores: 32 on weekdays 08:00-17:00 (local),
+# the User's rule (2026-11-12): ours, all together, of the farm's 64 cores: 32 on weekdays 08:00-17:00 (local),
 # 50 otherwise. RUNQ_FARM_CPUS sets one cap at all times
 FARM_CPU_OFFICE, FARM_CPU_OFF_HOURS = 32.0, 50.0
 FARM_CPU_FIXED = os.environ.get("RUNQ_FARM_CPUS")
@@ -35,10 +38,10 @@ MAC_THREAD_VARS = ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS",
 RAMP_S = 90                                      # a job just started may not show its CPU yet
 FILES_DIR = "_runq_files"                        # where files named outside the tree land in its copy
 
-# kind -> (hosts it may run on, CPUs it takes, timeout in s). Measured on gpufarm 2026-11-12: a
+# kind -> (hosts it may run on, CPUs it takes, timeout in s). Measured on the farm 2026-11-12: a
 # runner step or a gate part is one python process at 100 % of one core; a regeneration likewise.
 KINDS = {
-    "runner": (("farm",), 1, 7200),              # scripts/sharc_waverider_m5.py: digikit is on gpufarm
+    "runner": (("farm",), 1, 7200),              # scripts/sharc_waverider_m5.py: digikit is on the farm
     "regen": (("farm",), 1, 1800),               # gen_*_asm + gen_waverider_sharc --assemble: selas is there
     "gate": (("farm",), 1, 7200),                # ship_gate.py --only STEP
     "emu": (("mac",), 2, 7200),                  # the ColdFire emulator (Docker on the Mac)
@@ -61,7 +64,7 @@ class HostError(RuntimeError):
 
 def check_glob(g: str) -> str:
     """a --collect pattern: relative, inside the tree, plain characters (it is expanded by a shell
-    on gpufarm, so nothing it could run)"""
+    on the farm, so nothing it could run)"""
     if not GLOB_OK.match(g) or g.startswith("/") or ".." in g.split("/"):
         raise ValueError(f"runq: --collect {g!r}: a relative pattern of letters, digits, _ . - / * ? [ ]")
     return g
@@ -127,14 +130,14 @@ def snapshot(trees: pathlib.Path, top: pathlib.Path, files: list[str],
 # -- the limits ----------------------------------------------------------------------------------
 
 def ssh(cmd: str, timeout: int = 60, inp: bytes | None = None) -> subprocess.CompletedProcess:
-    """CMD on gpufarm; HostError when ssh itself fails (rc 255) or times out"""
+    """CMD on the farm; HostError when ssh itself fails (rc 255) or times out"""
     try:
         r = subprocess.run(["ssh", "-o", "ConnectTimeout=15", "-o", "BatchMode=yes", FARM, cmd],
                            input=inp, capture_output=True, timeout=timeout)
     except (subprocess.SubprocessError, OSError) as e:
-        raise HostError(f"gpufarm: {e}") from e
+        raise HostError(f"farm: {e}") from e
     if r.returncode == 255:
-        raise HostError(f"gpufarm: {r.stderr.decode(errors='replace')[-200:]}")
+        raise HostError(f"farm: {r.stderr.decode(errors='replace')[-200:]}")
     return r
 
 
@@ -160,7 +163,7 @@ EOF"""
 
 
 def farm_usage() -> tuple[float, float] | None:
-    """(the CPUs all our processes on gpufarm use now, queued or not; its load1), or None"""
+    """(the CPUs all our processes on the farm use now, queued or not; its load1), or None"""
     try:
         ours, load = ssh(FARM_PROBE, timeout=40).stdout.decode().split()
         return float(ours), float(load)
@@ -173,7 +176,7 @@ def mac_load() -> float:
 
 
 def farm_cpu_max(now: float) -> float:
-    """our CPU cap on gpufarm at NOW (epoch seconds, the Mac's local time)"""
+    """our CPU cap on the farm at NOW (epoch seconds, the Mac's local time)"""
     if FARM_CPU_FIXED is not None:
         return float(FARM_CPU_FIXED)
     t = time.localtime(now)
@@ -237,21 +240,21 @@ def start(job: dict, work: pathlib.Path) -> dict:
     r = ssh(f"rm -rf {root} && mkdir -p {root} && tar -xzf - -C {root}", timeout=900,
             inp=pathlib.Path(job["tar"]).read_bytes())
     if r.returncode:
-        raise HostError(f"gpufarm: unpacking failed: {r.stderr.decode(errors='replace')[-200:]}")
+        raise HostError(f"farm: unpacking failed: {r.stderr.decode(errors='replace')[-200:]}")
     seed = (f"mkdir -p out/waverider && cp -n {FARM_ROOT}/seed/m2_init_* out/waverider/ 2>/dev/null; "
             if job["kind"] == "runner" else "")
     run = f"timeout {int(job['timeout'])} " + ("" if job["kind"] == "cmd" else f"{FARM_BENCH}/bench_ns112.sh . ")
-    # 2026-11-14 (main): nice 19 on gpufarm too, as on the Mac (17-19 jobs at a time ran at nice 0 until now)
+    # 2026-11-14 (main): nice 19 on the farm too, as on the Mac (17-19 jobs at a time ran at nice 0 until now)
     sh = f"cd {root} && {seed}( nice -n 19 {run}env {_env(job)} {_shell(job, 'farm')} ) > runq.log 2>&1{tail}"
     r = ssh(f"nohup sh -c {shlex.quote(sh)} > /dev/null 2>&1 < /dev/null &", timeout=60)
     if r.returncode:
-        raise HostError(f"gpufarm: start failed: {r.stderr.decode(errors='replace')[-200:]}")
+        raise HostError(f"farm: start failed: {r.stderr.decode(errors='replace')[-200:]}")
     return {"where": root}
 
 
 def poll(job: dict, now: float) -> int | str | None:
     """the job's rc when it has ended; 'gone' when its tree has vanished; else None. A Mac job past
-    its timeout is stopped (its process group) and ends with 124, as `timeout` does on gpufarm."""
+    its timeout is stopped (its process group) and ends with 124, as `timeout` does on the farm."""
     if job["host"] == "mac":
         f = pathlib.Path(job["where"]) / "runq.rc"
         if f.exists():
@@ -275,7 +278,7 @@ def poll(job: dict, now: float) -> int | str | None:
 
 def collect(job: dict, into: pathlib.Path) -> None:
     """the job's log (into/log) and the files its --collect patterns match (into/files/...); raises
-    HostError if gpufarm did not hand them over (so nothing half is kept)"""
+    HostError if the farm did not hand them over (so nothing half is kept)"""
     (into / "files").mkdir(parents=True, exist_ok=True)
     if job["host"] == "mac":
         work = pathlib.Path(job["where"])
@@ -292,7 +295,7 @@ def collect(job: dict, into: pathlib.Path) -> None:
     pack = f"tar -czf - runq.log $(for f in {pats}; do [ -f \"$f\" ] && printf '%s\\n' \"$f\"; done)"
     r = ssh(f"cd {job['where']} && bash -O globstar -O nullglob -c {shlex.quote(pack)}", timeout=900)
     if r.returncode or not r.stdout:
-        raise HostError(f"gpufarm: collecting failed: {r.stderr.decode(errors='replace')[-200:]}")
+        raise HostError(f"farm: collecting failed: {r.stderr.decode(errors='replace')[-200:]}")
     with tarfile.open(fileobj=io.BytesIO(r.stdout), mode="r:gz") as t:
         t.extractall(into / "files", filter="data")
     (into / "files" / "runq.log").replace(into / "log")

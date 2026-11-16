@@ -64,7 +64,7 @@ by the handshake only).
   boot path resets from it (`0x400f21d4`: bit 1 also when the factory armed a reset, `0x405ce870`). So
   `jmp_poll`, on its first pass of a boot with that bit, sets REMOTE CONTROL OFF and writes the sector (DIRECT JUMP
   kept as stored). EMPTY RESET leaves it as it was.
-- **Verified in the 1.12 emulator (2026-11-12, gpufarm, the build's own 800M snapshot; SETTINGS opens under the
+- **Verified in the 1.12 emulator (2026-11-12, farm, the build's own 800M snapshot; SETTINGS opens under the
   emulator now, ~100M instructions after the key).** SETTINGS > SYSTEM (7 DOWN) > USB CONFIG draws the fourth
   entry, ticked; DOWN x3 and YES: the box empties, the sector reads `DN2S` v1 flags 2, the armed channel disarms and
   the glass turns upright; SCREEN, ARM ASK, KEY, PEEK, SWITCH SET and PROFILE answer 7, ARM STATUS, COUNTERS and
@@ -253,7 +253,7 @@ Overbridge) passes on the build; the tools' 46 tests on the simulator (protocol 
 read from the C, the handshake, auto-disarm, key-up, the blacklist on both sides, the screen readout, the CLIs, a
 UI scenario file).
 
-**Emulator (gpufarm, the build's own 800M snapshot, 2026-11-11, build `60ffcf64`):** every command answered
+**Emulator (the farm, the build's own 800M snapshot, 2026-11-11, build `60ffcf64`):** every command answered
 through the stock SysEx router; the SCREEN readout of five screens equals the glass's buffer and the panel's own
 captured frame **pixel for pixel** (0 of 8,192 differ, hash checked); the arm handshake armed; a KEY FUNC+SRC opened
 *MACHINE SEL > TRACK 1*, NO closed it, encoder A reached the UI (TUN1's label turned into its value; the value read
@@ -401,7 +401,7 @@ The emulator models neither DMA timer 0 (its counter reads 0, its mode 0) nor IN
 `dt:profile:*` steps (`scripts/emulib/prof.py`) set DTMR0 to 0x0003 (as the unit's boot leaves it), model SIMR /
 CIMR for source 32 only, and raise vector 96 at level 6 at the end of each run slice when the firmware has armed it
 (and the CPU's mask is below 6), as the timer would. On the build's snapshot (`ui800M-v014` with this build
-installed; the bench container, and the same steps in `scratch/remoteui/farm_ru.sh` for gpufarm):
+installed; the bench container, and the same steps in `scratch/remoteui/farm_ru.sh` for the farm):
 
 - START took the timer: vector 96 became `prof_isr`, ICR32 6, the source unmasked, DTMR0 `0x0013` (ORRI set),
   DTRR0 the next due time. STOP put back every one of them (vector `0x40001252`, ICR 0, masked, DTMR0 `0x0003`,
@@ -421,7 +421,7 @@ installed; the bench container, and the same steps in `scratch/remoteui/farm_ru.
   interrupted. Called as a function (`isr:3`) the hook records 3 samples (the gate and the ring work; the frame
   there is not an interrupt's).
 - `late` is meaningless here (the counter stands still): every sample counts as late.
-- **gpufarm** (`scratch/remoteui/farm_ru.sh`, the build's own snapshot: `boot400M` with this build installed, run to
+- **farm** (`scratch/remoteui/farm_ru.sh`, the build's own snapshot: `boot400M` with this build installed, run to
   800M): booted from reset to 800M instructions with no fault; the earlier test channel steps unchanged (seven
   screen readouts equal the glass's buffer pixel for pixel, SETTINGS refused, KEY / ARM / PEEK as before); the
   timer source on the UI alone, 300 slices: 300 samples, every PC the raised one, all at `idle_spin`; with the

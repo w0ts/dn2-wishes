@@ -5,7 +5,7 @@ to this queue instead of starting them themselves. A job is the caller's tree as
 (snapshotted at submit), a kind and a command. The same tree, kind and command run once: a
 second submitter joins the job that is queued or running, and a later one gets its stored
 result (a passing one: a failure runs again). One dispatcher starts jobs on the Mac or on
-gpufarm within the User's limits (scripts/runq_hosts.py): on gpufarm at most 32 CPUs of ours
+the farm within the User's limits (scripts/runq_hosts.py): on the farm at most 32 CPUs of ours
 at any time, all our processes counted, and its load watched; on the Mac at most two jobs,
 and none while its load is high.
 
@@ -342,8 +342,8 @@ def status(d: pathlib.Path) -> str:
     lines = [f"Mac load {H.mac_load():.1f} of {H.MAC_CORES} cores (a job starts when its threads fit half the free cores, "
              f"<= {H.MAC_JOBS_MAX} jobs)"]
     fu = H.farm_usage()
-    lines.append("gpufarm: unreachable" if fu is None else
-                 f"gpufarm: our CPUs {fu[0]:.1f} of {H.farm_cpu_max(time.time()):g}, load {fu[1]:.1f} (starts at <= {H.FARM_LOAD_MAX:g})")
+    lines.append("farm: unreachable" if fu is None else
+                 f"farm: our CPUs {fu[0]:.1f} of {H.farm_cpu_max(time.time()):g}, load {fu[1]:.1f} (starts at <= {H.FARM_LOAD_MAX:g})")
     lines.append(f"dispatcher: {'running' if (d / 'dispatcher.pid').exists() else 'idle'}")
     for sel in ("running", "starting", "queued", "joined"):
         js = [j for j in jobs if j["state"] == sel]
@@ -366,7 +366,7 @@ def status(d: pathlib.Path) -> str:
 
 def gc(d: pathlib.Path, days: float) -> list[str]:
     """results and records older than DAYS, snapshots no live job needs (older than a day), and
-    work trees here and on gpufarm that belong to no live job"""
+    work trees here and on the farm that belong to no live job"""
     now, gone = time.time(), []
     with Lock(d):
         jobs = all_jobs(d)
@@ -391,7 +391,7 @@ def gc(d: pathlib.Path, days: float) -> list[str]:
     try:
         r = H.ssh(f"cd {H.FARM_ROOT}/work 2>/dev/null && for x in *; do [ -e \"$x\" ] || continue; "
                   f"case \"$x\" in {'|'.join(k + '-*' for k in live) or '-'}) ;; "
-                  f"*) rm -rf \"$x\" && echo \"gpufarm:$x\";; esac; done", timeout=300)
+                  f"*) rm -rf \"$x\" && echo \"farm:$x\";; esac; done", timeout=300)
         gone += r.stdout.decode().split()
     except H.HostError:
         pass

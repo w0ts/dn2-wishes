@@ -21,7 +21,7 @@ WAVETONE_RMS = -26.4
 STOCK_PEAK = (-15.8 + -18.7) / 2                # WaveTone, FM TONE
 BAND = 2.0
 
-# engine -> (kind, peak dB, RMS dB) at LEVELS_THEN (gpufarm, main f649683c; PLAITS ADD at MODL knob 41)
+# engine -> (kind, peak dB, RMS dB) at LEVELS_THEN (the farm, main f649683c; PLAITS ADD at MODL knob 41)
 MEASURED = {
     "ANALOG2": ("held", -17.8, -23.2), "PLAITS WS": ("held", -18.2, -23.6), "SID 6581": ("held", -18.2, -24.7),
     "PLAITS FM": ("held", -19.6, -24.8), "PLAITS ADD": ("held", -19.4, -28.4), "PLAITS VA": ("held", -20.1, -25.5),

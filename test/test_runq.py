@@ -67,7 +67,7 @@ def test_mac_counts_jobs_and_load(runq, monkeypatch):
     assert not runq.H.can_start(_job(host="mac"), "mac", [], 15.0, 1000)     # 1 free core: half is 0.5 < 1
     assert runq.H.can_start(_job(host="mac"), "mac", [], 14.0, 1000)         # 2 free: half is 1
     assert not runq.H.can_start(_job(host="mac"), "mac", [_job(host="mac", started=990)], 13.0, 1000)   # ramping
-    # a job that may run on either goes to gpufarm when the Mac is loaded
+    # a job that may run on either goes to the farm when the Mac is loaded
     j = {"cpus": 1, "hosts": ["mac", "farm"]}
     assert runq.H.place(j, [], 20.0, (3.0, 10.0), 0) == "farm"
     assert runq.H.place(j, [], 2.0, (3.0, 10.0), 0) == "mac"
@@ -91,7 +91,7 @@ def test_farm_jobs_run_at_nice_19(runq, tmp_path, monkeypatch):
     tar.write_bytes(b"")
     for kind in ("runner", "cmd"):
         sent.clear()
-        job = {"id": f"t-{kind}", "host": "gpufarm", "tar": str(tar), "kind": kind, "timeout": 60,
+        job = {"id": f"t-{kind}", "host": "farm", "tar": str(tar), "kind": kind, "timeout": 60,
                "cmd": ["python", "x.py"], "files": {}, "env": {"A": "1"}}
         runq.H.start(job, tmp_path / "w")
         started = sent[-1]
@@ -103,7 +103,7 @@ def test_status_runs(runq, tmp_path, monkeypatch):
     d = tmp_path / "q"
     d.mkdir(parents=True, exist_ok=True)
     out = runq.status(d)
-    assert "Mac load" in out and "gpufarm: unreachable" in out
+    assert "Mac load" in out and "farm: unreachable" in out
 
 
 def test_the_key_follows_tree_command_and_outside_files(runq, tmp_path):

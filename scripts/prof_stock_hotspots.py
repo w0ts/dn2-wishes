@@ -1,7 +1,7 @@
 """Where the STOCK Elektron DSP spends its block: a per-PC profile of the unmodified OS image in the
 SHARC runner (measuring only: it changes nothing in any build).
 
-Run from a tree root (on gpufarm through the bench namespace, one job at a time):
+Run from a tree root (on the farm through the bench namespace, one job at a time):
 
     bench_ns112.sh TREE python scripts/prof_stock_hotspots.py --job idle --out out/stock/idle.json
     ... --job synth --voices 1,8,16 --out out/stock/synth.json

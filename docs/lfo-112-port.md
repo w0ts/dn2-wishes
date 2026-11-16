@@ -119,7 +119,7 @@ sounds saved with LFO4 values load and play LFO1..3 (the values sit in the wishe
 ## 6. The failing unit tests
 
 On r6's tree (1.12 bench, `-m "not slow"`): `test_mods_platform.py` (in the gate's list) 13 fail,
-`test_lfo4_mod.py` 4 fail and 2 error; `test_js_lfo4.py` skips (no node on gpufarm). Two causes only:
+`test_lfo4_mod.py` 4 fail and 2 error; `test_js_lfo4.py` skips (no node on the farm). Two causes only:
 
 - `MAIN OS is 3,192,192 B, shorter than 3,196,288: not Digitone II 1.12` (21 of them): the tests load the 1.11
   image (`STOCK_SYX = ...OS1.11_dist.zip`) while the series' platform is 1.12, and `lfo4_code.json` /
