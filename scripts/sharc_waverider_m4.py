@@ -86,6 +86,12 @@ UNPACK_CALLER = 0x1C9FC2        # where sw 0x1c9e76 resumes after it
 RX_BASE, RX_STRIDE, RX_PAGE = 0x300000, 0x1000, 0x2C08E8
 RX_INDEX = 0x268A38             # the double-buffer index both are offset by
 UNPACK_LOCAL = 0x284800         # a scratch stand-in for the caller's 10-word local
+# what the caller's local holds on the unit: the driver (cmd 3, sw 0x1c9f90..0x1c9fa5, SIMD) copies its 10-word list of the
+# converted input buffers there (ADC L / R 0x268538 / 0x2685b8, then RX slot pairs 0..7 at 0x268638..0x2689b8). The
+# input FX sends read their L / R through it (sw 0x1c18f0 / 0x1c18fb: I5 = local[1], I4 = local[0]). 2026-11-15
+# (opt-host): until then the harness zeroed the local, so those sends read from address 0 up (sendfx: FX inputs at
+# 1e22 by block 3, NaN in earlier runs).
+INPUT_LIST = 0x268A40
 AMP_RETURN = 0x1C99D3           # the dispatch resumes here after the amp stage
 
 MACHINE5D = ROOT / "csrc" / "waverider" / "sharc" / "machine5_dir.json"
@@ -221,7 +227,7 @@ def unpack_call(state_runner, frame: bytes, i7: int | None = None):
                                 return_address=UNPACK_CALLER)
     r.entry_i7 = i7
     for k in range(10):
-        m2.poke(r.state, UNPACK_LOCAL + 4 * k, 0)
+        m2.poke(r.state, UNPACK_LOCAL + 4 * k, m2.word(r.state, INPUT_LIST + 4 * k) or 0)
     m2.poke(r.state, i7 + 4, 0)
     m2.poke(r.state, i7 + 8, RX_PAGE + (idx << 11))
     for k in range(0, len(frame), 4):
