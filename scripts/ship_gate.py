@@ -889,7 +889,7 @@ def main() -> int:
 
         # 6w2. 2026-11-12: the wishes record on kits, patterns, songs and the project settings (csrc/wishes/item.c,
         # items.S; scripts/emu_wishes_items.py)
-        if "wish_kit_load_stub" in lay:
+        if "wish_item" in lay:                  # (its stubs are in c_text_symbols, not the layout: 2026-11-12)
             wt_js = work / "wishitems.json"
             wt_cmd = [a.venv, "-u", "scripts/emu_wishes_items.py", "--build", bdir, "--snapshot", snap, "--json", wt_js]
 

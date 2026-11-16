@@ -97,6 +97,18 @@ def regions(dev):
     return [(POOL0, POOL_END), (PL0, PL_END), (INS0, INS_END), (DN7C, DN7C_END), (XA, XA_END), (WS, WS_END), (SET, SET + 1), (HI, HI_END), (LIB0, dev)]
 
 
+def joined(regs):
+    """REGS with the ones that touch as one range, as the TRIMs' cover is merged (2026-11-12: the wishes
+    record's cells end where the settings sector starts, 0x6FF000)"""
+    out = []
+    for a, b in regs:
+        if out and out[-1][1] == a:
+            out[-1][1] = b
+        else:
+            out.append([a, b])
+    return out
+
+
 def in_regions(s, n, dev):
     return any(a <= s and s + n <= b for a, b in regions(dev))
 
@@ -467,7 +479,7 @@ def run_ui(a, lay, SMx):
             merged.append([s, s + n])
     want = [[POOL0, POOL_END], [PL0, PL_END], [INS0, INS_END], [DN7C, DN7C_END], [XA, XA_END], [WS, WS_END], [SET, SET + 1], [HI, HI_END], [LIB0, DEVICE]]
     check("the TRIMs cover exactly the nine regions (v0.43: folders 64..127's; v0.45: the library's extension; 2026-11-11: the inserts' records, the DSP program's copy, the wishes record's cells), each sector once",
-          merged == want, f"{[[hex(x) if isinstance(x, int) else x for x in m] for m in merged]}")
+          merged == joined(want), f"{[[hex(x) if isinstance(x, int) else x for x in m] for m in merged]}")
     order = [s for s, _ in trims[:36]]
     check("headers first: the pool's, the lists' region, the settings, the library's headers, the inserts' records, "
           "the DSP program's copy, the wishes record's cells (2026-11-11), then the frames",
@@ -551,7 +563,7 @@ def covered(trims, dev):
             return False
         else:
             merged.append([s, s + n])
-    return merged == [[a, b] for a, b in regions(dev)]
+    return merged == joined(regions(dev))
 
 
 def run_link(a, lay, SMx):
