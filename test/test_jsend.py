@@ -102,7 +102,7 @@ def test_a_switch_to_juno_zeroes_the_stock_choruss_sound_state_only():
     assert m.get(base + 4) != 0, "STOCK leaves the stock chorus's state to it"
     call(m, D.JS_JUNO, 0, 0, zero, zero, {})
     cleared = {a for lo, hi in J.stock_words() for a in range(lo, hi, 4)}
-    assert len(cleared) == 1092 + 2 * 2 + 6 * 4
+    assert len(cleared) == 1088 + 2 * 2 + 6 * 4
     for a in range(base, base + size, 4):
         want = 0 if a in cleared else 0x3F000000 | (a & 0xFFFF)
         assert m.get(a) == want, hex(a)

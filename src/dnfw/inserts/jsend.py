@@ -32,16 +32,17 @@ from ..waverider import stockfx as SF
 C = P.C
 CHORUS_SW = 0xB84D5C                 # the stock chorus, as the bus calls it
 WORDS = 8                            # the state words: s0..s5, the last TYPE run (word 6)
-# the stock chorus's sound state (measured in the runner, 2026-11-15: after 40 blocks of noise and 40 of JUNO, the
-# words that differ from the same path never fed): its ring, the 1,092 words after its struct's first; two 2-word
+# the stock chorus's sound state (measured in the runner, 2026-11-15, g14h snapshot: after 40 blocks of noise, the
+# words that differ from the same path never fed): its ring, the 1,088 words after its struct's first (the 4 after
+# it are the same either way: not sound, never cleared; g14f's runner put them in the ring); two 2-word
 # filter states (base + 0x1190, + 0x1200); and six filter sections' 4 state words each (base + 0x1224, 0x24 apart,
 # between their 5 coefficients). The LFO and the smoothed knobs are the same either way and are left. In L2 when
 # stockfx moves the struct.
 STOCK_BASE = SF.CHORUS_L2 if SF.ENABLED else SF.CHORUS_DDR
-STOCK_RING, STOCK_RING_WORDS = STOCK_BASE + 4, 1092
+STOCK_RING, STOCK_RING_WORDS = STOCK_BASE + 4, 1088
 STOCK_PAIRS = (STOCK_BASE + 0x1190, STOCK_BASE + 0x1200)
 STOCK_SECTIONS, STOCK_SECTION_STRIDE, STOCK_SECTION_N = STOCK_BASE + 0x1224, 0x24, 6
-assert STOCK_RING_WORDS % 12 == 0 and STOCK_RING + 4 * STOCK_RING_WORDS <= STOCK_PAIRS[0]
+assert STOCK_RING_WORDS % 16 == 0 and STOCK_RING + 4 * STOCK_RING_WORDS <= STOCK_PAIRS[0]
 assert STOCK_SECTIONS + STOCK_SECTION_STRIDE * STOCK_SECTION_N <= STOCK_BASE + SF.CHORUS_BYTES
 
 
@@ -88,10 +89,10 @@ def stock_fresh(p: Prog) -> None:
     p.iconst(1, STOCK_RING)
     p.seti(0, 1)
 
-    def twelve():
-        for _ in range(12):
+    def sixteen():
+        for _ in range(16):
             p.stpost(0, 0)
-    p.loop_r(11, STOCK_RING_WORDS // 12, twelve)
+    p.loop_r(11, STOCK_RING_WORDS // 16, sixteen)
     for at in STOCK_PAIRS:
         p.iconst(1, at)
         p.seti(0, 1)

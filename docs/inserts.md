@@ -448,17 +448,19 @@ them (VOL the return's level, DEL / REV its sends on); HPF and WDTH are the stoc
   epilogue. Its scratch is the post pass's (that pass has ended when the bus runs); its eight words and its ring
   (1,024 floats, three mirror words) in DDR `0x82550000..0x82551050` (zeros at power-on); a switch to JUNO starts
   from zeros. That switch also zeroes the stock chorus's sound state (`stock_fresh`, the User 2026-11-14: "start
-  fresh"), so back on STOCK it starts from silence, not from the ring it held: its ring (1,092 words at base + 4),
+  fresh"), so back on STOCK it starts from silence, not from the ring it held: its ring (1,088 words at base + 4),
   two 2-word filter states (base + `0x1190`, `0x1200`) and six filter sections' 4 state words (base + `0x1224`,
   `0x24` apart, between their coefficients). Those are exactly the struct words that differ, after a JUNO stretch,
-  from a stock chorus never fed the sound (measured in the runner on the g14f snapshot); its LFO and knob smoothing
-  are left. About 1,120 stores, once, in the first JUNO block.
+  from a stock chorus never fed the sound (measured in the runner on the g14h snapshot, which models the chorus's
+  DDR pointers as the unit does; g14f's put the ring 4 words long); its LFO and knob smoothing are left. About 1,120 stores, once, in the first JUNO block.
 - **Checked**: `test/test_jsend.py` (the model against `postref.JsendRef` bit for bit through switches and knob
   moves; STOCK leaves the send to the stock chorus; every register back), `test/test_fxpage.py` (knob E, the word);
   SHARC runner step `jsend` (`scripts/sharc_jsend_step.py`): TYPE STOCK bit-identical to the stock image (outputs,
   registers, every word written but the send's own), TYPE JUNO bit-exact to the reference, registers back, no stray
   DDR write, its cost; STOCK -> JUNO -> STOCK: back on STOCK on silence within 1e-6 of a stock chorus never fed the
-  noise (without `stock_fresh`: its ring replayed, 0.2-0.45 for 9 blocks).
+  noise (without `stock_fresh`: its ring replayed, 0.2-0.45 for 9 blocks); the clear exactly the words the noise
+  left different, no other struct word changed (the 4 after the ring: `0x100`, then 264.1, 278.9 and 0.050, kept);
+  a note after it within 1e-6 of the never-fed chorus's.
 
 ## On the track's bus: FDN8 and XDLY
 

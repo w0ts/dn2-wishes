@@ -11,7 +11,8 @@ build, block after block.
    buffers); the instructions per block (the emulator charges every access alike).
 3. STOCK -> JUNO -> STOCK (the User, 2026-11-14: "start fresh"): back on STOCK after noise and a JUNO stretch, the
    stock chorus on silence gives what one never fed the noise gives (its ring and filter states were zeroed at the
-   switch to JUNO, dnfw.inserts.jsend.stock_fresh), and it sounds again on the noise.
+   switch to JUNO, dnfw.inserts.jsend.stock_fresh); the clear is exactly the words the noise left different and no
+   other struct word changes; a note after it is the never-fed chorus's note (within 1e-6) and is heard.
 """
 
 from __future__ import annotations
@@ -118,53 +119,92 @@ def _f(w: int) -> float:
     return struct.unpack("<f", struct.pack("<I", w & 0xFFFFFFFF))[0]
 
 
-def _path(M5, snap, m2mach, img, first, knobs, n=40):
-    """an instance: N blocks of STOCK on FIRST (per block), N of JUNO, then N of STOCK on silence -> (its state,
-    its outputs back on STOCK, the stock chorus's struct words after JUNO, every call came back)"""
+def _path(M5, snap, m2mach, img, first, knobs, note, n=40):
+    """an instance: N blocks of STOCK on FIRST (per block), N of JUNO, N of STOCK on silence, then STOCK on NOTE ->
+    (its outputs back on STOCK on silence, on the note; the stock chorus's struct words before JUNO, after JUNO;
+    every call came back)"""
     zero = [0.0] * 32
     r = M5.init_on(snap, m2mach, img)
     ok = True
+
+    def struct_words():
+        return {a: M5.m2.word(r.state, a) or 0 for a in range(STATE, STATE + 0x1344, 4)}
     for b in range(n):
         r, how, *_ = call(M5, r, D.JS_STOCK, *knobs, first[b], [0.5 * x for x in first[b]])
         ok &= how[0] == "stop"
+    pre = struct_words()
     for b in range(n):
         r, how, *_ = call(M5, r, D.JS_JUNO, *knobs, zero, zero)
         ok &= how[0] == "stop"
-    words = {a: M5.m2.word(r.state, a) or 0 for a in range(STATE, STATE + 0x1344, 4)}
-    back = []
+    post = struct_words()
+    back, sung = [], []
     for b in range(n):
         r, how, out, _, _ = call(M5, r, D.JS_STOCK, *knobs, zero, zero)
         ok &= how[0] == "stop"
         back.append(out)
-    return r, back, words, ok
+    for blk in note:
+        r, how, out, _, _ = call(M5, r, D.JS_STOCK, *knobs, blk, [0.5 * x for x in blk])
+        ok &= how[0] == "stop"
+        sung.append(out)
+    return back, sung, pre, post, ok
+
+
+def _ranges(ws) -> list[tuple[str, str]]:
+    out: list[list[int]] = []
+    for a in sorted(ws):
+        if out and a == out[-1][1]:
+            out[-1][1] = a + 4
+        else:
+            out.append([a, a + 4])
+    return [(hex(lo), hex(hi)) for lo, hi in out]
+
+
+def _diff(xs, ys) -> list[float]:
+    return [max(abs(_f(x) - _f(y)) for cx, cy in zip(o, q) for x, y in zip(cx, cy)) for o, q in zip(xs, ys)]
 
 
 def comeback(M5, snap, m2mach, m5img) -> tuple[dict, dict]:
     """STOCK -> JUNO -> STOCK (the User, 2026-11-14: "start fresh"): 40 blocks of noise on the stock chorus, 40 of
-    JUNO, then the stock chorus again on silence, against the same path with silence where the noise was (the same
-    LFO and knob smoothing, never fed: it gives exact zeros). Before the fix the ring came back (0.45 for 9 blocks)."""
+    JUNO, 40 of the stock chorus on silence, then a note through it, against the same path with silence where the
+    noise was (the same LFO and knob smoothing, never fed: it gives exact zeros on silence). Before the fix the ring
+    came back (0.45 for 9 blocks). The clear must be exactly the words the noise left different, and touch no other
+    struct word (the stock chorus does not run while JUNO does: any other change is the clear's)."""
+    from dnfw.inserts import jsend as JS
     checks, numbers = {}, {}
     rnd = random.Random(5)
     noise = [[rnd.uniform(-0.6, 0.6) for _ in range(32)] for _ in range(40)]
+    t = np.arange(32 * 30) / 48000.0
+    pluck = 0.5 * np.sin(2 * np.pi * 220.0 * t) * np.exp(-t / 0.15)
+    note = [[float(x) for x in pluck[32 * b:32 * b + 32]] for b in range(30)]
     knobs = (127 << 8, 64 << 8)
-    r, back, fed, ok = _path(M5, snap, m2mach, m5img, noise, knobs)
-    _, quiet, never, ok2 = _path(M5, snap, m2mach, m5img, [[0.0] * 32] * 40, knobs)
-    diff = [max(abs(_f(x) - _f(y)) for cx, cy in zip(o, q) for x, y in zip(cx, cy)) for o, q in zip(back, quiet)]
-    left = [a for a in sorted(fed) if fed[a] != never[a]]
+    back, sung, pre_f, post_f, ok = _path(M5, snap, m2mach, m5img, noise, knobs, note)
+    quiet, sung_n, pre_n, post_n, ok2 = _path(M5, snap, m2mach, m5img, [[0.0] * 32] * 40, knobs, note)
+    cleared = {a for lo, hi in JS.stock_words() for a in range(lo, hi, 4)}
+    held = {a for a in pre_f if pre_f[a] != pre_n[a]}
+    touched = {a for a in pre_f if a not in cleared and (post_f[a] != pre_f[a] or post_n[a] != pre_n[a])}
+    diff, ndiff = _diff(back, quiet), _diff(sung, sung_n)
+    numbers["stock chorus: words the noise left different (before JUNO)"] = _ranges(held)
+    numbers["stock chorus: words cleared"] = _ranges(cleared)
+    numbers["stock chorus: words past the ring (base + 0x1104 .. + 0x1114) before / after JUNO"] = [
+        (hex(a), hex(pre_f[a]), hex(post_f[a])) for a in range(STATE + 0x1104, STATE + 0x1114, 4)]
     numbers["back on STOCK: largest difference from the never-fed path, per block (first 12)"] = [
         f"{d:.3g}" for d in diff[:12]]
     numbers["back on STOCK: largest difference over 40 blocks"] = f"{max(diff):.3g}"
-    numbers["stock chorus struct words that differ from the never-fed path after JUNO"] = [
-        (hex(a), hex(fed[a]), hex(never[a])) for a in left[:12]]
+    numbers["the note after: largest difference from the never-fed path; words not bit for bit"] = (
+        f"{max(ndiff):.3g}", sum(x != y for o, q in zip(sung, sung_n) for cx, cy in zip(o, q) for x, y in zip(cx, cy)))
+    heard = sum(1 for o in sung for w in o[0] + o[1] if w & 0x7FFFFFFF and w != MARK)
+    numbers["the note after: output words heard (of 1,920)"] = heard
     checks["STOCK -> JUNO -> STOCK: the calls come back to the bus"] = ok and ok2
+    checks["STOCK -> JUNO -> STOCK: the clear is exactly the stock chorus's words the noise left different"] = (
+        held == cleared)
+    checks["STOCK -> JUNO -> STOCK: no other stock chorus word changes across JUNO (base + 0x1104 .. + 0x1114 "
+           "among them)"] = not touched
     checks["STOCK -> JUNO -> STOCK: back on STOCK on silence, within 1e-6 of a stock chorus never fed the noise "
            "(40 blocks: not the ring or filter states it held before JUNO)"] = max(diff) <= 1e-6
-    heard = 0
-    for b in range(10):
-        r, how, out, _, _ = call(M5, r, D.JS_STOCK, *knobs, noise[b], noise[b])
-        heard += sum(1 for w in out[0] + out[1] if w & 0x7FFFFFFF and w != MARK)
-    checks["STOCK -> JUNO -> STOCK: the stock chorus sounds again when the noise comes back"] = heard > 200
+    checks["STOCK -> JUNO -> STOCK: a note after, within 1e-6 of the never-fed chorus fed the same note, and "
+           "heard (30 blocks)"] = max(ndiff) <= 1e-6 and heard > 1000
     return checks, numbers
+
 
 def run(M5, snap, m2mach, m5img, stock_img) -> dict:
     checks, numbers = {}, {}
