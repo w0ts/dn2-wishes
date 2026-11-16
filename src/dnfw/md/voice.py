@@ -54,8 +54,10 @@ def _same_code(step: str) -> dict[int, int]:
         return q.text()
     out, seen = {}, {}
     for k, M in enumerate(ALL):
-        if hasattr(M, "MNM"):                 # their own code each, but one host (the same)
-            out[k] = seen.setdefault("mnm_host", k) if step == "host" else k
+        if hasattr(M, "MNM"):                 # their own code each, but one host per host function
+            # (v0.56: DPRO-DDRW has its own, machines._host_ddrw; the others share machines._host)
+            h = getattr(M.host, "__func__", M.host)
+            out[k] = seen.setdefault(("mnm_host", h), k) if step == "host" else k
             continue
         f = getattr(M, step)
         key = getattr(f, "__func__", f)
