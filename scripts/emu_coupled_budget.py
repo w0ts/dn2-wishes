@@ -101,7 +101,9 @@ def main() -> int:
         c.period()
         ends.append(ck["end"])
     idle_end = sum(ends[2:]) / len(ends[2:])
-    ck["extra"] = a.extra if a.extra is not None else max(0, int(a.target_idle * ck["P"] - idle_end))
+    # (EXTRA may be negative: a kit with more stock than the unit's reads less stock time, so an idle frame reads
+    # the unit's D)
+    ck["extra"] = a.extra if a.extra is not None else int(a.target_idle * ck["P"] - idle_end)
     print(f"  idle end {idle_end:.0f} cycles: EXTRA {ck['extra']} (idle D {(idle_end + ck['extra']) / ck['P']:.3f})", flush=True)
     for _ in range(40):                                            # TAIL and the deadline settle on the new stock
         c.period()
@@ -115,7 +117,11 @@ def main() -> int:
         return {**st, "sounding": sum(1 for x in costs if x > TAIL_UNITS), "ours_cost": 16 * sum(costs),
                 "track_slots": [v for v in range(16) if vt[v] == t],
                 "voice_skips": c.dsp_word(G.SKIPS), "ins_skips": c.dsp_word(G.INS_SKIPS),
-                "tail": c.dsp_word(G.TAIL), "limit": c.dsp_word(G.LIMIT), "d": round(ck["d"], 3)}
+                "tail": c.dsp_word(G.TAIL), "limit": c.dsp_word(G.LIMIT), "d": round(ck["d"], 3),
+                "dsp_packets": c.dsp_packets, "delivered": c.delivered,
+                "periods": c.long(lay["smp_periods"]) if "smp_periods" in lay else None,
+                "room_at": c.long(lay["smp_room_at"]) if "smp_room_at" in lay else None,
+                "room_bus": struct.unpack(">H", c.read(lay["smp_room_now"] + 6, 2))[0] if "smp_room_now" in lay else None}
     s0 = state()
     rows = []
     for n in range(a.notes):
@@ -129,7 +135,9 @@ def main() -> int:
         rows.append({"note": n + 1, **s})
         print(f"  note {n + 1:2d}: sounding {s['sounding']:2d}, ours {s['ours_cost']:6d}, D {s['d']:.3f}, voice skips "
               f"{s['voice_skips'] - s0['voice_skips']}, ins skips {s['ins_skips'] - s0['ins_skips']}, "
-              + ", ".join(f"{k[5:]} {s[k] - s0.get(k, 0) if k != 'load_last_free' else s[k]}" for k in syms), flush=True)
+              + ", ".join(f"{k[5:]} {s[k] - s0.get(k, 0) if k != 'load_last_free' else s[k]}" for k in syms)
+              + f" | dsp packets {s['dsp_packets']}, periods {s['periods']}, room_at {s['room_at']}, room_bus {s['room_bus']}",
+              flush=True)
     last = rows[-1] if rows else s0
     d = {k: last[k] - s0[k] for k in ("voice_skips", "ins_skips") if k in last}
     for k in syms:

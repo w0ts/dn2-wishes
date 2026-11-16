@@ -39,7 +39,23 @@ from emulib import bounded                                      # noqa: E402
 ISR, ISR_RTE = 0x40025E36, 0x40027BC6
 CF_FRAME = 0x80005E60                   # the frame as the ColdFire builds it (16-bit BE)
 CF_REPLY_TAIL = 0x80005E40              # the SPI reply's tail: the DSP's status, 16 BE halfwords
-CF_TDM_TX, CF_TDM_RX = 0x4E6E0100, 0x4E6DF100
+CF_TDM_TX, CF_TDM_RX = 0x4E6E0100, 0x4E6DF100   # (1.11's; 1.12's from the tree's link.c, below)
+
+
+def _tdm_pages() -> tuple[int, int]:
+    """2026-11-13: the ColdFire's TDM transmit and receive pages as this tree's link.c has them (TDM_TX, TDM_RX):
+    1.12 moved them 0x8000 up (0x4E6E8100, 0x4E6E7100). Until now the harness used 1.11's on 1.12, so neither side's
+    packets reached the other (the DSP's idle packet never decoded: no telemetry, no room on the ColdFire)."""
+    import re
+    src = (ROOT / "csrc/sampler/link.c").read_text()
+    tx = re.search(r"#define TDM_TX\(h\) \(\(volatile u32 \*\)\((0x[0-9A-Fa-f]+)u", src)
+    rx = re.search(r"#define TDM_RX\(h\) \(\(volatile u32 \*\)\((0x[0-9A-Fa-f]+)u", src)
+    if not (tx and rx):
+        return CF_TDM_TX, CF_TDM_RX
+    return int(tx.group(1), 16), int(rx.group(1), 16)
+
+
+CF_TDM_TX, CF_TDM_RX = _tdm_pages()
 STACK_TOP, SENTINEL = 0x46A20000, 0x46A20400
 SEQ_ISR, SEQ_VECTOR = 0x400D99DE, 121   # the sequencer's timer ISR (emu_jump.py, emu_waverider_menu.py)
 SEQ_ENTRIES_A_STEP = 24                 # 4 entries a tick, 6 ticks a sixteenth (measured, emu_jump.py)
