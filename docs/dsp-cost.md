@@ -107,6 +107,22 @@ voice now reads fewer than the empty run counts and the table's DDR column would
 in the model (ONESHOT, a block, DDR counted as 10): int16 saves 1,621 up to an octave above the
 sample's rate, 1,039 at +2.5 octaves; float32 2,610 .. 1,446; past `LINE_MAX` the switch costs 135.
 
+**A note's block** (model, ONESHOT): a fresh note costs about a steady block (+3 %); a note on a
+voice still sounding costs 2.05 x, because the old note is rendered once more, fading out under the
+new one (the DT2's second voice for a retrigger). Both renders are in the output, so this stays: with
+the two changes above that block is about 15k on the estimate, and sixteen at once about 240k of the
+roughly 310k our voices get.
+
+**The program's own block** (the recorder and the fast link, before the slot loop, every block
+whether a sample voice plays or not): the recorder's 32 frames (the input meter's peak, the staged
+block) and the link's 64-unit packet (playheads, the guard's telemetry, its check, out to the TDM
+page) kept their counters and indices in memory and recomputed each address. They now run on
+register counts and running pointers: the same words written (the model, old against new, on 200
+random states including recording, armed, new commands and a busy SEND: no word differs) and the same
+cost every block, only less of it. The runner's empty run, our code with no voice sounding:
+14,605 -> 11,201 instructions a block, L1 accesses 2,573 -> 1,458 (model: recorder 1,566 -> 934,
+the idle packet 3,641 -> about 1,000).
+
 ## v0.43: the Monomachine render scratch in L1 (2026-11-07)
 
 The Monomachine machines' render scratch (the decimator's input, SID's phases, the coefficients,

@@ -2220,19 +2220,18 @@ def recorder(p: Prog, L: Layout) -> None:
         p.iop(9, 12, "+", 10)
     p.if_(8, "GE", 12, track, kind="i")
     p.st(C["a"], 9)
-    p.iconst(6, 0)
-    p.st(C["x"], 6)
+    # 2026-11-12 (opt-samples): the frames through running pointers and a register count, every
+    # block; the same words staged, the same peak, and the loop's words left as loop() left them
+    p.seti(1, 9)
+    p.iconst(12, SM.REC_STAGE)
+    p.seti(4, 12)
+    p.ld(8, C["rchan"])
+    p.ld(10, C["rsrc"])
+    p.ld(5, C["rpk"])                         # the block's peak (0 above)
 
     def frame():
-        p.ld(6, C["x"])
-        p.lsh(7, 6, 2)
-        p.ld(9, C["a"])
-        p.ipass(12, 9)
-        p.iop(9, 12, "+", 7)
-        p.seti(1, 9)
-        p.ldi(3, 0, 1)                        # L
         p.ldi(4, 32, 1)                       # R
-        p.ld(8, C["rchan"])
+        p.ldpost(3, 1)                        # L
         p.iconst(12, 1)
         p.if_(8, "EQ", 12, lambda: p.fpass(4, 3), kind="i")
         p.iconst(12, 2)
@@ -2240,9 +2239,8 @@ def recorder(p: Prog, L: Layout) -> None:
         p.fop(3, 3, "+", 4)
         p.fconst(12, 0.5)
         p.fop(3, 3, "*", 12)                  # mono
-        p.ld(8, C["rsrc"])
         p.iconst(12, 2)
-        p.if_(8, "GE", 12, lambda: (p.fconst(12, 1.0 / SM.TRK_GAIN), p.fop(3, 3, "*", 12)),
+        p.if_(10, "GE", 12, lambda: (p.fconst(12, 1.0 / SM.TRK_GAIN), p.fop(3, 3, "*", 12)),
               kind="i")                       # a track's slot carries it x TRK_GAIN
 
         def gained():                         # v0.50: a FLEX take's GAIN (settings()), and a track's
@@ -2257,22 +2255,17 @@ def recorder(p: Prog, L: Layout) -> None:
         p.fop(3, 3, "MIN", 12)
         p.fconst(12, -1.0)
         p.fop(3, 3, "MAX", 12)
-        p.ld(5, C["rpk"])                     # the block's peak
         p.fconst(12, 0.0)
         p.fop(6, 12, "-", 3)
         p.fop(6, 6, "MAX", 3)
         p.fop(5, 5, "MAX", 6)
-        p.st(C["rpk"], 5)
-        p.ld(6, C["x"])
-        p.lsh(7, 6, 2)
-        p.iconst(12, SM.REC_STAGE)
-        p.iop(7, 12, "+", 7)
-        p.seti(1, 7)
-        p.sti(0, 1, 3)                        # staged as floats
-        p.iconst(12, 1)
-        p.iop(6, 12, "+", 6)
-        p.st(C["x"], 6)
-    p.loop(C["n"], 32, frame)
+        p.stpost(4, 3)                        # staged as floats
+    p.loop_r(11, 32, frame)
+    p.st(C["rpk"], 5)
+    p.iconst(6, 32)
+    p.st(C["x"], 6)
+    p.iconst(0, 0)
+    p.st(C["n"], 0)
 
     p.ld(1, C["rst"])
     p.iconst(12, 1)
@@ -2683,15 +2676,14 @@ def tdm_tx(p: Prog, L: Layout) -> None:
     def idle():                               # v0.25: the play positions
         p.iconst(6, SM.POS_MAGIC)
         p.st(SM.LINK_BUF, 6)
-        p.iconst(0, 0)
-        p.st(K["u"], 0)
+        # 2026-11-12 (opt-samples): this block's loops through running pointers and a register count;
+        # the same units, and K['u'], K['v'] left as loop() left them
+        p.iconst(9, L.state)
+        p.iconst(12, SM.LINK_BUF + 4)
+        p.seti(4, 12)
 
         def track():
-            p.ld(0, K["u"])
-            p.lsh(1, 0, 7)                    # the track's state: state + 128 t
-            p.iconst(12, L.state)
-            p.iop(1, 12, "+", 1)
-            p.seti(1, 1)
+            p.seti(1, 9)                      # the track's state: state + 128 t
             p.iconst(5, SM.POS_NONE)
             p.ldi(2, V["on"], 1)
             p.ldi(3, V["frames"], 1)
@@ -2711,16 +2703,11 @@ def tdm_tx(p: Prog, L: Layout) -> None:
                 p.fop(4, 4, "MIN", 12)
                 p.trunc(5, 4)
             p.ifz(2, "NE", lambda: p.ifz(3, "GT", playing))
-            p.ld(0, K["u"])
-            p.lsh(1, 0, 2)
-            p.iconst(12, SM.LINK_BUF + 4)
-            p.iop(1, 12, "+", 1)
-            p.seti(1, 1)
-            p.sti(0, 1, 5)
-            p.iconst(12, 1)
-            p.iop(0, 12, "+", 0)
-            p.st(K["u"], 0)
-        p.loop(K["v"], 16, track)
+            p.stpost(4, 5)
+            p.iconst(12, 128)
+            p.iop(9, 9, "+", 12)
+        p.loop_r(11, 16, track)
+        _loop_done(p, K, 16)
         from ..perc import guard as G          # v0.30: unit 17, the slots the guard skipped since
         p.ld(6, G.SKIPMASK)                    # the last packet (the pages' CPU flag); then cleared
         p.iconst(12, 0xFFFF)
@@ -2756,34 +2743,24 @@ def tdm_tx(p: Prog, L: Layout) -> None:
         # ~1,500, never 0: the unit, 2026-11-11), units 40, 41, the A2 filter pass's
         # counts of voices filtered and left dry (cumulative, low 16 bits). Read only: the telemetry
         # frame (SysEx 32) reports them; nothing else reads them.
-        p.iconst(0, 24)
-        p.st(K["u"], 0)
+        p.iconst(12, G.COST_PERC)
+        p.seti(1, 12)
+        p.iconst(12, G.COST_SMP)
+        p.seti(2, 12)                          # the sample slot's cost beside it: a slot is on one or the other
+                                               # (I2: I0, I3, I5 are never post-modified here, test_waverider_dsp)
+        p.iconst(12, SM.LINK_BUF + 4 * 24)
+        p.seti(4, 12)
+        p.iconst(9, 0xFFFF)
 
         def slot_cost():
-            p.ld(0, K["u"])
-            p.lsh(1, 0, 2)
-            p.iconst(12, G.COST_PERC - 4 * 24)
-            p.iop(1, 12, "+", 1)
-            p.seti(1, 1)
-            p.ldi(6, 0, 1)
-            p.lsh(1, 0, 2)                     # the sample slot's cost beside it: a slot is on one or the other
-            p.iconst(12, G.COST_SMP - 4 * 24)
-            p.iop(1, 12, "+", 1)
-            p.seti(1, 1)
-            p.ldi(7, 0, 1)
+            p.ldpost(6, 1)
+            p.ldpost(7, 2)
             p.iop(6, 6, "MAX", 7)
             p.lsh(6, 6, -4)
-            p.iconst(12, 0xFFFF)
-            p.iop(6, 6, "AND", 12)
-            p.lsh(1, 0, 2)
-            p.iconst(12, SM.LINK_BUF)
-            p.iop(1, 12, "+", 1)
-            p.seti(1, 1)
-            p.sti(0, 1, 6)
-            p.iconst(12, 1)
-            p.iop(0, 12, "+", 0)
-            p.st(K["u"], 0)
-        p.loop(K["v"], 16, slot_cost)
+            p.iop(6, 6, "AND", 9)
+            p.stpost(4, 6)
+        p.loop_r(11, 16, slot_cost)
+        _loop_done(p, K, 40)
         from ..a2f import program as A2         # lazy: a2f.program imports the layers above
         p.iconst(12, 0xFFFF)
         p.ld(6, A2.C["nfil"])
@@ -2792,21 +2769,11 @@ def tdm_tx(p: Prog, L: Layout) -> None:
         p.ld(6, A2.C["ndry"])
         p.iop(6, 6, "AND", 12)
         p.st(SM.LINK_BUF + 4 * 41, 6)
-        p.iconst(0, 42)
-        p.st(K["u"], 0)
-
-        def zero():
-            p.ld(0, K["u"])
-            p.lsh(1, 0, 2)
-            p.iconst(12, SM.LINK_BUF)
-            p.iop(1, 12, "+", 1)
-            p.seti(1, 1)
-            p.iconst(6, 0)
-            p.sti(0, 1, 6)
-            p.iconst(12, 1)
-            p.iop(0, 12, "+", 0)
-            p.st(K["u"], 0)
-        p.loop(K["v"], SM.TX_UNITS - 1 - 42, zero)
+        p.iconst(12, SM.LINK_BUF + 4 * 42)
+        p.seti(4, 12)
+        p.iconst(6, 0)
+        p.loop_r(11, SM.TX_UNITS - 1 - 42, lambda: p.stpost(4, 6))
+        _loop_done(p, K, SM.TX_UNITS - 1)
         _tx_out(p, K)
 
     def busy():
@@ -2882,57 +2849,47 @@ def tdm_tx(p: Prog, L: Layout) -> None:
 def _tx_out(p: Prog, K) -> None:
     """LINK_BUF's 64 units: unit 63 the check of the first 63, then each out tagged, unit i
     at frame i >> 1, slot 14 + (i & 1), in this block's page (K['pg'])."""
-    if True:
-        p.iconst(5, SM.LINK_SEED)             # the check
-        p.iconst(0, 0)
-        p.st(K["u"], 0)
+    # 2026-11-12 (opt-samples): running pointers and register counts; the same words out
+    p.iconst(8, SM.LINK_SEED)                 # the check
+    p.iconst(12, SM.LINK_BUF)
+    p.seti(1, 12)
 
-        def sumup():
-            p.ld(0, K["u"])
-            p.lsh(1, 0, 2)
-            p.iconst(12, SM.LINK_BUF)
-            p.iop(1, 12, "+", 1)
-            p.seti(1, 1)
-            p.ldi(2, 0, 1)
-            p.ipass(12, 5)
-            p.iop(5, 12, "+", 2)
-            p.iconst(12, 1)
-            p.iop(0, 12, "+", 0)
-            p.st(K["u"], 0)
-        p.loop(K["v"], SM.TX_UNITS - 1, sumup)
-        p.iconst(12, 0xFFFF)
-        p.iop(5, 5, "AND", 12)
-        p.st(SM.LINK_BUF + 4 * 63, 5)
-        # out: unit i at frame i >> 1, slot 14 + (i & 1), tagged
-        p.iconst(0, 0)
-        p.st(K["u"], 0)
+    def sumup():
+        p.ldpost(2, 1)
+        p.iop(8, 8, "+", 2)
+    p.loop_r(11, SM.TX_UNITS - 1, sumup)
+    _loop_done(p, K, SM.TX_UNITS - 1)
+    p.iconst(12, 0xFFFF)
+    p.iop(5, 8, "AND", 12)
+    p.st(SM.LINK_BUF + 4 * 63, 5)
+    # out: unit i at frame i >> 1, slot 14 + (i & 1), tagged
+    p.iconst(12, SM.LINK_BUF)
+    p.seti(1, 12)
+    p.ld(9, K["pg"])
+    p.iconst(10, SM.TDM_TAG << 24)
+    p.iconst(13, 64)                          # a frame's 16 slots
 
-        def out():
-            p.ld(0, K["u"])
-            p.lsh(1, 0, 2)
-            p.iconst(12, SM.LINK_BUF)
-            p.iop(1, 12, "+", 1)
-            p.seti(1, 1)
-            p.ldi(2, 0, 1)
-            p.lsh(2, 2, 8)
-            p.iconst(12, SM.TDM_TAG << 24)
-            p.iop(2, 12, "+", 2)
-            p.lsh(3, 0, -1)
-            p.lsh(3, 3, 6)
-            p.iconst(12, 1)
-            p.iop(4, 0, "AND", 12)
-            p.lsh(4, 4, 2)
-            p.ld(5, K["pg"])
-            p.ipass(12, 5)
-            p.iop(5, 12, "+", 3)
-            p.ipass(12, 5)
-            p.iop(5, 12, "+", 4)
-            p.seti(1, 5)
-            p.sti(0, 1, 2)
-            p.iconst(12, 1)
-            p.iop(0, 12, "+", 0)
-            p.st(K["u"], 0)
-        p.loop(K["v"], SM.TX_UNITS, out)
+    def out():
+        p.ldpost(2, 1)
+        p.lsh(2, 2, 8)
+        p.iop(2, 10, "+", 2)
+        p.ldpost(3, 1)
+        p.lsh(3, 3, 8)
+        p.iop(3, 10, "+", 3)
+        p.seti(4, 9)
+        p.sti(0, 4, 2)
+        p.sti(1, 4, 3)
+        p.iop(9, 9, "+", 13)
+    p.loop_r(11, SM.TX_UNITS // 2, out)
+    _loop_done(p, K, SM.TX_UNITS)
+
+
+def _loop_done(p: Prog, K, u: int) -> None:
+    """K['u'] = U and K['v'] = 0, as the loop() these loops were left them (2026-11-12)."""
+    p.iconst(0, u)
+    p.st(K["u"], 0)
+    p.iconst(0, 0)
+    p.st(K["v"], 0)
 
 
 def verify_step(p: Prog, L: Layout) -> None:
