@@ -18,6 +18,8 @@ a driver-level model, not an eMMC one. Every routine below is stock's, entered d
 5. the UI pass (wish_poll) 0.5 s on: the cell on the +Drive, as this script spells a cell;
 6. a cell written here (as another unit of ours would have) and a stored sound linking to it: LOAD leaves the
    sound waiting, the UI pass reads the cell, the record is there;
+6b. a record given over our SysEx channel (link.c smp_rx, a PUT from USB, as `scripts/wish_pst.py send` frames it)
+   to a sound waiting for it with no cell anywhere: the UI pass files it, the sound has it, its cell is queued;
 7. ERASE's lock up: nothing written;
 8. no fault; the lock never found taken (wish_reentered 0); the cost of each call, in instructions.
 """
@@ -198,6 +200,30 @@ def main() -> int:
     call(lay["wish_poll"])
     check("the UI pass reads its cell: the record is there", get(snd[4]) == b"from another unit")
     check("... with one sector read", sum(1 for k, *_ in disk.log if k == "R") - reads == 1)
+
+    # 6b. a record given over our SysEx channel
+    sys.path.insert(0, str(HERE.parent / "src"))
+    from dnfw.wishes import travel as T
+    sent = spell({TAG: b"sent over USB"})
+    slink = bytearray(stock_saved)
+    for k, v in link_bytes(sent).items():
+        slink[k] = v
+    uc.mem_write(st[2], bytes(slink))
+    call(LOAD, snd[5], st[2])
+    call(lay["wish_poll"])
+    check("a sound linking to a record no cell holds: missing, plays stock", get(snd[5]) is None)
+    msg = T.request(0x0123, T.PUT, struct.pack(">H", len(sent)) + sent)
+    uc.mem_write(block, msg)
+    call(lay["smp_rx"], block, len(msg), 2)                     # 2: USB
+    check("PUT over the channel (smp_rx from USB): taken, waiting for the UI pass",
+          i32("wish_puts") == 1 and i32("wish_put_wait") == 1, f"puts {i32('wish_puts')}, wait {i32('wish_put_wait')}")
+    queued = i32("wish_pend_tail") - i32("wish_pend_head")
+    call(lay["wish_poll"])
+    check("the UI pass files it: the waiting sound has the record, its cell queued",
+          get(snd[5]) == b"sent over USB" and i32("wish_put_wait") == 0
+          and i32("wish_pend_tail") - i32("wish_pend_head") == queued + 1)
+    call(lay["smp_rx"], block, len(msg), 1)                     # not USB: not ours
+    check("the same PUT from a DIN port is not taken", i32("wish_puts") == 1)
 
     # 7. ERASE's lock
     writes = sum(1 for k, *_ in disk.log if k == "W")

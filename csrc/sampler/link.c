@@ -2988,6 +2988,9 @@ void smp_rx(const u8 *msg, u32 len, u32 source)
             for (u32 c = 0; c < 8; c++)
                 rp[r++] = dir_ok && k < POOL_SLOTS && fr ? NAME(k)[c] : 0;
         }
+    } else if (cmd == 12 || cmd == 13) {        /* 2026-11-13: a wishes record, PUT and GET (csrc/wishes/store.c) */
+        extern u32 wish_rx(u32 cmd, const u8 *rq, u32 n, u8 *rp, u32 r, u8 *st);
+        r = wish_rx(cmd, rq, n, rp, r, &rp[3]);
     } else if (cmd == 27) {                     /* v0.35: ENTRY K -> the slot's 16-byte entry as the DSP reads it, */
         u32 k = n >= 4 ? rq[3] : 0xFFu;          /*   its 8-byte name, u32 the pool's DSP address (for dn2diag's */
         for (u32 c = 0; c < 16; c++)            /*   own entry check: a slot that previews but will not play, M5) */

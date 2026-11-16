@@ -113,6 +113,8 @@ def w(lib):
     lib.host_zero()
     for name in ("smp_er_lock", "host_fail"):
         ctypes.c_int.in_dll(lib, name).value = 0
+    for name in ("wish_put_wait", "wish_got_state"):
+        ctypes.c_uint32.in_dll(lib, name).value = 0
     ctypes.c_uint.in_dll(lib, "host_frames").value = 0
     return lib
 
@@ -634,3 +636,119 @@ def test_removing_the_last_field_removes_the_link(w):
     put(w, 0x13000, 1, b"")
     stored = save(w, 0x13000)
     assert read_link(w, stored) is None and entry(w, 0x13000) is None
+
+
+# -- travel: PUT and GET over our SysEx channel (link.c 12, 13) ------------------------------------------------
+
+def rx(lib, cmd: int, args: bytes) -> tuple[int, bytes]:
+    """-> (status, reply data): wish_rx as link.c's smp_rx calls it (the request: seq, cmd, arguments)"""
+    rq = b"\x12\x34" + bytes([cmd]) + args
+    rp = ctypes.create_string_buffer(160)
+    st = ctypes.cast(ctypes.byref(rp, 3), ctypes.POINTER(ctypes.c_uint8))
+    r = lib.wish_rx(cmd, rq, len(rq), rp, 4, st)
+    return rp.raw[3], rp.raw[4:r]
+
+
+def get_all(lib, h0: int, h1: int) -> tuple[int, bytes]:
+    """-> (status, record): GET chunk by chunk from offset 0"""
+    out, off = b"", 0
+    while True:
+        st, d = rx(lib, 13, h0.to_bytes(4, "big") + h1.to_bytes(4, "big") + off.to_bytes(2, "big"))
+        if st:
+            return st, out
+        n = int.from_bytes(d[:2], "big")
+        assert int.from_bytes(d[2:4], "big") == off
+        out += d[4:]
+        off += len(d) - 4
+        if off >= n:
+            return 0, out
+
+
+def test_a_record_put_reaches_the_sound_waiting_for_it_and_its_cell(w):
+    rec = spell({0x10: bytes(range(200)), 0x11: b"\x08\x7f\x20\x60\x18\x01\x01\x00"})
+    put(w, 0xC000, 0x10, bytes(range(200)))
+    put(w, 0xC000, 0x11, b"\x08\x7f\x20\x60\x18\x01\x01\x00")
+    stored = save(w, 0xC000)                                   # another unit's preset: its link, no cell here
+    w.host_erase()
+    w.host_reboot()
+    load(w, 0xC000, stored)
+    settle(w, 2)
+    assert entry(w, 0xC000)[3] & W_MISSING
+    st, d = rx(w, 12, len(rec).to_bytes(2, "big") + rec)
+    assert st == 0 and d == xxh32(rec, 0x57495348).to_bytes(4, "big") + xxh32(rec, 0x4E324D58).to_bytes(4, "big")
+    assert rx(w, 12, len(rec).to_bytes(2, "big") + rec)[0] == 5       # one at a time, until the UI loop files it
+    settle(w)
+    assert get(w, 0xC000, 0x10) == bytes(range(200)) and entry(w, 0xC000)[3] == W_DISK
+    assert u32(w, "wish_cells_written") == 1 and u32(w, "wish_put_wait") == 0
+    w.host_reboot()                                            # and it stays: the cell is on the +Drive
+    load(w, 0xC100, stored)
+    settle(w, 2)
+    assert get(w, 0xC100, 0x10) == bytes(range(200))
+
+
+def test_a_put_that_is_not_a_record_is_refused(w):
+    for bad in (b"", b"\x00\x05abc", (489).to_bytes(2, "big") + bytes(489), b"\x00\x03\x00\x10\x00"):
+        assert rx(w, 12, bad)[0] == 1
+    rec = spell({0x20: b"x", 0x10: b"y"})[::-1]                  # tags out of order: no record of ours
+    assert rx(w, 12, len(rec).to_bytes(2, "big") + rec)[0] == 1 and u32(w, "wish_put_wait") == 0
+
+
+def test_get_answers_from_ram_in_chunks(w):
+    put(w, 0xD000, 0x10, bytes(range(256)) + bytes(200))
+    stored = save(w, 0xD000)
+    h0, h1, n = read_link(w, stored)
+    st, rec = get_all(w, h0, h1)
+    assert st == 0 and rec == entry(w, 0xD000)[4] and len(rec) == n and u32(w, "host_reads") == 0
+
+
+def test_get_reads_the_cell_when_no_sound_holds_it(w):
+    put(w, 0xE000, 0x10, b"from the drive")
+    stored = save(w, 0xE000)
+    settle(w)
+    w.host_reboot()                                            # RAM lost, the cell kept
+    h0, h1, _ = read_link(w, stored)
+    assert get_all(w, h0, h1)[0] == 5                          # asked: the UI loop reads it
+    settle(w, 1)
+    st, rec = get_all(w, h0, h1)
+    assert st == 0 and rec == spell({0x10: b"from the drive"})
+
+
+def test_get_of_a_record_this_drive_has_not_says_so(w):
+    assert get_all(w, 0x1234, 0x5678)[0] == 5
+    settle(w, 1)
+    assert get_all(w, 0x1234, 0x5678)[0] == 3
+
+
+def test_the_hosts_link_and_hash_are_the_firmwares(w):
+    from dnfw.wishes import record as R
+    for fields in ({0x10: b"routes"}, {0x10: bytes(300), 0x11: bytes(range(8))}):
+        rec = spell(fields)
+        s = 0xF000
+        for t, v in fields.items():
+            put(w, s, t, v)
+        stored = bytes(save(w, s))
+        assert R.write_link(bytes(359), rec) == stored and R.read_link(stored).matches(rec)
+        w.wish_drop(ctypes.c_uint32(s))
+
+
+def test_the_hosts_client_puts_and_gets_through_the_channels_framing(w):
+    """dnfw.wishes.travel's Unit over the SysEx bytes, wish_rx answering as link.c's smp_rx frames it"""
+    from dnfw.wishes import record as R
+    from dnfw.wishes import travel as T
+
+    def exchange(msg: bytes) -> bytes:
+        rq = T.unpack7(msg[6:-1])
+        rp = ctypes.create_string_buffer(160)
+        rp.raw = rq[:2] + bytes([rq[2] | 0x80, 0]) + bytes(156)
+        st = ctypes.cast(ctypes.byref(rp, 3), ctypes.POINTER(ctypes.c_uint8))
+        r = w.wish_rx(rq[2], rq, len(rq), rp, 4, st)
+        return T.HEADER + T.pack7(rp.raw[:r]) + b"\xF7"
+
+    unit = T.Unit(exchange, wait=lambda s: settle(w, 1))
+    rec = spell({0x10: bytes(range(250)), 0x11: bytes(8)})
+    assert unit.put(rec) == R.hash_of(rec)
+    settle(w)
+    w.host_reboot()                                            # only the cell left: GET reads it
+    link = R.Link(*R.hash_of(rec), len(rec))
+    assert unit.get(link) == rec
+    assert unit.get(R.Link(1, 2, 10)) is None

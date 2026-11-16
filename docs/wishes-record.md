@@ -150,14 +150,42 @@ reads per-track lists the UI task builds, phase 2).
   SETUP), whatever the hooks. Measured: Overbridge's audio path never reaches the sound loader or saver. How the
   plugin loads a preset stored on the unit goes through function pointers and was not traced statically; any
   stored sound that becomes a live one passes the loader, so its record follows.
-- **Elektron Transfer to another unit** carries the link, not the record (phase 5 adds the record to our own
-  `.dn2pst` files).
+- **Elektron Transfer to another unit** carries the link, not the record: our `.dn2pst` files carry it beside the
+  sound (Travel, below).
+
+## Travel: a record in a `.dn2pst`, and to and from the unit (phase 5, 2026-11-13)
+
+Transfer sends only the payload a preset's `manifest.json` names, so a preset sent to another unit arrives with its
+link and without its record (`scratch/modulation/wishes-record.md` §3). Our files carry the record beside it, as a
+third ZIP entry, and our SysEx channel gives it to the unit:
+
+- **`wishes.bin`** in the `.dn2pst` (`src/dnfw/wishes/pst.py`): `WSH1`, u16 count, then per record u32 h0, u32 h1,
+  u16 length, the record. Adding it copies the file's other two entries as they are. A reader checks each record
+  against its hash.
+- **PUT** (our channel's command 12, `csrc/wishes/store.c` `wish_rx`, dispatched from `link.c` `smp_rx`, USB only):
+  u16 length, the record -> its h0, h1. The MIDI task checks the spelling, hashes it and leaves it in a one-record
+  mailbox (status 5 while the previous one is not filed). The UI pass files it as a save files a record: its cell
+  queued, and every sound waiting for that hash, missing ones included, gets it.
+- **GET** (13): h0, h1, u16 offset -> u16 length, u16 offset, up to 128 bytes. Answered from RAM (the hash cache,
+  checked under the table's lock) when a sound holds the record; otherwise the UI pass reads its cell (status 5, ask
+  again) and the next GET answers from it; status 3 when no cell of this +Drive holds it.
+- **The tool** (`scripts/wish_pst.py`, for the User; Claude never talks to the unit): `info` (the link, and
+  whether the file carries its record), `fetch` (GET the record the link names into the file), `send` (PUT the
+  file's records). The User sends the preset itself with Transfer, before or after: the sound finds the record by
+  its hash either way.
+
+Checked: the C on the host (`test/test_wishes_c.py`: PUT into a waiting sound and its cell, refusals, GET from RAM
+in chunks and from a cell, an unknown record; the host's link and hash against the C's, and `travel.Unit` against
+`wish_rx` through the channel's framing), the files (`test/test_wishes_pst.py`), and the build's `smp_rx` taking a
+PUT from USB and not from DIN, the UI pass filing it (`scripts/emu_wishes.py` 6b). **Not checked:** Transfer
+receiving a 3-entry `.dn2pst` (expected to ignore the extra entry; the User tests it before presets are published
+that way), and anything on the unit.
 
 ## Not done yet
 
 - Reference lists and collecting cells no link names (59,392 cells; a cell is never freed, so nothing can lose a
   record; needed before the store passes about half full).
-- Carrying records in `.dn2pst` presets (phase 5), a SysEx dump of cells, a web-page send.
+- A SysEx dump of cells, a web-page send (the page could speak PUT and GET as `wish_pst.py` does).
 - The machine-change hook (no field needs it yet).
 - **On the unit:** the hooks' paths (pattern switch, undo, clipboard across a project LOAD), `wish_reentered`,
   the cells on a real eMMC. The emulator has no eMMC model.

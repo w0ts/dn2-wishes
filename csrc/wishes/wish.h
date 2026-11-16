@@ -149,7 +149,10 @@ void wish_settings_save(u8 *stored, u32 live);
 extern u32 wish_cells_written, wish_cells_found, wish_cells_read, wish_resolved, wish_missing;
 extern volatile u32 wish_pend_head, wish_pend_tail;
 extern u32 wish_pend_lost, wish_io_fails;
+extern volatile u32 wish_put_wait, wish_got_state;
+extern u32 wish_puts, wish_gets;
 int wish_enqueue(const struct wish *w);
 void wish_poll(void);
+u32 wish_rx(u32 cmd, const u8 *rq, u32 n, u8 *rp, u32 r, u8 *st);   /* link.c: PUT 12, GET 13 */
 
 #endif

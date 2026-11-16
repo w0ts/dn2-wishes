@@ -128,7 +128,9 @@ WISH_ENTRIES = ["wish_memcpy_stub", "wish_memset_stub", "wish_load_stub", "wish_
                 "mx_poll", "mx_eval", "mx_lay", "mx_compiles", "mx_env_on", "mx_env_off",
                 "mxp_pop", "mxp_poll", "mxp_draw", "mxp_visible",
                 "mxp_pushes", "mxp_opens", "mxp_refusals", "mxp_why", "mxp_rid", "mxp_turns", "mxp_keys", "mxp_detents",
-                "env2_visible", "mx_env2_locks", "sl_e2_held", "sl_e2_set"]     # the matrix (csrc/matrix)
+                "env2_visible", "mx_env2_locks", "sl_e2_held", "sl_e2_set",     # the matrix (csrc/matrix)
+                "mxp_setup_dep", "mxp_setup_rows",
+                "wish_rx", "wish_put_wait", "wish_puts"]                         # travel (store.c: PUT, GET)
 # the preset browser's ENGINE filter (csrc/presets, dnfw.waverider.engfilt): its hooks and the state the checks read
 ENG_ENTRIES = ["eng_test_hook", "eng_sort_hook", "eng_ctor_hook", "eng_label", "eng_title", "eng_list", "eng_sort_row",
                "eng_clear", "eng_toggle", "eng_tick", "eng_match", "eng_mask", "eng_tests", "eng_lists", "eng_n"]

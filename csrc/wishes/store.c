@@ -21,7 +21,12 @@
  * time, and a cell is never freed, so nothing can lose a record.
  *
  * Every write here waits for the +Drive, for ERASE MOD DATA (smp_er_lock), and runs from the UI loop (wr_poll),
- * as inserts' and the pools' writes (csrc/inserts/store.c, csrc/sampler/pools.c). */
+ * as inserts' and the pools' writes (csrc/inserts/store.c, csrc/sampler/pools.c).
+ *
+ * **Travel** (phase 5, docs/wishes-record.md "Travel"): a record sent over our SysEx channel (link.c, PUT 12) is
+ * filed as a save files one, and every sound waiting for it gets it; a record asked for by its hash (GET 13) is
+ * answered from RAM, or read from its cell by the UI loop and answered when asked again. The MIDI task only fills a
+ * mailbox and reads under the table's lock; the UI loop does the rest. */
 #include "wish.h"
 
 #ifndef WISH_BLK_READ
@@ -172,14 +177,15 @@ static int write_cell(const u8 *p)
 }
 
 /* every entry waiting for H0:H1 gets the record in IO (or, when FOUND is 0, is marked missing); under the lock,
- * which is not held across a read (a save in another task must never find it taken for long) */
-static void fill(u32 h0, u32 h1, int found)
+ * which is not held across a read (a save in another task must never find it taken for long) -> 0 when the lock was
+ * taken (nothing done) */
+static int fill(u32 h0, u32 h1, int found)
 {
     const u16 *slots = (const u16 *)WISH_AT(WISH_O_SLOTS);
     u32 k, n = found ? (u32)(IO[6] << 8 | IO[7]) : 0;
 
     if (!wish_take())
-        return;                                 /* tried again next pass */
+        return 0;                               /* tried again next pass */
     for (k = 0; k < wish_n; k++) {
         struct wish *w = wish_entry(slots[k]);
         u32 b;
@@ -196,6 +202,7 @@ static void fill(u32 h0, u32 h1, int found)
         wish_edits++;
     }
     wish_give();
+    return 1;
 }
 
 /* the first entry still waiting for its record: its cell read -> 1 done, 0 not now. The walk reads the index
@@ -251,6 +258,137 @@ static void queue_again(void)
     wish_give();
 }
 
+/* --- travel: PUT and GET over our SysEx channel (link.c smp_rx, commands 12 and 13) ------------------------- */
+#define CMD_PUT 12u
+#define CMD_GET 13u
+#define GET_CHUNK 128u                          /* a reply's bytes of record (link.c's reply buffer: 160) */
+
+static struct wish put_w D_;                    /* a PUT's record, until the UI loop files it */
+static struct wish got_w D_;                    /* a GET's record, read from its cell by the UI loop */
+volatile u32 wish_put_wait D_ = 0;              /* 1: put_w waits for the UI loop */
+volatile u32 wish_got_state D_ = 0;             /* got_w: 1 to be read, 2 read, 3 on no cell of this +Drive */
+u32 wish_puts D_ = 0, wish_gets D_ = 0;
+
+/* PUT u16 length, the record -> h0, h1 (the hash it is filed under). 1: not a record; 3: not now (no table yet);
+ * 5: the last PUT is not filed yet (ask again) */
+static u32 put_rx(const u8 *a, u32 k, u8 *rp, u32 r, u8 *st)
+{
+    u32 len = k >= 2u ? (u32)(a[0] << 8 | a[1]) : 0u, b;
+
+    if (!len || len > WISH_MAX || k != 2u + len || !wish_tlv_valid(a + 2, len)) {
+        *st = 1;
+        return r;
+    }
+    if (!wish_ready || wish_put_wait) {
+        *st = wish_ready ? 5 : 3;
+        return r;
+    }
+    for (b = 0; b < len; b++)
+        put_w.rec[b] = a[2 + b];
+    put_w.len = (u16)len;
+    put_w.flags = 0;
+    wish_hash(put_w.rec, len, &put_w.h0, &put_w.h1);
+    wish_puts++;
+    wish_put_wait = 1;                          /* last: whole before the UI loop looks */
+    put32(rp + r, put_w.h0);
+    put32(rp + r + 4, put_w.h1);
+    return r + 8;
+}
+
+/* GET h0, h1, u16 offset -> u16 length, u16 offset, up to GET_CHUNK bytes of the record from OFFSET. 1: bad
+ * arguments; 3: no cell of this +Drive holds it; 5: being read from the +Drive (ask again) */
+static u32 get_rx(const u8 *a, u32 k, u8 *rp, u32 r, u8 *st)
+{
+    u32 h0, h1, off, len = 0, b;
+    const u8 *rec = 0;
+
+    if (k != 10u) {
+        *st = 1;
+        return r;
+    }
+    h0 = get32(a);
+    h1 = get32(a + 4);
+    off = (u32)(a[8] << 8 | a[9]);
+    if (wish_take()) {                          /* a sound in RAM holds it: copied under the lock */
+        const struct wish *w = wish_cache_get(h0, h1);
+        if (w && w->h0 == h0 && w->h1 == h1 && w->len && !(w->flags & (W_DIRTY | W_WANT)) && off <= w->len) {
+            len = w->len;
+            for (b = off; b < len && b < off + GET_CHUNK; b++)
+                rp[r + 4u + b - off] = w->rec[b];
+            rec = w->rec;
+        }
+        wish_give();
+    }
+    if (!rec && wish_got_state == 2u && got_w.h0 == h0 && got_w.h1 == h1 && off <= got_w.len) {
+        len = got_w.len;
+        for (b = off; b < len && b < off + GET_CHUNK; b++)
+            rp[r + 4u + b - off] = got_w.rec[b];
+        rec = got_w.rec;
+    }
+    if (!rec) {
+        int same = got_w.h0 == h0 && got_w.h1 == h1;
+        if (same && wish_got_state == 3u) {
+            *st = 3;
+        } else {
+            if (wish_got_state != 1u && !(same && wish_got_state == 2u)) {   /* one read at a time */
+                got_w.h0 = h0;
+                got_w.h1 = h1;
+                wish_got_state = 1;
+            }
+            *st = (same && wish_got_state == 2u) ? 1 : 5;                     /* 2: OFFSET past its end */
+        }
+        return r;
+    }
+    wish_gets++;
+    rp[r] = (u8)(len >> 8);
+    rp[r + 1] = (u8)len;
+    rp[r + 2] = (u8)(off >> 8);
+    rp[r + 3] = (u8)off;
+    return r + 4u + (len - off < GET_CHUNK ? len - off : GET_CHUNK);
+}
+
+/* link.c smp_rx: commands 12 (PUT) and 13 (GET); RQ the request (seq, cmd, arguments), N its bytes */
+u32 wish_rx(u32 cmd, const u8 *rq, u32 n, u8 *rp, u32 r, u8 *st)
+{
+    if (n < 3u) {
+        *st = 1;
+        return r;
+    }
+    return cmd == CMD_PUT ? put_rx(rq + 3, n - 3u, rp, r, st) : get_rx(rq + 3, n - 3u, rp, r, st);
+}
+
+/* the UI loop's part: a PUT filed (queued for its cell, and given to every sound waiting for it); a GET's cell read */
+static void travel_poll(void)
+{
+    u32 i;
+
+    if (wish_put_wait && wish_enqueue(&put_w) == 0) {
+        cell_make(IO, &put_w);
+        if (fill(put_w.h0, put_w.h1, 1))
+            wish_put_wait = 0;                  /* else: the lock was taken, filed again next pass (queued once) */
+    }
+    if (wish_got_state != 1u)
+        return;
+    for (i = 0; i < PROBE; i++) {
+        if (WISH_BLK_READ(cell_of(got_w.h0, i), 512u, IO) != 0) {
+            wish_io_fails++;
+            return;                             /* tried again next pass */
+        }
+        wish_cells_read++;
+        if (!cell_valid(IO))
+            break;
+        if (get32(IO + 8) == got_w.h0 && get32(IO + 12) == got_w.h1
+            && wish_hash_ok(IO + HEAD, IO[6] << 8 | IO[7], got_w.h0, got_w.h1)) {
+            got_w.len = (u16)(IO[6] << 8 | IO[7]);
+            for (i = 0; i < got_w.len; i++)
+                got_w.rec[i] = IO[HEAD + i];
+            wish_got_state = 2;
+            return;
+        }
+    }
+    wish_got_state = 3;
+}
+
 /* from the UI loop (page.c's wr_poll), every pass */
 void wish_poll(void)
 {
@@ -258,6 +396,7 @@ void wish_poll(void)
 
     if (!wish_ready || !ok())
         return;
+    travel_poll();
     if (requeue && wish_pend_tail - wish_pend_head < WISH_PEND / 2u)
         queue_again();
     if (wish_pend_head == wish_pend_tail) {

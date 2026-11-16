@@ -1202,7 +1202,7 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
                  "wish_loads", "wish_links_in", "wish_saves", "wish_links_out", "wish_reentered", "wish_full",
                  "wish_copies", "wish_carries", "wish_clears", "wish_get", "wish_put", "wish_find",
                  "wish_pend_head", "wish_pend_tail", "wish_cells_written", "wish_resolved", "wish_missing",
-                 "wish_wants", "wish_io_fails", "wish_edits"):
+                 "wish_wants", "wish_io_fails", "wish_edits", "wish_put_wait", "wish_puts", "wish_rx"):
         layout[name] = csyms[name]              # 2026-11-11: the wishes record (csrc/wishes): the checks read them
     for name in ("wish_item", "wish_item_loads", "wish_item_saves", "wish_item_nolane", "wish_item_dropped"):
         layout[name] = csyms[name]              # 2026-11-12: kits and patterns (csrc/wishes/item.c)
