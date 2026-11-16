@@ -264,6 +264,38 @@ def mono_engine(p: Prog, d: int, s: int, k146: int) -> None:
         p.if_(s, "GE", 12, lambda: (p.iconst(12, 1), p.iop(d, 12, "+", d)), kind="i")
 
 
+def _rest_clear(p: Prog, L: M.Layout) -> None:
+    """2026-11-15 (B, main; the User: VO-6 retriggers as the Monomachine): a note on a slot that was resting (RESTS at
+    MNM_QUIET_BLOCKS or more: its sound died away after the DN2's AMP) whose machine lists REST_CLEAR (VO-6: its AMP
+    level) starts those state words at 0, as a Monomachine voice's level after its release, before its trig reads
+    them. The machine is the one the voice still plays (its 'mach' word, MDV.N + its NAMES index, as mono_cost reads
+    it): a note that changes machine runs its init anyway. In mnm_ages' slot pass: I0 the slot, I5 its scratch words.
+    Clobbers R0, R12, R13, I1. (Known limit: a note during the DN2 AMP's audible release, before the rest, finds the
+    level full: the full pre-delay where the Monomachine's would be shorter.)"""
+    from ..mnm import machines as MNM
+    clears = [(MDV.N + k, mod) for k, mod in enumerate(MNM.MODULES) if hasattr(mod, "REST_CLEAR")]
+    if not clears:
+        return
+    p.ldi(0, RESTS_OFF // 4, 5)
+    p.iconst(12, MNM_QUIET_BLOCKS)
+
+    def rested():
+        p.geti(13, 0)
+        p.lsh(13, 13, 10)                      # the slot's Machinedrum words (the voice's: L.md.state + u << 10)
+        p.iconst(12, L.md.state)
+        p.iop(13, 12, "+", 13)
+        p.seti(1, 13)
+        p.ldi(0, MDK.VW["mach"], 1)
+        for mach, mod in clears:
+            def clear(mod=mod):
+                p.iconst(13, 0)
+                for name in mod.REST_CLEAR:
+                    p.sti(MDK.S0 + mod.S[name], 1, 13)
+            p.iconst(12, mach)
+            p.if_(0, "EQ", 12, clear, kind="i")
+    p.if_(0, "GE", 12, rested, kind="i")
+
+
 def mnm_ages(p: Prog, L: M.Layout) -> None:
     """v0.29: every slot's key and Monomachine cost for this block (MNM_KEYS_OFF), and the
     slots in key order (ORDER_OFF), and (2026-11-12) the budget sums (CUM_OFF). Clobbers R0-R15, I0-I2."""
@@ -348,6 +380,7 @@ def mnm_ages(p: Prog, L: M.Layout) -> None:
             p.iop(12, 3, "AND", 12)
 
             def struck():
+                _rest_clear(p, L)
                 p.iconst(0, 0)
                 p.sti(RESTS_OFF // 4, 5, 0)
                 p.sti(STRIKES_OFF // 4, 5, 0)  # v0.36: a new note, no strikes

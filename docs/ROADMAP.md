@@ -4,6 +4,15 @@ What the owner has asked for and is not built yet, in the words he asked for it,
 enough of a plan that it can be picked up cold. Upstream's own parked ideas are in
 `docs/ideas-backlog.md`.
 
+## VO-6's retrig level from stock's amp envelope (the User via main, 2026-11-15; later refinement)
+
+VO-6 retriggers as the Monomachine since 2026-11-15 (docs/mnm.md, "Its AMP level"): the pre-delay is
+0x89 x the AMP level, and that level is VO-6's own stand-in (full after two blocks, 0 again only once
+the voice rests). A note during the DN2 AMP's audible release therefore gets the full fade and wait.
+Closer to the Monomachine: read the level of the voice's stock amp envelope on the SHARC (section 7)
+at the trig. Its word, and whether it is updated before or after our engine's block, are not known yet:
+find them in the runner first (hours), then feed that level to `vo6.trig` in place of `lev`.
+
 ## After v0.51 (owner, 2026-11-12)
 
 - **v0.51 LIGHTER, released:** the lighter Monomachine and Machinedrum machines (`docs/mnm-trim.md`),

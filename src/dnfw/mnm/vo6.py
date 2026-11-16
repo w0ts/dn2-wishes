@@ -20,9 +20,11 @@ excitation and its crossfade, the pulse taps -- the arithmetic is the 56300's ex
 same way. Elsewhere it is float, each limited store floored as the 56300's (`_floor`).
 test/test_mnm.py holds it to the Monomachine's output (its code in an emulator).
 
-y:(r6+175), the Monomachine kernel's AMP envelope level, gates the voiced path. The DN2 has no
-such envelope here: the level is that of an AMP attack of 0 (S_LEV): 0 at the trig, then after
-each block min(level + 0x400000, 0x7FFFFF).
+y:(r6+175), the Monomachine kernel's AMP envelope level, gates the voiced path and (AMP_ROWS)
+sets a retrig's pre-delay. The DN2 has no such envelope here: the level is that of an AMP attack
+of 0 (S_LEV): 0 before the first note, then after each block min(level + 0x400000, 0x7FFFFF); a
+note keeps it, as the kernel's attack restarts from the current level (2026-11-15); a voice that
+rested (its sound died away after the DN2's AMP) starts its next note at 0 (REST_CLEAR).
 
 State (S): the envelopes' words (x31..x40, y31..y40), the consonant (x54) and the trill
 (y54, x55, y55), the pulse phase, the ring position, the noise words, the frozen formants and
@@ -67,6 +69,15 @@ assert NSTATE <= K.NS
 FORM = ((0x8074B7, 0x7F1766), (0x80AF13, 0x7EA3B7), (0x80E96E, 0x7E3072), (0x815E23, 0x7D4B22))
 OUT_EQ = (0x3FFFD6, 0x941206, 0x2E6F69, 0x8B8D50, 0x372839)
 LEV_STEP, LEV_TOP = 0x400000, 0x7FFFFF
+# 2026-11-15 (the User, via main: "fix and also previous one"): the consonants k whose trig set-up (x:0x101A51 + k)
+# reads the kernel's AMP level y:(r6+$AF) for the pre-delay, y37 = MPY(0x89, level): 1 2 3 4 7 11 14 16 17 18 20
+# (5 and 15 also start at x35 = 1, with y37 0). The Monomachine's kernel updates the level after the trig and the
+# render (DSP A P:0x88E..0x8D7) and a note restarts its attack from where it is, never from 0: so a retrig on a
+# sounding note fades and waits ~136 blocks (49 ms at full level), as the Monomachine does
+AMP_ROWS = sum(1 << k for k in (1, 2, 3, 4, 7, 11, 14, 16, 17, 18, 20))
+# 2026-11-15 (B, main): the state words a rested voice's next note starts at 0 (dnfw.perc.program mnm_ages): the
+# level, as a Monomachine voice's after its release
+REST_CLEAR = ("lev",)
 
 # scratch in the shared IN buffer (floats unless said)
 EXC, UNV, C30, RAMP, CO, WRD = 0, 16, 32, 48, 80, 96
@@ -213,7 +224,7 @@ def trig(p: Prog, L: C.Layout) -> None:
     p.fop(1, 1, "MIN", 12)
     ss(p, "pb", 1)
     for name, v in (("x31", 1), ("y31", 0), ("x35", 2), ("y37", 0), ("x39", 3), ("y39", 0x7FFFF8),
-                    ("y40", 1), ("y54", 1), ("x55", 0), ("y55", 0xF), ("y32", 0), ("lev", 0)):
+                    ("y40", 1), ("y54", 1), ("x55", 0), ("y55", 0xF), ("y32", 0)):   # (not lev: see AMP_ROWS)
         setk(p, name, v)
     # the consonant: k = CONS x 21 / 128; its row
     C.knob(p, 1, 4)
@@ -282,6 +293,21 @@ def trig(p: Prog, L: C.Layout) -> None:
             p.ifz(11, "NE", lambda: setk(p, "y39", 0x770A3D))
         p.if_(10, "LT", 12, off, kind="i")
     p.ifz(9, "NE", vsw)
+    # 2026-11-15 (the User: VO-6 retriggers as the Monomachine): AMP_ROWS' set-ups start the pre-delay at
+    # y37 = MPY(0x89, the AMP level), the level as the note found it (P:0x146607.. in each)
+    ls(p, 2, "k")
+    p.iconst(12, 0)
+    p.iop(2, 12, "-", 2)                       # -k
+    p.iconst(1, AMP_ROWS)
+    K._shift_r(p, 1, 1, 2)                     # AMP_ROWS >> k
+    p.iconst(12, 1)
+    p.iop(1, 1, "AND", 12)
+
+    def amp():
+        ls(p, 1, "lev")
+        mulc(p, 1, 0x89)
+        ss(p, "y37", 1)
+    p.ifz(1, "NE", amp)
 
 
 # -- the pitch ----------------------------------------------------------------------------

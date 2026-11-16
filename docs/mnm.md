@@ -113,8 +113,19 @@ kinds (is_wr: the type - 4) and the DSP's type lookup follow that one table.)
   same pitch, it sounds an octave under SID, DDRW, DENS and VO-6 (their golden runs). So
   each machine's note 60 is 261.6 Hz, as the DN2's own machines' (test_perc_live).
 - **Its AMP level** (y:(r6+175), the kernel's amp envelope, which gates the voiced path):
-  that of an AMP attack of 0 (0 at the trig, then + 0x400000 a block to full), so its
-  pre-delay is 0.
+  that of an AMP attack of 0 (0 before the first note, then + 0x400000 a block to full).
+  2026-11-15 (the User: VO-6 retriggers as the Monomachine): a note keeps the level, as the
+  kernel's attack restarts from where it is (DSP A P:0x88E..0x8D7, after the trig and the
+  render). So on the 11 consonants whose trig reads it (CONS rows 1 2 3 4 7 11 14 16 17 18 20,
+  `vo6.AMP_ROWS`), a retrig on a sounding note fades and waits y37 = 0x89 x level blocks, as
+  the Monomachine: at full level a fade of about 48 ms, then about 47 ms of silence
+  (test_perc_live). A voice that rested (its sound died away after the DN2's AMP: 64 blocks
+  under -96 dB) starts its next note at level 0, at once (`vo6.REST_CLEAR`,
+  `perc.program._rest_clear`).
+  **Known limit:** the level is VO-6's own stand-in, not the DN2's amp envelope. A note during
+  the DN2 AMP's audible release (before the voice rests) finds the level full and gets the
+  full fade and wait, where a Monomachine's released level would give a shorter one. Reading
+  stock's amp envelope level instead is in docs/ROADMAP.md.
 - **The knobs start where WaveTone's records are** when the machine is chosen (as PERC's
   do): the Monomachine's own defaults are not loaded (see FIRMWARE.md).
 

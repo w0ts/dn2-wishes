@@ -408,3 +408,56 @@ def test_v042_a_voice_changing_machine_plays_as_a_fresh_one(y):
         for x in ("PI-BD", "PI-RS", "PI-SD", "PI-HH", "TRX-BD", "TRX-CP", "EFM-CY", "PI-ML"):
             if x != y:
                 assert _switch([(x, ring, True)], y) == fresh, (x, y, ring)
+
+
+def _vo6_blocks(plan, rest=False):
+    """2026-11-15: VO-6 (CONS 72: a consonant whose trig reads the AMP level) on slot 0, with mnm_ages run before each
+    block as the program runs it. PLAN: per block, a note or not; REST: from block 12 until the next note the chain's
+    buffer is silent (the DN2's AMP has faded the voice out), so the voice comes to rest. -> per-block peaks."""
+    from dnfw.mnm import dpro, machines as MNM
+    from dnfw.perc.dsl import Prog
+    h = PL.Harness()
+    h.words.update(dpro.bench_words(h.L.md.mnm))
+    h.words[h.L.md.C["fill"]] = MDK.Z_N
+    h.set_mnm_voice(MNM.NAMES.index("VO-6"), (64, 64, 96, 0, 72, 64, 64, 64))
+    peaks, silent = [], False
+    for b, note in enumerate(plan):
+        silent = rest and (silent or b == 12) and not note
+        if silent:
+            for k in range(32):
+                h.mem.put(PL.BUF + 4 * k, PL.bits(0.0))
+        h.mem.put(PP.TRIG_WORD, (1 << 16) if note else 0)
+        h.mem.put(PP.BUFFERS, PL.BUF)
+        p = Prog("run", mem=h.mem)
+        p.spill = h.L.md.C["ash"]
+        PP.mnm_ages(p, h.L)
+        peaks.append(_peak(h.block(60.0, note)))
+    return peaks
+
+
+def test_vo6_retrig_waits_while_sounding_and_starts_at_once_after_a_rest(monkeypatch):
+    """2026-11-15 (the User: VO-6 retriggers as the Monomachine; main: B): a note on a sounding VO-6 voice finds its
+    AMP level full, so CONS 72's set-up fades it (y35 down by 0xEDC6 a Monomachine block) and then waits y37 = 136
+    blocks: measured, a fade over 72 of these blocks (48 ms), silence to the 147th, then the vowel. A note after the
+    voice came to rest (its sound died away after the DN2's AMP) finds the level 0 and starts at once; without
+    REST_CLEAR it would wait as on a sounding voice"""
+    from dnfw.mnm import rom as MROM
+    from dnfw.mnm import vo6
+    if not MROM.available():
+        pytest.skip("needs the owner's Monomachine OS")
+    n = PP.MNM_QUIET_BLOCKS + 40
+    plan = [b in (0, n) for b in range(n + 156)]
+    on = max(_vo6_blocks([b == 0 for b in range(8)])[2:8])
+    assert on > 1e-3
+    sounding = _vo6_blocks(plan)
+    assert max(sounding[n - 8:n]) > 0.1 * on, "the voice still sounds before the retrig"
+    assert max(sounding[n:n + 8]) > 0.1 * on, "the fade starts from the sound"
+    assert max(sounding[n + 80:n + 144]) < 1e-3 * on, "then the wait: silent"
+    assert max(sounding[n + 148:n + 156]) > 0.1 * on, "then the vowel again"
+    rested = _vo6_blocks(plan, rest=True)
+    assert all(x == 0.0 for x in rested[12 + PP.MNM_QUIET_BLOCKS + 1:n]), "the voice rests"
+    assert max(rested[n:n + 4]) > 0.1 * on, "after a rest: at once"
+    assert max(rested[n + 80:n + 144]) > 0.1 * on, "and no wait"
+    monkeypatch.delattr(vo6, "REST_CLEAR")
+    kept = _vo6_blocks(plan, rest=True)
+    assert max(kept[n + 80:n + 144]) < 1e-3 * on, "the control: without the clear, the level found full waits"
