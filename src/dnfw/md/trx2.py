@@ -477,6 +477,18 @@ def hpc(p: Prog, off: int, exact: bool = False) -> None:
     delay2(p, off + 2 * HP1_N)
 
 
+def hpc_inline(p: Prog, fh: int, cr: tuple[int, int], k22: int | None = None) -> None:
+    """hpc() at state words FH, float filters, inline: one I1 at the cascade's middle, the limiter's bounds in
+    the registers CR, 2^-22 in F<k22> (None: loaded each filter). R4 in, R4 out; R11 the state base. Clobbers
+    R3, R5-R9, R12, R13, I1."""
+    assert not EXACT
+    mid = fh + HPC_N // 2
+    at(p, mid)
+    _hp1f_body(p, fh - mid, cr, k22)
+    _hp1f_body(p, fh + HP1_N - mid, cr, k22)
+    delay2(p, fh + 2 * HP1_N)
+
+
 def path_inline(p: Prog, fh: int, fr: int, cr: tuple[int, int], k22: int) -> None:
     """hpc at state words FH then res4 at FR = FH + HPC_N, float filters, inline (not called): one I1 at their
     middle (34 words: every offset within a compute's move), the limiter's bounds in the registers CR
@@ -1611,17 +1623,29 @@ class TRXMA:
         p.ld(1, C["mdb"])
         iaddk(p, 1, 1, 4 * (K.S0 + TRXMA.SH + 2))
 
+        # the three cascades inline (hpc_inline), the limiter's bounds in R15, R10 (unused in the loop)
+        cr = (15, 10)
+        if not EXACT:
+            p.iconst(15, 0x7FFFFF)
+            p.iconst(10, -0x800000)
+
+        def cascade(off):
+            if EXACT:
+                hpc(p, off)
+            else:
+                hpc_inline(p, off, cr)
+
         def one():
             p.ldi(4, 0, 5)
-            hpc(p, TRXMA.F1)
+            cascade(TRXMA.F1)
             p.ipass(2, 4)                             # the body
             p.seti(1, 1)
             p.ldi(4, 0, 1)                            # the bead, two words on
             p.iconst(12, 4)
             p.iop(1, 12, "+", 1)
-            hpc(p, TRXMA.F2)
+            cascade(TRXMA.F2)
             p.ash(4, 4, -3)
-            hpc(p, TRXMA.F3)
+            cascade(TRXMA.F3)
             p.ipass(5, 2)
             p.ipass(2, 4)
             p.ld(6, C["a"])
