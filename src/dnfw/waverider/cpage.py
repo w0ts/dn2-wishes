@@ -48,6 +48,10 @@ LINK_SOURCES = [SOURCE.parents[1] / "sampler" / "link.c", SOURCE.parents[1] / "s
                 SOURCE.parent / "popup_stock.c",                      # ... on stock parameters' lists
                 SOURCE.parents[1] / "devtest" / "devtest.c",          # the test channel (docs/remote-ui.md, 2026-11-11)
                 SOURCE.parents[1] / "devtest" / "whitelist.c",        # ... its one whitelist
+                SOURCE.parents[1] / "wishes" / "table.c",             # the wishes record (docs/wishes-record.md)
+                SOURCE.parents[1] / "wishes" / "tlv.c",
+                SOURCE.parents[1] / "wishes" / "store.c",
+                SOURCE.parents[1] / "wishes" / "hooks.S",
                 SOURCE.parents[1] / "modulation" / "cascade.c",       # LFOs on the LFOs above them (2026-11-11)
                 SOURCE.parents[1] / "modulation" / "hooks.S",
                 SOURCE.parents[1] / "modulation" / "moving.c",        # controls that move (2026-11-11)
@@ -97,7 +101,14 @@ DEVTEST_ENTRIES = ["dt_rx", "dt_poll", "dt_sw", "smp_bulk_at", "prof_isr", "prof
 LZMA7_ENTRIES = ["dn_depack7", "dn7_status", "dn7_length", "dn7_late", "dn7c_state", "dn7c_why"]    # 2026-11-11 (docs/lzma7.md)
 MOD_ENTRIES = ["mod_mask_hook", "mod_lfo_mask", "mod_eval", "mod_eval_pre", "mod_wb", "mod_wb_cell",   # csrc/modulation
                "mv_begin", "mv_cell", "mv_poll"]
-LINK_ENTRIES = LINK_ENTRIES + DEVTEST_ENTRIES + LZMA7_ENTRIES + MOD_ENTRIES + SLIDE_ENTRIES + METER_ENTRIES + FDN8_ENTRIES + XDLY_ENTRIES + FXP_ENTRIES + INS_ENTRIES + HOLD_ENTRIES
+# the wishes record (csrc/wishes, docs/wishes-record.md): its four stubs and the state the checks read
+WISH_ENTRIES = ["wish_memcpy_stub", "wish_memset_stub", "wish_load_stub", "wish_save_stub", "wish_poll",
+                "wish_n", "wish_ready", "wish_busy", "wish_reentered", "wish_full", "wish_wants",
+                "wish_loads", "wish_links_in", "wish_saves", "wish_links_out", "wish_copies", "wish_carries",
+                "wish_clears", "wish_cells_written", "wish_cells_found", "wish_cells_read", "wish_resolved",
+                "wish_missing", "wish_pend_head", "wish_pend_tail", "wish_pend_lost", "wish_io_fails",
+                "wish_get", "wish_put", "wish_find"]
+LINK_ENTRIES = LINK_ENTRIES + WISH_ENTRIES + DEVTEST_ENTRIES + LZMA7_ENTRIES + MOD_ENTRIES + SLIDE_ENTRIES + METER_ENTRIES + FDN8_ENTRIES + XDLY_ENTRIES + FXP_ENTRIES + INS_ENTRIES + HOLD_ENTRIES
 
 
 # the list popup (csrc/waverider/popup.c, docs/popups.md): on our machines' and FX's list parameters,
@@ -124,6 +135,8 @@ def compile_page(header: str, *, base: int) -> tuple[bytes, dict[str, int], int]
                    "POOL_SLOTS": SM.POOL_SLOTS}
         from . import pages as PG
         defines["METER_RAM"] = hex(PG.METER_RAM)      # the system meter's block (csrc/meter)
+        defines["WISH_AREA"] = hex(PG.WISH_RAM) + "u"  # the wishes record's RAM (csrc/wishes/wish.h)
+        defines["WR_LOAD_BOUND"] = PG.TYPES_LAST + 2   # the stored-sound LOAD's machine bound (csrc/wishes/hooks.S replays it)
         defines["MOD_RAM"] = hex(PG.MOD_RAM) + "u"    # csrc/modulation's state (2026-11-11)
         defines["MOD_CASCADE_BYTES"] = PG.MOD_CASCADE_BYTES
         defines["MOD_MOVING_RAM"] = hex(PG.MOD_RAM + PG.MOD_CASCADE_BYTES) + "u"

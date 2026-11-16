@@ -409,6 +409,7 @@ int wr_poll(void *screen)
     extern void wpop_poll(void *screen);
     wpop_poll(screen);                          /* the list popup's redraws (popup.c) */
     smp_er_poll();                              /* v0.39: ERASE MOD DATA, a step a pass (erase.c) */
+    { extern void wish_poll(void); wish_poll(); }   /* the wishes record's cells, read and written (csrc/wishes) */
     smp_boot();
     jmp_poll();                                 /* DIRECT JUMP's setting, read and written (csrc/jump) */
     rec_poll();

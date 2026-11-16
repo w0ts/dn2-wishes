@@ -107,6 +107,26 @@ SLOT_RESUME = 0x400DC19E
 # a `moveq #6,%d2` reused for nothing else before the compare (the filter type
 # loads its own `moveq #7`). SAVE copies `sound+0xDE` to `stored+244` as it is.
 LOAD_BOUND = 0x400DD3EA
+# 2026-11-11, the wishes record (csrc/wishes, docs/wishes-record.md): every reference to stock's memcpy and
+# memset, and the stored-sound loader and saver just past their value loops. The load site's 6 bytes hold that
+# bound: its stub replays `moveq #TYPES_LAST + 2,%d2`, so one hook owns it.
+# memcpy and memset themselves stay stock (they are on Overbridge's audio path, scripts/gate_overbridge.py): each
+# jsr / jmp / lea / move.l # that names them names the wishes stub instead (the User, 2026-11-11: "A: keep
+# Overbridge stock"), except the four in Overbridge's own code (measured: they copy 56/84 B packet pieces, 32 B
+# input pieces, 108 B records and a DSP-side block, never a sound), whose operands are WISH_KEEP
+WISH_MEMCPY = 0x40134770
+WISH_MEMSET = 0x401347B8
+WISH_KEEP = (0x400031A8,                # lea memcpy,%a3 in the Overbridge packet builder (0x40003118)
+             0x40003436,                # lea memcpy,%fp in the Overbridge input (0x40003376)
+             0x400CF958,                # jsr memcpy, a DSP-side block from 0x80001a20 (the audio interrupt's path)
+             0x400D7ED4)                # move.l #memcpy,%d4, 108 B records (the audio interrupt's path)
+WISH_REFS = {WISH_MEMCPY: 694, WISH_MEMSET: 307}     # every reference in stock 1.12's MAIN OS (measured)
+# the instructions a reference may be the operand of: jsr / jmp abs.l, lea abs.l,An, move.l #imm,Dn
+WISH_OPS = {0x4EB9, 0x4EF9} | {0x41F9 | r << 9 for r in range(8)} | {0x203C | r << 9 for r in range(8)}
+WISH_LOAD_SITE = 0x400DD3E6             # mvs.b 28(%a2),%d0 ; moveq #6,%d2 (a2 live, a3 stored)
+WISH_LOAD_STOCK = bytes.fromhex("712a001c7406")
+WISH_SAVE_SITE = 0x400DD888             # mvs.b 54(%a2),%d0 ; move.l (%a0,%d0.l*4),%d0 (a2 stored, a3 live)
+WISH_SAVE_STOCK = bytes.fromhex("712a003620300c00")
 
 # the caves: clean runs from `dnfw cave scan` that no other mod writes, entered
 # 4 bytes in and left 4 bytes short, as arpmodes does (docs/memory-map.md).
@@ -714,9 +734,10 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
         edit(site + 2, _long(layout["attributes"] + col), f"attribute rows: the {n_rows}-row copy",
              _long(ATTR_STOCK_VA + col))
 
-    # 5. the stored-sound LOAD keeps type 5 (stock turns it into FM Tone)
-    edit(LOAD_BOUND, bytes([0x74, top + 2]), f"stored-sound LOAD: machine types -1..{top} are "
-         "kept (stock keeps -1..4; anything else loads as FM Tone)", bytes.fromhex("7406"))
+    # 5. the stored-sound LOAD keeps type 5 (stock turns it into FM Tone): the wishes record's load stub
+    # replays the bound as `moveq #top + 2,%d2` (csrc/wishes/hooks.S, WR_LOAD_BOUND), below
+    if top + 2 > 127:
+        raise ComposeError(f"the LOAD bound {top + 2} does not fit a moveq")
 
     # 4. slot_to_id
     edit(SLOT_HOOK, bytes.fromhex("4ef9") + _long(layout["slot_shim"]) + bytes.fromhex("4e71"),
@@ -863,6 +884,17 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     edit(MOD_WB_SITE, bytes.fromhex("4eb9") + _long(csyms["mod_wb"]) + bytes.fromhex("4e71"),
          "the LFO evaluator's DEST write: a lower LFO's into a higher LFO's control goes to a "
          "shadow cell (mod_wb_cell), carried into the mirror next frame", MOD_WB_STOCK)
+
+    # 2026-11-11: the wishes record (csrc/wishes, docs/wishes-record.md): its four sites
+    edit(WISH_SAVE_SITE, bytes.fromhex("4ef9") + _long(csyms["wish_save_stub"]) + bytes.fromhex("4e71"),
+         "the stored-sound SAVE, past its value loop: a sound with a wishes record gets its link in the lane "
+         "(wish_save)", WISH_SAVE_STOCK)
+    edit(WISH_LOAD_SITE, bytes.fromhex("4ef9") + _long(csyms["wish_load_stub"]),
+         f"the stored-sound LOAD, past its value loop: the link read into the wishes record (wish_load); the "
+         f"stub replays `moveq #{top + 2},%d2`: machine types -1..{top} are kept (stock keeps -1..4; anything "
+         "else loads as FM Tone)", WISH_LOAD_STOCK)
+    _need(content, WISH_LOAD_SITE + 6, bytes.fromhex("20300c00"), "the loader goes on: move.l (%a0,%d0.l*4),%d0")
+    _need(content, WISH_SAVE_SITE + 8, bytes.fromhex("e1883540"), "the saver goes on: lsl.l #8,%d0 ; move.w %d0,...")
 
     # v0.38: per-project pools: the four detours, entered by jmp (the stack as stock left it)
     _need(content, PJ_BEGIN_SITE + 8, bytes.fromhex("262f0028"), "the load goes on: move.l 40(%sp),%d3")
@@ -1031,6 +1063,23 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
                  "sl_lock_get", "sl_lock_set", "sl_v", "sl_cap", "sl_started", "sl_ticks", "sl_pasted", "sl_tclip", "sl_paste",
                  "sl_draw_sld", "sl_draw_slen"):
         layout[name] = csyms[name]
+    # last of every edit: each reference to memcpy / memset but Overbridge's (WISH_KEEP) names the wishes stub;
+    # one that another hook already rewrote fails its stock check here
+    for target, stub, word in ((WISH_MEMCPY, "wish_memcpy_stub", "memcpy"), (WISH_MEMSET, "wish_memset_stub", "memset")):
+        refs = [BASE + at for at in range(2, len(stock) - 3, 2)
+                if stock[at:at + 4] == _long(target) and struct.unpack_from(">H", stock, at - 2)[0] in WISH_OPS]
+        if len(refs) != WISH_REFS[target] or (target == WISH_MEMCPY and not set(WISH_KEEP) <= set(refs)):
+            raise ComposeError(f"{len(refs)} references to {word}, not the {WISH_REFS[target]} measured on 1.12")
+        for va in refs:
+            if va not in WISH_KEEP:
+                edit(va, _long(csyms[stub]), f"wishes: a {word} reference names {stub}", _long(target))
+    for name in ("wish_memcpy_stub", "wish_memset_stub", "wish_load_stub", "wish_save_stub", "wish_load_displaced",
+                 "wish_save_displaced", "wish_poll", "wish_n",
+                 "wish_loads", "wish_links_in", "wish_saves", "wish_links_out", "wish_reentered", "wish_full",
+                 "wish_copies", "wish_carries", "wish_clears", "wish_get", "wish_put", "wish_find",
+                 "wish_pend_head", "wish_pend_tail", "wish_cells_written", "wish_resolved", "wish_missing",
+                 "wish_wants", "wish_io_fails"):
+        layout[name] = csyms[name]              # 2026-11-11: the wishes record (csrc/wishes): the checks read them
     for name in ("mod_mask_hook", "mod_lfo_mask", "mod_eval", "mod_eval_pre", "mod_wb", "mod_wb_cell",
                  "mv_begin", "mv_cell", "mv_poll", "sl_lastv", "wr_screen"):
         layout[name] = csyms[name]              # 2026-11-11: csrc/modulation (the checks call them)

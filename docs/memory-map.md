@@ -191,6 +191,18 @@ attributes each changed run to a cave, an in-place edit, the appended area, or
 | **clean** runs (pass the stride and reference checks) | **70 runs, 7,065 B**; only three are large: `0x402cf52c`, `0x402d0664`, `0x402dfa1c`, 896 B each |
 | RAM above BSS (`0x466b74d0`–`0x48000000`) | 25.3 MB, mods use 49 KB — 26 KB of it step 4b's relocated parameter table |
 
+**RAM above BSS from `0x47000000`, 1.12 (2026-11-11).** Every claim up here has its row; a new one takes a range
+between them, adds its row and an `assert` against its neighbours in `dnfw.waverider.pages`. Measured free map:
+`scratch/memory/free-memory-2026-11-11.md` (stack depth from `0x48000000` read small, not bounded).
+
+| Range | Owner | What |
+|---|---|---|
+| `0x47000000` .. `0x4700d110` | `dnfw.mods.waverider._tables` | the DSP's tables, sent at power-on by the sample link (53,520 B) |
+| `0x47100000` .. `0x47200000` | remoteui, `csrc/devtest/prof.c` (`pages.PROF_RAM`, `PROF_BYTES`) | the CPU profiler's state and sample ring (1 MB) |
+| `0x47200000` .. `0x47280000` | (free) | 512 KB kept clear between the profiler and the wishes record |
+| `0x47280000` .. `0x476E4200` | the wishes record, `csrc/wishes` (`pages.WISH_RAM`, `docs/wishes-record.md`) | index, free stack, hash cache, queue, carry scratch, 8,192 entries of 512 B (4,604,416 B) |
+| `0x47800000` | (bound) | the claims above stay under it; the stack descends from `0x48000000` |
+
 | mod | caves | in-place edits | appended | RAM |
 |---|---|---|---|---|
 | `lfo4-tick6a` | 210 B at `0x402dfa1c` | 137 B, 33 sites | — | 12,288 B at `0x46700000` |
@@ -260,12 +272,12 @@ each region checked against its bounds before the stock block driver (`0x4012c59
 | `0x6E0400` .. `0x6E0501` | the inserts (`csrc/inserts/store.c`, `docs/inserts.md`) | 129 records x 2 copies (`DN2I`) |
 | `0x6E8000` .. `0x6E8800` | the DSP program's copy (`csrc/waverider/lzma7cache.c`, `docs/lzma7.md`) | header (`DN7C`, written last), then the program decoded from section 7 (up to 1 MiB) |
 | `0x6F0000` .. `0x6F0700` | the +Drive library's extension (`csrc/sampler/lib.c` `LIB_X_AT`) | entries 2,048..16,383 |
+| `0x6F0800` .. `0x6FEFFF` | the wishes record (`csrc/wishes/store.c`, `docs/wishes-record.md`) | 59,392 cells of one sector (`DN2W`), each a sound's record filed under its hash; written once |
 | `0x6FF000` | DIRECT JUMP (`csrc/jump/jump.c`, `docs/jump.md`) | the mod's settings sector (`DN2S`, version, flags, check); bit 0: DIRECT JUMP |
 | `0x700000` .. the device's end | the +Drive library (`csrc/sampler/lib.c`) | superblock (`DN2L`), index, folders, then the samples' frames |
 
 Free between them: `0x6C8001..0x6CFFFF`, `0x6D0002..0x6D00FF`, `0x6E0300..0x6E03FF`, `0x6E0502..0x6E7FFF`,
-`0x6E8801..0x6EFFFF`, `0x6F0701..0x6FEFFF` (the folders 64..127 at `0x6FF800..0x6FF804`; 2026-11-11: the matrix
-session's wishes record claims `0x6F0800..0x6FEFFF`, not on main yet). A new region takes a range
+`0x6E8801..0x6EFFFF`, `0x6F0701..0x6F07FF` (the folders 64..127 at `0x6FF800..0x6FF804`). A new region takes a range
 from there and adds its row here and a `_Static_assert` against its neighbours in its C.
 
 **v0.39, ERASE MOD DATA** (`csrc/sampler/erase.c`, `docs/erase-mod-data.md`) TRIMs exactly the four

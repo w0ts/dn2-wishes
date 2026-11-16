@@ -806,6 +806,13 @@ assert MDUI_LOAD + 0x8000 <= MOD_RAM and MOD_RAM + MOD_BYTES <= METER_RAM, "MD g
 PROF_RAM = 0x47100000
 PROF_BYTES = 0x100000
 assert 0x47000000 + (512 << 10) <= PROF_RAM and PROF_RAM + PROF_BYTES <= 0x47800000, "tables, profiler, stack"
+# the wishes record's RAM (csrc/wishes/wish.h WISH_O_END; docs/wishes-record.md): the sorted index, the free
+# stack, the hash cache, the queue of cells for the +Drive and 8,192 entries of 512 B. Above the DSP tables
+# (dnfw.mods.waverider._tables, 0x47000000..) and remoteui's profiler (0x47100000..0x47200000, 1 MB,
+# csrc/devtest/prof.c), far below the stack (from 0x48000000). docs/memory-map.md lists every claim up here
+WISH_RAM = 0x47280000                           # 512 KB clear above the profiler
+WISH_BYTES = 0x464200                           # 4 x 8192 + 2 x 8192 x 2 + 2 x 16384 + 512 x 512 + 512 + 6 x 8192 + 512 x 8192
+assert PROF_RAM + PROF_BYTES + (512 << 10) <= WISH_RAM and WISH_RAM + WISH_BYTES <= 0x47800000, "DSP tables, profiler, wishes, the stack"
 MD_FX_NIBBLES = 0x31313311                      # AMD-AMF, EQF-EQG, FLTF-FLTW-FLTQ clipped, as the MD's
 TRACK_LEVEL_ID = 10                             # record 10, "Track Level" / LEV, 0..0x7f00 (read from the 1.11 record table)
 

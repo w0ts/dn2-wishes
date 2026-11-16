@@ -81,5 +81,7 @@ keeps its records out of stock's per-track loops with a track tag in RAM.
 | **200** | `(0x50, track \| 0x20)` | **parameter slides: SLD** (0 off, 1 on) | `docs/slides.md` |
 | **201** | `(0x51, track \| 0x20)` | **parameter slides: SLEN** (0..14, the length table) | `docs/slides.md` |
 
-Sound-level stored ids 4..32 stay reserved for LFO4 (a stock round trip zeroes them);
-slides use none. 0xFF is a free record and never an id.
+Sound-level stored ids 4..28 hold the **wishes record's link** (2026-11-11, `docs/wishes-record.md`): `'W'` and
+its version, the record's hash, its length, a check. Id 32 stays 0 (a stock unit's sink). LFO4's old reservation of
+4..32 (a 1.11 mod) is retired: a future LFO4 is a field of the record. A stock round trip zeroes the link; slides
+use none. 0xFF is a free record and never an id.

@@ -134,6 +134,8 @@ def ram() -> list[Extent]:
                       "the sample link's mirror of the pool (csrc/sampler/link.c, v0.14)")]
             + [Extent(RAM, PG.METER_RAM, PG.METER_BYTES,
                       "the system meter's state: its counters and figures (csrc/meter)")]
+            + [Extent(RAM, PG.WISH_RAM, PG.WISH_BYTES,
+                      "the wishes record: the sounds' records, their index and the cells for the +Drive (csrc/wishes)")]
             + [Extent(RAM, PG.MOD_RAM, PG.MOD_BYTES,
                       "modulation's state: the LFO cascade's shadow cells, the moving controls (csrc/modulation)")]
             + [Extent(RAM, PG.PROF_RAM, PG.PROF_BYTES,

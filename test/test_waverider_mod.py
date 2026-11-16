@@ -161,7 +161,14 @@ def test_attribute_rows_5_to_12_are_wavetones(applied, stock):
 
 
 def test_the_stored_sound_load_keeps_types_5_to_12(applied):
-    assert at(applied.payloads[3], CF.LOAD_BOUND, 2) == bytes([0x74, CF.TYPES_LAST + 2])   # v0.19: 13 SLICE kept
+    # 2026-11-11: the bound is replayed by the wishes record's load stub, which owns the site (csrc/wishes/hooks.S)
+    main = applied.payloads[3]
+    assert at(main, CF.WISH_LOAD_SITE, 2) == bytes.fromhex("4ef9")
+    stub = long_at(main, CF.WISH_LOAD_SITE + 2)
+    assert stub == waverider.SPEC["layout"]["wish_load_stub"]
+    c = waverider.SPEC["c_chunk"]
+    code, at_ = bytes.fromhex(c["code"]), waverider.SPEC["layout"]["wish_load_displaced"] - c["load"]
+    assert code[at_:at_ + 6] == bytes.fromhex("712a001c") + bytes([0x74, CF.TYPES_LAST + 2])   # v0.19: 13 SLICE kept
 
 
 def test_the_group_function_gives_the_sample_machines_their_own_section(applied):

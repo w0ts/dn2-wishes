@@ -49,6 +49,10 @@ failure:
    DN2's own NameView is up, opened once and drawn; its NO goes on to ASSIGN without a name. The negative
    control clears the main view pointer: our own naming screen stands in (the fallback). The recorder
    flow (6d) spells a name with the stock screen's own keys and its YES names the recording.
+6w. **the wishes record** (2026-11-11, `emu_wishes.py`, docs/wishes-record.md): stock's own SAVE, LOAD,
+   memcpy and memset through the four hooks, on a Python +Drive at the driver: every byte outside the link's
+   lane as stock saves it, the link and the cell as the host reference spells them, a record copied, carried,
+   dropped, written once 0.5 s on, read back from a cell; nothing written under ERASE's lock; no fault.
 6s. **DIRECT JUMP** (`emu_jump.py`, docs/jump.md): the sequencer ticked through stock's own ISR;
    off is stock's state every tick; on, every track goes on from its own step (Elektron's rule); a cue
    that is not the PTN view's stays stock's; the setting persists in its sector.
@@ -180,7 +184,8 @@ TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platfo
          "test/test_inserts.py",                              # the inserts: the same
          "test/test_inserts_post.py",                         # the post inserts (CHOR, WIDE): the same
          "test/test_inserts_bus.py",                          # the bus inserts (FDN8, XDLY per track): the same
-         "test/test_inserts_c.py"]                            # the ColdFire's packed values against design.pack
+         "test/test_inserts_c.py",                            # the ColdFire's packed values against design.pack
+         "test/test_wishes.py", "test/test_wishes_c.py"]      # the wishes record: its stubs, its C on the host
 HIT = re.compile(r"^\s+([0-9a-f]{8}):", re.M)
 
 # v0.38 (owner, 2026-11-01): the steps by name, for --only and --list, in the order a full run
@@ -237,6 +242,7 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("link16", "sample link (ColdFire)"),
        ("pools", "per-project pools (ColdFire)"),
        ("erase", "ERASE MOD DATA (ColdFire)"),
+       ("wishes", "the wishes record through stock's SAVE, LOAD, memcpy, memset (ColdFire)"),
        ("engine", "engine + LOAD/SAVE"),
        ("boot", "boot from reset"),
        ("fuzz", "UI fuzz, two seeds, the audio interrupt at its real rate (ColdFire)"),
@@ -846,6 +852,28 @@ def main() -> int:
                     return good, why
                 later("erase", "ERASE MOD DATA (ColdFire)", "ERASE MOD DATA (ColdFire)",
                       [er_cmd, sorted(EMU_ENV.items())], er_body)
+
+        # 6w. 2026-11-11: the wishes record (csrc/wishes, docs/wishes-record.md; scripts/emu_wishes.py)
+        if "wish_load_stub" in lay:
+            wi_js = work / "wishes.json"
+            wi_cmd = [a.venv, "-u", "scripts/emu_wishes.py", "--build", bdir, "--snapshot", snap, "--json", wi_js]
+
+            def wi_body(tdir):
+                rc, out = run("wishes", wi_cmd, logs, env=EMU_ENV, trace=tdir)
+                why, good = out[-800:], False
+                if rc == 0 and wi_js.exists():
+                    r = json.loads(wi_js.read_text())
+                    checks = r.get("checks", {})
+                    good = bool(r.get("ok")) and len(checks) >= 20 and all(c["ok"] for c in checks.values())
+                    why = json.dumps({k: c for k, c in checks.items() if not c["ok"]})[:800] or out[-800:]
+                    if good:
+                        why = (f"stock's SAVE/LOAD/memcpy/memset through the hooks: lane-only difference, link and "
+                               f"cell as the host reference, copy/carry/drop, a cell written and one read; "
+                               f"{len(checks)} checks; cost {r.get('cost')}")[:800]
+                return good, why
+            later("wishes", "the wishes record through stock's SAVE, LOAD, memcpy, memset (ColdFire)",
+                  "the wishes record through stock's SAVE, LOAD, memcpy, memset (ColdFire)",
+                  [wi_cmd, sorted(EMU_ENV.items())], wi_body)
 
         # 6c. the RECORDER screen (v0.22): FUNC+VOICE opens it over any page, its knobs
         # change the recorder and never the track's sound, NO closes it, and the UI keeps
