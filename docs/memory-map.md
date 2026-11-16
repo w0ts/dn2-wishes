@@ -329,16 +329,24 @@ only references in our code are constants (FDN8's LFO step `0x2E41D8`) and GRAN'
 | L1 `0x2E0080..0x2E0100` | 128 | opt-samples | (their claim) | (theirs) | taken |
 | L1 F2 `0x2E1200..0x2E1700` | 1,280 | opt-mnm | DPRO's interp table (`dsp.MNM_INTERP_DM`; trackbuf's span cut to `0x2E1200`) | measured (dsp_cost.py, engine): DPRO-DDRW -5,120 a voice, DPRO-DENS -2,560 (a 3-PCH chord ~-10k) | released (v0.52 merge: opt-mnm dropped, main's rule b) |
 | L1 F1 `0x2E0640..0x2E0E44` | 2,052 | opt-synths | PERC's exp2 table | SOPHIE -2.2..3.9k a voice (with tan), MD too | allotted |
-| L1 F3 `0x2E4080..0x2E4D50` | 3,344 | opt-synths | PERC's tan table (2,056) + SHFT's sine (322 words, SOPHIE's L.sin), as REGION spans (copies; DDR originals and the link stay) | (with exp2) | allotted |
-| L2 `0x20098400..0x2009B400` | 12,288 | opt-stock | the send FX' hot state | -69k (L2); -115k if L1 | allotted (L2, the User 2026-11-12); L1 block 2: **pending unit test** when the User is back |
+| L1 F3 `0x2E4080..0x2E4888` | 2,056 | opt-synths | PERC's tan table, a REGION span (copy; the DDR original and the link stay) | (with exp2) | allotted |
+| L1 `0x25D980..0x25DD84` (stock's) | 0 new | opt-synths (reads) | stock's own L1 sine S1, now SOPHIE's / AMD's sine (rounding only: 26 of 257 words 1 ulp; never written in the runner) | SHFT.sin's 1,288 B L1 copy not needed | used (457f79a4, after 12:00) |
+| L2 `0x20098400..0x2009B400` | 12,288 | opt-stock | the send FX' hot state: the stock chorus's state at `0x20098400..0x20099744` (4,932 B, `dsp.CHORUS_DM`, `_check_l2`); the rest reserved for the delay's control words (~600 B) and the reverb's hot words | -69k (L2); block 2 another ~-21k | used in part (L2, the User 2026-11-12); L1 block 2: **pending unit test** when the User is back |
 | L2 `0x200A1800..0x200A2800` | 4,096 | juno-chorus | jsend.asm, the chorus send's JUNO (1,976 B code, sw `0xBD0C00`) | (a feature, not a saving) | allotted (3b3b1aae / 6e982a5c) |
-| L2 `0x2009B400..0x200A0000` | 19,456 | perc-layout | PERC's event-only code: host bodies (18,074) + trx_coefs / md_idiv (754) | PERC's span -24.3 KB with 2b (0 instructions changed) | **requested, pending main** |
-| L2 `0x200A2800..0x200A4000` | 6,144 | perc-layout | 2b: init bodies (4,788) + vo6_bqx (648) | (with 2a) | **requested, pending main** |
+| L2 `0x2009B400..0x200A0000` | 19,456 | perc-layout | PERC's event-only code: host bodies (18,074) + trx_coefs / md_idiv (754) | PERC's span -24.3 KB with 2b (0 instructions changed) | used: perc2a 18,828 B (628 B spare); dsp.py pairwise L2 overlap check (round 11) |
+| L2 `0x200A2800..0x200A4000` | 6,144 | perc-layout | 2b: init bodies (4,788) + vo6_bqx (648) | (with 2a) | used: perc2b 5,480 B (664 B spare) |
+| L2 `0x200A6FC0..0x200A7000` (MNM scratch +0x2FC0) | 64 | opt-host | the budget sums (`perc.program.CUM_OFF`, 16 words) | (the host cut, bf2639fd) | used |
+| L2 `0x200A7400..0x200A7440` (MNM scratch +0x3400) | 64 | clicks | `VEL_OFF`: per-slot velocity (16 words; plus frame slot 62 of our voices, types 5..31) | - | allotted (claude/velocity) |
 | L2 128 KB, place open | 131,072 | opt-md | DSP2's sine table (no exact smaller form: no symmetry) | EFM-CY -2.5k a voice, FM / TRX | **decision**: no 128 KB contiguous anywhere today; see below |
 
-Left free: F1 `0x2E0E44..0x2E1000` (444 B), F2 `0x2E1700..0x2E1C00` (1,280 B), F3 `0x2E4D50..0x2E5400` (1,712 B),
-L2 `0x2009B400..0x200A0000` (19,456 B) and `0x200A2800..0x200A4000` (6,144 B), both requested by perc-layout: with them,
+Left free: F1 `0x2E0E44..0x2E1000` (444 B), F2 `0x2E1700..0x2E1C00` (1,280 B), F3 `0x2E4888..0x2E5400` (2,936 B),
+L2 `0x2009B400..0x200A0000` (19,456 B) and `0x200A2800..0x200A4000` (6,144 B), both taken by perc-layout: with them,
 nothing is left inside dsp.py's L2 floor but the small gaps between spans.
+
+The Monomachine L2 scratch (`0x200A4000..0x200A8000`, one span): `+0x0000..+0x2FC0` unused since v0.43 (the render scratch
+went to L1): **12,224 B of free L2 inside an existing span**; `+0x2FC0` opt-host's sums; `+0x3000..+0x31C4` the voices'
+bookkeeping (keys, costs, rests, strikes, bounds, SLOT_N); `+0x3200..+0x33A8` ANALOG 2's mix tables (106 words);
+`+0x3400..+0x3440` clicks' VEL_OFF; free `+0x33A8..+0x3400` and `+0x3440..+0x4000`.
 
 DDR (no fast-memory cost; listed so nobody lands on another): juno-chorus `0x82550000..0x82551050` (the send's state +
 a 1,024-float ring with 3 mirror words, zeros at power-on), right after the moved TAPE's rings (`0x82540000..0x82550000`);
