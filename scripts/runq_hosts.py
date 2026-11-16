@@ -26,7 +26,12 @@ FARM_CPU_OFFICE, FARM_CPU_OFF_HOURS = 32.0, 50.0
 FARM_CPU_FIXED = os.environ.get("RUNQ_FARM_CPUS")
 FARM_LOAD_MAX = float(os.environ.get("RUNQ_FARM_LOAD", "60"))     # of its 64 cores: the colleagues' room
 MAC_JOBS_MAX = int(os.environ.get("RUNQ_MAC_JOBS", "2"))
-MAC_LOAD_MAX = float(os.environ.get("RUNQ_MAC_LOAD", "12"))
+# the User's rule (2026-11-13, ~/.claude/rules/common/check-system-before-running.md: the Mac is in use, always): a Mac
+# job starts only when its CPUs fit in half of the free cores (cores - load1, all our jobs' and everyone's work counted
+# in the load), runs at nice 19, and its numeric libraries get no more threads than its CPUs
+MAC_CORES = int(os.environ.get("RUNQ_MAC_CORES", str(os.cpu_count() or 8)))
+MAC_THREAD_VARS = ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "VECLIB_MAXIMUM_THREADS",
+                   "NUMBA_NUM_THREADS")
 RAMP_S = 90                                      # a job just started may not show its CPU yet
 FILES_DIR = "_runq_files"                        # where files named outside the tree land in its copy
 
@@ -179,7 +184,9 @@ def can_start(job: dict, host: str, running: list[dict], usage, now: float) -> b
     """the User's limits for starting JOB on HOST, given the queue's RUNNING jobs and the host's
     USAGE (farm: (our CPUs, load1) or None; mac: load1). Pure, for the tests."""
     if host == "mac":
-        return len([j for j in running if j["host"] == "mac"]) < MAC_JOBS_MAX and usage <= MAC_LOAD_MAX
+        mine = [j for j in running if j["host"] == "mac"]
+        ramping = sum(j["cpus"] for j in mine if now - j.get("started", 0) < RAMP_S)
+        return len(mine) < MAC_JOBS_MAX and ramping + job["cpus"] <= (MAC_CORES - usage) / 2
     if usage is None:
         return False
     ours, load = usage
@@ -221,7 +228,8 @@ def start(job: dict, work: pathlib.Path) -> dict:
         work.mkdir(parents=True)
         with tarfile.open(job["tar"]) as t:
             t.extractall(work, filter="data")
-        sh = f"( env {_env(job)} {_shell(job, 'mac')} ) > runq.log 2>&1{tail}"
+        caps = " ".join(f"{v}={job['cpus']}" for v in MAC_THREAD_VARS)
+        sh = f"( nice -n 19 env {caps} {_env(job)} {_shell(job, 'mac')} ) > runq.log 2>&1{tail}"
         p = subprocess.Popen(["/bin/sh", "-c", sh], cwd=work, stdin=subprocess.DEVNULL,
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
         return {"where": str(work), "pgid": p.pid}

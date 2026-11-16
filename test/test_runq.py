@@ -19,7 +19,7 @@ SCRIPTS = pathlib.Path(__file__).resolve().parents[1] / "scripts"
 def runq(tmp_path, monkeypatch):
     monkeypatch.setenv("RUNQ_DIR", str(tmp_path / "q"))
     monkeypatch.setenv("RUNQ_NO_DISPATCHER", "1")
-    monkeypatch.setenv("RUNQ_MAC_LOAD", "100000")          # the test must not wait on the Mac's load
+    monkeypatch.setenv("RUNQ_MAC_CORES", "100000")         # the test must not wait on the Mac's load
     sys.path.insert(0, str(SCRIPTS))
     import runq_hosts
     importlib.reload(runq_hosts)
@@ -59,16 +59,25 @@ def test_farm_counts_cpus_ours_and_ramping(runq):
 
 
 def test_mac_counts_jobs_and_load(runq, monkeypatch):
-    monkeypatch.setattr(runq.H, "MAC_LOAD_MAX", 12.0)
+    # the User's rule (2026-11-13): half of the free cores (cores - load1), a job's CPUs within it
+    monkeypatch.setattr(runq.H, "MAC_CORES", 16)
     two = [_job(host="mac"), _job(host="mac")]
-    assert runq.H.can_start(_job(host="mac"), "mac", two[:1], 3.0, 0)
-    assert not runq.H.can_start(_job(host="mac"), "mac", two, 3.0, 0)
-    assert not runq.H.can_start(_job(host="mac"), "mac", [], 12.5, 0)
+    assert runq.H.can_start(_job(host="mac"), "mac", two[:1], 3.0, 1000)
+    assert not runq.H.can_start(_job(host="mac"), "mac", two, 3.0, 1000)
+    assert not runq.H.can_start(_job(host="mac"), "mac", [], 15.0, 1000)     # 1 free core: half is 0.5 < 1
+    assert runq.H.can_start(_job(host="mac"), "mac", [], 14.0, 1000)         # 2 free: half is 1
+    assert not runq.H.can_start(_job(host="mac"), "mac", [_job(host="mac", started=990)], 13.0, 1000)   # ramping
     # a job that may run on either goes to gpufarm when the Mac is loaded
     j = {"cpus": 1, "hosts": ["mac", "farm"]}
     assert runq.H.place(j, [], 20.0, (3.0, 10.0), 0) == "farm"
     assert runq.H.place(j, [], 2.0, (3.0, 10.0), 0) == "mac"
     assert runq.H.place({"cpus": 1, "hosts": ["mac"]}, [], 20.0, (3.0, 10.0), 0) is None
+
+
+def test_mac_jobs_run_at_nice_19_with_capped_threads(runq):
+    import pathlib as _p
+    src = (_p.Path(__file__).resolve().parents[1] / "scripts" / "runq_hosts.py").read_text()
+    assert "nice -n 19 env" in src and "OMP_NUM_THREADS" in src and "VECLIB_MAXIMUM_THREADS" in src
 
 
 def test_the_key_follows_tree_command_and_outside_files(runq, tmp_path):

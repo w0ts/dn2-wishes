@@ -63,9 +63,12 @@ setup has not been shown to match the Mac's (main, 2026-11-12: they may go there
     counted (queued or not: other runs too), measured over a second from /proc, plus the CPUs of
     any queue job started in the last 90 s (not visible yet); and the farm's load1 plus the job
     stays under 60 of its 64 cores, the colleagues' room.
-  - Mac: at most **two** queue jobs, and none while `uptime`'s load1 is over **12**. A job that may
-    run on either host goes to gpufarm when the Mac is loaded, else it waits.
-  - (`RUNQ_FARM_CPUS`, `RUNQ_FARM_LOAD`, `RUNQ_MAC_JOBS`, `RUNQ_MAC_LOAD` change them.)
+  - Mac (the User's rule, 2026-11-13, `~/.claude/rules/common/check-system-before-running.md`: the Mac is in use,
+    always): at most **two** queue jobs, and a job starts only when its CPUs, with those of our jobs started in the
+    last 90 s, fit in **half of the free cores** (cores - `uptime`'s load1); it runs at **nice 19** with
+    OMP / MKL / OpenBLAS / vecLib / Numba threads capped to its CPUs. A job that may run on either host goes to
+    gpufarm when the Mac is loaded, else it waits.
+  - (`RUNQ_FARM_CPUS`, `RUNQ_FARM_LOAD`, `RUNQ_MAC_JOBS`, `RUNQ_MAC_CORES` change them.)
 - **One place.** Everything is under the main checkout's `scratch/runq/` (git-ignored): `jobs/`
   (a record a job), `trees/` (the snapshots, one per tree content), `results/KEY/`, `work/` (the
   Mac's running jobs), `dispatcher.log`. On gpufarm a job runs in `~/dn2mk2-bench/runq/work/ID`
