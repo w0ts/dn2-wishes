@@ -465,7 +465,7 @@ def main() -> int:
         return set(c.panel.panel.lit(bytes(f[-1]))) if f else set()
 
     def aged():
-        c.poke(lay["smp_knob_at"], struct.pack(">I", (c.long(0x4058E8D4) - 3000) & 0xFFFFFFFF))
+        c.poke(lay["smp_knob_at"], struct.pack(">I", (c.long(0x4058F8D4) - 3000) & 0xFFFFFFFF))
         c.periods(6)
     tap(19)                                                      # GRID RECORD: a held trig takes locks
     held(25, True)
