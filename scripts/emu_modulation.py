@@ -357,10 +357,29 @@ def scenario_cascade(a, report, sym):
     report["cascade"] = rep
 
 
-def eval_cost(build, snapshot, sym, dests, frames=8):
+def lfowaves_edits(build):
+    """lfowaves' in-image edits when BUILD carries its chunk (each checked as lfowaves made it), else []"""
+    from dnfw.cli.files import read_image
+    from dnfw.firmware.load import load
+    from dnfw.mods import lfowaves as LW
+    from dnfw.mods import platform
+    sec3 = load(read_image(pathlib.Path(build))).container.find(3).unpack()
+    if not any(va == LW.RUNTIME_VA for va, _ in platform.runtime(sec3)):
+        return []
+    bad = [e["va"] for e in LW.EDITS if sec3[e["va"] - BASE:e["va"] - BASE + len(e["new"]) // 2].hex() != e["new"]]
+    if bad:
+        raise SystemExit(f"the build carries lfowaves' chunk but not its edits at {[hex(v) for v in bad]}")
+    return LW.EDITS
+
+
+def eval_cost(build, snapshot, sym, dests, frames=8, without=()):
     """instructions of the frame's evaluator call (the build's mod_eval, or stock's 0x40137a06), all
-    16 voice rows at full depth with LFO1/2/3 aimed at DESTS; -> the most over FRAMES frames"""
+    16 voice rows at full depth with LFO1/2/3 aimed at DESTS; -> the most over FRAMES frames.
+    WITHOUT: in-image edits put back to stock first (lfowaves', whose share is not the cascade's)"""
     m = machine(build, snapshot)
+    for e in without:
+        m.write(e["va"], bytes.fromhex(e["stock"]))
+    m.flush()
     frac = m.alloc(len(SET_FRAC))
     m.write(frac, SET_FRAC)
     m.flush()
@@ -394,15 +413,27 @@ def scenario_cost(a, report, sym):
     LFO1 and LFO2 aimed at LFO3's controls, LFO3 at LFO2's: the most our hooks can do in one frame)"""
     typical = (67, 36 + 0, 72)                  # FREQ, a filter slot, VOL: no LFO's control
     worst = (17, 18, 9)                         # LFO1 -> LFO3 SPD, LFO2 -> LFO3 MULT, LFO3 -> LFO2 SPD
+    # 2026-11-14 (r8, the first build with lfowaves on 1.12): lfowaves hooks every LFO's evaluation (two hooks,
+    # 18 instructions an LFO at a stock wave), 816 instructions a frame that are not the cascade's. The cascade is
+    # measured on the build with lfowaves' edits put back to stock; lfowaves' share is checked on its own.
+    lw = lfowaves_edits(a.build)
     rep = {}
     for label, dests in (("typical", typical), ("worst", worst)):
-        st, bd = eval_cost(None, a.snapshot, sym, dests), eval_cost(a.build, a.snapshot, sym, dests)
+        st = eval_cost(None, a.snapshot, sym, dests)
+        bd = eval_cost(a.build, a.snapshot, sym, dests, without=lw)
         rep[label] = {"stock": st, "build": bd, "ours": bd - st, "per_second_at_1500": (bd - st) * 1500}
-        print(f"    evaluator frame, {label}: stock {st}, build {bd}: ours {bd - st} instructions a frame, "
-              f"{(bd - st) * 1500:,} a second", flush=True)
+        print(f"    evaluator frame, {label}: stock {st}, build {bd}{' without lfowaves' if lw else ''}: "
+              f"ours {bd - st} instructions a frame, {(bd - st) * 1500:,} a second", flush=True)
         bound = {"typical": 800, "worst": 4500}[label]
         check(f"the cascade's {label} cost is under {bound:,} instructions a frame", 0 <= bd - st < bound,
               f"{bd - st} ({100 * (bd - st) / st:.0f} % of stock's evaluator, {st})")
+        if lw:
+            full = eval_cost(a.build, a.snapshot, sym, dests)
+            rep[label]["lfowaves"] = full - bd
+            print(f"    evaluator frame, {label}: lfowaves' share {full - bd} instructions a frame "
+                  f"(the build with it {full})", flush=True)
+            check(f"lfowaves' {label} share is under 1,000 instructions a frame (48 LFOs at a stock wave)",
+                  0 <= full - bd < 1000, f"{full - bd}")
     report["cost"] = rep
 
 

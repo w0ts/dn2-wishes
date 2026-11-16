@@ -193,7 +193,7 @@ def compose(stock: bytes, frames: list | None = None, log=print) -> dict:
     while len(content) % 4:
         content.append(0)
     return {"content": content, "blob_len": len(blob), "tables": table_vas, "fills": fills,
-            "boot_len": len(boot)}
+            "boot_len": len(boot), "code": (code_va, code_va + len(code))}
 
 
 def main() -> int:

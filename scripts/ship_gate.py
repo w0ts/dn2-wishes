@@ -199,6 +199,11 @@ def code_ranges() -> dict[int, list[tuple[int, int]]]:
            lay["c_load"]: [(lay["c_load"], lay["c_text_end"])]}      # v0.13: a chunk of its own
     if "mchunk_code_end" in lay:  # the machines chunk: the shims, then strings and tables
         out[lay["slot_shim"]] = [(lay["slot_shim"], lay["name_long_5"])]
+    # 2026-11-14 (r8): lfowaves' chunk is names, wavetables, the glyph and its relocated pointer tables, then its
+    # code; the tables read as 68020 modes (`03b4 4678` = bclr ..(78,%d4:w:8)). Its build records the code's range.
+    lw = json.loads((ROOT / "src/dnfw/mods/lfowaves_code.json").read_text())
+    if "code" in lw:
+        out[lw["runtime_va"]] = [tuple(lw["code"])]
     return out
 # v0.40 (owner, 2026-11-05): the one build the missing Monomachine golden runs may be excepted
 # for -- its DSP image (section 7) and the MnM code and test as they were at v0.39 (dbbe804).

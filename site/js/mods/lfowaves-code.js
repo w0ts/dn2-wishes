@@ -242,5 +242,9 @@ export const CODE = {
   "POS",
   "POS",
   "POS"
+ ],
+ "code": [
+  1182270868,
+  1182272122
  ]
 };
