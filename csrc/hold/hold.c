@@ -48,7 +48,7 @@ static int hold_on(int t)
     return (*(const u16 *)(snd + SOUND_PARAMS + 2u * SLOT_HOLD) >> 8) >= 64u;   /* the page's two-way rule */
 }
 
-/* ANALOG 2's PARA (2026-11-15, dnfw.engines.analog2.para): the DSP plays a chord on the chord's oldest voice, so the
+/* PARA (ANALOG 2, JUNO; 2026-11-15, dnfw.engines.analog2.para): the DSP plays a chord on the chord's oldest voice, so the
  * chord's envelopes are that voice's, and a PARA track's notes end together. A voice of such a track whose note-off
  * comes while another of the track's voices is held keeps its amp gate (+36) and filter gate (+40) open (para_kept);
  * once none of the track's voices is held, every kept voice's note-off goes out (legato: one envelope a chord, the
@@ -173,7 +173,7 @@ u32 hold_final(u32 off36, u32 *w40)
     *w40 = (*w40 & ~hold_seq) | hold_rel;
     off36 = (off36 & ~hold_seq) | hold_rel;
     hold_rel = 0;
-    off36 = para_final(off36, w40);                              /* ANALOG 2's PARA: a chord's notes end together */
+    off36 = para_final(off36, w40);                              /* PARA: a chord's notes end together */
     { extern void mx_env_off(u32 bits); mx_env_off(off36); }     /* the voices' envelopes released (csrc/matrix) */
     return off36;
 }

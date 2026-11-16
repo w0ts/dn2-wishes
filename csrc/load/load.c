@@ -235,8 +235,9 @@ static u32 voice_cost(int t)
     return c && load_meas[t] > c ? load_meas[t] : c;
 }
 
-/* 2026-11-15: ANALOG 2's PARA (docs/paraphonic.md). A chord plays on its leader: each member renders its oscillators,
- * noise and drive (LOAD_PARA_MEMBER) and its leader adds them (LOAD_PARA_ADD a member), a note past the chord's N is
+/* 2026-11-15: PARA (ANALOG 2, JUNO; docs/paraphonic.md). A chord plays on its leader: each member renders its
+ * per-note part (ANALOG 2's oscillators, noise and drive, LOAD_PARA_MEMBER; JUNO's DCO, LOAD_PARA_JUNO_MEMBER) and its
+ * leader adds them (LOAD_PARA_ADD / LOAD_PARA_JUNO_ADD a member), a note past the chord's N is
  * dropped (LOAD_PARA_DROPPED: not rendered). The track's measured voices (load_meas) are its leader's, so they price
  * a note that starts a chord, not one that joins it. */
 extern u32 para_live;                           /* hold.c: the held voices (the DSP's HELD, as the frame sends it) */
@@ -244,6 +245,12 @@ extern u32 para_live;                           /* hold.c: the held voices (the 
 static int para_on_track(int t)
 {
     return para_track(t) && para_value(t) != 0;
+}
+
+/* a member's voice on track T's engine (each engine measured: scripts/para_cost.py) */
+static u32 para_member(int t)
+{
+    return para_type(t) == PARA_TYPE_JUNO ? LOAD_PARA_JUNO_MEMBER : LOAD_PARA_MEMBER;
 }
 
 /* a note on track T, its voice costing ONE: on a PARA track, while some of the track's voices are held it joins
@@ -262,7 +269,7 @@ static u32 para_join_cost(int t, u32 one)
         return one;
     if (held > para_value(t))                   /* N = PARA + 1 notes play */
         return LOAD_PARA_DROPPED;
-    return LOAD_PARA_MEMBER + LOAD_PARA_ADD;
+    return para_member(t) + (para_type(t) == PARA_TYPE_JUNO ? LOAD_PARA_JUNO_ADD : LOAD_PARA_ADD);
 }
 
 /* slot V sounds: held, or released and the DSP still reports it busy (its release tail) */
@@ -280,7 +287,7 @@ static u32 slot_cost(int v)
         return load_stock[own];
     if (!sounding(v))
         return 0;
-    u32 c = para_on_track(own) ? LOAD_PARA_MEMBER : voice_cost(own), m = (u32)smp_tlm_cost[v] * 16u;
+    u32 c = para_on_track(own) ? para_member(own) : voice_cost(own), m = (u32)smp_tlm_cost[v] * 16u;
     return m > c ? m : c;                       /* (2026-11-13: what the DSP measured, when dearer; 2026-11-15: a PARA
                                                  * track's slot is its own measure, a leader's or a member's) */
 }

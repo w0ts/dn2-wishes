@@ -14,11 +14,13 @@
 #define PARA_RECORD       248u                    /* MOD's record id (the knob path's setValue) */
 
 /* the engines PARA plays (dnfw.engines.analog2.para ENGINES; their machine type values, dnfw.mnm.machines
- * ALL_TYPE_SLOTS): ANALOG 2 (22). JUNO, then the DPRO machines, join here with their DSP side (the User, 2026-11-15:
- * no PARA for SOPHIE or SID 6581) */
+ * ALL_TYPE_SLOTS): ANALOG 2 (22), JUNO (23, 2026-11-15). The DPRO machines join here with their DSP side (the User,
+ * 2026-11-15: no PARA for SOPHIE or SID 6581) */
+#define PARA_TYPE_A2   22
+#define PARA_TYPE_JUNO 23
 static inline int para_engine(int type)
 {
-    return type == 22;
+    return type == PARA_TYPE_A2 || type == PARA_TYPE_JUNO;
 }
 
 static inline const unsigned char *para_sound(int t)
@@ -27,6 +29,13 @@ static inline const unsigned char *para_sound(int t)
     if (t < 0 || t > 15 || !kit)
         return 0;
     return kit + PARA_SOUND_BASE + PARA_SOUND_STRIDE * (unsigned int)t;
+}
+
+/* track T's machine type value (-1: no kit) */
+static inline int para_type(int t)
+{
+    const unsigned char *snd = para_sound(t);
+    return snd ? (signed char)snd[PARA_SOUND_TYPE] : -1;
 }
 
 /* track T plays a PARA engine */

@@ -81,6 +81,7 @@ def table(eng: dict, fxr: dict) -> dict:
         "send": {k: m(fxr[f"SEND {k}"]["per_instance"]) for k in ("FDN8", "XDLY", "JUNO")},
         "engines": eng,
         "para": PC.table_costs(),             # 2026-11-15: ANALOG 2's PARA chords (a joining note, a dropped one)
+        "para_juno": PC.table_costs("JUNO"),  # 2026-11-15: JUNO's
     }
 
 

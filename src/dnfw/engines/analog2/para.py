@@ -53,7 +53,7 @@ PARA_REC = PM.P3_RECS[5]                         # MOD (id 248, slot 37, 0..0x30
 # engine joins by its name here and one call of `stage` in its half, round its shared stage (the filter and what
 # follows), after its per-note part (oscillators, noise, drive). Its post-per-note half must be at the half's block
 # (the word BV_WORD) in its 44.1 kHz stream, as ANALOG 2's and JUNO's are
-ENGINES = ("ANALOG2",)
+ENGINES = ("ANALOG2", "JUNO")                    # JUNO 2026-11-15 (main: "go on JUNO PARA next")
 NOTE_ON, NOTE_OFF = 34, 36                       # the frame's note-on and note-off masks (one bit a slot)
 assert (PM.FRAME + NOTE_OFF) % 4 == 0 and (PM.FRAME + NOTE_ON) % 4 == 2       # 36 a word's low half, 34 a high
 

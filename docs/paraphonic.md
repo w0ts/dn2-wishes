@@ -1,4 +1,4 @@
-# PARA: ANALOG 2's paraphonic mode (pilot, 2026-11-15)
+# PARA: paraphonic mode for ANALOG 2 (pilot) and JUNO (2026-11-15)
 
 The User's idea: "Each new note does not trigger a new voice, but add a osc to current voice if there is one?
 Cheap(er) chords." The study is docs/paraphonic-study.md; this is its pilot, design A, on ANALOG 2.
@@ -9,7 +9,7 @@ level "Louder with more notes" (each note at full level, no scaling of the sum).
 ## What it does
 
 - **The control:** the VOICE menu (the VOICE key: VOICE SETUP), knob B: **PARA OFF 2 3 4** (how many notes a chord
-  takes), on a track playing a PARA engine (ANALOG 2 now). The User, 2026-11-15: "i would put the voice page, for the
+  takes), on a track playing a PARA engine (ANALOG 2, JUNO). The User, 2026-11-15: "i would put the voice page, for the
   synth that support it. on B knob". Stock leaves B empty ("---"; a turn of it changes nothing, measured in the
   emulator: top row VOICE STEAL, ---, ---, REUSE; bottom VOICES, UNISON STATE, V.AMNT, SPREAD). On any other track
   the menu is stock's. One step per four detents, as every choice knob, through the knob's own path (setValue: undo,
@@ -25,6 +25,42 @@ level "Louder with more notes" (each note at full level, no scaling of the sum).
   plays on beside it.
 - **Glide:** each note glides from its own previous note (stock's per voice). ANALOG 2's own GLID / GLTY (page 3)
   stays per voice too.
+
+## JUNO (2026-11-15, main: "go on JUNO PARA next")
+
+The same design, on JUNO's own split: each note's DCO (saw, pulse, sub, noise: `juno._osc`) per note; the ladder
+and the VCA (`_ladder`, `_post`) the chord's, on its leader (`para.stage` round them in `juno.half`; the block at the
+same word as ANALOG 2's, `bv`). The chord's VCF envelope and its key tracking are the leader's own (JUNO's envelope
+and DAC run in its `pitch`, per voice; the ladder reads the leader's). Type 23 in `csrc/para/para.h`: the VOICE
+menu's B, HOLD's legato rule and the budget take it as ANALOG 2's.
+
+What it costs (`scripts/para_cost.py`, steady / note block, without PER_VOICE or the margin):
+
+| | 2 notes | 3 notes | 4 notes |
+|---|---|---|---|
+| a voice, PARA OFF | 7,098 / 7,455 | (each) | (each) |
+| a member | 3,336 / 3,693 | 3,336 / 3,693 | 3,336 / 3,693 |
+| the leader | 7,744 / 8,102 | 7,966 / 8,323 | 8,186 / 8,544 |
+| the chord in all, PARA OFF | 14,196 / 14,912 | 21,294 / 22,367 | 28,388 / 29,820 |
+| the chord in all, PARA | 11,080 / 11,795 | 14,640 / 15,711 | 18,196 / 19,625 |
+
+A 4-note JUNO chord costs 36 % less than four voices (ANALOG 2's: 21 %). The budget prices a joining JUNO note at
+`LOAD_PARA_JUNO_MEMBER` + `LOAD_PARA_JUNO_ADD` (4,859 + 723 with PER_VOICE and the margin; table key `para_juno`).
+
+Checked (2026-11-15):
+- `test/test_a2_para.py`, every test for both engines: a 4-note JUNO chord's leader bit for bit against the same sum
+  made from today's pieces (each member's engine with its ladder and VCA taken out); PARA OFF and a chord of one as
+  today; the first N play; the chords' rules; a refused member left out; a held chord past the quiet test.
+- JUNO with PARA OFF before and after (claude/para 822b3035 against this branch): six model renders, 120 blocks each
+  (INIT, a release, pulse + sub + noise, resonance with the envelope and a release, a high note, a low note with
+  the HPF), every output word the same.
+- The SHARC runner's step `para`, both engines, every check passing (1,519 s): every slot of `PARA_a2`,
+  `PARA_a2_off`, `PARA_juno`, `PARA_juno_off` bit-exact to the model; for JUNO as for ANALOG 2, the leader sounds
+  and the members are exact silence, the chord held 80 blocks keeps its members, a refused member is left out
+  (poisoned or not, the same leader), with room for a voice and a half the members go and the leader plays.
+- `scripts/emu_load_budget.py` 19 of 19 (17: a JUNO join priced as a JUNO member).
+- `scripts/emu_para_vmenu.py` gains a JUNO track (its B row as ANALOG 2's, a step): not run here (it needs the
+  build's own snapshot and the panel's frame clock, the integrator's).
 
 ## How (design A: slot groups on the DSP)
 
@@ -146,9 +182,7 @@ The full `mnm` run on the same DSP code: every Monomachine machine's runs bit-ex
 - **The other engines (the User, 2026-11-15: ANALOG 2, then JUNO, then DPRO-WAVE, DDRW, DENS; not SOPHIE, not SID 6581).** The chord pass,
   the roles, the stream positions and the members' silence are the engine's own business nowhere: an engine joins
   by its name in `para.ENGINES` and one `para.stage(...)` call round its shared stage in its half, as ANALOG 2's.
-  - **JUNO** fits as is: its half is `_osc` (per note: DCO, sub, noise, its VCF envelope) then `_ladder` and
-    `_post` (shared), its block at the same word (ANALOG 2's `bv`), so `stage(p, L, ladder_and_post,
-    bv_word=...)`; and its type in `csrc/para/para.h` para_engine (the VOICE menu's B shows PARA for it).
+  - **JUNO**: done (the section above).
   - **The DPRO machines** do not: their shared stage (`mnm.dec`, DPRO's Digipro stage) reads the
     render's 192-float scratch (IN), not the slot's stream, so a member's per-note part cannot wait in its stream
     for the leader. Either (a) a per-slot buffer for a member's pre-decimator block (16 x 768 B, a claim), or (b) the

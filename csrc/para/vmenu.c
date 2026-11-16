@@ -3,7 +3,7 @@
  * places: top VOICE STEAL, ---, ---, REUSE (knobs A..D); bottom VOICES, UNISON STATE, V.AMNT, SPREAD (E..H). Its B
  * is an empty place: stock draws "---" there and a turn of B changes nothing (measured in the emulator, 2026-11-15).
  *
- * On a track whose machine plays PARA (para.h: ANALOG 2), B is PARA: OFF 2 3 4, the track's sound's record MOD,
+ * On a track whose machine plays PARA (para.h: ANALOG 2, JUNO), B is PARA: OFF 2 3 4, the track's sound's record MOD,
  * set through the knob's own path (setValue: undo, the kit and the frame all see it), one step per four detents as
  * every choice knob. On any other track nothing here draws or takes a turn: the menu is stock's, pixel for pixel.
  *

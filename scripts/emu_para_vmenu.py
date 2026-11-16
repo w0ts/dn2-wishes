@@ -11,7 +11,9 @@ not redraw after a turn), the VOICE key (panel code 49) on track 0:
    where PARA OFF is drawn;
 3. one held push of B a step (the harness passes about one step a hold, stock's own knob E too; measured
    2026-11-15), four detents each: right five times -> MOD 0x0100 0x0200 0x0300 0x0300 0x0300 (the cap at PARA 4),
-   then left four times -> 0x0200 0x0100 0x0000 0x0000; vm_sets counts the three steps up and the three down.
+   then left four times -> 0x0200 0x0100 0x0000 0x0000; vm_sets counts the three steps up and the three down;
+4. a JUNO track (type 23, 2026-11-15), MOD 0: the screen the ANALOG 2 track's (PARA OFF in B's row); one held push
+   of B right sets MOD 0x0100.
 
 Built from the integrator's driver (side-session-notes paraphonic-voice-menu/build-para3/para_vmenu3.py). Prints PASS
 or FAIL with each check; --json writes the numbers.
@@ -26,13 +28,11 @@ import struct
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-import emu_modulation as MO                                          # noqa: E402 -- its machine recipe
-from emulib.panel import ENCODER_PUSH, SETTLE, Panel                 # noqa: E402
 
 VOICE = (6, 0)                                                       # panel code 49
 ENC_B, ENC_C = 1, 2
 MOD_AT = 20 + 2 * 37                                                 # the sound's MOD (PARA) value
-WAVETONE, ANALOG2 = 1, 22
+WAVETONE, ANALOG2, JUNO = 1, 22, 23
 B_ROW = (33, 27, 73, 34)                                             # B's label row (x0, y0, x1, y1), bottom-up
 STEPS_RIGHT = (0x0100, 0x0200, 0x0300, 0x0300, 0x0300)
 STEPS_LEFT = (0x0200, 0x0100, 0x0000, 0x0000)
@@ -47,7 +47,7 @@ def check(what: str, ok: bool, detail: str = "") -> None:
         FAILS.append(what)
 
 
-def frame(p: Panel) -> bytes:
+def frame(p) -> bytes:                       # p: an emulib.panel.Panel
     if not p.capture or not p.capture.frames:
         raise SystemExit("FAIL: no frame composed (the frame clock?)")
     return bytes(p.capture.frames[-1])
@@ -69,6 +69,8 @@ def main() -> int:
     ap.add_argument("--json", default=None)
     ap.add_argument("--png-dir", default="out/para_vmenu")
     a = ap.parse_args()
+    import emu_modulation as MO                                      # its machine recipe (scripts/, on sys.path)
+    from emulib.panel import ENCODER_PUSH, SETTLE, Panel
     root = pathlib.Path(__file__).resolve().parent.parent
     sym = json.loads((root / "src/dnfw/mods/waverider_code.json").read_text())["layout"]
     need = [n for n in ("vm_sets", "vm_seen") if n not in sym]
@@ -138,6 +140,13 @@ def main() -> int:
     check("B right, a step a hold: PARA 2 3 4, capped at 4", tuple(got_r) == STEPS_RIGHT, str([hex(v) for v in got_r]))
     check("B left, a step a hold: PARA 3 2 OFF, held at OFF", tuple(got_l) == STEPS_LEFT, str([hex(v) for v in got_l]))
     check("vm_sets: three steps up, three down", m.long(sym["vm_sets"]) == 6, str(m.long(sym["vm_sets"])))
+    # 4. a JUNO track
+    m, p, s = setup(JUNO)
+    juno_screen = frame(p)
+    p.screen("4_juno_voice")
+    check("JUNO track: the screen as the ANALOG 2 track's (PARA OFF in B's row)", juno_screen == para_screen)
+    held_turn(m, p, ENC_B, +1, 4)
+    check("JUNO track: B right, a step: PARA 2", mod(m, s) == 0x0100, hex(mod(m, s)))
     report.update({"right": [hex(v) for v in got_r], "left": [hex(v) for v in got_l],
                    "vm_sets": m.long(sym["vm_sets"]), "outside_b_row": len(diff)})
     report["ok"] = not FAILS

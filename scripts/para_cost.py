@@ -33,23 +33,25 @@ def _route(h, u: int, track: int) -> None:
     h.mem.put(a, (w & 0xFFFF) | (track << 16) if u & 1 else (w & 0xFFFF0000) | track)
 
 
-def setup(slots, para: int):
-    """test/test_a2_para.setup: SLOTS on ANALOG 2 at its defaults, on track 0, PARA PARA"""
+def setup(slots, para: int, engine: str = "ANALOG2"):
+    """test/test_a2_para.setup: SLOTS on ENGINE (ANALOG2, JUNO) at its defaults, on track 0, PARA PARA"""
     from dnfw.engines.analog2 import analog2 as A2
+    from dnfw.engines.juno import juno as J
     from dnfw.md import core as MDK
     from dnfw.mnm import machines as MM
     from dnfw.perc import live as PL
     from dnfw.perc import machines as PM
     from dnfw.perc.dsl import bits
-    kind = next(t for t, k in PP.MNM_TYPES.items() if MM.NAMES[k] == "ANALOG2")
+    kind = next(t for t, k in PP.MNM_TYPES.items() if MM.NAMES[k] == engine)
+    mod = {"ANALOG2": A2, "JUNO": J}[engine]
     h = PL.Harness()
     h.words[h.L.md.C["fill"]] = MDK.Z_N
     for k, v in enumerate(A2.table_words()):
         h.words[h.L.md.mnm.scratch + A2.TABLES_OFF + 4 * k] = bits(v)
     for u in slots:
         h.t = u
-        h.set_mnm(kind, list(A2.DEFAULTS))
-        for (_r, slot, lo, top), x in zip(PM.FX_PARAMS, A2.DEFAULTS2):
+        h.set_mnm(kind, list(mod.DEFAULTS))
+        for (_r, slot, lo, top), x in zip(PM.FX_PARAMS, mod.DEFAULTS2):
             h._half(PM.frame_offset(slot), PL.knob_word(x, top, lo))
         h._half(PM.frame_offset(PARA.PARA_REC[1]), para << 8)
         _route(h, u, 0)
@@ -65,10 +67,10 @@ def tot(c: dict) -> float:
     return DC.est([sum(v[i] for v in c.values()) for i in range(3)])
 
 
-def run(n: int, para: int) -> dict:
+def run(n: int, para: int, engine: str = "ANALOG2") -> dict:
     slots = list(range(n))
     from dnfw.perc.dsl import Prog, bits
-    h = setup(slots, para)
+    h = setup(slots, para, engine)
     L = h.L
     per = {u: [] for u in slots}
     pre = []
@@ -106,7 +108,7 @@ def run(n: int, para: int) -> dict:
 
 
 
-def table_costs() -> dict:
+def table_costs(engine: str = "ANALOG2") -> dict:
     """the load table's PARA costs (scripts/gen_load_table.py, dnfw.load: a voice's cost is (its dearer block +
     PER_VOICE) x (1 + MARGIN)), from a 4-note chord's start blocks against four voices with PARA off (the caller has
     run dsp_cost._install):
@@ -115,7 +117,7 @@ def table_costs() -> dict:
       dropped: a note past the chord's N (not rendered: only its guard and quiet test)"""
     _imports()
     from dnfw import load as LD
-    on, off = run(4, 3), run(4, 0)
+    on, off = run(4, 3, engine), run(4, 0, engine)
     member = max(on["start"][u] for u in (0, 1, 2))
     lead_extra = on["start"][3] - max(off["start"].values())
     pass_extra = on["prepass_steps"]["start"] - off["prepass_steps"]["start"]
@@ -131,12 +133,12 @@ def main() -> int:
     _imports()
     DC._install()
     out = {}
-    for n in (1, 2, 3, 4):
+    for engine, n in ((e, n) for e in ("ANALOG2", "JUNO") for n in (1, 2, 3, 4)):
         for para in sorted({0, n - 1}):
-            r = run(n, para)
-            out[f"n{n}_para{para}"] = r
+            r = run(n, para, engine)
+            out[f"{engine}_n{n}_para{para}"] = r
             st, sd = r["start"], r["steady"]
-            print(f"{n} notes PARA {para}: roles {r['roles']}  steady {[round(sd[u]) for u in sorted(sd)]} "
+            print(f"{engine} {n} notes PARA {para}: roles {r['roles']}  steady {[round(sd[u]) for u in sorted(sd)]} "
                   f"(sum {round(sum(sd.values()))})  start {[round(st[u]) for u in sorted(st)]} "
                   f"(sum {round(sum(st.values()))})  pass {r['prepass_steps']}", flush=True)
     if a.json:

@@ -227,9 +227,14 @@
  ],
  "ours": 310000,
  "para": {
-  "add": 1087,
+  "add": 1088,
   "dropped": 610,
   "member": 6095
+ },
+ "para_juno": {
+  "add": 723,
+  "dropped": 610,
+  "member": 4859
  },
  "per_voice": 530,
  "plaits": [

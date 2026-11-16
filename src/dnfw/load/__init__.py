@@ -109,5 +109,7 @@ def c_header(t: dict | None = None) -> str:
              # voice and what it adds to its leader; one past the chord's N is dropped (not rendered)
              f"#define LOAD_PARA_MEMBER {t['para']['member']}u",
              f"#define LOAD_PARA_ADD {t['para']['add']}u",
-             f"#define LOAD_PARA_DROPPED {t['para']['dropped']}u"]
+             f"#define LOAD_PARA_DROPPED {t['para']['dropped']}u",
+             f"#define LOAD_PARA_JUNO_MEMBER {t['para_juno']['member']}u",
+             f"#define LOAD_PARA_JUNO_ADD {t['para_juno']['add']}u"]
     return "\n".join(lines) + "\n"

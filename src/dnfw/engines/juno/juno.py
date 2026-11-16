@@ -36,6 +36,7 @@ from __future__ import annotations
 import math
 
 from ..analog2 import analog2 as A2
+from ..analog2 import para as PARA
 from ...mnm import core as C
 from .tables import T_D, T_G1Q, T_ID8, T_K8, T_NZ4, T_PULL2, T_SUB
 from ..tb303.tb303 import _exp2p
@@ -550,5 +551,7 @@ def half(p: Prog, L: C.Layout) -> None:
     p.st(W[A2.WN["bv"]], 0)
     p.seti(0, 0)
     _osc(p, L)
-    _ladder(p, L)
-    _post(p, L)
+    # 2026-11-15 (PARA, dnfw.engines.analog2.para): the DCO is the note's own; a chord's member stops here (its block
+    # stays in its stream for its leader), its leader first adds its members' blocks; the ladder and the VCA are the
+    # chord's. Any other slot: as before
+    PARA.stage(p, L, lambda: (_ladder(p, L), _post(p, L)), bv_word=W[A2.WN["bv"]])

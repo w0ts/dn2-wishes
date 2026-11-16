@@ -894,7 +894,7 @@ def main(argv=None):
             show(results["7b_gran"])
 
         if "para" in steps:
-            print("\nstep 8p: ANALOG 2's PARA (2026-11-15)")
+            print("\nstep 8p: PARA, ANALOG 2 and JUNO (2026-11-15)")
             results["8p_para"] = step_para(warm(), sound, machines)
             show(results["8p_para"])
 
@@ -4100,6 +4100,7 @@ def step_gran(init, sound, machines) -> dict:
 A2_NOTE2, A2_BLOCKS = 12, 40                    # ANALOG 2's glide runs: the second note's block, the length
 A2_PARA_SLOT, A2_PARA_BLOCKS = 37, 24           # 2026-11-15: PARA's record (MOD), the PARA runs' length
 A2_PARA_HELD = 80                               # PARA_a2: past the quiet test's 64 blocks (a member rests with its leader)
+PARA_ENGINES = (("ANALOG2", "a2"), ("JUNO", "juno"))   # 2026-11-15: the engines PARA plays (para.ENGINES), the runs' tags
 A2_ROUTE_FRAME = 0xA5A                          # the frame's route words: the track voice slot v plays, 0xa5a + 2 v
 JUNO_OFF, JUNO_BLOCKS = 6, 64                    # JUNO's envelope runs (2026-11-12): the released one's note-off, the length
 
@@ -4134,13 +4135,13 @@ def _slim(run: dict) -> dict:
 A2_PARA_GUARD_FROM = 6                          # the PARA guard runs: the clock fed from this block
 
 
-def a2_para_frames(sound, machines, para):
-    """2026-11-15: ANALOG 2's PARA (dnfw.engines.analog2.para): slots 0..3 on ANALOG 2 at its defaults, all four
+def a2_para_frames(sound, machines, para, engine="ANALOG2"):
+    """2026-11-15: PARA (dnfw.engines.analog2.para): slots 0..3 on ENGINE (ANALOG2, JUNO) at its defaults, all four
     routed to track 0 (the frame's route words 0xa5a + 2 v), notes 60 64 67 71 on at block 1 and held; PARA (the
     record MOD, slot 37: 3 is 4 pitches, 0 OFF)"""
     from dnfw.mnm import machines as MM
     types = dict(enumerate(MM.TYPES))
-    ak = MM.NAMES.index("ANALOG2")
+    ak = MM.NAMES.index(engine)
 
     def fb(b):
         f = base_frame(sound, machines, t0=types[ak], overrides=mnm_words(ak), note=0x3C00,
@@ -4158,28 +4159,62 @@ def a2_para_frames(sound, machines, para):
 
 
 def a2_para_runs(init, sound, machines) -> dict:
-    """PARA_a2 (PARA 4, held A2_PARA_HELD blocks) and PARA_a2_off; the step's exactness check holds every slot to the
-    model (which runs the slots in the DSP's order on one memory, the PARA pass first)"""
+    """for each PARA engine (PARA_ENGINES: tag): PARA_tag (PARA 4, held A2_PARA_HELD blocks, each slot's ROLE word and
+    quiet count recorded after PERC) and PARA_tag_off; the step's exactness check holds every slot to the model (which
+    runs the slots in the DSP's order on one memory, the PARA pass first)"""
     from dnfw.engines.analog2 import para as PA
-    seen = []
+    out = {}
+    for engine, tag in PARA_ENGINES:
+        seen = []
 
-    def at_smp(r):                               # after PERC: each slot's ROLE word and its quiet count (RESTS)
-        seen.append([(m2.word(r.state, PA.ROLE + 4 * u) or 0,
-                      m2.word(r.state, PERC_L.md.mnm.scratch + PP.RESTS_OFF + 4 * u) or 0) for u in range(4)])
-    held = _slim(run_blocks(init, a2_para_frames(sound, machines, 3), A2_PARA_HELD, extra_hooks={dsp.SMP_SW: at_smp}))
-    held["roles_rests"] = seen
-    return {"PARA_a2": held,
-            "PARA_a2_off": _slim(run_blocks(init, a2_para_frames(sound, machines, 0), A2_PARA_BLOCKS))}
+        def at_smp(r, seen=seen):                # after PERC: each slot's ROLE word and its quiet count (RESTS)
+            seen.append([(m2.word(r.state, PA.ROLE + 4 * u) or 0,
+                          m2.word(r.state, PERC_L.md.mnm.scratch + PP.RESTS_OFF + 4 * u) or 0) for u in range(4)])
+        held = _slim(run_blocks(init, a2_para_frames(sound, machines, 3, engine), A2_PARA_HELD,
+                                extra_hooks={dsp.SMP_SW: at_smp}))
+        held["roles_rests"] = seen
+        out[f"PARA_{tag}"] = held
+        out[f"PARA_{tag}_off"] = _slim(run_blocks(init, a2_para_frames(sound, machines, 0, engine), A2_PARA_BLOCKS))
+    return out
 
 
-def a2_para_held_check(pr, n: dict) -> dict:
+def a2_para_guards(init, sound, machines) -> dict:
+    """a2_para_guard for each PARA engine: tag -> its runs"""
+    return {tag: a2_para_guard(init, a2_para_frames(sound, machines, 3, engine)) for engine, tag in PARA_ENGINES}
+
+
+def para_checks(runs, guards, n: dict) -> dict:
+    """each PARA engine's checks: its chord (the leader sounds, the members exact silence; OFF, each slot sounds), held
+    past the quiet test, and under the guard (a2_para_guard_checks)"""
+    checks = {}
+    for engine, tag in PARA_ENGINES:
+        if f"PARA_{tag}" not in runs:
+            continue
+        pr, po = runs[f"PARA_{tag}"], runs[f"PARA_{tag}_off"]
+        pok = pr["ok"] and po["ok"]
+        pp = {t: V.peak(perc_series(pr, t)) for t in range(4)} if pok else {}
+        po_ = {t: V.peak(perc_series(po, t)) for t in range(4)} if pok else {}
+        n[f"para_{tag}_peaks"] = {"para": {t: round(v, 4) for t, v in pp.items()},
+                                  "off": {t: round(v, 4) for t, v in po_.items()}}
+        checks[f"{engine} PARA: a 4-note chord on one track plays on its oldest slot (3: the highest of one block's "
+               "notes), its members (0, 1, 2) exact silence; PARA OFF, each slot plays its own note"] = (
+            pok and pp[3] > 0.05 and all(perc_series(pr, t) and all(x == 0.0 for x in perc_series(pr, t))
+                                         for t in (0, 1, 2))
+            and all(v > 0.05 for v in po_.values()))
+        checks.update(a2_para_held_check(pr, n, engine, tag))
+        if tag in guards:
+            checks.update(a2_para_guard_checks(pr, guards[tag], n, engine, tag))
+    return checks
+
+
+def a2_para_held_check(pr, n: dict, engine: str = "ANALOG2", tag: str = "a2") -> dict:
     """PARA_a2 held past the quiet test: at its last block each member (0, 1, 2) still rendered (RENDERED) and its
     quiet count (RESTS) under QUIET_BLOCKS, as its leader's"""
     from dnfw.engines.analog2 import para as PA
     rr = pr.get("roles_rests") or []
     last = rr[-1] if rr else []
-    n["a2_para_held_last"] = [[hex(w), q] for w, q in last]
-    return {"ANALOG2 PARA: the chord held 80 blocks (past the quiet test's 64): at its last block every member still "
+    n[f"para_{tag}_held_last"] = [[hex(w), q] for w, q in last]
+    return {f"{engine} PARA: the chord held 80 blocks (past the quiet test's 64): at its last block every member still "
             "renders (RENDERED) and its quiet count stays under 64, as its leader's":
             pr["ok"] and len(rr) >= A2_PARA_HELD and len(last) == 4
             and all(last[u][0] & PA.RENDERED and last[u][1] < PP.MNM_QUIET_BLOCKS for u in (0, 1, 2))
@@ -4187,26 +4222,15 @@ def a2_para_held_check(pr, n: dict) -> dict:
 
 
 def step_para(init, sound, machines) -> dict:
-    """2026-11-15: ANALOG 2's PARA alone (step mnm runs the same, among every machine): the runs bit-exact to the
-    model, the chord's checks, and the chord under the frame guard (a2_para_guard)"""
+    """2026-11-15: PARA alone, each engine (step mnm runs the same, among every machine): the runs bit-exact to the
+    model, each chord's checks, and each chord under the frame guard (a2_para_guard)"""
     runs = a2_para_runs(init, sound, machines)
-    g = a2_para_guard(init, a2_para_frames(sound, machines, 3))
-    pr, po = runs["PARA_a2"], runs["PARA_a2_off"]
-    pok = pr["ok"] and po["ok"]
+    guards = a2_para_guards(init, sound, machines)
     exact = {k: perc_exact(r) for k, r in runs.items() if r["ok"]}
     n = {"exact": exact}
-    pp = {t: V.peak(perc_series(pr, t)) for t in range(4)} if pok else {}
-    po_ = {t: V.peak(perc_series(po, t)) for t in range(4)} if pok else {}
-    n["peaks"] = {"para": pp, "off": po_}
-    checks = {
-        "every slot of PARA_a2 and PARA_a2_off, every block, bit-exact to the model":
-            pok and all(v[0] > 0 and v[1:] == (0, 0) for v in exact.values()),
-        "PARA 4: the leader (slot 3) sounds, its members (0, 1, 2) exact silence; OFF: each slot sounds":
-            pok and pp[3] > 0.05 and all(all(x == 0.0 for x in perc_series(pr, t)) for t in (0, 1, 2))
-            and all(v > 0.05 for v in po_.values()),
-    }
-    checks.update(a2_para_held_check(pr, n))
-    checks.update(a2_para_guard_checks(pr, g, n))
+    checks = {"every slot of every PARA run (" + ", ".join(runs) + "), every block, bit-exact to the model":
+              all(r["ok"] for r in runs.values()) and all(v[0] > 0 and v[1:] == (0, 0) for v in exact.values())}
+    checks.update(para_checks(runs, guards, n))
     return {"ok": all(checks.values()), "checks": checks, "numbers": n}
 
 
@@ -4262,7 +4286,7 @@ def a2_para_guard(init, fb) -> dict:
     return {"member1": one(member1), "member1_poison": one(member1, True), "room": one(room), "emuclk_reads": len(at)}
 
 
-def a2_para_guard_checks(ctl, g: dict, n: dict) -> dict:
+def a2_para_guard_checks(ctl, g: dict, n: dict, engine: str = "ANALOG2", tag: str = "a2") -> dict:
     """the checks of a2_para_guard's runs against PARA_a2 (CTL, the clock still)"""
     from dnfw.engines.analog2 import para as PA
     gf = A2_PARA_GUARD_FROM
@@ -4279,7 +4303,7 @@ def a2_para_guard_checks(ctl, g: dict, n: dict) -> dict:
         return bool(rr[b][u][0] & PA.RENDERED) if b < len(rr) else None
     blocks = range(gf, A2_PARA_BLOCKS)
     m1, m1p, rm = g["member1"], g["member1_poison"], g["room"]
-    n["a2_para_guard"] = {
+    n[f"para_{tag}_guard"] = {
         "member1_leader_peaks": [round(V.peak(out(m1, b, 3)), 4) for b in blocks] if ok else None,
         "room_leader_peaks": [round(V.peak(out(rm, b, 3)), 4) for b in blocks] if ok else None,
         "room_rendered": [[rendered(rm, b, u) for u in range(3)] for b in blocks] if ok else None,
@@ -4292,7 +4316,7 @@ def a2_para_guard_checks(ctl, g: dict, n: dict) -> dict:
         "limits": {k: g[k]["limits"][gf:gf + 3] for k in ("member1", "room")} if ok else None,
         "exact": {k: perc_exact(g[k]) for k in ("member1", "member1_poison", "room")} if ok else None}
     return {
-        "ANALOG2 PARA under the guard: a refused member (slot 1) is left out of its leader's sum: the leader's output is "
+        f"{engine} PARA under the guard: a refused member (slot 1) is left out of its leader's sum: the leader's output is "
         "bit-identical whatever that member's stream words hold (1000.0 poured in), and differs from the whole chord's; "
         "the other members render in the same blocks as with the clock still":
             ok and all(out(m1, b, 3) == out(m1p, b, 3) for b in blocks)
@@ -4300,12 +4324,12 @@ def a2_para_guard_checks(ctl, g: dict, n: dict) -> dict:
             and all(not rendered(m1, b, 1) for b in blocks)
             and all(rendered(m1, b, u) == ctl_rendered(b, u) for b in blocks for u in (0, 2))
             and all(V.peak(out(m1, b, 3)) > 0.005 for b in blocks),
-        "ANALOG2 PARA under the guard: with room for one voice and a half, the members (0, 1, 2) are refused and the "
+        f"{engine} PARA under the guard: with room for one voice and a half, the members (0, 1, 2) are refused and the "
         "leader keeps its room and plays (each block it sounds; the members never rendered)":
             ok and all(V.peak(out(rm, b, 3)) > 0.005 for b in blocks)
             and all(not rendered(rm, b, u) for b in blocks for u in range(3))
             and all(out(rm, b, u) == [0.0] * len(out(rm, b, u)) for b in blocks for u in range(3)),
-        "ANALOG2 PARA under the guard: the guard reads the clock twice a voice": g["emuclk_reads"] == 2,
+        f"{engine} PARA under the guard: the guard reads the clock twice a voice": g["emuclk_reads"] == 2,
     }
 
 
@@ -4398,8 +4422,8 @@ def step_mnm(init, sound, machines, blocks) -> dict:
             runs[f"A2_held_{gn}"] = _slim(run_blocks(init, a2_leg(False, glty), A2_BLOCKS))
             runs[f"A2_released_{gn}"] = _slim(run_blocks(init, a2_leg(True, glty), A2_BLOCKS))
 
-        runs.update(a2_para_runs(init, sound, machines))      # 2026-11-15: ANALOG 2's PARA (step para too)
-        para_guard.update(a2_para_guard(init, a2_para_frames(sound, machines, 3)))
+    runs.update(a2_para_runs(init, sound, machines))          # 2026-11-15: PARA, each engine (step para too)
+    para_guard.update(a2_para_guards(init, sound, machines))
     # 2026-11-12: JUNO's VCF envelope (page 2 q0 ENV up, its ADSR at MACHINE SEL's starts): a saw at CUT 30 RES 60,
     # note 60 on at block 1; "held" no note-off, "released" its note-off at block JUNO_OFF (the release closes the
     # filter: the DN2's AMP envelope, not in this buffer, shapes the level)
@@ -4583,21 +4607,7 @@ def step_mnm(init, sound, machines, blocks) -> dict:
             a2ok and a2["released_RATE"] == a2["released_OFF"] and a2["released_TIME"] == a2["released_OFF"])
         n["a2_glide_periods_between"] = between
         n["a2_glide_periods"] = {k: v[:24] for k, v in periods.items()}
-    if "PARA_a2" in runs:                        # 2026-11-15: ANALOG 2's PARA
-        pr, po = runs["PARA_a2"], runs["PARA_a2_off"]
-        pok = pr["ok"] and po["ok"]
-        pp = {t: V.peak(perc_series(pr, t)) for t in range(4)} if pok else {}
-        po_ = {t: V.peak(perc_series(po, t)) for t in range(4)} if pok else {}
-        checks["ANALOG2 PARA: a 4-note chord on one track plays on its oldest slot (3: the highest of one block's "
-               "notes), its members (0, 1, 2) exact silence; PARA OFF, each slot plays its own note"] = (
-            pok and pp[3] > 0.05 and all(perc_series(pr, t) and all(x == 0.0 for x in perc_series(pr, t))
-                                         for t in (0, 1, 2))
-            and all(v > 0.05 for v in po_.values()))
-        checks.update(a2_para_held_check(pr, n))
-        n["a2_para_peaks"] = {"para": {t: round(v, 4) for t, v in pp.items()},
-                              "off": {t: round(v, 4) for t, v in po_.items()}}
-        if para_guard:
-            checks.update(a2_para_guard_checks(pr, para_guard, n))
+    checks.update(para_checks(runs, para_guard, n))   # 2026-11-15: PARA, each engine
     if "JUNO_held" in runs:                      # 2026-11-12: JUNO's VCF envelope
         jh, jr = perc_series(runs["JUNO_held"], 0), perc_series(runs["JUNO_released"], 0)
         jok = runs["JUNO_held"]["ok"] and runs["JUNO_released"]["ok"]

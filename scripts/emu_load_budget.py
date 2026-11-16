@@ -32,7 +32,9 @@ stole, as every voice was released, and judged by a fixed LOAD_AVAIL the unit's 
 14. a note past the chord's N (PARA 2 pitches, two held) is priced as dropped (LOAD_PARA_DROPPED);
 15. with none of the track's notes held, the note starts a chord: priced as the track's voice;
 16. a heavy note's further releases never take a PARA chord's voice (HOLD keeps its note-off back); with PARA OFF they
-    take the chord's next oldest.
+    take the chord's next oldest;
+17. track 0 on JUNO (2026-11-15): a note joining its held chord is priced as a JUNO member (LOAD_PARA_JUNO_MEMBER +
+    LOAD_PARA_JUNO_ADD).
 Exit 0 when every check passes.
 """
 
@@ -265,7 +267,7 @@ def twin(e, sym, build, t, n):
     return got, ref, mh == ms
 
 
-A2_TYPE, MOD_AT = 22, 20 + 2 * 37             # ANALOG 2's machine type value; the sound's MOD (PARA) value
+A2_TYPE, JUNO_TYPE, MOD_AT = 22, 23, 20 + 2 * 37   # the PARA engines' machine type values; the sound's MOD (PARA)
 
 
 def para_checks(e: Emu, sym, res) -> None:
@@ -277,11 +279,11 @@ def para_checks(e: Emu, sym, res) -> None:
     snd0 = e.r32(KIT_PTR) + 52                 # track 0's sound
     keep = (e.read(snd0 + 0xDE, 1), e.read(snd0 + MOD_AT, 2))
 
-    def para(v):
-        e.write(snd0 + 0xDE, bytes([A2_TYPE]))
+    def para(v, typ=A2_TYPE):
+        e.write(snd0 + 0xDE, bytes([typ]))
         e.write(snd0 + MOD_AT, struct.pack(">H", v << 8))
 
-    def chord(value, fill, n1=10, held=True):
+    def chord(value, fill, n1=10, held=True, typ=A2_TYPE):
         """track 0 (a voice 10,000): notes 60, 64 held, its chord; track 1: N1 notes of FILL; PARA VALUE"""
         def build():
             cost = [10000] + [fill] * 15
@@ -292,7 +294,7 @@ def para_checks(e: Emu, sym, res) -> None:
             for nn in range(n1):
                 k.play(1, 30 + nn, hook=False)
             e.w32(sym["para_live"], k.chord if held else 0)
-            para(value)
+            para(value, typ)
             return k
         return build
     fill = (avail - 2 * pc["member"] - join - 500) // 10          # PARA: the slots' sum and a joining note just fit
@@ -338,6 +340,11 @@ def para_checks(e: Emu, sym, res) -> None:
         check("16 a heavy note's further releases never take a PARA chord's voice; PARA OFF takes the chord's next",
               ups >= 1 and gone and not (gone & ch) and ups0 >= 1 and (gone0 & ch0),
               f"PARA: released {gone:#06x} (chord {ch:#06x}); OFF: released {gone0:#06x}")
+        pj = t["para_juno"]
+        twin(e, sym, chord(3, fill, typ=JUNO_TYPE), 0, 67)
+        need = counters(e, sym)["last_need"]
+        check("17 JUNO: a note joining its held chord is priced as a JUNO member",
+              need == pj["member"] + pj["add"], f"need {need} (a JUNO member {pj['member'] + pj['add']})")
     finally:
         e.write(snd0 + 0xDE, keep[0])
         e.write(snd0 + MOD_AT, keep[1])
