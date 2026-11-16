@@ -19,9 +19,6 @@ Custom firmware for the Elektron Digitone II, OS 1.12. Built on
 - Insert effects: FUZZ, TAPE, FOLD, CHOR, WIDE, HARM, FDN8, XDLY, SUB, DIST, GATER,
   RING, JUNO.
 - Modulation matrix.
-- MACHINE SEL in two columns, engine row in the preset browser, LIVE SELECT.
-- List popups, units on parameter values, oscilloscope page.
-- Velocity on the Machinedrum and Monomachine machines.
 - Voice budget: new notes take the voice of an old one before the DSP runs out of time.
 - Faster DSP code for the sample, Machinedrum and Monomachine machines, sound unchanged.
 
