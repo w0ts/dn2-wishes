@@ -11,6 +11,8 @@
  *   the per-project lists (pools.c)    0x6D0000 .. 0x6E02FF   (superblocks 0x6D0000/1)
  *   the inserts' records (store.c)     0x6E0400 .. 0x6E0501   (2026-11-11: missed until then, so
  *                                      ERASE left the inserts of every project behind)
+ *   the DSP program's copy (lzma7cache.c) 0x6E8000 .. 0x6E8800 (2026-11-11: decoded once; a
+ *                                      boot after the erase decodes and writes it again)
  *   the settings sector (jump.c)       0x6FF000
  *   the library (lib.c)                0x700000 .. the device's last sector
  *
@@ -87,6 +89,8 @@ typedef unsigned char u8;
 #define LIB_DATA (LIB_SECTOR + 1u + 256u + 4u)                      /* lib.c: superblock, index, folders */
 #define INS_AT 0x6E0400u                                            /* 2026-11-11, inserts/store.c INS_BASE */
 #define INS_END (INS_AT + 2u * 129u)                                /* store.c INS_END: 129 records x 2 copies */
+#define DN7C_AT 0x6E8000u                                           /* 2026-11-11, waverider/lzma7cache.c C_HDR */
+#define DN7C_END (DN7C_AT + 1u + 2048u)                             /* lzma7cache.c C_END: header + 1 MiB */
 #define ER_CHUNK 2048u                                              /* stock FORMAT's call */
 #define ER_TRIES 5u                     /* v0.40: a call (TRIM or a verify read) tried at most 5 times */
 #define ER_PAUSE_FR 300u                /* 200 ms between tries (or ER_PAUSE_PASSES passes ... */
@@ -104,6 +108,7 @@ _Static_assert(LIB_HI_AT > SET_SECTOR && LIB_HI_END <= LIB_SECTOR, "v0.43: folde
 _Static_assert(LIB_X_AT >= PL_END && LIB_X_END <= SET_SECTOR, "v0.45: the library's extension between the lists and the settings");
 _Static_assert(LIB_SECTOR > SET_SECTOR && LIB_DATA == 0x700105u, "the library's headers: 0x700000..0x700104");
 _Static_assert(INS_AT >= PL_END && INS_END == 0x6E0502u && INS_END <= LIB_X_AT, "the inserts' records between the lists and the library's extension");
+_Static_assert(DN7C_AT >= INS_END && DN7C_END == 0x6E8801u && DN7C_END <= LIB_X_AT, "the DSP program's copy between the inserts and the library's extension");
 
 int smp_er_lock D_ = 0;                 /* set at the first erase call; every writer of ours refuses */
 int smp_er_req D_ = 0;                  /* link command 28: start at the next UI pass */
@@ -131,7 +136,7 @@ static u32 er_pos D_ = 0;               /* the next sector of the job */
 static u8 er_buf[512] __attribute__((section(".data"), aligned(16)));
 
 /* job -> [start, end) */
-#define ER_JOBS 9
+#define ER_JOBS 10
 static void er_job(int j, u32 *a, u32 *b)
 {
     u32 end = BLK_SECTORS;
@@ -143,7 +148,8 @@ static void er_job(int j, u32 *a, u32 *b)
     case 4: *a = LIB_HI_AT; *b = LIB_HI_END; return;                /* v0.43: folders 64..127 */
     case 5: *a = LIB_X_AT; *b = LIB_X_END; return;                  /* v0.45: entries 2,048..16,383 */
     case 6: *a = INS_AT; *b = INS_END; return;                      /* 2026-11-11: the inserts' records */
-    case 7: *a = POOL_SECTOR + 1u; *b = POOL_STORE_END; return;     /* the pool's frames */
+    case 7: *a = DN7C_AT; *b = DN7C_END; return;                    /* 2026-11-11: the DSP program's copy */
+    case 8: *a = POOL_SECTOR + 1u; *b = POOL_STORE_END; return;     /* the pool's frames */
     default: *a = LIB_DATA; *b = end > LIB_DATA ? end : LIB_DATA; return;    /* the library's frames */
     }
 }
@@ -166,6 +172,8 @@ static int er_inside(u32 s, u32 n)
     if (s >= LIB_X_AT && s + n <= LIB_X_END)    /* v0.45 */
         return 1;
     if (s >= INS_AT && s + n <= INS_END)        /* 2026-11-11: the inserts' records */
+        return 1;
+    if (s >= DN7C_AT && s + n <= DN7C_END)      /* 2026-11-11: the DSP program's copy */
         return 1;
     if (s >= LIB_SECTOR)                        /* to the device's end (checked above) */
         return 1;
@@ -257,7 +265,7 @@ static int er_trim(u32 s, u32 n)
 /* the verify's list: K -> a sector. Every header sector first (the pool's; the lists'
  * superblocks and each list copy's header; the settings; the library's superblock, index,
  * folders), then 64 a range spread over it, its first and last among them (the pool's frames, the
- * lists, the library's frames, 2026-11-11 the inserts' records) */
+ * lists, the library's frames, 2026-11-11 the inserts' records, the DSP program's copy: its header first) */
 #define ER_SPREAD 64u
 static u32 er_nhead(void) { return 1u + 2u + 2u * 129u + 1u + (LIB_DATA - LIB_SECTOR) + (LIB_HI_END - LIB_HI_AT) + 1u; }   /* v0.45: + the extension's header */
 
@@ -280,7 +288,7 @@ static u32 er_check_sector(u32 k)
         return LIB_HI_AT + (k - (h - 1u - (LIB_HI_END - LIB_HI_AT)));
     k -= h;
     u32 j = k / ER_SPREAD, i = k % ER_SPREAD, a, b;
-    er_job(j == 0 ? 7 : j == 1 ? 1 : j == 2 ? 8 : 6, &a, &b);    /* the pool's frames, the lists, the library, the inserts */
+    er_job(j == 0 ? 8 : j == 1 ? 1 : j == 2 ? 9 : j == 3 ? 6 : 7, &a, &b);    /* the pool's frames, the lists, the library, the inserts, the DSP program's copy */
     if (b <= a)
         return a;
     u32 span = b - a - 1u;
@@ -339,7 +347,7 @@ int smp_er_start(void)
         er_job(j, &a, &b);
         smp_er_total += b - a;
     }
-    smp_er_nchecks = er_nhead() + 4u * ER_SPREAD;
+    smp_er_nchecks = er_nhead() + 5u * ER_SPREAD;
     u32 end;
     smp_er_job = 0;
     er_job(0, &er_pos, &end);

@@ -534,6 +534,12 @@ HOLD_FINAL_STOCK = "4eb94002b12e"
 # `jsr 0x40136820` (aPLib depack(src, dst)) -> dn_depack7 (csrc/waverider/lzma7.c), same arguments
 DEPACK7_SITE = 0x400CF73A
 DEPACK7_STOCK = "4eb940136820"
+# 2026-11-11 (lzma-cache, csrc/waverider/lzma7cache.c): the boot routine uploads the DSP program
+# (jsr 0x400cf4b0) before it sets up the eMMC driver; the call moves to where its paths meet after
+UPLOAD_EARLY_SITE = 0x400CF086
+UPLOAD_EARLY_STOCK = "4eb9400cf4b0"
+UPLOAD_LATE_SITE = 0x400CF0F2           # move.l %d0,0x4243989c: the driver's set-up result
+UPLOAD_LATE_STOCK = "23c04243989c"
 POLL_SITE = 0x4002E464                  # jsr 0x4011d5d4 (isDirty), its argument the screen
 # v0.38: per-project pools (csrc/sampler/pools.c, hooks.S, docs/project-pools.md): the OS's
 # project LOAD 0x40042E6E (its entry, its success where it sets the slot, its exit) and NEW
@@ -761,6 +767,20 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
          "the SHARC uploader's depack of section 7: dn_depack7 decodes our LZMA section 7 "
          "(checked by length and CRC-32; anything else refused into stock's error path) and "
          "hands stock's aPLib to 0x40136820", bytes.fromhex(DEPACK7_STOCK))
+    # 2026-11-11 (lzma-cache): the upload moved after the eMMC's set-up, so dn_depack7 can read
+    # and write its copy on the +Drive (csrc/waverider/lzma7cache.c, lzma7late.S)
+    _need(content, UPLOAD_EARLY_SITE + 6, bytes.fromhex("4eb940027d3a"), "the boot routine goes on after the upload")
+    _need(content, 0x400CF09A, bytes.fromhex("4eb94012bddc"), "the eMMC driver's set-up comes after it ...")
+    _need(content, 0x400CF0A8, bytes.fromhex("4eb94012be52" "4eb94012c438" "4eb94012c620"), "... in three calls")
+    _need(content, UPLOAD_LATE_SITE - 2, bytes.fromhex("7007"), "the last path falls into the meeting point")
+    _need(content, UPLOAD_LATE_SITE + 6, bytes.fromhex("7040"), "... and stock writes d0 after the replayed store")
+    edit(UPLOAD_EARLY_SITE, bytes.fromhex("4e714e714e71"),
+         "the boot routine's DSP upload, before the eMMC is set up: moved to 0x400cf0f2",
+         bytes.fromhex(UPLOAD_EARLY_STOCK))
+    edit(UPLOAD_LATE_SITE, bytes.fromhex("4eb9") + _long(csyms["dn7_late"]),
+         "where the boot routine's paths meet after the eMMC's set-up: the store replayed, then "
+         "the DSP upload (dn_depack7 reads the +Drive's copy of the program, or decodes and writes it)",
+         bytes.fromhex(UPLOAD_LATE_STOCK))
 
     # v0.22: the RECORDER's screen -- its keys and knobs, its draw, FUNC + VOICE
     _need(content, UI_POP_SITE - 6, bytes.fromhex("48794059e214"), "the UI loop pushes its queue")
@@ -1036,6 +1056,8 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
                  "smp_er_done", "smp_er_total", "smp_er_trims", "smp_er_reads", "smp_er_checks",
                  "smp_er_nchecks", "smp_er_job", "smp_er_start", "smp_er_poll",
                  "smp_er_retries", "smp_er_waits", "smp_er_resume",   # v0.41
+                 # 2026-11-11: section 7 as LZMA and its +Drive copy (scripts/emu_lzma7_cache.py)
+                 "dn7_status", "dn7_length", "dn7_late", "dn7c_state", "dn7c_why",
                  # v0.40: the slice menus' wait, LINKED points, the playhead's redraw (gate: slice, samplist)
                  "slc_pop", "slc_poll", "slc_stock_asked", "slc_fails", "slc_linked", "smp_norm_state",
                  "smp_pl_quiesce", "smp_analysis_slot", "smp_slot_frames", "wr_draws", "smp_pos_in", "smp_playhead",

@@ -29,6 +29,7 @@ LINK_SOURCES = [SOURCE.parents[1] / "sampler" / "link.c", SOURCE.parents[1] / "s
                 SOURCE.parents[1] / "sampler" / "pools.c",          # v0.38: per-project pools
                 SOURCE.parents[1] / "sampler" / "erase.c",          # v0.39: ERASE MOD DATA
                 SOURCE.parents[1, / "sampler" / "rectrig.c",        # v0.41: REC trigs, buffers, QREC/QPLAY
+                SOURCE.parent / "lzma7cache.c", SOURCE.parent / "lzma7late.S",   # ... decoded once, kept on the +Drive
                 SOURCE.parent / "lzma7.c"]                          # 2026-11-11: section 7 as LZMA (docs/lzma7.md)
                 SOURCE.parents[1] / "jump" / "jump.c", SOURCE.parents[1] / "jump" / "hooks.S",   # DIRECT JUMP
                 SOURCE.parents[1] / "slides" / "slide.c", SOURCE.parents[1] / "slides" / "hooks.S",   # parameter slides
@@ -93,7 +94,7 @@ INS_ENTRIES = ["ins_pop", "ins_draw", "ins_visible", "ins_words", "ins_gen", "in
 HOLD_ENTRIES = ["hold_note_hook", "hold_final_hook", "hold_final", "hold_len", "hold_keys", "hold_poll", "hold_seq", "hold_key", "hold_count", "hold_drops", "hold_rel"]   # DRONE's HOLD (csrc/hold)
 DEVTEST_ENTRIES = ["dt_rx", "dt_poll", "dt_sw", "smp_bulk_at", "prof_isr", "prof_audio",
                    "dt_glass", "dt_present", "dt_inv"]   # the test channel (csrc/devtest)
-LZMA7_ENTRIES = ["dn_depack7", "dn7_status", "dn7_length"]    # 2026-11-11 (docs/lzma7.md)
+LZMA7_ENTRIES = ["dn_depack7", "dn7_status", "dn7_length", "dn7_late", "dn7c_state", "dn7c_why"]    # 2026-11-11 (docs/lzma7.md)
 MOD_ENTRIES = ["mod_mask_hook", "mod_lfo_mask", "mod_eval", "mod_eval_pre", "mod_wb", "mod_wb_cell",   # csrc/modulation
                "mv_begin", "mv_cell", "mv_poll"]
 LINK_ENTRIES = LINK_ENTRIES + DEVTEST_ENTRIES + LZMA7_ENTRIES + MOD_ENTRIES + SLIDE_ENTRIES + METER_ENTRIES + FDN8_ENTRIES + XDLY_ENTRIES + FXP_ENTRIES + INS_ENTRIES + HOLD_ENTRIES

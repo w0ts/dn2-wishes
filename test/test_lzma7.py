@@ -28,6 +28,9 @@ extern volatile uint32_t dn7_status;
 long host_stock_calls;
 long host_stock(const uint8_t *src, uint8_t *dst) { host_stock_calls++; dst[0] = 0xA5; return 7; }
 unsigned long host_malloc(unsigned int n) { return (unsigned long)malloc(n); }   /* as stock: an integer */
+/* no +Drive copy here (test_lzma7cache.py has it) */
+int dn7c_load(const uint8_t *id, uint8_t *dst, uint32_t len, uint32_t crc) { return 0; }
+void dn7c_store(const uint8_t *id, uint8_t *dst, uint32_t len, uint32_t crc) { }
 int main(int argc, char **argv)
 {
     FILE *f = fopen(argv[1], "rb");

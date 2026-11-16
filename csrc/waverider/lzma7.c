@@ -30,6 +30,10 @@
 #define LC_LP_MAX 3
 #define NPROBS (1846 + (0x300 << LC_LP_MAX))
 
+/* the copy on the +Drive (lzma7cache.c, 2026-11-11): read instead of decoding, written after */
+int dn7c_load(const uint8_t *id, uint8_t *dst, uint32_t len, uint32_t crc);
+void dn7c_store(const uint8_t *id, uint8_t *dst, uint32_t len, uint32_t crc);
+
 typedef long (*depack_fn)(const uint8_t *src, uint8_t *dst);
 /* stock's malloc answers in d0; GCC's m68k ABI reads a pointer result from a0, so the call is
  * typed as returning an integer and the pointer made from it */
@@ -44,7 +48,8 @@ typedef void (*free_fn)(void *p);
 #endif
 
 /* what the last call did (for the emulator check and a PEEK on the unit):
- * 0 never called, 1 handed to stock, 2 decoded and checked, 3.. refused (the reason).
+ * 0 never called, 1 handed to stock, 2 decoded and checked, 3..7 refused (the reason), 8 read from
+ * the +Drive's copy (lzma7cache.c).
  * In .data: the page renderer's chunk has no BSS (nothing zeroes it). */
 volatile uint32_t dn7_status __attribute__((section(".data"))) = 0;
 volatile uint32_t dn7_length __attribute__((section(".data"))) = 0;
@@ -240,7 +245,7 @@ static const uint32_t crc_nibble[16] = {
     0xEDB88320u, 0xF00F9344u, 0xD6D6A3E8u, 0xCB61B38Cu, 0x9B64C2B0u, 0x86D3D2D4u, 0xA00AE278u, 0xBDBDF21Cu,
 };
 
-static uint32_t crc32(const uint8_t *p, uint32_t n)
+uint32_t dn7_crc32(const uint8_t *p, uint32_t n)
 {
     uint32_t c = 0xFFFFFFFFu;
     while (n--) {
@@ -276,6 +281,11 @@ long dn_depack7(const uint8_t *src, uint8_t *dst)
         return refuse(3);
     if (props >= 225 || lc + lp > LC_LP_MAX || h[9] || h[10] || h[11])
         return refuse(4);
+    if (dn7c_load(src, dst, outlen, want)) {       /* the copy on the +Drive (lzma7cache.c) */
+        dn7_status = 8;
+        dn7_length = outlen;
+        return (long)outlen;
+    }
     probs = (uint16_t *)(uintptr_t)DN7_MALLOC(NPROBS * sizeof(uint16_t));
     if (!probs)
         return refuse(7);
@@ -284,9 +294,10 @@ long dn_depack7(const uint8_t *src, uint8_t *dst)
     probs = 0;
     if (got != (long)outlen)
         return refuse(5);
-    if (crc32(dst, outlen) != want)
+    if (dn7_crc32(dst, outlen) != want)
         return refuse(6);
     dn7_status = 2;
     dn7_length = outlen;
+    dn7c_store(src, dst, outlen, want);            /* for the next boot */
     return (long)outlen;
 }
