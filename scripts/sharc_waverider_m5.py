@@ -4285,6 +4285,10 @@ def step_mnm(init, sound, machines, blocks) -> dict:
          "buffer_max_abs": {k: round(max((abs(x) for blk in r["perc"] for v in blk.values() for x in v["out"]),
                                          default=0.0), 4) for k, r in runs.items() if r["ok"]},
          "halts": {k: r.get("halt") for k, r in runs.items() if not r["ok"]}}
+    # 2026-11-13, the User: TB303 2x by default, its loudest corner accepted. TB303_tops (all eight knobs 127: CUT,
+    # RES, ENV and ACC at their top, square, TUNE +24) peaks at 4.155 at 2x (3.771 at 4x) before it settles near
+    # 1.45; that run alone may reach 4.3, every other run keeps 4.0.
+    TOPS_LIMIT = {"TB303_tops": 4.3}
     checks = {
         "every run returns every block": ok_runs,
         "every Monomachine track's buffer and state, every block of every run, are bit-exact to "
@@ -4295,9 +4299,9 @@ def step_mnm(init, sound, machines, blocks) -> dict:
             all(v is not None and v > 0.005 for v in list(peaks.values()) + list(other.values())),
         "each machine is still sounding in the run's last four blocks (peak > 0.005)":
             all(v is not None and v > 0.005 for v in late.values()),
-        "nothing is non-finite or above 4.0 in any buffer":
-            ok_runs and all(math.isfinite(x) and abs(x) <= 4.0 for r in runs.values() for blk in r["perc"]
-                            for v in blk.values() for x in v["out"]),
+        "nothing is non-finite or above 4.0 in any buffer (TB303_tops: 4.3)":
+            ok_runs and all(math.isfinite(x) and abs(x) <= TOPS_LIMIT.get(k, 4.0) for k, r in runs.items()
+                            for blk in r["perc"] for v in blk.values() for x in v["out"]),
         "control: no trigger is silent (every sample 0)": bool(silent) and all(x == 0.0 for x in silent),
         f"the budget: of four SID tracks the first {fits} play, the rest are silent":
             None not in budget and all(v > 0.01 for v in budget[:fits]) and all(v == 0.0 for v in budget[fits:]),
