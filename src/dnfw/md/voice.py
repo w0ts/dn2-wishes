@@ -170,9 +170,8 @@ def reset(p: Prog, L: K.Layout) -> None:
     K.vws(p, "pos", 0)
 
 
-def advance(p: Prog, L: K.Layout) -> None:
-    """The stream moves on a block (B[32..66] -> B[0..34]) and the next is rendered at
-    OUT0. Clobbers everything but I3, I4."""
+def _move(p: Prog, L: K.Layout) -> None:
+    """The stream moves on a block (B[32..66] -> B[0..34]). Clobbers R1, R6, R7, R12, I1, I5."""
     p.ld(1, L.C["mdb"])
     p.iconst(12, 4 * K.B0)
     p.iop(1, 12, "+", 1)
@@ -189,6 +188,14 @@ def advance(p: Prog, L: K.Layout) -> None:
     for _ in range(35 % 8):
         p.ldpost(6, 1)
         p.stpost(5, 6)
+
+
+def advance(p: Prog, L: K.Layout) -> None:
+    """The stream moves on a block (B[32..66] -> B[0..34]) and the next is rendered at
+    OUT0. Clobbers everything but I3, I4. 2026-11-12 (SIMD voice pairs, dnfw.perc.pairs): a voice whose
+    move and render were done ahead this block skips them."""
+    from ..perc import pairs as PAIRS
+    PAIRS.skip_move(p, L, lambda: _move(p, L))
     # v0.24: the host's scale function is emitted once (it was twice: after a note and
     # for dirty words), run when a note waits or, with a machine, when words are dirty
     K.vw(p, 0, "trg")
@@ -301,7 +308,7 @@ def advance(p: Prog, L: K.Layout) -> None:
         p.loop0(32, lambda: p.stpost(5, 6))
 
     def sound():
-        _each(p, L, "render")
+        PAIRS.render(p, L, lambda: _each(p, L, "render"))
         # silent long enough (QUIET_BLOCKS blocks under QUIET_LEVEL): the machine rests
         # until the next note, as its sound has died away (it costs the DSP nothing then)
         p.ld(1, L.C["mdb"])

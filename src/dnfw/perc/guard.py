@@ -379,7 +379,8 @@ def perc_limit(p, smp_types, smp_state: int, smp_stride: int, on_word: int, trig
 
 def around(p, t_word: int, cost: int, buffers: int, voice, rests: int | None = None,
            rest_blocks: int = 0, strikes: int | None = None, steal_at: int = 1,
-           limit: int = LIMIT, struck: int | None = None, stop=None, keys: int | None = None) -> None:
+           limit: int = LIMIT, struck: int | None = None, stop=None, keys: int | None = None,
+           admit=None) -> None:
     """VOICE() if it fits, else the slot's buffer zeroed and the skip counted. T_WORD:
     the scratch word holding the slot; COST: the slots' cost words; BUFFERS: the track
     buffers' pointers (0x254a60). v0.36: RESTS (the slots' rest counters) given, a voice
@@ -442,13 +443,21 @@ def around(p, t_word: int, cost: int, buffers: int, voice, rests: int | None = N
         p.e("R9 = PASS R11;", "the machine's start bound")
         p.place(nob)
     p.iop(8, 8, "+", 9)
+    ok = p.label("gok") if admit is not None else None
+    if admit is not None:                      # 2026-11-12 (dnfw.perc.pairs): a voice rendered ahead is admitted
+        admit(ok)
     p.ld(10, limit)
     p.e("COMP(R8, R10);")
     p.jump("GT", skip)
+    if admit is not None:
+        p.place(ok)
     voice()
     p.e("R8 = EMUCLK;")
     p.ld(9, START)
     p.e("R8 = R8 - R9;", "what the voice cost")
+    if admit is not None:                      # 2026-11-12 (dnfw.perc.pairs): a pair's partner render on its own slot
+        from . import pairs as PAIRS
+        PAIRS.shift(p, t_word)
     steady = p.label("gsteady")
     p.ld(10, FRESH)
     p.e("R10 = PASS R10;")

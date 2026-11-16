@@ -1022,6 +1022,8 @@ def regions() -> list[tuple[str, int, int, str]]:
          ins_bus.UNIT_L1_END - ins_bus.UNIT_L1, "the Monomachine render scratch")
     area("the bus pass's own words and the send FX set aside (inserts.bus.WORDS_L1, transient)", ins_bus.WORDS_L1,
          ins_bus.WORDS_L1_END - ins_bus.WORDS_L1, "the Monomachine render scratch")
+    from ..perc import pairs as PAIRS                # 2026-11-12: SIMD voice pairs' words (the arbiter's F4)
+    area("SIMD voice pairs' words and snapshots (perc.pairs, F4)", PAIRS.WORDS_OFF, PAIRS.BYTES)
     # L2: the loaded code and state, then the run-time areas
     for what, at, payload in l2_spans():
         area(what, at, len(payload))

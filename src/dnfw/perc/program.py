@@ -687,6 +687,8 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
         p.seti(4, 0)
         p.fconst(1, 0.0)
         p.loop(C["tmp"], 32, lambda: p.stpost(4, 1))
+    from . import pairs as PAIRS
+    PAIRS.unskip(p, L.md, C["mskip"])         # 2026-11-12: a voice rendered ahead this block plays it
     p.ld(0, C["mskip"])
     p.ifz(0, "NE", silence, render)
     p.ld(12, C["sbase"])
@@ -1105,6 +1107,7 @@ def program_spans(L: M.Layout, rings_sw: int, prefix: str = "pk") -> dict[str, s
 
 
 def _emit(L: M.Layout, rings_sw: int, prefix: str) -> Prog:
+    from . import pairs as PAIRS
     p = Prog("emit", prefix=prefix)
     p.spill = L.md.C["ash"]
     p.raw("// perc.asm -- PERC, machine type 5 (docs/perc.md): the owner's Ravel PERC machines")
@@ -1158,7 +1161,8 @@ def _emit(L: M.Layout, rings_sw: int, prefix: str) -> Prog:
              rests=L.md.mnm.scratch + RESTS_OFF, rest_blocks=MNM_QUIET_BLOCKS,   # v0.36: else, the second
              strikes=L.md.mnm.scratch + STRIKES_OFF, steal_at=STEAL_STRIKES,       # time in a note, stolen
              limit=G.LIMIT_PERC,                                                    # v0.49: after the samples' share
-             keys=L.md.mnm.scratch + MNM_KEYS_OFF)     # 2026-11-09: PLAITS' start bound, its trig block no strike
+             keys=L.md.mnm.scratch + MNM_KEYS_OFF,     # 2026-11-09: PLAITS' start bound, its trig block no strike
+             admit=(lambda ok: PAIRS.admit(p, L.md, L.C["t"], ok)) if PAIRS.enabled() else None)
     p.jump("", nxt)
     # not PERC: its voice is silenced, so a track that comes back to PERC starts clean
     # (v0.12: v0.11 resumed what it had left ringing)
@@ -1178,6 +1182,7 @@ def _emit(L: M.Layout, rings_sw: int, prefix: str) -> Prog:
     p.iconst(12, 16)
     p.e("COMP(R0, R12);")
     p.jump("LT", top)
+    PAIRS.tick(p, L.md)                        # 2026-11-12: SIMD voice pairs' block stamp (DN2_PAIRS)
     p.e(f"JUMP {rings_sw:#x};", "smp.asm's wr_smp, then PING (which restores)")
     p.emit_subs(SUB_SPAN)
     p.raw(".wr_perc..end:")
