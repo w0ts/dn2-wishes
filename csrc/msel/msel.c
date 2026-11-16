@@ -202,6 +202,7 @@ int msel_key(u8 *it, u32 code, int down)
 #define TICK_MASK   0xFFFu
 #define REST        150                         /* ticks the cursor rests before its machine is committed */
 #define MACHINE_COMMIT ((u32 (*)(u32, int, int, int, int))0x40031880u)
+extern u32 smp_machine_commit(u32 model, u32 track, u32 type, u32 a, u32 b);   /* csrc/sampler/rec.c */
 #define TYPE_AT     ((int (*)(u32))0x4005B162u) /* the type under MACHINE SEL's cursor (stock's YES reads it) */
 #define V_TRACK     128
 #define V_MODEL     132
@@ -288,7 +289,8 @@ static void ls_commit(u32 v)
         }
     } else if (t != *(volatile int *)(v + V_TYPE)) {
         *(volatile int *)(v + V_TYPE) = t;
-        MACHINE_COMMIT(model, track, t, 1, 1);
+        smp_machine_commit(model, (u32)track, (u32)t, 1, 1);   /* (our wrapper of stock's: a sample kept, LEN, a
+                                         * Monomachine machine's own start values; 2026-11-12, found by mnmdefaults) */
         *(volatile int *)(v + V_FILTER) = FILTER_GET(model, track);
         ls_commits++;
     }
