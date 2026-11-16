@@ -23,6 +23,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: github.repository == 'De-Pattern/dn2mk2-firmware'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
