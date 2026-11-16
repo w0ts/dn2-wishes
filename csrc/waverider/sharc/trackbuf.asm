@@ -6,9 +6,19 @@
 // buffers sit in DDR (0x804acf90 + 0x80 t) and the voice chain touches each word about 19 times a
 // block: 9,745 of the idle block's 9,857 voice-dispatch DDR accesses (docs/stock-hotspots.md). Two
 // tables hold their addresses and nothing else does (scanned in L1 and L2 after init and after two
-// blocks, 32 words): DM 0x254a60 + 4 t, and a copy at 0x257ea8 + 0x10 (t / 2) + 4 (t % 2). This
-// copies the 512 words to the same layout in L1 (0x2e1d00, the 2 KB that PING's state held until it was
-// removed, zero-filled in the stream) and writes the 32 addresses.
+// blocks, 32 words): DM 0x254a60 + 4 t, and its copy at 0x257ea8 + 4 t (engine init copies it, sw
+// 0x1c14c7; the output stage 0x1c244d reads it, sw 0x1c2510, to fill the per-track buffers 0x259f68 +
+// 0x100 k that FLEX's TRK sources and Overbridge's raw track channels carry). This copies the 512 words
+// to the same layout in L1 (0x2e1d00, the 2 KB that PING's state held until it was removed, zero-filled
+// in the stream) and writes the 32 addresses.
+//
+// 2026-11-15 (the unit: a FLEX take with SRC TRK13 or TRK15 recorded silence): until then the copy's
+// words were written as if interleaved (0x257ea8 + 0x10 (t / 2) + 4 (t % 2)). The output stage then
+// took slots 0 and 1 from the right buffers, slots 4, 5, 8, 9, 12, 13 from another slot's, and the rest
+// from the old DDR buffers nothing writes any more (silence). The eight words past the table it wrote
+// fell in track 0's stereo block (0x257ee8). Measured stock (scripts/probe_trkbuf_b.py): 16 contiguous
+// words, buffer t at word t. Not seen before: the runner sounds voice slot 0 only, and the other proofs
+// held the same layout.
 //
 // It runs once, from entry_mark.asm's first pass (TWIN still 0), before the per-block routine's first
 // call, so engine init has made the tables and the buffers hold what init left. Same data, same
@@ -41,46 +51,46 @@ wr_trackbuf_copy.:
       DM(0x257eac) = R9;
       R9 = 0x2e1e00;
       DM(0x254a68) = R9;
-      DM(0x257eb8) = R9;
+      DM(0x257eb0) = R9;
       R9 = 0x2e1e80;
       DM(0x254a6c) = R9;
-      DM(0x257ebc) = R9;
+      DM(0x257eb4) = R9;
       R9 = 0x2e1f00;
       DM(0x254a70) = R9;
-      DM(0x257ec8) = R9;
+      DM(0x257eb8) = R9;
       R9 = 0x2e1f80;
       DM(0x254a74) = R9;
-      DM(0x257ecc) = R9;
+      DM(0x257ebc) = R9;
       R9 = 0x2e2000;
       DM(0x254a78) = R9;
-      DM(0x257ed8) = R9;
+      DM(0x257ec0) = R9;
       R9 = 0x2e2080;
       DM(0x254a7c) = R9;
-      DM(0x257edc) = R9;
+      DM(0x257ec4) = R9;
       R9 = 0x2e2100;
       DM(0x254a80) = R9;
-      DM(0x257ee8) = R9;
+      DM(0x257ec8) = R9;
       R9 = 0x2e2180;
       DM(0x254a84) = R9;
-      DM(0x257eec) = R9;
+      DM(0x257ecc) = R9;
       R9 = 0x2e2200;
       DM(0x254a88) = R9;
-      DM(0x257ef8) = R9;
+      DM(0x257ed0) = R9;
       R9 = 0x2e2280;
       DM(0x254a8c) = R9;
-      DM(0x257efc) = R9;
+      DM(0x257ed4) = R9;
       R9 = 0x2e2300;
       DM(0x254a90) = R9;
-      DM(0x257f08) = R9;
+      DM(0x257ed8) = R9;
       R9 = 0x2e2380;
       DM(0x254a94) = R9;
-      DM(0x257f0c) = R9;
+      DM(0x257edc) = R9;
       R9 = 0x2e2400;
       DM(0x254a98) = R9;
-      DM(0x257f18) = R9;
+      DM(0x257ee0) = R9;
       R9 = 0x2e2480;
       DM(0x254a9c) = R9;
-      DM(0x257f1c) = R9;
+      DM(0x257ee4) = R9;
       R9 = 0x2e1c00;
       DM(0x254aa0) = R9;                // the 17th pointer: the extra block
       JUMP 0x16f6b1;                    // wr_emark's restore of I0 and I1

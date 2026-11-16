@@ -1,5 +1,5 @@
 """Prototype and proof of item 2 of docs stock-hotspots: the stock engine's 16 mono track buffers moved from
-DDR (0x804acf90 + 0x80 t) to L1, by re-pointing the two pointer tables (DM 0x254a60 + 4 t and the interleaved
+DDR (0x804acf90 + 0x80 t) to L1, by re-pointing the two pointer tables (DM 0x254a60 + 4 t and its
 copy at 0x257ea8) before every block, as entry_mark.asm will. The stock image runs twice over the same frames,
 once as it is and once relocated; after every block all of L1 (the stock's own data: the pointer tables, the
 chain's state, the stereo blocks, the routing and main buffers) must be word-for-word equal, and the 512 buffer
@@ -25,11 +25,11 @@ import prof_stock_hotspots as H                                   # noqa: E402
 M5, FR, fx, m2, m4 = H.M5, H.FR, H.fx, H.m2, H.m4
 OLD = 0x804ACF90
 PTR_A = 0x254A60                                     # 16 words
-PTR_B = 0x257EA8                                     # words at +0, +4, then +0x10, +0x14, ...
+PTR_B = 0x257EA8                                     # 16 contiguous words (measured 2026-11-15)
 
 
 def ptr_slots():
-    return [PTR_A + 4 * t for t in range(16)], [PTR_B + 0x10 * (t // 2) + 4 * (t % 2) for t in range(16)]
+    return [PTR_A + 4 * t for t in range(16)], [PTR_B + 4 * t for t in range(16)]
 
 
 def relocate(state, to):

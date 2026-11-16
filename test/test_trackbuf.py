@@ -29,7 +29,7 @@ def test_the_32_pointer_words_are_the_two_stock_tables_pointing_at_the_l1_buffer
     for t in range(16):
         new = dsp.TRACKBUF_DM + 0x80 * t
         want[0x254A60 + 4 * t] = new                                  # TRACK_BUFFERS
-        want[0x257EA8 + 0x10 * (t // 2) + 4 * (t % 2)] = new          # the interleaved copy
+        want[0x257EA8 + 4 * t] = new                                  # its copy, the output stage's (contiguous)
     want[dsp.TRACKAUX_PTR] = dsp.TRACKAUX_DM                          # the 17th pointer: the extra 256 B block
     assert stores == want and len(stores) == 33
 

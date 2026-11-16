@@ -113,7 +113,7 @@ def main():
     new, info = run(B, fb, a.blocks, True)
     ptr_words = {dsp.TRACKAUX_PTR}
     for t in range(16):
-        ptr_words |= {0x254A60 + 4 * t, 0x257EA8 + 0x10 * (t // 2) + 4 * (t % 2)}
+        ptr_words |= {0x254A60 + 4 * t, 0x257EA8 + 4 * t}
     # the pointers and the copy, after the first pass
     st = None
     rows, bad = [], []
@@ -122,7 +122,7 @@ def main():
         tiny_n = sum(1 for x in sc if x not in ptr_words and sc[x] != sn[x] and R.tiny(sc[x], sn[x]))
         bdiff = sum(1 for x, y in zip(bc, bn) if x != y)
         ptr_ok = sn[dsp.TRACKAUX_PTR] == dsp.TRACKAUX_DM and all(sn[0x254A60 + 4 * t] == dsp.TRACKBUF_DM + 0x80 * t and
-                     sn[0x257EA8 + 0x10 * (t // 2) + 4 * (t % 2)] == dsp.TRACKBUF_DM + 0x80 * t for t in range(16))
+                     sn[0x257EA8 + 4 * t] == dsp.TRACKBUF_DM + 0x80 * t for t in range(16))
         rows.append({"b": rc["b"], "ok": rc["ok"] and rn["ok"], "pointers_at_L1": ptr_ok, "l1_words_differing": len(diff),
                      "first": [[hex(d), hex(sc[d] or 0), hex(sn[d] or 0)] for d in diff[:12]],
                      "denormal_level_differences": tiny_n, "buffer_words_differing": bdiff,

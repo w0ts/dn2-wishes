@@ -27,6 +27,9 @@ dispatch, per-track chain), as Milestone 4 does. Steps, each PASS/FAIL
    type-5 run tracks 1-15 match a stock run; the stock filter types likewise.
 4o. **stockout** (2026-11-12, `sharc_stockout_step.py`) -- with stock machines only, what leaves the engine (main mix,
    tracks' routed and panned blocks, FX returns, TDM slots 0-13, Overbridge records) is the stock image's, every block.
+4k. **trkbuf** (2026-11-15, `sharc_trkbuf_step.py`) -- after trackbuf.asm's first pass (entry_mark.asm, as the
+   firmware runs it), every voice slot's buffer reaches its TRK bucket (0x259f68 + 0x100 k, FLEX's TRK sources) as on
+   stock: 16 of 16, a marker per slot; a control with the old interleaved pointer table must be seen.
 4t. **tableready** (2026-11-12, `sharc_table_ready.py`) -- the tables' READY with this build's checksum: another build's
    ready word waits, the same build's decodes at once, a cold DDR waits; JUNO plays after each (docs/mnm.md).
 5. **frame** (with --frame/--frame-be/--frames) -- a caller's frame(s), used verbatim
@@ -567,7 +570,7 @@ def main(argv=None):
     p.add_argument("--frame-be", help="a frame as the ColdFire holds it at 0x80005e60 (16-bit BE)")
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
-    p.add_argument("--steps", default="decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,flexlevel,mainrec,recwhole,pvmix,fdn8,xdly,jsend,inserts,insall,a2f,inspost,insbus,pitrack,mainmix,insorder,tdm,twin,stock,stockout,tableready,mnm,frame")   # v0.27: shft, gran removed; v0.45: ping removed   # voice: PERC
+    p.add_argument("--steps", default="decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,flexlevel,mainrec,recwhole,pvmix,fdn8,xdly,jsend,inserts,insall,a2f,inspost,insbus,pitrack,mainmix,insorder,tdm,twin,stock,stockout,trkbuf,tableready,mnm,frame")   # v0.27: shft, gran removed; v0.45: ping removed   # voice: PERC
     p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
@@ -861,6 +864,13 @@ def main(argv=None):
             results["4o_stockout"] = so_step.run(sys.modules[__name__], snap, m2mach, m5, stock_img, sound, machines)
             gc.collect()
             show(results["4o_stockout"])
+
+        if "trkbuf" in steps:
+            print("\nstep 4k: every voice slot's buffer reaches its TRK bucket after trackbuf.asm (2026-11-15)")
+            tk_step = importlib.import_module("sharc_trkbuf_step")
+            results["4k_trkbuf"] = tk_step.run(sys.modules[__name__], snap, m2mach, m5, stock_img, sound, machines)
+            gc.collect()
+            show(results["4k_trkbuf"])
 
         if "tableready" in steps:
             print("\nstep 4t: the tables' READY with this build's checksum (cases a, b, c; 2026-11-12)")
