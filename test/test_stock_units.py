@@ -62,7 +62,7 @@ def test_the_formatters_answer_units(monkeypatch, tmp_path):
     a, b = src.index("static int ucat"), src.index("static int mnm_choice_count")
     keep = [ln for ln in hdr.splitlines() if ln.startswith((
         "#define MNM_N", "#define MNM_J", "enum { MU_", "static const unsigned char mnm_unit", "static const unsigned char ins_unit",
-        "static const unsigned char flt_unit", "static const short mnm_curves", "static const unsigned short mnm_glid",
+        "static const unsigned char flt_unit", "static const unsigned char fxp_unit", "static const short mnm_curves", "static const unsigned short mnm_glid",
         "#define STU_", "static const unsigned short stu_", "static const unsigned char stu_", "static const unsigned int stu_"))]
     prog = ("#include <stdio.h>\ntypedef unsigned int u32;\n#define DN2_STOCK_UNITS 1\nint wr_track_ours(void){return 0;}\n"
             + "\n".join(keep) + "\n" + src[a:b].replace("__attribute__((section(\".data\")))", "")

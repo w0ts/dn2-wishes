@@ -461,6 +461,14 @@ const char *mu_flt(int w, int k)
 
 /* the inserts' knobs (csrc/inserts/ins.c, SYN held): type 0..13, knob 0..5, 6 AUTO (FUZZ, TAPE), 7 the MIX, 8 TAPE's PGAIN;
  * 0 a knob with no unit yet */
+/* the send pages' page 2 (csrc/fxpage/fxp.c): page 0 Delay, 1 Reverb, place 0..7; 0 a place with no unit */
+const char *mu_fxp(int page, int place, int k)
+{
+    if (page < 0 || page > 1 || place < 0 || place > 7)
+        return 0;
+    return unit_text_of(fxp_unit[page][place], fxp_unit_curve[page][place], k > 127 ? 127 : k < 0 ? 0 : k);
+}
+
 const char *mu_ins(int type, int knob, int k)
 {
     if (type < 0 || type >= (int)(sizeof ins_unit / sizeof ins_unit[0]) || knob < 0 || knob > 8)

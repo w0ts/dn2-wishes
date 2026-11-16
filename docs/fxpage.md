@@ -41,6 +41,15 @@ old constants.
 Not here (a later commit, if it fits): XDLY XFBK, LOCT, MOD2, SYNC; FDN8 MRAT, BASS, ERLY, TILT; LEN needs a table
 per line length and stays out.
 
+## The values on screen (2026-11-13, the User: no bare 0..127)
+
+A place's value (SYN held, or the place just turned) reads in its unit, from the same derivation the engine uses
+(`dnfw.engines.units` `_fxp_units`, `md_page.c` `mu_fxp`): **SLEW** 1 ms .. 1 s (`1ms`, `32ms`, `1.0s`), **KNEE**
+the soft knee's level in dB (0.3 .. 0.95: `-10` .. `0dB`; -10 and under without "dB", four characters), **WDTH**
+and **FREZ** %, **INPT** signed % (`+0%` the mono sum), **DIFF** 0..198 % (`100%` = today's diffusers). The Delay's
+TIME is stock's cell and record, read by XDLY's page-1 formatter. Display only: the knobs, the saved bytes and the
+words sent are unchanged.
+
 ## How it works
 
 - **ColdFire** (`csrc/fxpage/fxp.c`, `fxp_params.h`, generated `fxp_derive.h`): the page hooks are the INSERT pages'

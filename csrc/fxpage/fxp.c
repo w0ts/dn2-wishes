@@ -375,12 +375,17 @@ static void tag(void *c, int n)
     WG_TEXT(c, 0x44508ED8u, TAG_X0 + 12, TAG_Y0 + 2, 2, "%s", s);   /* the grid's label font (page.c FONT) */
 }
 
+/* a place's value in its unit (md_page.c mu_fxp, dnfw.engines.units _fxp_units: 2026-11-13, the User: no bare
+ * 0..127): SLEW ms, KNEE dB, INPT signed %, DIFF %; a place without one in % */
+extern const char *mu_fxp(int page, int place, int k);
+
 static const char *text(int page, int i, int v)
 {
     static char b[8] __attribute__((section(".data")));
+    const char *u = page == PAGE_DELAY || page == PAGE_REVERB ? mu_fxp(page - 1, i, v) : 0;   /* (0: JUNO's chorus MIX, a %) */
+    if (u)
+        return u;
     int pc = (v * 100 + 63) / 127, n = 0;
-    (void)page;
-    (void)i;
     if (pc >= 100)
         b[n++] = '1';
     if (pc >= 10)

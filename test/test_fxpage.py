@@ -29,6 +29,7 @@ u32 host_kit = 0x1000;
 int smp_overlay_dirty = 0;
 u32 ins_edits = 0;
 int smp_values_held(void) { return 0; }
+const char *mu_fxp(int page, int place, int k) { return 0; }
 extern u8 fxp_v[2][8];
 extern void fxp_set_record(const u8 *f);
 extern void fxp_defaults(void);
@@ -121,6 +122,7 @@ typedef unsigned char u8;
 int smp_overlay_dirty = 0;
 u32 ins_edits = 0;
 int smp_values_held(void) { return 0; }
+const char *mu_fxp(int page, int place, int k) { return 0; }
 int func_down = 0;
 /* the kit wishes record, faked (csrc/wishes): two kits, a field per kit, -1 when it has none */
 volatile u32 wish_edits = 0;
@@ -282,6 +284,7 @@ u32 host_kit = 0x1000;
 int smp_overlay_dirty = 0;
 u32 ins_edits = 0;
 int smp_values_held(void) { return 0; }
+const char *mu_fxp(int page, int place, int k) { return 0; }
 extern void fxp_defaults(void);
 extern void fxp_set_record(const u8 *f);
 extern int fxp_active(void);

@@ -150,6 +150,17 @@ static void rec_box(void *c, int heard)
     D_VLINE(c, 91, 29, 33, 1);
 }
 
+/* THRES in dB (2026-11-13, the User: no bare 0..127): the level rec.c thr_word arms at, full scale x
+ * 2^(-(120 - t) / 12): -0.502 dB a step, 0 dB at 120; under 12 its floor of 64 (-54 dB); 0 the -60 dB floor */
+static int thres_db(int t)
+{
+    if (t <= 0)
+        return -60;
+    if (t < 12)
+        return -54;
+    return -(((120 - (t > 120 ? 120 : t)) * 502 + 500) / 1000);
+}
+
 /* the RECORDER (DT2 SamplerView, idle): eight places, values over labels */
 static void main_page(void *c, int heard)
 {
@@ -161,7 +172,7 @@ static void main_page(void *c, int heard)
     value2(c, 48, 39, "MONO", CHAN[rec_chan < 0 ? 0 : rec_chan > 2 ? 2 : rec_chan]);
     D_TEXT(c, F_LBL, 48, 27, 2, "%s", "CHAN");
     rec_box(c, heard);
-    D_TEXT(c, F_VAL, 112, 39, 2, "%d", rec_thres);
+    D_TEXT(c, F_VAL, 112, 39, 2, "%ddB", thres_db(rec_thres));
     D_TEXT(c, F_LBL, 112, 27, 2, "%s", "THRES");
     if (rec_dest >= 0) {                        /* E: INTO, the slot the take goes into (the DT2's MON place) */
         D_TEXT(c, F_VAL, 15, 15, 2, "%s", "SAMP");

@@ -427,6 +427,8 @@ def mnm_c_header() -> str:
     _UNITS = (_UNITS[0], _UNITS[1], _UNITS[2] + _ic)
     _fk, _fa, _fc = _mnm_units.flt_tables(len(_UNITS[2]))
     _UNITS = (_UNITS[0], _UNITS[1], _UNITS[2] + _fc)
+    _xk, _xa, _xc = _mnm_units.fxp_tables(len(_UNITS[2]))    # 2026-11-13: the send pages' page 2
+    _UNITS = (_UNITS[0], _UNITS[1], _UNITS[2] + _xc)
     _ia = [[(x + _base) if k & 127 and x < len(_ic) and _ic else x for x, k in zip(r, kr)] for r, kr in zip(_ia, _ik)]
     _st = None
     _glid = [_mnm_units.glid_table(t) for t in _mnm_units.GLID_TOPS]
@@ -490,6 +492,8 @@ def mnm_c_header() -> str:
         f"static const unsigned char flt_unit[{len(_fk)}] = {{{', '.join(map(str, _fk))}}};",
         f"static const unsigned char flt_unit_curve[{len(_fk)}] = {{{', '.join(map(str, _fa))}}};",
         f"#define FLT_UNIT_IDS {{{', '.join(map(str, _mnm_units.FLT_IDS))}}}",
+        f"static const unsigned char fxp_unit[2][8] = {{{arr(_xk)}}};",
+        f"static const unsigned char fxp_unit_curve[2][8] = {{{arr(_xa)}}};",
         f"static const unsigned char ins_unit[{len(_ik)}][9] = {{{arr(_ik)}}};",
         f"static const unsigned char ins_unit_curve[{len(_ia)}][9] = {{{arr(_ia)}}};",
     ]

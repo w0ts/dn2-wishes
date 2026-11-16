@@ -157,6 +157,43 @@ FLT_UNITS = {36: ("hz", _CUT), 37: ("pct", None), 38: ("mode", None), 44: ("mode
              47: ("hz", _CUT), 48: ("pct", None), 49: ("spct", None)}
 
 
+# the send pages' second page (csrc/fxpage/fxp.c, docs/fxpage.md): page (0 Delay with XDLY, 1 Reverb with FDN8 /
+# LONG) and place 0..7 -> kind and curve, from the engines' own derivations (dnfw.xdly.design / fdn8.design derive):
+# 2026-11-13, the User: no bare 0..127; were all percent. Delay A (TIME) is stock's cell, its record's formatter
+def _fxp_units() -> dict[int, dict[int, tuple]]:
+    from ..xdly import design as XD
+    from ..fdn8 import design as FD
+    return {
+        0: {1: ("ms", lambda k: XD.SL_T0 * 1000.0 ** (k / 127.0) / 48.0),       # SLEW: the times' follow, 1 ms .. 1 s
+            2: ("db", lambda k: 20.0 * math.log10(XD.KN_LO + k * XD.KN_STEP)),    # KNEE: the soft knee's level
+            3: ("pct", None),                                                      # WDTH: 0 mono .. 100 hard
+            4: ("spct", None)},                                                    # INPT: (k - 64) / 64, 0 the mono sum
+        1: {0: ("pctc", lambda k: 100.0 * k * FD.DF_K),                           # DIFF: the diffusers x k / 64
+            1: ("pct", None), 2: ("pct", None)},                                   # WDTH, FREZ: k / 127
+    }
+
+
+def fxp_tables(base: int) -> tuple[list[list[int]], list[list[int]], list[list[int]]]:
+    """-> (kind per page and place, curve index (from BASE), the curves) for the send pages' page 2"""
+    curves: list[list[int]] = []
+    kinds, at = [], []
+    for page in range(2):
+        krow, arow = [], []
+        for i in range(8):
+            kind, fn = _fxp_units()[page].get(i, ("raw", None))
+            idx = 0
+            if fn is not None:
+                c = curve(fn)
+                if c not in curves:
+                    curves.append(c)
+                idx = base + curves.index(c)
+            krow.append(KINDS.index(kind))
+            arow.append(idx)
+        kinds.append(krow)
+        at.append(arow)
+    return kinds, at, curves
+
+
 def flt_tables(base: int) -> tuple[list[int], list[int], list[list[int]]]:
     """-> (kinds, curve indices (from BASE), the curves) for FLT_IDS"""
     curves: list[list[int]] = []
