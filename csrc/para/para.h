@@ -14,8 +14,8 @@
 #define PARA_RECORD       248u                    /* MOD's record id (the knob path's setValue) */
 
 /* the engines PARA plays (dnfw.engines.analog2.para ENGINES; their machine type values, dnfw.mnm.machines
- * ALL_TYPE_SLOTS): ANALOG 2 (22), JUNO (23, 2026-11-15). The DPRO machines join here with their DSP side (the User,
- * 2026-11-15: no PARA for SOPHIE or SID 6581) */
+ * ALL_TYPE_SLOTS): ANALOG 2 (22), JUNO (23, 2026-11-15). The User, 2026-11-15: no PARA for SOPHIE, SID 6581, DPRO-DDRW
+ * or DPRO-DENS; DPRO-WAVE decided later */
 #define PARA_TYPE_A2   22
 #define PARA_TYPE_JUNO 23
 static inline int para_engine(int type)

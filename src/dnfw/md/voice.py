@@ -410,11 +410,13 @@ def inputs(p: Prog, L: K.Layout, knobs: list[int]) -> None:
 
 
 def block(p: Prog, L: K.Layout, knobs: list[int], note: int, want: int, level: float = 1.0,
-          level_word: int | None = None, after_advance=None) -> None:
+          level_word: int | None = None, after_advance=None, no_output=None) -> None:
     """One DN2 block (steps 1-4): KNOBS the scratch words of the eight knobs, Rnote nonzero
     for a note, Rwant the machine TYPE asks for (0..N-1). Output from I4 on, written through I2
     (2026-11-12: I2 left past the block, I4 at its start). Clobbers everything but I3. AFTER_ADVANCE (2026-11-11): code run once the stream has
-    moved on (the machine VW['mach'] is the one this block plays), before the level is read."""
+    moved on (the machine VW['mach'] is the one this block plays), before the level is read. NO_OUTPUT (2026-11-15,
+    PARA design B): code leaving R0 nonzero when this block's output is not used (no resampling, the position moved
+    on as the resampler moves it); it may clobber R0, R6, R7, R12, R13, I1."""
     p.ifz(note, "NE", lambda: (K.vws(p, "want", want), p.iconst(0, 1), K.vws(p, "trg", 0)))
     inputs(p, L, knobs)
     K.vw(p, 0, "pos")
@@ -423,6 +425,26 @@ def block(p: Prog, L: K.Layout, knobs: list[int], note: int, want: int, level: f
                                   p.fop(0, 0, "-", 12), K.vws(p, "pos", 0)))
     if after_advance is not None:
         after_advance()
+    if no_output is None:
+        _resample(p, L, level, level_word)
+        return
+    # 2026-11-15 (PARA design B, the User: "Do that"): NO_OUTPUT(p) leaves R0 nonzero for a voice whose output is not
+    # used (a PARA chord's member: its caller writes silence): the read position moves on as the resampler moves it
+    # (the same 32 adds), nothing is read or written
+    no_output(p)
+    p.ifz(0, "NE", lambda: _position_only(p), lambda: _resample(p, L, level, level_word))
+
+
+def _position_only(p: Prog) -> None:
+    """the read position moved on a block, as _resample moves it (32 adds of the step, in turn)"""
+    K.vw(p, 6, "pos")
+    p.fconst(4, K.STEP)
+    p.loop_r(5, 32, lambda: p.fop(6, 6, "+", 4))
+    K.vws(p, "pos", 6)
+
+
+def _resample(p: Prog, L: K.Layout, level: float, level_word: int | None) -> None:
+    """step 4: the block out (Output from I4 on, written through I2), the read position moved on"""
     # step 4: Catmull-Rom over B[i-1..i+2], i = trunc(pos), f = pos - i
     p.ld(0, L.C["mdb"])
     p.iconst(12, 4 * (K.B0 - 1))

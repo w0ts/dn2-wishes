@@ -270,6 +270,61 @@ def test_a_held_chord_keeps_its_members_past_the_quiet_test(engine):
     assert max(abs(flt(w)) for w in last[3]) > 0.1
 
 
+def _chord_run(engine, design_b, blocks, off_at=None):
+    """a 4-note chord (PARA 3) held, then released at OFF_AT: each block's buffers and roles, each slot's words (its
+    1 KB of voice state) after the last block, and each slot's model instructions summed. DESIGN_B False: the members
+    resampled and their silence guarded, as before 2026-11-15"""
+    slots = [0, 1, 2, 3]
+    saved = PARA.is_member, PARA.silent_role
+    if not design_b:
+        PARA.is_member = lambda p, d, t_word: p.iconst(d, 0)
+        PARA.silent_role = lambda p, d, t_word: p.iconst(d, 0)
+    try:
+        h = setup(slots, para=3, engine=engine)
+        L = h.L
+        outs, steps = [], {u: 0 for u in slots}
+        for b in range(blocks):
+            for u in slots:
+                h.mem.put(PP.NOTE_CELLS + 4 * u, bits(CHORD4[u]))
+                h.mem.put(PP.BUFFERS + 4 * u, BUFS + 0x100 * u)
+            h.mem.put(PP.TRIG_WORD, (h.mem.get(PP.TRIG_WORD) & 0xFFFF) | ((0xF if b == 0 else 0) << 16))
+            w = h.mem.get(PM.FRAME + PARA.NOTE_OFF)
+            h.mem.put(PM.FRAME + PARA.NOTE_OFF, (w & 0xFFFF0000) | (0xF if b == off_at else 0))
+            h.mem.put(L.C["mcost"], 0)
+            p = Prog("run", mem=h.mem)
+            p.spill = L.md.C["ash"]
+            PP.mnm_ages(p, L)
+            PP.para_prepass(p, L)
+            for u in [h.mem.get(L.md.mnm.scratch + PP.ORDER_OFF + 4 * k) for k in range(16)]:
+                if u in slots:
+                    q, _ = PP.run_voice(L, None, u, mem=h.mem)
+                    steps[u] += q.steps
+            outs.append(({u: [h.mem.get(BUFS + 0x100 * u + 4 * k) for k in range(32)] for u in slots},
+                         {u: h.mem.get(PARA.ROLE + 4 * u) for u in slots}))
+        words = {u: [h.mem.get(L.md.state + 1024 * u + 4 * k) for k in range(256)] for u in slots}
+        rests = [h.mem.get(L.md.mnm.scratch + PP.RESTS_OFF + 4 * u) for u in slots]
+        return outs, words, rests, steps
+    finally:
+        PARA.is_member, PARA.silent_role = saved
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_design_b_members_skip_the_resampler_and_the_guard_with_the_same_sound(engine):
+    """2026-11-15 (PARA design B, the User: "Do that"): a member is not resampled (its read position moves on the same)
+    and its silence is not guarded: every slot's buffer, role and voice words, and the quiet counts, are those of the
+    members resampled and guarded, every block of a held chord past the quiet test and its release; the members cost
+    less"""
+    n = PP.MNM_QUIET_BLOCKS + 16
+    old = _chord_run(engine, False, n, off_at=n - 12)
+    new = _chord_run(engine, True, n, off_at=n - 12)
+    assert new[0] == old[0]
+    assert new[1] == old[1] and new[2] == old[2]
+    assert role_of(new[0][5][1][1]) == PARA.MEMBER
+    assert all(new[3][u] < old[3][u] - 500 * n for u in (0, 1, 2))           # the members: the resampler gone
+    assert abs(new[3][3] - old[3][3]) <= 20 * n                               # the leader: its two role tests only
+    assert max(abs(flt(w)) for o, _r in new[0][1:] for w in o[3]) > 0.1
+
+
 @pytest.mark.parametrize("name", ["HELD", "CUR", "MEM", "ROLE"])
 def test_the_words_fit_the_area(name):
     at = getattr(PARA, name)

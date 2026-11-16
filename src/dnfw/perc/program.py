@@ -740,7 +740,8 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
         p.ld(2, C["trig"])
         p.ld(5, C["type"])
         MDV.block(p, L.md, [C[f"p{k}"] for k in range(8)], 2, 5, level_word=C["lev"],
-                  after_advance=mono_level if MONO_THRESHOLDS else None)
+                  after_advance=mono_level if MONO_THRESHOLDS else None,
+                  no_output=lambda p: PARA.is_member(p, 0, C["t"]))   # 2026-11-15 (design B): a member's not resampled
         PARA.role(p, 6, C["t"])
         p.lsh(7, 6, -PARA.ROLE_SHIFT)
         p.iconst(12, PARA.MEMBER)
@@ -755,7 +756,10 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
     p.seti(2, 12, "this slot's state, again")
     p.ld(0, C["mnm"])
     p.ifz(0, "EQ", lambda: fx(p, L))          # the Machinedrum's track effects: PERC's only
-    out_guard(p, L)
+    # 2026-11-15 (PARA design B): a chord's MEMBER or DROPPED slot wrote silence above (+0.0s, finite, in bounds): the
+    # guard would write the same +0.0s and find nothing, so it is left out
+    PARA.silent_role(p, 0, C["t"])
+    p.ifz(0, "EQ", lambda: out_guard(p, L))
 
 
 OUT_LIMIT = 8.0                                # v0.33: our voices' samples, at most (+- 18 dBFS)

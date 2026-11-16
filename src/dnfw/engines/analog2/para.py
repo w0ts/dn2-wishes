@@ -48,8 +48,8 @@ MEMBER, LEADER, DROPPED = 1, 2, 3
 ROLE_SHIFT, LEAD_SHIFT = 24, 16                  # a member's leader at bits 16..19; a leader's places left there
 RENDERED = 1 << 20                               # a member's own word: its half rendered this block (the guard let it)
 PARA_REC = PM.P3_RECS[5]                         # MOD (id 248, slot 37, 0..0x300, default 0): PARA OFF 2 3 4
-# the engines PARA plays (2026-11-15, the User: ANALOG 2 first, then JUNO, then the DPRO machines; not SOPHIE, not
-# SID 6581): an
+# the engines PARA plays (2026-11-15, the User: ANALOG 2 first, then JUNO; not SOPHIE, SID 6581, DPRO-DDRW or
+# DPRO-DENS; DPRO-WAVE decided later): an
 # engine joins by its name here and one call of `stage` in its half, round its shared stage (the filter and what
 # follows), after its per-note part (oscillators, noise, drive). Its post-per-note half must be at the half's block
 # (the word BV_WORD) in its 44.1 kHz stream, as ANALOG 2's and JUNO's are
@@ -398,6 +398,27 @@ def role(p: Prog, d: int, t_word: int) -> None:
     p.iop(13, 12, "+", 13)
     p.seti(1, 13)
     p.ldi(d, 0, 1)
+
+
+def is_member(p: Prog, d: int, t_word: int) -> None:
+    """Rd = 1 when this slot (the slot in the word T_WORD) is a chord's MEMBER this block, else 0 (2026-11-15, design
+    B: its output is not used, so it is not resampled). Clobbers R7, R12, R13, I1."""
+    role(p, 7, t_word)
+    p.lsh(7, 7, -ROLE_SHIFT)
+    p.iconst(d, 0)
+    p.iconst(12, MEMBER)
+    p.if_(7, "EQ", 12, lambda: p.iconst(d, 1), kind="i")
+
+
+def silent_role(p: Prog, d: int, t_word: int) -> None:
+    """Rd nonzero when this slot is a chord's MEMBER or DROPPED this block (it wrote silence: the role's low bit).
+    Clobbers R12, R13, I1."""
+    role(p, d, t_word)
+    p.lsh(d, d, 31 - ROLE_SHIFT)
+    p.lsh(d, d, -31)
+
+
+assert MEMBER & 1 and DROPPED & 1 and not LEADER & 1
 
 
 def push_position(p: Prog, md_state: int, r: int) -> None:

@@ -115,6 +115,33 @@ a member's stream is its own.
     (VOICES) does exactly the same under the same timing (the control run), so it is the harness's or stock's, not
     PARA's.
 
+## Design B: a member is not resampled (2026-11-15, the User: "Do that, skip DDRW/DENS")
+
+A member writes silence over its voice buffer, so what the voice host's resampler (44.1 to 48 kHz, Catmull-Rom,
+`dnfw.md.voice._resample`, 1,017 a block) writes there is never heard. A member now skips it: its read position
+moves on as the resampler moves it (the same 32 adds of the step, `_position_only`), nothing is read or written,
+and its stream (its per-note halves, which its leader adds) is untouched. Its silence is not guarded either: the
+output guard would write the same +0.0s and find nothing (a MEMBER's or DROPPED slot, `para.silent_role`). Every
+other voice runs both as before (two role tests, ~15 instructions a voice). The quiet test (`peak32` on the
+member's stream) stays: a member rests by it as before, and leaving it out is not proven safe.
+
+Cost (`scripts/para_cost.py`, steady / note block; the leader carries its two role tests):
+
+| | ANALOG 2 | JUNO |
+|---|---|---|
+| a member, design A | 4,148 / 4,770 | 3,336 / 3,693 |
+| a member, design B | 3,038 / 3,657 | 2,226 / 2,584 |
+| the leader (4 notes) | 7,520 / 8,950 | 8,208 / 8,567 |
+| 4 notes, PARA OFF | 25,156 | 28,480 |
+| 4 notes, PARA (B) | 16,633 (-34 %) | 14,886 (-48 %) |
+
+The load table's members (`para`, `para_juno`: (start + PER_VOICE) x 1.15): ANALOG 2 6,095 -> 4,817, JUNO 4,859 -> 3,581.
+
+Checked: `test_a2_para.test_design_b_members_skip_the_resampler_and_the_guard_with_the_same_sound` (both engines:
+every slot's buffer, role and voice words and the quiet counts the same as with the members resampled, every block
+of a held chord past the quiet test and its release; the members cost less); runner step `para` (every slot
+bit-exact to the model, the guard and quiet checks as before), also built with voice pairs (`DN2_PAIRS`).
+
 ## Cost, the frame guard and the VOICE BUDGET (2026-11-15, main for the User: "will the guard understand this?")
 
 What a chord costs (`scripts/para_cost.py`, dsp_cost's method on the model: instructions + 4 L2 + 10 DDR, ANALOG 2
@@ -185,15 +212,14 @@ The full `mnm` run on the same DSP code: every Monomachine machine's runs bit-ex
 - **Velocity**: the chord plays at its leader's (the AMP's) velocity.
 - **A note that joins a running chord** may render one engine block out of step with the leader before the
   leader's position reaches it (a new chord's notes start together).
-- **The other engines (the User, 2026-11-15: ANALOG 2, then JUNO, then DPRO-WAVE, DDRW, DENS; not SOPHIE, not SID 6581).** The chord pass,
+- **The other engines (the User, 2026-11-15: ANALOG 2, then JUNO; not SOPHIE, not SID 6581).** The chord pass,
   the roles, the stream positions and the members' silence are the engine's own business nowhere: an engine joins
   by its name in `para.ENGINES` and one `para.stage(...)` call round its shared stage in its half, as ANALOG 2's.
   - **JUNO**: done (the section above).
-  - **The DPRO machines** do not: their shared stage (`mnm.dec`, DPRO's Digipro stage) reads the
-    render's 192-float scratch (IN), not the slot's stream, so a member's per-note part cannot wait in its stream
-    for the leader. Either (a) a per-slot buffer for a member's pre-decimator block (16 x 768 B, a claim), or (b) the
-    leader runs its members' oscillators itself, on each member's words (the SIMD pairs' way of rendering another
-    slot in a slot's turn), no memory. `mnm.dec` (read 2026-11-15) is a polyphase IIR whose
-    words are clamped at +-TOP (the 56300's limiter, `sat`): linear below the clamp, so a chord summed before it
-    sounds as the notes summed after it until the sum reaches the clamp, where it clips and separate notes would not
-    (a level choice for the User, as ANALOG 2's knee). Not measured on sound yet.
+  - **DPRO-DDRW, DPRO-DENS: no PARA** (the User, 2026-11-15, "skip DDRW/DENS", after a measurement: at OS 1
+    they have no stage worth sharing, a 16-sample limiter of 204 a block; design A would cost more than it saves,
+    design B 2..8 % at most).
+  - **DPRO-WAVE: decided later.** Its 4x decimator (3,012 of 10,467 a block) could be shared, but its input is the
+    render's one L1 scratch (IN), so each member's 4x halves would need ~8 KB of L1 kept for the leader, and the
+    decimator's clamp clips a summed chord (a level choice). Measured on the model 2026-11-15 (side note
+    dpro-para-measure-2026-11-15.md): about -13 % at 4 notes with design A, -20 % with A and B.
