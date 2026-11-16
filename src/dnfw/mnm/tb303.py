@@ -41,16 +41,24 @@ PNAMES = ("CUT", "RES", "ENV", "DEC", "ACC", "SLID", "WAVE", "TUNE")
 DEFAULTS = (64, 64, 64, 64, 0, 0, 0, 64)
 
 SR = 44100.0
-OS = 4
-OSR = SR * OS                                    # 176.4 kHz
+# build option DN2_TB303_2X (2026-11-12, the User: "2X with a build option"): set (not empty, not 0) when the code is
+# generated, the voice runs 2x oversampled (88.2 kHz: the oscillator, the high-pass and the ladder at half the
+# work), Open303's elliptic decimator moved to 88.2 kHz (the same equiripple shape; scratch ell2x.py's transform)
+# and, on the plain path (VSCHED False), the control every 2nd sample (CTL2). Off: the 4x voice, unchanged.
+TB303_2X = __import__("os").environ.get("DN2_TB303_2X", "") not in ("", "0")
+OS = 2 if TB303_2X else 4
+OSR = SR * OS                                    # 176.4 kHz (88.2 with DN2_TB303_2X)
 K_SQ = 69.9841996002273                          # dB2amp(36.9): the square's tanh drive
 OFF_SQ = 4.37
 EDGE = 1023.5 / 2048.0                           # the saw's step (table points 1023 | 1024)
 DC_SAW, DC_SQ = -0.000244140625, -0.06195438585180707   # the prototypes' DC (gone from 43 Hz on)
-DC_FROM = 0.5 / 2048.0                           # increment from which the mip level is >= 1
+DC_FROM = 0.5 / 2048.0 * 4 / OS                  # increment from which the mip level is >= 1 (43 Hz)
 # fixed coefficients (Open303's, at their rates; see dn2mk2-scratch/plaits303/ref303)
 HP1 = (0.9992083547409913, -0.9992083547409913, 0.9984167094819826)     # 44.486 Hz @ 176.4k
 FBHP = (0.9973357014799811, -0.9973357014799811, 0.994671402959962)     # 150 Hz @ 176.4k
+if TB303_2X:                                     # the same one-poles at 88.2 kHz (OnePoleFilter HIGHPASS)
+    HP1, FBHP = ((lambda x: (0.5 * (1 + x), -0.5 * (1 + x), x))(math.exp(-2 * math.pi * f / OSR))
+                 for f in (44.486, 150.0))
 AP = (-0.9980061871566851, 1.0, 0.9980061871566851)                     # 14.008 Hz all-pass
 HP2 = (0.9982813535100947, -0.9982813535100947, 0.9965627070201895)     # 24.167 Hz
 NOTCH = (0.9973820302482191, -1.994762916660274, 0.9973820302482191, 1.994762916660274,
@@ -58,6 +66,8 @@ NOTCH = (0.9973820302482191, -1.994762916660274, 0.9973820302482191, 1.994762916
 DECLICK = (0.00019897140604503043, 0.00039794281209006087, 0.00019897140604503043,
            1.9597070338155824, -0.9605029194397625)                     # 200 Hz, Q 0.707
 RC1, RC2 = 0.9924699152338644, 0.99848942626933                         # 3 ms, 15 ms
+DECLICK2 = (0.0007803262822605191, 0.0015606525645210383, 0.0007803262822605191, 1.91944457152177,
+            -0.9225658766508121)                                        # 200 Hz, Q 0.707 at 22.05 kHz (CTL2)
 SLEW = 0.9981121395078009                                               # 12 ms (60 ms slide)
 AMP_MUL = 1.0 - 1.8435388571380606e-05                                  # 1230 ms amp decay
 ACC_DECAY = 200.0                                                       # ms, an accent's
@@ -73,6 +83,16 @@ ELLIP = (
     (0.2758217161489087, -0.10244116374782673, 0.2758217161489047, -1.4983265489464017, 0.9475288174963884),
     (0.14286990027143076, 0.19537248746316077, 0.1428699002714311, -1.5032624520096824, 0.9843747400157051),
 )
+if TB303_2X:                                     # Open303's quarter-band elliptic moved to 88.2 kHz (pi/4 -> pi/2)
+    ELLIP_GAIN = 0.9999999986182567
+    ELLIP = (
+        (0.12271871226820573, 0.003928379552408184, 0.12271871226778734, -1.0977543544846453, 0.34712015857304657),
+        (0.3084912527150732, 0.030562841269957987, 0.30849125271676564, -0.858281880983788, 0.5058272276855847),
+        (0.49268457360828594, 0.13086541000719706, 0.49268457360708195, -0.5773486340591077, 0.6935831912816727),
+        (0.5594237298289366, 0.33815971646060344, 0.5594237298291541, -0.3755394272577464, 0.8325466033764407),
+        (0.5179745608004157, 0.621797961418567, 0.5179745608004096, -0.26204421321217386, 0.919791296231566),
+        (0.45459392439114504, 0.8524174230864457, 0.45459392439114554, -0.21469661770238124, 0.9763018895711174),
+    )
 # envModScaler / Offset (Open303's measured mapping)
 C0, C1 = 3.138152786059267e+002, 2.394411986817546e+003
 OF, OC = 0.048292930943553, 0.294391201442418
@@ -92,6 +112,16 @@ S_END = S_E + 12
 T_Y0 = S_END + 14
 # (perf, 2026-11-12) the frequency T_INC, T_INCI and T_RINC were last made from (0 until a note: never a note's)
 T_FQ = T_Y0 + 4
+T_PAR = T_FQ + 1                                 # (DN2_TB303_2X, plain path) the control's parity: 0 runs it
+# 2026-11-12 (fix, the User on r11f: SLID changed isolated notes): the slot's gate, 1 from its note-on until its
+# note-off (frame +36, bit slot), as DRONE's: a trig slides only while the note before it is still held
+S_GATE = 80
+NOTE_OFF_WORD = 0x25C4B0                         # frame +36 (low half): the note-off / amp gate-off mask, bit slot
+
+
+def _ctl2() -> bool:
+    """the control every 2nd sample: DN2_TB303_2X on the plain path (tb303_sched runs it every sample)"""
+    return TB303_2X and not VSCHED
 
 
 def _pm():
@@ -196,14 +226,30 @@ def init(p: Prog, L: C.Layout) -> None:
     p.iconst(0, 0)
     for k in (*range(S_END), T_FQ):
         _sv(p, k, 0)
+    C.sts(p, S_GATE, 0)
     p.fconst(0, SLEW)
     _sv(p, S_SLC, 0)
     p.iconst(0, 1)
     _sv(p, S_IDLE, 0)
 
 
+def _gate_off(p: Prog, L: C.Layout) -> None:
+    """S_GATE 0 when this block's frame carries the slot's note-off (+36 bit slot: the DN2's key-up or the trig's
+    end), as dnfw.mnm.drone's"""
+    from ..perc import program as PP
+    p.ld(0, NOTE_OFF_WORD)
+    p.iconst(12, 0xFFFF)
+    p.iop(0, 0, "AND", 12)
+    p.iconst(1, 1)
+    p.ld(9, L.perc.C["t"])
+    PP._shift_by(p, 1, 9)
+    p.iop(0, 0, "AND", 1)
+    p.ifz(0, "NE", lambda: (p.iconst(1, 0), C.sts(p, S_GATE, 1)))
+
+
 def pitch(p: Prog, L: C.Layout) -> None:
-    """S_BASE = the note's frequency, Hz: 440 x 2^((note - 69 + TUNE) / 12), TUNE -24..+24."""
+    """S_BASE = the note's frequency, Hz: 440 x 2^((note - 69 + TUNE) / 12), TUNE -24..+24; the gate's note-off."""
+    _gate_off(p, L)
     C.vw(p, 1, "pitch")
     C.par(p, 2, 7)
     _mulk(p, 2, 2, 48.0)
@@ -276,7 +322,11 @@ def trig(p: Prog, L: C.Layout) -> None:
     _ld(p, 0, S_IDLE)
     p.iconst(1, 1)
     # a slide needs a note before it; the first ever note is a trigger
-    p.if_(7, "GT", 12, lambda: p.if_(0, "NE", 1, slide, note, kind="i"), note)
+    # (fix 2026-11-12) and only from a note still held (S_GATE): an isolated note restarts the envelopes at any SLID
+    p.if_(7, "GT", 12, lambda: p.if_(0, "NE", 1, lambda: (C.st(p, 2, S_GATE), p.ifz(2, "NE", slide, note)), note,
+                                     kind="i"), note)
+    p.iconst(0, 1)
+    C.sts(p, S_GATE, 0)
 
 
 def _params(p: Prog, L: C.Layout) -> None:
@@ -314,7 +364,7 @@ def _params(p: Prog, L: C.Layout) -> None:
     _sv(p, D_RES, 4)
     _unit(p, 4, 6)
     _sv(p, D_BL, 4)
-    if FILT4:                                    # _filt4's coefficients (I3: past I0's reach)
+    if FILT4 and not VSCHED:                     # _filt4's coefficients (I3: past I0's reach; tb303_sched: unused)
         for m, c in enumerate(HP1 + FBHP):
             p.fconst(4, c)
             C.sts(p, U_C + m, 4)
@@ -328,15 +378,17 @@ def _params(p: Prog, L: C.Layout) -> None:
     p.if_(0, "GE", 1, lambda: (p.iconst(0, 0), _sv(p, S_IDLE, 0)), kind="i")
 
 
-def _control(p: Prog, L: C.Layout) -> None:
-    """One sample's control: the slew, the increment, the envelopes, the cutoff and the
-    ladder's coefficients, the amplitude."""
-    # pitch: y = x + c (y - x); the increment (cycles an oversampled sample) and its inverse
+def _slew(p: Prog) -> None:
+    """The slew, and the increment (cycles an oversampled sample) and its inverse, only when the slewed
+    frequency changed."""
+    # pitch: y = x + c (y - x)
     _ld(p, 4, S_TGT)
     _ld(p, 5, S_FRQ)
     p.fop(5, 5, "-", 4)
     _ld(p, 6, S_SLC)
     p.fop(5, 5, "*", 6)
+    if _ctl2():
+        p.fop(5, 5, "*", 6)                      # (CTL2: two samples' slew)
     p.fop(5, 5, "+", 4)
     _sv(p, S_FRQ, 5)
 
@@ -353,14 +405,22 @@ def _control(p: Prog, L: C.Layout) -> None:
     # values from it: they are worked out again only when it differs from the one they were made from (T_FQ)
     _ld(p, 6, T_FQ)
     p.if_(5, "NE", 6, incs)
+
+
+def _control(p: Prog, L: C.Layout) -> None:
+    """One sample's control: the slew, the increment, the envelopes, the cutoff and the
+    ladder's coefficients, the amplitude."""
+    _slew(p)
     # mainEnv, rc1, rc2 (rc2 fed only with an accent)
     _ld(p, 4, S_MENV)
     _ld(p, 5, S_MC)
     p.fop(4, 4, "*", 5)
+    if _ctl2():
+        p.fop(4, 4, "*", 5)
     _sv(p, S_MENV, 4)
     _ld(p, 5, S_RC1)                             # y = x + c (y - x)
     p.fop(5, 5, "-", 4)
-    _mulk(p, 5, 5, RC1)
+    _mulk(p, 5, 5, RC1 * RC1 if _ctl2() else RC1)
     p.fop(5, 5, "+", 4)
     _sv(p, S_RC1, 5)
     _ld(p, 7, S_ACC)
@@ -369,7 +429,7 @@ def _control(p: Prog, L: C.Layout) -> None:
     p.if_(7, "GT", 12, lambda: p.fpass(6, 4))
     _ld(p, 8, S_RC2)
     p.fop(8, 8, "-", 6)
-    _mulk(p, 8, 8, RC2)
+    _mulk(p, 8, 8, RC2 * RC2 if _ctl2() else RC2)
     p.fop(8, 8, "+", 6)
     _sv(p, S_RC2, 8)
     # cutoff x 2^(envScaler (rc1 - envOffset) + accent rc2), 200..20000 Hz
@@ -415,13 +475,13 @@ def _control(p: Prog, L: C.Layout) -> None:
     _sv(p, T_K, 9)
     # the amplitude: the amp envelope + (0.45 + 4 accent) mainEnv, through the de-clicker
     _ld(p, 5, S_AENV)
-    _mulk(p, 6, 5, AMP_MUL)
+    _mulk(p, 6, 5, AMP_MUL * AMP_MUL if _ctl2() else AMP_MUL)
     _sv(p, S_AENV, 6)
     _mulk(p, 6, 7, 4.0)
     _addk(p, 6, 6, 0.45)
     p.fop(6, 6, "*", 4)
     p.fop(5, 5, "+", 6)
-    _biquad(p, 5, DECLICK, S_DX1, S_DX2, S_DY1, S_DY2)
+    _biquad(p, 5, DECLICK2 if _ctl2() else DECLICK, S_DX1, S_DX2, S_DY1, S_DY2)
     _mulk(p, 5, 5, LEVEL)
     _sv(p, T_AMP, 5)
 
@@ -666,6 +726,7 @@ def _ellip(p: Prog, x: int) -> None:
 
 
 ELLIP_MF = True                                  # (perf, 2026-11-11) the multifunction schedule; False = one op at a time
+VSCHED = True                                    # (perf, 2026-11-12) the sample scheduled (tb303_sched); False = as before
 
 
 def _section_mf(p: Prog, k: int, coef, last: bool) -> None:
@@ -680,14 +741,14 @@ def _section_mf(p: Prog, k: int, coef, last: bool) -> None:
     for reg, c in ((4, b0), (5, b1), (6, b2), (1, -a1), (2, -a2)):
         p.fconst(reg, c)
     _ld(p, 0, T_Y0)                                  # x0
-    xr = (0, 3, 0, 3)
+    xr = (0, 3) * (OS // 2)
     cyc: dict[int, dict] = {}
 
     def put(c: int, kind: str, v) -> None:
         d = cyc.setdefault(c, {})
         assert kind not in d, (c, kind)
         d[kind] = v
-    for j in range(4):
+    for j in range(OS):
         base, x = 5 * j, xr[j]
         put(base + 0, "mul", (8, x, 4))              # F8 = x b0
         put(base + 1, "mul", (11, x, 5))             # F11 = x b1
@@ -700,11 +761,11 @@ def _section_mf(p: Prog, k: int, coef, last: bool) -> None:
         put(base + 5, "alu", ("+", 13, 10, 15))      # s1 = x b2 + y (-a2)
         if not last:
             put(base + 2, "mv", ("stk", T_Y0 + j - S_MID, 0, 7))
-        if j < 3:
+        if j < OS - 1:
             put(base + 4, "mv", ("ldk", xr[j + 1], T_Y0 + j + 1 - S_MID, 0))
     put(0, "mv", ("ldk", 12, s0 - S_MID, 0))
     put(1, "mv", ("ldk", 13, s1 - S_MID, 0))
-    put(19, "mv", ("stk", s0 - S_MID, 0, 12))        # s0 is final after the ALU op of cycle 18
+    put(5 * OS - 1, "mv", ("stk", s0 - S_MID, 0, 12))    # s0 is final after the ALU op of cycle 5 OS - 2
     for c in sorted(cyc):
         d = cyc[c]
         ops = []
@@ -733,15 +794,15 @@ def _ellip4(p: Prog) -> None:
     if ELLIP_MF:
         p.fconst(12, ELLIP_GAIN)
         _ld(p, 0, T_Y0)
-        for j in range(4):                       # x_j G, written back for the first section
-            p.par(("op", j, j, "*", 12), *((("ldk", j + 1, T_Y0 + j + 1 - S_MID, 0),) if j < 3 else
+        for j in range(OS):                      # x_j G, written back for the first section
+            p.par(("op", j, j, "*", 12), *((("ldk", j + 1, T_Y0 + j + 1 - S_MID, 0),) if j < OS - 1 else
                                               (("stk", T_Y0 - S_MID, 0, 0),)))
-        for j in (1, 2, 3):
+        for j in range(1, OS):
             _sv(p, T_Y0 + j, j)
         for k, coef in enumerate(ELLIP):
             _section_mf(p, k, coef, k == len(ELLIP) - 1)
         return
-    xs = (13, 14, 15, 11)
+    xs = (13, 14, 15, 11)[4 - OS:]
     for j, r in enumerate(xs):
         _ld(p, r, T_Y0 + j)
         _mulk(p, r, r, ELLIP_GAIN)
@@ -852,7 +913,15 @@ def _filt4(p: Prog) -> None:
 
 def _sample(p: Prog, L: C.Layout) -> None:
     """One sample at I4."""
-    _control(p, L)
+    if _ctl2():                                  # every 2nd sample (T_PAR 0); the other holds the values
+        _ld(p, 0, T_PAR)
+        p.ifz(0, "EQ", lambda: _control(p, L))
+        _ld(p, 0, T_PAR)
+        p.iconst(1, 1)
+        p.iop(0, 1, "-", 0)
+        _sv(p, T_PAR, 0)
+    else:
+        _control(p, L)
     # the DC the band-limited levels drop, from 43 Hz on (as the oscillator reads it)
     _ld(p, 4, T_INC)
     p.fconst(5, 0.0)
@@ -910,7 +979,11 @@ def half(p: Prog, L: C.Layout) -> None:
         _I0[0] = True
         try:
             _params(p, L)
-            p.loop(L.W["n4"], 16, lambda: _sample(p, L))
+            if VSCHED:
+                from . import tb303_sched
+                tb303_sched.half_run(p, L)
+            else:
+                p.loop(L.W["n4"], 16, lambda: _sample(p, L))
         finally:
             _I0[0] = False
     p.if_(0, "EQ", 1, zeros, run, kind="i")

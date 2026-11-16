@@ -231,8 +231,10 @@ def test_ddr_spans_are_clear_of_the_stock_image_and_the_engine():
     assert all(dsp.MNM_RENDER_DM <= a < dsp.MNM_RENDER_DM + MNC.RENDER_BYTES
                for a in (m.IN, m.XB, m.YB, m.COEF, m.BUF, m.MIX, m.W1, m.W2, *m.W.values(), *m.DG.values()))
     tail = [(a, len(pl)) for _, a, pl in dsp.spans()]
-    assert any(a <= dsp.dm_to_load(dsp.MNM_RENDER_DM) and dsp.dm_to_load(dsp.MNM_RENDER_DM + dsp.MNM_RENDER_BYTES) <= a + n
+    # 2026-11-12: the scratch's real extent (core.RENDER_BYTES); TB303's KTAB span sits in the room after it
+    assert any(a <= dsp.dm_to_load(dsp.MNM_RENDER_DM) and dsp.dm_to_load(dsp.MNM_RENDER_DM + MNC.RENDER_BYTES) <= a + n
                for a, n in tail)
+    assert dsp.MNM_RENDER_DM + MNC.RENDER_BYTES <= dsp.TB303_KTAB_DM
     # v0.17: the sample pool's directory begins with its magic, and holds nothing (the
     # +Drive's samples are loaded in; the test sounds are gone)
     assert struct.unpack_from("<II", ddr[-2][2]) == (0x31504D53, 0)

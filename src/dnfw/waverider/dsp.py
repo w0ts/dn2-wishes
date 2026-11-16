@@ -102,6 +102,9 @@ PERC_TABLES_DDR = 0x81216000                 # dnfw.perc.machines.tables_bytes
 # merge of SHFT's sine into it, 26 of its words one ulp apart.
 PERC_EXP2_DM = 0x2E0640                      # .. 0x2E0E44
 STOCK_SINE_DM, STOCK_SINE_N = 0x25D980, 257
+# 2026-11-12 (perf, opt-synths; the arbiter's claim): TB303's constants table (dnfw.mnm.tb303_sched KTAB_AT, 128
+# words) after the Monomachine render scratch's real end (0x2E5400 + core.RENDER_BYTES 3,280 = 0x2E60D0)
+TB303_KTAB_DM = 0x2E6100                     # .. 0x2E6300
 # the Machinedrum machines (v0.17, docs/md.md): their tables (the sine, which the DSP fills
 # itself, then the host's and DSP2's tables, read from the owner's MD firmware at build
 # time), and 16 slots x 1 KB of words
@@ -510,6 +513,7 @@ def _raw_spans() -> list[tuple[str, int, bytes]]:
         ("the stock track buffers in L1 (zeros; 256 B extra block, then 16 x 128 B)", TRACKAUX_DM,
          bytes(TRACKAUX_BYTES + TRACKBUF_BYTES)),
         *_ins_state_spans(),
+        ("TB303's constants (KTAB, 2026-11-12: dnfw.mnm.tb303_sched)", TB303_KTAB_DM, _tb303_ktab()),
         ("FDN8 state: its words, the LFOs' phases, the stock buffers' chunk table", FDN8_STATE_DM, _fdn8_state()),
         ("XDLY state: its words (zeros)", XDLY_STATE_DM, _xdly_state()),
         ("Machinedrum / Monomachine voices: 16 slots x 1 KB (zeros; L2 until 2026-11-10)", MD_STATE_DM,
@@ -523,6 +527,16 @@ def _perc_exp2() -> bytes:
     out = data[at["exp2"]:at["tan"]]
     assert PERC_EXP2_DM + len(out) <= TRACKBUF_CODE_DM
     return out
+
+
+def _tb303_ktab() -> bytes:
+    import struct
+    from ..mnm import tb303_sched as TBS
+    from ..perc import live as PL
+    assert TBS.KTAB_AT == TB303_KTAB_DM
+    words = TBS.ktab_words(PL.layout().md.mnm)
+    assert len(words) <= TBS.KTAB_N and TB303_KTAB_DM + 4 * TBS.KTAB_N <= 0x2E6300
+    return struct.pack(f"<{len(words)}I", *words)
 
 
 def stock_sine() -> bytes:

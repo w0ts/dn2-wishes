@@ -353,9 +353,15 @@ def _mods(p: Prog, L: C.Layout) -> None:
     p.fop(15, 4, "+", 5)
     sinw(p, L, 15, 15)
     _sv(p, T_M2, 15)
-    _ld(p, 15, S_M3)
-    sinw(p, L, 15, 15)
-    _sv(p, T_M3, 15)
+    def m3():
+        _ld(p, 15, S_M3)
+        sinw(p, L, 15, 15)
+        _sv(p, T_M3, 15)
+    # (perf, 2026-11-12) m3 is read by STAK and SPLT alone (this sample's T_M3): the others skip its sine (S_M3 still
+    # moves on in _advance, so a model changed mid-note finds the same phase)
+    _ld(p, 0, D_MOD)
+    p.iconst(1, STAK)
+    p.if_(0, "EQ", 1, m3, lambda: (p.iconst(1, SPLT), p.if_(0, "EQ", 1, m3, kind="i")), kind="i")
     # b: the metal envelope for PIPE and BOOM (Sophie's shaped models), else the pitch one
     _ld(p, 4, S_PEN)
     _ld(p, 0, D_MOD)

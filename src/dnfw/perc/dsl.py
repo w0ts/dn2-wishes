@@ -615,6 +615,22 @@ class Prog:
             if COND[cond]((c > 0) - (c < 0)):
                 self.setR(d, self.r[a] + self.r[b] if op == "+" else self.r[a] - self.r[b])
 
+    def iop_if(self, cond: str, d: int, a: int, op: str, b: int, note: str = "") -> None:
+        """2026-11-12 (vsched): `IF cond Rd = Ra op Rb;` (op + or -, integer) right after an ALU fop, on its
+        result's flags as fop_if."""
+        assert self._alu is not None, "iop_if must follow an ALU fop directly"
+        assert op in ("+", "-")
+        if op == "+":
+            assert 8 <= a <= 15, "integer adds take R8..R15 first (docs/waverider-m5-dsp.md, G5)"
+        last = self._alu
+        an, az = bool(last >> 31), not last & 0x7FFFFFFF
+        lt, le = an and not az, an or az
+        take = {"LT": lt, "LE": le, "GT": not le, "GE": not lt, "EQ": az, "NE": not az}[cond]
+        self.e(f"IF {cond} R{d} = R{a} {op} R{b};", note)
+        if self.run and take:
+            x, y = s32(self.r[a]), s32(self.r[b])
+            self.setR(d, x + y if op == "+" else x - y)
+
     def fabs_(self, d: int, a: int, note: str = "") -> None:
         """Fd = ABS Fa (a NaN input: all ones, as the core's other float ops)."""
         self.e(f"F{d} = ABS F{a};", note)
@@ -743,6 +759,11 @@ class Prog:
                 self.r[d] = v
             if load:
                 self.r[load[0]] = load[1]
+        # 2026-11-12 (vsched): the ALU op's result sets the flags a fop_if right after decides on, as a
+        # lone fop's does (the multiplier and a move set none of AZ / AN)
+        alu_d = next((c[1] for c in comp if c[0] in ("+", "-") or (c[0] == "op" and c[3] in ("+", "-"))), None)
+        if alu_d is not None:
+            self._alu = self.r[alu_d] if self.run else 0
 
     # -- structured control flow ------------------------------------------------------
     # -- SIMD (2026-11-12, engine-layout; the User: "SIMD oh yes!") ---------------------
