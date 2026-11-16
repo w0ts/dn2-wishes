@@ -1,0 +1,73 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later
+   Wishes' shared style: the tokens and components of its pages (builder.html, help.html); each page keeps its own
+   layout in its own <style>. */
+/* The look: its
+   tokens, black (light: warm grey) from the system's scheme, square corners, no shadows, the system's sans-serif at
+   13..24 px, one colour (the blue), amber for a warning, red for what stops; cards with a 3 px line under their head;
+   buttons in lower case on a flat fill. Only the look: the markup and the script are the builder's own. */
+:root {
+  --bg: #000; --fg: #f2f2f2; --panel: #0b0b0e; --dim: #8a8a92; --line: #26262c;
+  --t1: #287cff; --warn: #ffc618; --err: #ff4a50; --on: #000;
+  --s1: color-mix(in srgb, var(--bg) 94%, var(--fg)); --s2: color-mix(in srgb, var(--bg) 86%, var(--fg));
+  --s3: color-mix(in srgb, var(--bg) 70%, var(--fg)); --fg2: color-mix(in srgb, var(--fg) 82%, var(--bg));
+  --text: var(--fg2); --accent: var(--t1); --accent-hi: color-mix(in srgb, var(--t1) 80%, var(--fg));
+  --warn-soft: color-mix(in srgb, var(--warn) 14%, transparent); --err-soft: color-mix(in srgb, var(--err) 14%, transparent);
+  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+  --fs-1: 13px; --fs-2: 14px; --fs-3: 14px; --fs-4: 16px;
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px;
+  --ctl-h: 30px;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f4f4f2; --fg: #14141a; --panel: #ffffff; --dim: #5e5e66; --line: #c3c3c9;
+    --warn: #825000; --err: #a82229; --t1: #1a52b8; --on: #fff;
+    --s2: color-mix(in srgb, var(--bg) 90%, var(--fg)); --s3: color-mix(in srgb, var(--bg) 62%, var(--fg));
+    color-scheme: light;
+  }
+}
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }      /* (a hidden element stays gone whatever its display, as Optimist's .o-ui) */
+html { background: var(--bg); -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: var(--fs-3)/20px var(--font-ui); overflow-x: hidden;
+  -webkit-font-smoothing: antialiased; }
+a { color: var(--fg); }
+::selection { background: var(--accent); color: var(--on); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+main { max-width: 1100px; margin: 0 auto; padding: var(--sp-4) var(--sp-4) var(--sp-6); }
+h1 { font-size: var(--fs-1); font-weight: 400; text-transform: uppercase; color: var(--fg); margin: 0 0 var(--sp-1); }
+.sub { font-size: var(--fs-4); line-height: 20px; margin: 0 0 var(--sp-4); max-width: 760px; }
+.row { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
+button { font: inherit; font-size: var(--fs-3); line-height: 20px; color: var(--fg); background: var(--s2); border: 0; border-radius: 0;
+  min-height: var(--ctl-h); padding: 4px 12px; cursor: pointer; text-transform: lowercase; display: inline-flex; align-items: center; gap: var(--sp-1); }
+button:hover { background: var(--s3); }
+button:disabled { cursor: default; color: var(--s3); background: var(--s1); }
+button.primary { background: var(--accent); color: var(--on); }
+button.primary:hover { background: var(--accent-hi); }
+button.primary:disabled { background: var(--s1); color: var(--s3); }
+button.on { box-shadow: inset 0 -3px var(--accent); background: var(--s3); }
+select { font: inherit; font-size: var(--fs-3); color: var(--fg); border: 1px solid var(--s3); border-radius: 0; min-height: var(--ctl-h);
+  padding: 3px 22px 3px 6px; cursor: pointer; appearance: none; max-width: 100%;
+  background: var(--bg) linear-gradient(45deg, transparent 50%, var(--dim) 50%) no-repeat calc(100% - 9px) 55% / 5px 5px,
+              linear-gradient(-45deg, transparent 50%, var(--dim) 50%) no-repeat calc(100% - 4px) 55% / 5px 5px; }
+select:hover { border-color: var(--dim); }
+select option { background: var(--bg); color: var(--fg); }
+input[type=checkbox] { appearance: none; width: 16px; height: 16px; margin: 0; border: 1px solid var(--dim); background: var(--bg); flex: none;
+  cursor: pointer; display: inline-grid; place-content: center; vertical-align: -3px; }
+input[type=checkbox]:checked { background: var(--accent); border-color: var(--accent); }
+input[type=checkbox]:checked::after { content: ""; width: 8px; height: 8px; background: var(--on); }
+@media (pointer: coarse) { :root { --ctl-h: 36px; } input[type=checkbox] { width: 22px; height: 22px; } input[type=checkbox]:checked::after { width: 12px; height: 12px; } }
+/* tags (the levels): TESTED filled blue, EMULATOR-CHECKED outlined blue, UNTESTED amber, a failure red */
+.pill { display: inline-flex; align-items: center; height: 20px; padding: 0 6px; font-size: var(--fs-1); background: var(--s2); color: var(--dim);
+  white-space: nowrap; vertical-align: 1px; text-transform: none; }
+.pill.ok { background: var(--accent); color: var(--on); }
+.pill.emu { background: transparent; color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.pill.warn { background: var(--warn); color: var(--on); }
+.pill.bad { background: var(--err); color: var(--on); }
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+code { font-family: var(--font-mono); }
+.note { color: var(--dim); font-size: var(--fs-2); margin-top: var(--sp-2); margin-bottom: 0; }
+.note.bad { color: var(--err); } .note.ok, .note.emu { color: var(--accent); } .note.warn { color: var(--warn); }
+.unoff { margin: 0 0 var(--sp-4); padding: var(--sp-1) var(--sp-3); background: var(--warn-soft); border-left: 3px solid var(--warn); color: var(--text); }
+.unoff b { font-weight: 400; text-transform: uppercase; color: var(--warn); }
