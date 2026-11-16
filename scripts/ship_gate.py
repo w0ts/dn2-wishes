@@ -1351,8 +1351,10 @@ def main() -> int:
             snd0 = kit + 52
             samp0 = snd0 + 0x6A
 
-            def samp_all(v):
-                return [f"poke:{kit + 52 + 1163 * t + 0x6A:#x}:{v:02x}00" for t in range(16)]
+            def samp_all(v):                    # (2026-11-14: and a redraw asked, as a load of the value asks one: 1.12
+                # redraws a poked value only when asked, so the list's NO put back a slot it had not seen drawn)
+                return [f"poke:{kit + 52 + 1163 * t + 0x6A:#x}:{v:02x}00" for t in range(16)] + [
+                    f"poke:{lay['smp_overlay_dirty']:#x}:00000001"]
             d = bytearray(0x1000)
             struct.pack_into("<II", d, 0, 0x31504D53, 4)
             for k, (fr, nm) in enumerate([(48000, "KICK"), (96000, "SHS_HAU"), (0, ""), (24000, "SNARE")]):
