@@ -1,9 +1,10 @@
 """The preset browser's ENGINE filter (2026-11-12; csrc/presets: engfilt.c, hooks.S; docs/engine-filter.md).
 
-Stock's FILTER list (PRESET > LOAD / MANAGE > [LEFT] > FILTER) gets one tick row per MACHINE SEL engine, after its
-32 tags and before its own MIDI row. Stock's preset index already holds each preset's machine (entry +32: the
-stored sound's byte 244, MIDI 4), so the list needs no extra +Drive reads. The engines are MACHINE SEL's, in its
-order and with its names (dnfw.waverider.msel), MIDI left out: stock's own row stays the MIDI one.
+Its own row in stock's SORTING menu (PRESET > LOAD / SAVE / MANAGE > [LEFT]), ENGINE, after FILTER: its own tick
+list, as FILTER's for the tags (the User: "add a separate engine filter please"), one row per MACHINE SEL engine
+after <CLEAR>. Stock's preset index already holds each preset's machine (entry +32: the stored sound's byte 244, MIDI
+4), so the filter needs no extra +Drive reads. The engines are MACHINE SEL's, in its order and with its names
+(dnfw.waverider.msel), MIDI left out: stock's FILTER keeps its own MIDI row.
 """
 from __future__ import annotations
 
@@ -13,6 +14,7 @@ MIDI = 4                     # stock's MIDI row (view +1413) is that machine's
 LABEL_MAX = 12               # "  " + name in the list's column (msel.NAME_MAX)
 # measured in stock 1.12 (scratch study, the emulator): the preset browser's view and its index
 V_TAGS, V_NOTAG, V_MIDI, V_MENU = 1408, 1412, 1413, 448
+TITLE = "ENGINE"             # the SORTING row, FILTER's " *" after it while an engine is ticked
 LIB_MACHINE = 28             # the preset library's vtable: machine(slot) -> entry +32 (0x4012d1cc), -1 if none
 
 

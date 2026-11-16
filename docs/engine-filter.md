@@ -5,51 +5,57 @@
 
 ## What the User sees
 
-PRESET > LOAD (or SAVE / MANAGE) > [LEFT] > FILTER is stock's tick list: `<CLEAR>`, the 32 tags, MIDI,
-NO TAG. Between the tags and MIDI it now has one row per MACHINE SEL engine, in MACHINE SEL's order and
-with its names: FM TONE, FM DRUM, WAVETONE, SWARMER, MACHINEDRUM, MONOMACHINE, SOPHIE, PLAITS, TB-303,
-DRONE, ANALOG, ONESHOT, WERP, STRETCH, REPITCH, SLICE, GRID (and BOUNCE when listed). YES ticks a row
-and moves down, as on a tag.
+PRESET > LOAD (or SAVE / MANAGE) > [LEFT] opens stock's SORTING menu. It now has its own **ENGINE** row
+between FILTER and SEARCH. The User asked for "a separate engine filter" (the first design put the
+engines inside FILTER's list).
 
-- Engines combine with **OR** among themselves (a preset has one machine). Stock's MIDI row joins that
-  set when ticked.
-- The engine set combines with **AND** with the tags, the bank (SEL BANK), the search and SHOW ALL SLOTS,
-  as stock's filters combine with each other.
-- `<CLEAR>` clears the engines too. FILTER's `*` in the SORTING menu shows while an engine is ticked.
-- The set lasts as stock's own filters do: the view's constructor clears both.
-
-MONOMACHINE is one row: its five engines share type 6 and the preset stores the type, not ENGN.
+- YES on ENGINE opens its own tick list, built the way stock builds FILTER's: `<CLEAR>`, then one row
+  per MACHINE SEL engine, in MACHINE SEL's order and with its names. The rows are FM TONE, FM DRUM,
+  WAVETONE, SWARMER, MACHINEDRUM, MONOMACHINE, SOPHIE, PLAITS, TB-303, DRONE, ANALOG, ONESHOT, WERP,
+  STRETCH, REPITCH, SLICE and GRID, plus BOUNCE when it is listed. MIDI stays in stock's FILTER, as stock
+  has it.
+- YES on an engine ticks it and moves down, as on a tag. NO leaves, as from FILTER's list.
+- Ticked engines are combined with **OR** (a preset has one machine). The engine set is combined with
+  **AND** against FILTER (tags, MIDI, NO TAG), the bank and the search.
+- ENGINE's `<CLEAR>` clears the engines only, and FILTER's `<CLEAR>` clears the tags only.
+- The SORTING row reads `ENGINE *` while an engine is ticked, like `FILTER *`.
+- MONOMACHINE is one row, because its five engines share type 6.
 
 ## How (stock 1.12, measured)
 
 - **The data is stock's.** The preset library (singleton `*0x44648940`, class vtable `0x40208ea4`) keeps
-  2048 36-byte entries at `lib + 3628`: +0 used, +4 the stored version, +8 name[16], +24 tags, **+32 the
-  machine**. Its indexer (`0x4012e2c0..`) reads one sector of each preset at boot and after each save,
-  and stores the stored sound's byte 244 sign-extended (4 for a MIDI preset, −1 if unreadable). The
+  2048 entries of 36 bytes at `lib + 3628`: +0 used, +4 version, +8 name[16], +24 tags, **+32 the
+  machine**. Stock's indexer (`0x4012e2c0..`) reads one sector of each preset at boot and after each
+  save, and stores byte 244 of the stored sound there, sign-extended (4 for MIDI, −1 if unreadable). The
   getter is the library's vtable +28 (`0x4012d1cc`). So the filter adds no +Drive read.
-- **The list.** The preset view's rebuild (`0x400ac7xx`) tests, per slot: tags `(tags & mask) == mask`,
-  NO TAG, search, show-all, bank, then MIDI (`0x400ac9a8`: `tst.b 1413(%a4)`). `eng_test_hook` replaces
-  that MIDI test. With no engine ticked it is stock's test. With engines ticked it is
-  `eng_match(lib, slot, view)`.
-- **The rows.** The FILTER list's builder makes each tag row from three `std::function`s. Each holds an
-  8-byte closure `{view, row}` on the heap, manager `0x400a9950`, and its invoker: label, toggle, tick.
-  It then calls the item ctor `0x401173b8(item, f1, f2, f3, f4, -1, 8)` and appends with
-  `0x40116bee(view+448, item)`. `eng_rows_hook` (at `0x400abad8`, after the 32 tags) makes ours the same
-  way, with stock's manager and our invokers.
-- **Other sites:** `<CLEAR>` `0x400a900e`, FILTER's label `0x400a90de`, and the view's constructor
-  `0x400ac62c`.
+- **The test.** The preset view's rebuild (`0x400ac7xx`) tests each slot in turn: tags, NO TAG, search,
+  show-all, bank, then MIDI (`0x400ac9a8`). `eng_test_hook` takes that spot. While engines are ticked it
+  first applies `eng_match`; a preset that fails goes where stock's failed test goes (`0x400ac9bc`).
+  Every other preset then gets stock's MIDI test as it was.
+- **The row and the list.** The SORTING builder (`0x400acc9e`) makes each row as an item:
+  `0x401173b8(item, label, action, f3, f4, -1, 8)`, added with `0x40116bee(view+448, item)`. The
+  callbacks are std::functions: a heap closure, a manager and an invoker. `eng_sort_hook`
+  (`0x400ad194`, after FILTER's row) adds ENGINE with FILTER's managers and our invokers. The list
+  (`eng_list`) is built the way FILTER's builder `0x400ab908` builds its own:
+  - the menu is cleared (`0x40116d10`);
+  - `<CLEAR>` is added with stock's label (`0x400a8566`);
+  - each engine row gets a closure {view, row} with the tag rows' manager (`0x400a9950`);
+  - the cursor goes to the top (`0x401168b8(menu, 0, 0)`).
+- **The constructor** (`0x400ac62c`) clears the engines when it clears stock's filters.
 
 ## Measured in the 1.12 emulator (this build's own snapshot, `scratch/be/emu.sh`)
 
 | step | result |
 |---|---|
-| FILTER list | engine rows after FAV, before MIDI; ticks drawn as stock's |
-| FM DRUM ticked | PUNCHBASS, THE GRAND PIANO, THE CELLO, PIXELATED… (index type 2). PUNCHBASS loaded onto track 1: `sound+0xDE` = 2, MACHINE SEL on FM DRUM |
-| a SOPHIE track (type 20) saved to B:172 | stock's indexer stores 20; SOPHIE ticked lists FRAGILE BEINGS alone (LOAD and SAVE views) |
-| SOPHIE + EVOL | FRAGILE BEINGS (it has EVOL) |
-| SOPHIE + EVOL + KICK | stock's NO MATCHES |
-| FM DRUM + SOPHIE | the FM DRUM presets, then B:172 FRAGILE BEINGS; B:170/171 (other machines) left out |
-| `<CLEAR>` | mask 0, the full list, FILTER without `*` |
+| SORTING | ADD TO PRESET POOL, SEL BANK, SORT, FILTER, **ENGINE**, SEARCH |
+| ENGINE | `<CLEAR>`, FM TONE … GRID; ticks drawn as stock's |
+| FILTER | stock's again: … FAV, MIDI, NO TAG |
+| ENGINE FM DRUM | PUNCHBASS, THE GRAND PIANO, THE CELLO … (the index's type 2; PUNCHBASS loads as FM DRUM) |
+| a SOPHIE track (type 20) saved to B:172, ENGINE SOPHIE | FRAGILE BEINGS alone |
+| + FILTER EVOL | FRAGILE BEINGS (it has EVOL); SORTING shows `FILTER *` and `ENGINE *` |
+| + FILTER KICK | stock's NO MATCHES |
+| ENGINE FM DRUM + SOPHIE | the FM DRUM presets, then B:172 FRAGILE BEINGS |
+| FILTER BASS + ENGINE FM DRUM, SOPHIE, then ENGINE `<CLEAR>` | all BASS presets; `ENGINE` with no `*`, `FILTER *` kept |
 | faults | none, every run |
 
 Not verified: on the unit; with the User's own +Drive (DN1-imported presets carry the machine their

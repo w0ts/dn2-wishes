@@ -121,8 +121,8 @@ WISH_ENTRIES = ["wish_memcpy_stub", "wish_memset_stub", "wish_load_stub", "wish_
                 "wish_item_loads", "wish_item_saves", "wish_item_nolane", "wish_item_dropped",
                 "mx_poll", "mx_eval", "mx_lay", "mx_compiles"]     # the matrix (csrc/matrix)
 # the preset browser's ENGINE filter (csrc/presets, dnfw.waverider.engfilt): its hooks and the state the checks read
-ENG_ENTRIES = ["eng_test_hook", "eng_rows_hook", "eng_clear_hook", "eng_star_hook", "eng_ctor_hook", "eng_label",
-               "eng_toggle", "eng_tick", "eng_match", "eng_mask", "eng_tests", "eng_n"]
+ENG_ENTRIES = ["eng_test_hook", "eng_sort_hook", "eng_ctor_hook", "eng_label", "eng_title", "eng_list", "eng_sort_row",
+               "eng_clear", "eng_toggle", "eng_tick", "eng_match", "eng_mask", "eng_tests", "eng_lists", "eng_n"]
 LINK_ENTRIES = LINK_ENTRIES + WISH_ENTRIES + ENG_ENTRIES + DEVTEST_ENTRIES + LZMA7_ENTRIES + MOD_ENTRIES + SLIDE_ENTRIES + METER_ENTRIES + FDN8_ENTRIES + XDLY_ENTRIES + FXP_ENTRIES + INS_ENTRIES + HOLD_ENTRIES
 
 

@@ -474,12 +474,8 @@ GLASS_WHOLE_SITE = 0x40131F54           # the whole-frame send dt_present calls 
 # 2026-11-12: the preset browser's ENGINE filter (csrc/presets, dnfw.waverider.engfilt; measured in stock 1.12)
 ENG_TEST_SITE = 0x400AC9A8              # the preset list's rebuild: tst.b 1413(%a4) ; beq.s 0x400ac9ba (MIDI's test)
 ENG_TEST_STOCK = bytes.fromhex("4a2c0585670c")
-ENG_ROWS_SITE = 0x400ABAD8              # FILTER's builder after the 32 tags: move.l (%a2),%d6 ; clr.l 52(%sp)
-ENG_ROWS_STOCK = bytes.fromhex("2c1242af0034")
-ENG_CLEAR_SITE = 0x400A900E             # <CLEAR>'s action: movea.l 4(%sp),%a0 ; clr.b %d0
-ENG_CLEAR_STOCK = bytes.fromhex("206f00044200")
-ENG_STAR_SITE = 0x400A90DE              # FILTER's label: tst.b 1413(%a1) ; beq.s 0x400a90e8
-ENG_STAR_STOCK = bytes.fromhex("4a2905856704")
+ENG_SORT_SITE = 0x400AD194              # the SORTING menu's builder after FILTER's row: pea 4 ; clr.l -56(%fp)
+ENG_SORT_STOCK = bytes.fromhex("4878000442aeffc8")
 ENG_CTOR_SITE = 0x400AC62C              # the view's constructor: move.b %d1,1412(%a2) ; move.b %d1,1413(%a2)
 ENG_CTOR_STOCK = bytes.fromhex("1541058415410585")
 # 2026-11-12: REMOTE CONTROL in USB CONFIG (csrc/devtest/usbcfg.c, usbcfg.S): UsbConfigMenuView::rebuild
@@ -1010,21 +1006,18 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
          "panel_diff: the whole frame once when the armed state turns, else stock's diff (dt_present)",
          PANEL_DIFF_STOCK)
 
-    # 2026-11-12: the preset browser's ENGINE filter (csrc/presets): the rows in FILTER, the test in the rebuild
+    # 2026-11-12: the preset browser's ENGINE filter (csrc/presets): its SORTING row and list, the test in the rebuild
     _need(content, ENG_TEST_SITE + 6, bytes.fromhex("4e922f032f004e95"),
           "MIDI's test goes on: jsr (%a2) the library ; the slot ; jsr (%a5) is-MIDI")
-    _need(content, ENG_ROWS_SITE - 8, bytes.fromhex("7020b0866600ff1c"), "the tag rows' loop ends: 32 rows")
-    _need(content, ENG_ROWS_SITE + 6, bytes.fromhex("487800044e94"), "MIDI's row follows: pea 4 ; jsr (%a4)")
+    _need(content, ENG_SORT_SITE - 8, bytes.fromhex("2f064e942f034e94"), "FILTER's row added, its functions destroyed")
+    _need(content, ENG_SORT_SITE + 8, bytes.fromhex("4e95223c400a"), "SEARCH's row follows: jsr (%a5) operator new")
     _need(content, ENG_CTOR_SITE - 8, bytes.fromhex("42aa058042aa0588"), "the constructor clears the tags and the sort")
     edit(ENG_TEST_SITE, bytes.fromhex("4ef9") + _long(csyms["eng_test_hook"]),
-         "the preset list's rebuild: the engines ticked in FILTER (eng_match), else MIDI's test as stock's",
+         "the preset list's rebuild: the engines ticked in ENGINE (eng_match), then MIDI's test as stock's",
          ENG_TEST_STOCK)
-    edit(ENG_ROWS_SITE, bytes.fromhex("4ef9") + _long(csyms["eng_rows_hook"]),
-         "FILTER's list: one tick row per MACHINE SEL engine after the tags, before MIDI", ENG_ROWS_STOCK)
-    edit(ENG_CLEAR_SITE, bytes.fromhex("4ef9") + _long(csyms["eng_clear_hook"]),
-         "FILTER's <CLEAR>: the engines too", ENG_CLEAR_STOCK)
-    edit(ENG_STAR_SITE, bytes.fromhex("4ef9") + _long(csyms["eng_star_hook"]),
-         "FILTER's label: '*' when an engine is ticked", ENG_STAR_STOCK)
+    edit(ENG_SORT_SITE, bytes.fromhex("4ef9") + _long(csyms["eng_sort_hook"]) + bytes.fromhex("4e71"),
+         "the SORTING menu: an ENGINE row after FILTER, opening its own tick list (eng_sort_row, eng_list)",
+         ENG_SORT_STOCK)
     edit(ENG_CTOR_SITE, bytes.fromhex("4eb9") + _long(csyms["eng_ctor_hook"]) + bytes.fromhex("4e71"),
          "the preset view's constructor: the engines cleared with stock's filters", ENG_CTOR_STOCK)
 
@@ -1243,7 +1236,7 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
         layout[name] = csyms[name]
     for name in ("scope_up", "scope_taps", "scope_ring", "scope_pos", "smp_rx_sh"):   # AMP page 2's scope (csrc/scope)
         layout[name] = csyms[name]
-    for name in ("eng_mask", "eng_tests", "eng_n"):   # the preset browser's ENGINE filter (csrc/presets)
+    for name in ("eng_mask", "eng_tests", "eng_lists", "eng_n"):   # the preset browser's ENGINE filter (csrc/presets)
         layout[name] = csyms[name]
     layout["mtr_ram"] = pages.METER_RAM      # the system meter's state block (csrc/meter/meter.c MTR_*)
     # 2026-11-11: where the page renderer's writable data starts and its image ends (its `.data`: every D_
