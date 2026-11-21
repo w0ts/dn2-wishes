@@ -16,7 +16,7 @@ from pathlib import Path
 REPO = "https://github.com/w0ts/dn2-wishes"
 NAV = ('<nav class="site" aria-label="Wishes pages"><a href="./">builder</a><a href="samples.html">sample import</a>'
        '<a href="help.html">help</a><a href="presets.html">presets</a><a href="about.html" aria-current="page">about</a>'
-       '<span class="spacer"></span><a href="%s">github.com/w0ts/dn2-wishes</a></nav>' % REPO)
+       '<a href="%s">github.com/w0ts/dn2-wishes</a></nav>' % REPO)
 # files the README links to that are not on the site: the repository's own page
 SITE_FILES = {"LICENSE", "THIRD-PARTY.md"}
 
@@ -55,7 +55,7 @@ def convert(md: str, icons: str) -> tuple[str, str]:
                 raise SystemExit("make_about: unsupported heading: %r" % line)
             if len(m.group(1)) == 1:
                 title = m.group(2)
-                body.append('<div class="titlebar"><h1>%s</h1></div>' % inline(title))
+                body.append('<header class="site"><div class="titlebar"><h1>%s</h1></div>%s</header>' % (inline(title), "@@NAV@@"))
             else:
                 body.append("<h2>%s</h2>" % inline(m.group(2)))
             i += 1
@@ -106,7 +106,6 @@ ul { padding-left: 20px; }
 </head>
 <body>
 <main>
-  %(nav)s
 %(body)s
 </main>
 </body>
@@ -120,7 +119,7 @@ def main() -> None:
     src, dst = Path(sys.argv[1]), Path(sys.argv[2])
     icons = sys.argv[3] if len(sys.argv) == 4 else "about-icons/"
     _, body = convert(src.read_text(encoding="utf-8"), icons)
-    dst.write_text(PAGE % {"nav": NAV, "body": body}, encoding="utf-8")
+    dst.write_text(PAGE % {"body": body.replace("@@NAV@@", NAV)}, encoding="utf-8")
 
 
 if __name__ == "__main__":
