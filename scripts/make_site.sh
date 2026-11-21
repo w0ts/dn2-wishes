@@ -6,7 +6,7 @@
 #   (python3 -m http.server --directory OUTDIR): a missing wishes/ bundle is allowed there (the builder
 #   then says "No release published yet."), never in the workflow.
 # The front page is the builder; the sample import is samples.html (the sources keep their names). The presets page
-# lists presets/ (the repository's folder) as zips, made reproducibly by scripts/presets_zip.py into OUTDIR/presets/.
+# lists presets/ (the repository's folder) with one zip of all, made reproducibly by scripts/presets_zip.py into OUTDIR/presets/.
 set -eu
 out="${1:?usage: scripts/make_site.sh OUTDIR [--preview]}"
 preview="${2:-}"

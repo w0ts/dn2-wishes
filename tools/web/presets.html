@@ -21,8 +21,10 @@ details { font-size: var(--fs-2); } details ul { margin: var(--sp-1) 0 0; paddin
 <body>
 <main>
   <header class="site"><div class="titlebar"><h1>Wishes · presets</h1></div><nav class="site" aria-label="Wishes pages"><a href="./">builder</a><a href="samples.html">sample import</a><a href="help.html">help</a><a href="presets.html" aria-current="page">presets</a><a href="about.html">about</a><a href="https://github.com/w0ts/dn2-wishes">github.com/w0ts/dn2-wishes</a></nav></header>
-  <p class="sub">Digitone II sounds (<span class="mono">.dn2pst</span>) for the machines Wishes adds: an INIT and a set of sounds for each machine of ours, and an INIT for each of the other machines. Download them all, or one set. The same files are in the repository's <a href="https://github.com/w0ts/dn2-wishes/tree/main/presets">presets folder</a>.</p>
+  <p class="sub">Digitone II sounds (<span class="mono">.dn2pst</span>) for the machines Wishes adds: an INIT and a set of sounds for each machine of ours, and an INIT for each of the other machines. One zip holds them all. The same files are in the repository's <a href="https://github.com/w0ts/dn2-wishes/tree/main/presets">presets folder</a>.</p>
   <p class="msg warn"><b>Wishes only</b> Our machines are saved by their machine type (JUNO 50, ANALOG 2 51, DRONE 52, SOPHIE 53, TB-303 54, PLAITS 55, MACHINEDRUM 5, MONOMACHINE 6), so these sounds need a Wishes build made since 2026-11-18: the release on the <a href="./">builder</a> (v0.62.2 or later). On an older build, or on stock firmware, they load as other machines or as silent ones. Unofficial: not made or supported by Elektron.</p>
+
+  <p id="dl"><span class="note" id="state">Loading the list…</span></p>
 
   <h3>How to load them</h3>
   <ol class="steps">
@@ -32,9 +34,8 @@ details { font-size: var(--fs-2); } details ul { margin: var(--sp-1) 0 0; paddin
     <li>On the Digitone II, load one onto a track as any other preset.</li>
   </ol>
 
-  <h3>Downloads</h3>
-  <div class="grid cards" id="sets"><p class="note" id="state">Loading the list…</p></div>
-  <p class="note">Each zip's sha256 is listed: on macOS <span class="mono">shasum -a 256 FILE</span>, on Windows <span class="mono">certutil -hashfile FILE SHA256</span>. The zips are made by <span class="mono">scripts/presets_zip.py</span>, byte for byte the same from the same presets.</p>
+  <div id="sets"></div>
+  <p class="note">The zip's sha256 is shown above: on macOS <span class="mono">shasum -a 256 FILE</span>, on Windows <span class="mono">certutil -hashfile FILE SHA256</span>. It is made by <span class="mono">scripts/presets_zip.py</span>, byte for byte the same from the same presets.</p>
 </main>
 <script>
 "use strict";
@@ -42,21 +43,16 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;"
 const href = p => "presets/" + String(p).split("/").map(encodeURIComponent).join("/");
 const size = n => n >= 1024 ? (n / 1024).toFixed(1) + " KB" : n + " B";
 
-function card(e, i) {
-  const list = e.presets.length
-    ? `<details><summary>${e.presets.length} presets, one by one</summary><ul>${e.presets.map(p =>
-        `<li><a href="${href(p.file)}" download>${esc(p.name)}</a></li>`).join("")}</ul></details>`
-    : "";
-  return `<article class="card${i === 0 ? " accent" : ""}"><h2>${esc(e.title)} <span class="tag">${e.count} presets</span></h2>
-    <p>${esc(e.what)}</p>
-    <a class="button mono" href="${href(e.zip)}" download>${esc(e.zip)}</a>
-    <dl class="kv"><dt>size</dt><dd class="mono">${size(e.bytes)} (${e.bytes} bytes)</dd><dt>sha256</dt><dd class="mono">${esc(e.sha256)}</dd></dl>
-    ${list}</article>`;
+function set(r) {
+  return `<h3>${esc(r.title)} <span class="note">${esc(r.what)}</span></h3>
+    <p>${r.presets.map(p => `<a href="${href(p.file)}" download>${esc(p.name)}</a>`).join(" · ")}</p>`;
 }
 
-fetch("presets/presets.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : Promise.reject(r.status)).then(rows => {
-  if (!Array.isArray(rows) || !rows.length) throw new Error("empty");
-  document.getElementById("sets").innerHTML = rows.map(card).join("");
+fetch("presets/presets.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : Promise.reject(r.status)).then(e => {
+  if (!e || !e.zip || !Array.isArray(e.sets) || !e.sets.length) throw new Error("empty");
+  document.getElementById("dl").innerHTML = `<a class="button" href="${href(e.zip)}" download>Download all ${e.count} presets (${size(e.bytes)})</a>
+    <span class="note mono">sha256 ${esc(e.sha256)}</span>`;
+  document.getElementById("sets").innerHTML = e.sets.map(set).join("");
 }).catch(() => {
   document.getElementById("state").textContent = "The list could not be loaded. The presets are also in the repository's presets folder.";
 });

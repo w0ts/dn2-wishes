@@ -1,9 +1,9 @@
 # Presets
 
 Digitone II sounds (`.dn2pst`) for the machines this firmware adds, made with this repository's own tools: an INIT
-and a set of sounds for each machine of ours, and an INIT for each of the other machines. Download them all, or one
-set, as a zip from the [presets page](https://w0ts.github.io/dn2-wishes/presets.html) (sizes and sha256 there), or
-take single files from the folders below.
+and a set of sounds for each machine of ours, and an INIT for each of the other machines. Download them all as one zip from the
+[presets page](https://w0ts.github.io/dn2-wishes/presets.html) (size and sha256 there), or take single files from the
+folders below.
 
 <!-- sets: presets_sync.py writes this table -->
 | folder | sounds | what |
@@ -45,5 +45,5 @@ for anything private (only Elektron's own fields, no +Drive slot, no text but th
 the set's types, only INITs of machines that are not ours) and, when all pass, copies the new and changed ones into
 their set's folder here and rewrites the table above; one failing file and nothing is copied. A new machine of ours
 is one row in its `SETS`. `scripts/presets_sync.py --check` checks this folder (the tests run it).
-`scripts/presets_zip.py OUTDIR` makes the downloads, byte for byte the same from the same files;
+`scripts/presets_zip.py OUTDIR` makes the download, byte for byte the same from the same files;
 `scripts/make_site.sh` runs it for the presets page.
