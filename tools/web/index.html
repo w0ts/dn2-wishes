@@ -4,112 +4,47 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Wishes · DN2 sample import</title>
-<link rel="icon" type="image/png" href="data:image/png;base64,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">
-<link rel="apple-touch-icon" href="icons/dn2-import-180.png">
+<link rel="icon" type="image/png" href="data:image/png;base64,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">
+<link rel="apple-touch-icon" href="icons/wishes-180.png">
 <link rel="manifest" href="manifest.webmanifest">
-<meta name="theme-color" content="#000000">
+
+<link rel="stylesheet" href="https://w0ts.github.io/site-style/common.css">
 <link rel="stylesheet" href="wishes.css">
 <style>
-/* the sample import's own layout (the tokens and the shared components: wishes.css) */
-:root { --ok: var(--accent); --bad: var(--err); --yours: var(--accent); --new: color-mix(in srgb, var(--accent) 45%, var(--fg)); --rec: var(--dim); }
-main { max-width: 1240px; }
-nav.top { display: flex; flex-wrap: wrap; gap: var(--sp-1); align-items: center; margin: 0 0 var(--sp-3); }
-nav.top a { display: inline-flex; align-items: center; min-height: 26px; padding: 2px 10px; background: var(--s2); color: var(--fg); text-decoration: none; text-transform: lowercase; }
-nav.top a:hover { background: var(--s3); }
-nav.top a[aria-current=page] { background: var(--s3); box-shadow: inset 0 -3px var(--accent); }
-nav.top .spacer { flex: 1; }
-section { background: var(--s1); border: 1px solid var(--line); margin-bottom: var(--sp-3); padding: 0 var(--sp-3) var(--sp-3); min-width: 0; }
-section > h2 { display: flex; align-items: center; min-height: 30px; margin: 0 calc(-1 * var(--sp-3)) var(--sp-3); padding: 3px var(--sp-3);
-  background: var(--s2); box-shadow: inset 0 -3px var(--accent); font-size: var(--fs-1); font-weight: 400; text-transform: uppercase; color: var(--fg); }
-label { color: var(--dim); font-size: var(--fs-2); }
-input[type=text], input[type=number] { font: inherit; font-size: var(--fs-3); color: var(--fg); background: var(--bg); border: 1px solid var(--s3); border-radius: 0;
-  min-height: var(--ctl-h); padding: 3px 6px; }
-input[type=text]:hover, input[type=number]:hover { border-color: var(--dim); }
-input[type=checkbox]:indeterminate { background: var(--accent); border-color: var(--accent); }
-input[type=checkbox]:indeterminate::after { content: ""; width: 8px; height: 2px; background: var(--on); }
-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
-th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); }
-th { color: var(--dim); font-weight: 400; font-size: var(--fs-1); text-transform: uppercase; }
-/* each list its own scrolling box inside its section, its header row kept in view */
-.scrollbox { max-height: 340px; overflow: auto; border: 1px solid var(--line); background: var(--bg); }
-.scrollbox table { margin: 0 !important; }
-.scrollbox thead th { position: sticky; top: 0; z-index: 1; background: var(--s2); box-shadow: inset 0 -1px 0 var(--line); }
-.scrollbox tr:last-child td { border-bottom: 0; }
-.scrollbox:has(tbody:empty) { display: none; }
-td.num, th.num { text-align: right; white-space: nowrap; }
-td input[type=number] { min-height: 24px; padding: 2px 6px; font-family: var(--font-mono); }
-td input[type=text] { width: 7.5em; min-height: 24px; padding: 2px 6px; font-family: var(--font-mono); text-transform: uppercase; }
-tr[draggable=true] { cursor: grab; }
-tr.dragging { opacity: .4; }
-.slot { font-family: var(--font-mono); }
-.bar { position: relative; height: 22px; background: var(--bg); border: 1px solid var(--line); overflow: hidden; display: flex; }
-.bar > div { height: 100%; }
-.legend { display: flex; flex-wrap: wrap; gap: var(--sp-3); margin-top: var(--sp-2); color: var(--dim); font-size: var(--fs-1); }
-.legend i { display: inline-block; width: 10px; height: 10px; margin-right: 5px; vertical-align: -1px; }
-.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--sp-2); margin-top: var(--sp-3); }
-.stat { background: var(--bg); border: 1px solid var(--line); border-left: 3px solid var(--s3); padding: var(--sp-2) var(--sp-3); }
-.stat b { display: block; font: 400 var(--fs-4)/1.3 var(--font-mono); color: var(--fg); }
-.stat span { color: var(--dim); font-size: var(--fs-1); }
-progress { display: block; width: 100%; height: 6px; margin-top: var(--sp-2); border: 0; background: var(--s3); appearance: none; -webkit-appearance: none; accent-color: var(--accent); }
-progress::-webkit-progress-bar { background: var(--s3); }
-progress::-webkit-progress-value { background: var(--accent); }
-progress::-moz-progress-bar { background: var(--accent); }
-#log { font: var(--fs-1)/1.5 var(--font-mono); color: var(--dim); white-space: pre-wrap; max-height: 160px; overflow: auto; margin: var(--sp-2) 0 0; }
-#diagOut { font: var(--fs-1)/1.5 var(--font-mono); color: var(--text); padding: var(--sp-2); }
-button.x { background: none; min-height: 0; padding: 2px 6px; color: var(--dim); }
-button.x:hover { background: none; color: var(--err); }
-@media (max-width: 640px) { .hide-sm { display: none; } td input[type=text] { width: 6em; } }
-/* Transfer-style: this computer on the left, the instrument on the right */
-.tabs { display: inline-flex; gap: 0; }
-.tab { background: var(--s2); color: var(--dim); }
-.tab[aria-selected=true] { background: var(--s3); color: var(--fg); box-shadow: inset 0 -3px var(--accent); }
-.panes { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: var(--sp-2); margin-top: var(--sp-3); align-items: stretch; }
-.pane { display: flex; flex-direction: column; border: 1px solid var(--line); border-left: 3px solid var(--s3); background: var(--bg); min-width: 0; }
-.pane.over { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--bg)); }
-.pane-head, .pane-foot { display: flex; flex-wrap: wrap; gap: var(--sp-1); align-items: center; padding: var(--sp-1) var(--sp-2); }
-.pane-head { min-height: 38px; background: var(--s1); border-bottom: 1px solid var(--line); }
-.pane-foot { border-top: 1px solid var(--line); min-height: 38px; margin-top: auto; }
-.pane-head b { font-size: var(--fs-1); font-weight: 400; text-transform: uppercase; color: var(--fg); }
-.spacer { flex: 1; }
-.pane-body { flex: none; overflow: auto; height: 420px; min-height: 200px; resize: vertical; }
-.pane-body table { margin: 0; }
-.navline { display: flex; gap: var(--sp-2); align-items: baseline; padding: var(--sp-1) var(--sp-2); border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--accent) 6%, var(--bg)); }
-.navline button.x { color: var(--accent); padding: 0; }
-.navline .here { font: var(--fs-1)/1.3 var(--font-mono); color: var(--fg); }
-.navline .note { margin: 0; }
-.pane-body thead th { position: sticky; top: 0; z-index: 1; background: var(--bg); box-shadow: inset 0 -1px 0 var(--line); }
+/* the sample import's own layout: common.css does the rest */
+section { overflow: visible; }
+.pane-body { flex: none; height: 420px; min-height: 200px; resize: vertical; }
 .pane-body .empty { color: var(--dim); text-align: center; padding: 60px var(--sp-4); }
-#drop .pane-body:has(#dropHint:not([style*="none"])) { border: 1px dashed var(--s3); margin: var(--sp-2); }
-.pane-foot .note { margin: 0; }
-.crumb { font: var(--fs-1)/1 var(--font-mono); color: var(--text); }
-.crumb a { color: var(--accent); cursor: pointer; text-decoration: none; }
-tr.up b.here { color: var(--fg); font-family: var(--font-mono); font-weight: 400; }
-.mid { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: var(--sp-2); width: 120px; text-align: center; }
+.pane-body thead th { position: sticky; top: 0; z-index: 1; background: var(--bg); box-shadow: inset 0 -1px 0 var(--line); }
+.mid { width: 120px; }
 .mid .note { margin: 0; font-size: var(--fs-1); }
+#drop .pane-body:has(#dropHint:not([style*="none"])) { border: 1px dashed var(--dim); margin: var(--sp-2); }
+.pane-foot .note, .pane-head .note { margin: 0; }
+#list td input.longIn { width: 100%; min-width: 9em; } #list td input.folderIn { width: 100%; min-width: 6em; }
+td input[type=number], td input[type=text] { min-height: 26px; padding: 2px 6px; font-family: var(--font-mono); width: auto; }
+td input[type=text] { width: 7.5em; text-transform: uppercase; }
+tr[draggable=true] { cursor: grab; } tr.dragging { opacity: .4; }
 th.ck, td.ck { width: 28px; padding-right: 0; }
-tr.sel td { background: color-mix(in srgb, var(--accent) 14%, transparent); }
-tr.folder td { cursor: pointer; }
-tr.folder:hover td, tr.up:hover td { background: var(--s1); }
-tr.up td { cursor: pointer; color: var(--dim); background: var(--bg); box-shadow: inset 0 -1px 0 var(--line); }
-.ico { display: inline-block; width: 1.3em; color: var(--accent); }
-#modeSel, #sliceSel { max-width: 100%; }
-label.proj-only { max-width: 100%; }
-#list td input.longIn { width: 100%; min-width: 9em; }
-#list td input.folderIn { width: 100%; min-width: 6em; }
+tr.folder td, tr.up td { cursor: pointer; } tr.up td { color: var(--dim); }
+.navline { display: flex; gap: var(--sp-2); align-items: baseline; padding: var(--sp-1) var(--sp-2); border-bottom: 1px solid var(--line); background: var(--accent-soft); }
+.navline .here { font: var(--fs-2)/1.3 var(--font-mono); } .navline .note { margin: 0; }
+.crumb { font: var(--fs-2)/1 var(--font-mono); } .crumb a { color: var(--accent-text); cursor: pointer; text-decoration: none; }
+.ico { display: inline-block; width: 1.3em; color: var(--accent-text); }
+.st-ok { color: var(--accent-text); } .st-bad { color: var(--err); }
 .lib-mode .proj-only, .proj-mode .lib-only { display: none !important; }
-.st-ok { color: var(--accent); } .st-bad { color: var(--err); } .st-run { color: var(--fg); }
-@media (max-width: 860px) {
-  #list td input.longIn { min-width: 6em; } #list td input.folderIn { min-width: 4.5em; }
-  .panes { grid-template-columns: minmax(0, 1fr); }
-  .mid { flex-direction: row; width: auto; justify-content: flex-start; }
-  .pane-body { height: 300px; }
-}
+:root { --rec: var(--dim); --yours: var(--accent); --new: color-mix(in srgb, var(--accent) 45%, var(--ink)); }
+.stat { background: var(--bg); border: 1px solid var(--line); border-left: 3px solid var(--line); border-radius: var(--r-ctl); padding: var(--sp-2) var(--sp-3); }
+.stat b { font: 600 var(--fs-4)/1.3 var(--font-mono); }
+.segments { position: relative; }
+#modeSel, #sliceSel { max-width: 100%; }
+.hide-sm {} @media (max-width: 640px) { .hide-sm { display: none; } td input[type=text] { width: 6em; } }
+@media (max-width: 860px) { .mid { width: auto; } .pane-body { height: 300px; } #list td input.longIn { min-width: 6em; } #list td input.folderIn { min-width: 4.5em; } }
 </style>
 </head>
 <body>
 <main>
-  <nav class="top" aria-label="Wishes pages"><a href="./">builder</a><a href="samples.html" aria-current="page">sample import</a><a href="help.html">help</a><span class="spacer"></span><a href="https://github.com/w0ts/dn2-wishes">github.com/w0ts/dn2-wishes</a></nav>
-  <h1>WISHES</h1>
+  <nav class="site" aria-label="Wishes pages"><a href="./">builder</a><a href="samples.html" aria-current="page">sample import</a><a href="help.html">help</a><a href="presets.html">presets</a><a href="about.html">about</a><span class="spacer"></span><a href="https://github.com/w0ts/dn2-wishes">github.com/w0ts/dn2-wishes</a></nav>
+  <div class="titlebar"><h1>Wishes</h1></div>
   <p class="sub">Sample import: your samples to the Digitone II over USB, for the sampler mod (v0.22 or later; the +Drive library: v0.31 or later). Chrome or Edge; USB CONFIG on the instrument set to USB MIDI or Overbridge. Close Elektron Transfer first.</p>
 
   <section>
@@ -117,8 +52,8 @@ label.proj-only { max-width: 100%; }
     <div class="row">
       <label>to <select id="outSel" aria-label="MIDI output"></select></label>
       <label>from <select id="inSel" aria-label="MIDI input"></select></label>
-      <button id="connectBtn" class="primary">Connect</button>
-      <span id="connState" class="pill">not connected</span>
+      <button id="connectBtn">Connect</button>
+      <span id="connState" class="tag">not connected</span>
     </div>
     <p id="devInfo" class="note">Allow MIDI (with SysEx) when the browser asks. Two ports, both named Digitone II: the one this page sends to, and the one it listens on (USB MIDI has one of each).</p>
   </section>
@@ -127,8 +62,8 @@ label.proj-only { max-width: 100%; }
     <h2>2 · Transfer</h2>
     <div class="row">
       <div class="tabs" role="tablist">
-        <button id="tabLib" class="tab" role="tab" aria-selected="true">+Drive library</button>
-        <button id="tabProj" class="tab" role="tab" aria-selected="false">Project slots (SAMP 1–122)</button>
+        <button id="tabLib" role="tab" aria-selected="true">+Drive library</button>
+        <button id="tabProj" role="tab" aria-selected="false">Project slots (SAMP 1–122)</button>
       </div>
       <label class="proj-only">Slots:
         <select id="modeSel">
@@ -148,7 +83,7 @@ label.proj-only { max-width: 100%; }
     <div class="panes">
       <div class="pane" id="drop">
         <div class="pane-head"><b>This computer</b><span class="spacer"></span>
-          <button id="browseBtn">Add files…</button> <button id="folderBtn" title="Your system's folder dialog shows folders only; every audio file inside the one you pick is added, subfolders included">Add a folder…</button>
+          <button class="quiet" id="browseBtn">Add files…</button> <button class="quiet" id="folderBtn" title="Your system's folder dialog shows folders only; every audio file inside the one you pick is added, subfolders included">Add a folder…</button>
           <input id="fileIn" type="file" accept="audio/*,.wav,.wave,.aif,.aiff,.aifc,.flac,.mp3,.ogg,.oga,.opus,.m4a,.aac,.caf" multiple hidden>
           <input id="dirIn" type="file" webkitdirectory multiple hidden>
         </div>
@@ -160,17 +95,17 @@ label.proj-only { max-width: 100%; }
           <div class="empty" id="dropHint">Drop audio files or folders here<br><span style="font-size:var(--fs-1)">WAV, AIFF, FLAC, MP3, OGG, M4A</span></div>
         </div>
         <div class="pane-foot"><span id="listNote" class="note"></span><span class="spacer"></span>
-          <button id="removeSelBtn" disabled>Remove selected</button> <button id="clearBtn">Clear</button></div>
+          <button class="quiet" id="removeSelBtn" disabled>Remove selected</button> <button class="quiet" id="clearBtn">Clear</button></div>
       </div>
       <div class="mid">
-        <button id="sendBtn" class="primary" disabled>Send →</button>
+        <button id="sendBtn" disabled>Send →</button>
         <p id="intoNote" class="note"></p>
       </div>
       <div class="pane" id="rightPane">
         <div class="pane-head"><b>Digitone II</b> <span id="crumb" class="crumb"></span><span class="spacer"></span>
-          <button id="newFolderBtn" class="lib-only" disabled>New folder</button>
-          <button id="delSelBtn" class="lib-only" disabled>Delete selected</button>
-          <button id="reloadBtn" title="Read the instrument again" disabled>↻</button>
+          <button id="newFolderBtn" class="quiet lib-only" disabled>New folder</button>
+          <button id="delSelBtn" class="quiet lib-only" disabled>Delete selected</button>
+          <button class="quiet" id="reloadBtn" title="Read the instrument again" disabled>↻</button>
         </div>
         <div id="libNav" class="navline lib-only" style="display:none"><button id="upBtn" class="x" title="Back to all folders">‹ All folders</button><span class="note">/</span><b class="here"></b><span class="note" id="navCount"></span></div>
         <div class="pane-body">
@@ -187,12 +122,12 @@ label.proj-only { max-width: 100%; }
 
   <section>
     <h2>3 · Memory</h2>
-    <div class="bar" id="bar"></div>
+    <div class="segments" id="bar"></div>
     <div class="legend">
       <span><i style="background:var(--rec)"></i>recordings (kept)</span>
       <span><i style="background:var(--new)"></i>what you send</span>
     </div>
-    <div class="stats">
+    <div class="grid" style="--min:150px;margin-top:var(--sp-3)">
       <div class="stat"><b id="sCap">–</b><span id="lCap">room for yours</span></div>
       <div class="stat"><b id="sNow">–</b><span id="lNow">yours on it now</span></div>
       <div class="stat"><b id="sSend">–</b><span>to send</span></div>
@@ -205,11 +140,11 @@ label.proj-only { max-width: 100%; }
 
   <section>
     <h2>4 · Transfers</h2>
-    <div class="row"><span id="sendState" class="pill">idle</span></div>
+    <div class="row"><span id="sendState" class="tag">idle</span></div>
     <p id="sendNote" class="note"></p>
     <progress id="prog" value="0" max="1"></progress>
     <div class="scrollbox" style="margin-top:var(--sp-2)"><table id="queue"><thead><tr><th>Sample</th><th>Into</th><th class="num">Size</th><th>Status</th></tr></thead><tbody></tbody></table></div>
-    <div id="log"></div>
+    <div id="log" class="log"></div>
   </section>
 
   <section>
@@ -224,14 +159,14 @@ label.proj-only { max-width: 100%; }
   <section>
     <h2>6 · Diagnostics</h2>
     <p class="note" style="margin-top:0">For bug reports: asks the instrument what its DSP has seen (needs v0.34 or later, connected above). It only reads. Run it right after power-on, again right after a note goes silent, and once more after a minute with nothing playing; press Copy each time and paste the results into your report.</p>
-    <div class="row"><button id="diagBtn" disabled>Run diagnostics</button> <button id="diagCopy" disabled>Copy</button> <span id="diagState" class="pill">idle</span></div>
-    <pre id="diagOut" class="scrollbox" style="white-space:pre-wrap;min-height:3em;margin-top:var(--sp-2)"></pre>
+    <div class="row"><button class="quiet" id="diagBtn" disabled>Run diagnostics</button> <button class="quiet" id="diagCopy" disabled>Copy</button> <span id="diagState" class="tag">idle</span></div>
+    <pre id="diagOut" class="log scrollbox" style="white-space:pre-wrap;min-height:3em;margin-top:var(--sp-2)"></pre>
   </section>
 
   <section>
     <h2>7 · Erase mod data</h2>
     <p class="note" style="margin-top:0">Before going back to stock firmware (needs v0.39 or later, connected above): erases everything the mod keeps on the +Drive (the samples in the pool, the projects' sample lists, the +Drive library, the mod's settings) and nothing of Elektron's (projects, sounds, presets are untouched). Then restart the instrument. The same is on the instrument: in the sample browser, +DRIVE, RIGHT, ERASE MOD DATA.</p>
-    <div class="row"><button id="eraseBtn" disabled>Erase mod data…</button> <span id="eraseState" class="pill">idle</span></div>
+    <div class="row"><button class="quiet" id="eraseBtn" disabled>Erase mod data…</button> <span id="eraseState" class="tag">idle</span></div>
   </section>
 </main>
 
@@ -566,7 +501,12 @@ const DN2 = (() => {
   }
   /* v0.40: a TREE reply (31) -> {depth, parents: each folder's parent, -1 the top} */
   function libTree(p) { return { depth: p[0], parents: [...p.subarray(1, 65)].map(b => b === 0xFF ? -1 : b) }; }
-  return { C, BLOCK, readAiff, libSample, le32, libBegin, adler, libList, folderLevels, libTree, metaBytes, metaAt, putMetaPtr, attachMeta, short, pack7, unpack7, request, parse, be32, rd32, readWav, onsets, slicesFrom, slicing, itemBytes, itemData, putEntry, poolBytes, addPlan, payloadBytes, stem };
+  // HELLO's RAM check word (link 4, v0.22; 3 = not answered since 2026-11-19) -> [text, "ok" | "warn" | "bad"]
+  const RAM_CHECK = { 0: ["RAM check not run yet", "warn"], 1: ["RAM check passed: all 400 MB load", "ok"],
+    2: ["RAM check FAILED: only the first 128 MB load", "bad"],
+    3: ["RAM check not answered: only the first 128 MB load", "warn"] };
+  function ramCheck(v) { return RAM_CHECK[v] || [v == null ? "" : `RAM check: ${v}`, ""]; }
+  return { C, BLOCK, ramCheck, readAiff, libSample, le32, libBegin, adler, libList, folderLevels, libTree, metaBytes, metaAt, putMetaPtr, attachMeta, short, pack7, unpack7, request, parse, be32, rd32, readWav, onsets, slicesFrom, slicing, itemBytes, itemData, putEntry, poolBytes, addPlan, payloadBytes, stem };
 })();
 if (typeof module !== "undefined") module.exports = DN2;
 </script>
@@ -678,14 +618,14 @@ if (typeof module !== "undefined") module.exports = DN2;
       const proto = (p[0] << 8) | p[1];
       dev = { proto, room: DN2.rd32(p, 2), ram: p.length >= 22 ? DN2.rd32(p, 18) : null, slots: [] };
       if (proto < 4) throw new Error(`sample link ${proto}: flash v0.22 or later for this tool (or use dn2samples.py)`);
-      $("connState").textContent = "connected"; $("connState").className = "pill ok";
-      const ram = { 0: ["RAM check not run yet", "warn"], 1: ["RAM check passed: all 400 MB load", "ok"], 2: ["RAM check FAILED: only the first 128 MB load", "bad"] }[dev.ram] || ["", ""];
+      $("connState").textContent = "connected"; $("connState").className = "tag accent";
+      const ram = DN2.ramCheck(dev.ram);
       $("devInfo").textContent = `Sample link ${proto}. ${ram[0]}.`;
       $("devInfo").className = "note " + (ram[1] === "bad" ? "bad" : ram[1] === "warn" ? "warn" : "");
       await readDir();
       await readLib();
     } catch (e) {
-      $("connState").textContent = "not connected"; $("connState").className = "pill bad";
+      $("connState").textContent = "not connected"; $("connState").className = "tag err";
       $("devInfo").textContent = String(e.message || e); $("devInfo").className = "note bad";
     }
     refresh();
@@ -852,7 +792,7 @@ if (typeof module !== "undefined") module.exports = DN2;
       const slotCell = lib ? `<td class="slot proj-only"></td>` : mode === "fill" ? `<td class="slot">SAMP ${k + 1}</td>`
         : `<td class="slot">SAMP <input type="number" class="slotIn" min="1" max="${C.USER_SLOTS}" value="${it.slot == null ? "" : it.slot + 1}" style="width:4.5em"></td>`;
       const over = mode !== "fill" && !lib && it.slot != null && devAt.get(it.slot);
-      tr.innerHTML = `<td class="ck"><input type="checkbox" class="selIn" ${it.sel ? "checked" : ""} aria-label="Select"></td>${slotCell}<td title="${esc(it.file)}"><input type="text" class="longIn" maxlength="${C.LONG_MAX}" value="${esc(it.long)}" style="text-transform:none"><div class="note slot" style="margin:2px 0 0">${esc(it.name)}${over ? ` <span class="pill warn">${over.rec ? "recording moves" : "replaces " + esc(over.name)}</span>` : ""}</div></td>
+      tr.innerHTML = `<td class="ck"><input type="checkbox" class="selIn" ${it.sel ? "checked" : ""} aria-label="Select"></td>${slotCell}<td title="${esc(it.file)}"><input type="text" class="longIn" maxlength="${C.LONG_MAX}" value="${esc(it.long)}" style="text-transform:none"><div class="note slot" style="margin:2px 0 0">${esc(it.name)}${over ? ` <span class="tag warn">${over.rec ? "recording moves" : "replaces " + esc(over.name)}</span>` : ""}</div></td>
         <td><input type="text" class="folderIn" list="folderList" maxlength="${C.PATH_MAX}" value="${esc(it.folder)}" placeholder="${lib ? "INCOMING" : "–"}" style="text-transform:none"></td>
         <td class="num hide-sm">${(it.w.frames.length / it.w.rate).toFixed(2)} s</td>
         <td class="num proj-only hide-sm">${it.slices.length || "–"}</td><td class="num">${fmtMB(lib ? 2 * it.w.frames.length : sz)}</td><td><button class="x" title="Remove from the list">✕</button></td>`;
@@ -1081,8 +1021,8 @@ if (typeof module !== "undefined") module.exports = DN2;
         const r = await call(C.LIB.DROP, [f], 10000, 1).catch(() => null);
         log(`${libPath(f)}: ${r ? "folder removed" : "folder kept (not empty?)"}`);
       }
-      $("sendState").textContent = `deleted ${gone}`; $("sendState").className = "pill ok";
-    } catch (x) { log(String(x.message || x)); $("sendState").textContent = "delete failed"; $("sendState").className = "pill bad"; }
+      $("sendState").textContent = `deleted ${gone}`; $("sendState").className = "tag accent";
+    } catch (x) { log(String(x.message || x)); $("sendState").textContent = "delete failed"; $("sendState").className = "tag err"; }
     libSel.clear();
     try { await readLib(); } catch (x) { log(String(x.message || x)); }
     busy = false; refresh();
@@ -1136,7 +1076,7 @@ if (typeof module !== "undefined") module.exports = DN2;
     }
     renderQueue();
     let done = 0; const t0 = performance.now();
-    st.textContent = "to the +Drive library"; st.className = "pill";
+    st.textContent = "to the +Drive library"; st.className = "tag";
     for (const q of queue) {
       const it = q.it;
       q.st = "sending"; q.cls = "st-run"; renderQueue();
@@ -1170,17 +1110,17 @@ if (typeof module !== "undefined") module.exports = DN2;
       renderQueue();
     }
     await readLib();
-    st.textContent = "done"; st.className = "pill ok"; $("prog").value = 1;
+    st.textContent = "done"; st.className = "tag accent"; $("prog").value = 1;
   }
   async function send() {
     busy = true; refresh();
     const st = $("sendState");
     if (mode === "lib") {
-      try { await sendLib(); } catch (e) { st.textContent = "failed"; st.className = "pill bad"; log(String(e.message || e)); try { await readLib(); } catch (x) { /* shown on the next refresh */ } }
+      try { await sendLib(); } catch (e) { st.textContent = "failed"; st.className = "tag err"; log(String(e.message || e)); try { await readLib(); } catch (x) { /* shown on the next refresh */ } }
       busy = false; refresh(); return;
     }
     try {
-      st.textContent = "building"; st.className = "pill";
+      st.textContent = "building"; st.className = "tag";
       const audio = it => ({ frames: it.w.frames, rate: it.w.rate, name: it.name, slices: it.slices });
       let parts, end, remember, total;
       const metas = [];                       /* v0.25: each slot's long name and folder */
@@ -1228,13 +1168,13 @@ if (typeof module !== "undefined") module.exports = DN2;
         if (state === 0) throw new Error("the load stopped: the samples are on the +Drive; power-cycle to load them again");
         await new Promise(r => setTimeout(r, 1000));
       }
-      st.textContent = "done"; st.className = "pill ok"; $("prog").value = 1;
+      st.textContent = "done"; st.className = "tag accent"; $("prog").value = 1;
       queue.forEach(q => { q.st = "✓ in the slot"; q.cls = "st-ok"; });
       log(`done: ${mode === "fill" ? `SAMP 1–${items.length}` : items.map(it => "SAMP " + (it.slot + 1)).join(", ")}; they load at every power-on`);
       await readDir();
       if (mode === "add") items = [];        /* they are on it now: the list starts again */
     } catch (e) {
-      st.textContent = "failed"; st.className = "pill bad"; log(String(e.message || e));
+      st.textContent = "failed"; st.className = "tag err"; log(String(e.message || e));
       queue.forEach(q => { q.st = "failed: send again"; q.cls = "st-bad"; });
     }
     busy = false; refresh();
@@ -1276,7 +1216,7 @@ if (typeof module !== "undefined") module.exports = DN2;
     if (busy || !dev) return;
     busy = true; refresh();
     const out = [], say = s => { out.push(s); $("diagOut").textContent = out.join("\n"); };
-    $("diagState").textContent = "running"; $("diagState").className = "pill";
+    $("diagState").textContent = "running"; $("diagState").className = "tag";
     $("diagOut").textContent = "";
     try {
       say(`DN2 diagnostics, ${new Date().toLocaleString()}, sample link ${dev.proto}`);
@@ -1303,11 +1243,11 @@ if (typeof module !== "undefined") module.exports = DN2;
           say(`  slot ${sl.k + 1} ${sl.name || "(no name)"}${sl.rec ? " (recording)" : ""}: ${entryVerdict(base, frames, fmt, pool)}`);
         }
       }
-      $("diagState").textContent = "done"; $("diagState").className = "pill ok";
+      $("diagState").textContent = "done"; $("diagState").className = "tag accent";
     } catch (x) {
       const m = String(x.message || x);
       say(/unknown command/.test(m) ? "This firmware has no diagnostics: v0.34 or later is needed." : `Stopped: ${m}`);
-      $("diagState").textContent = "failed"; $("diagState").className = "pill bad";
+      $("diagState").textContent = "failed"; $("diagState").className = "tag err";
     }
     busy = false; refresh();
   }
@@ -1318,7 +1258,7 @@ if (typeof module !== "undefined") module.exports = DN2;
     if (!confirm("Erase ALL samples and mod data on the instrument's +Drive?\n\nThe pool, every project's sample list, the +Drive library and the mod's settings. Elektron's projects, sounds and presets are not touched.")) return;
     if (!confirm("Are you sure? This cannot be undone.")) return;
     busy = true; refresh();
-    const st = $("eraseState"), say = (t, c) => { st.textContent = t; st.className = "pill" + (c ? " " + c : ""); };
+    const st = $("eraseState"), say = (t, c) => { st.textContent = t; st.className = "tag" + (c ? " " + c : ""); };
     try {
       await call(28, [69, 82, 65, 83, 69], 3000, 2);                  // "ERASE"
       for (;;) {

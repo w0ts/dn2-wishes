@@ -1,12 +1,13 @@
 """Bundle the build's Python for dn2mk2's in-browser patcher (tools/patcher).
 
     python scripts/web_bundle.py BUILD.syx VERSION NAME OUTDIR [--test]
-    python scripts/web_bundle.py --wishes BUILD.syx RELEASE PRESET OUTDIR [--uncleared-test]
+    python scripts/web_bundle.py --wishes BUILD.syx RELEASE OUTDIR [--uncleared-test]
     python scripts/web_bundle.py --check-site OUTDIR
 
 --wishes: the bundle of the Wishes builder page (tools/web/builder.html; scripts/wishes_bundle.py):
-OS 1.12, NOBOOT, the DN2's own section 7. --check-site: what the Pages workflow runs before it
-publishes OUTDIR: every zip is the one listed and every listed file has a record that clears it.
+one build per release (the whole mod: nothing to choose), OS 1.12, NOBOOT, the DN2's own section 7.
+--check-site: what the Pages workflow runs before it publishes OUTDIR: a release is listed, every zip
+is the one listed and every listed build has a record that clears it.
 
 --test (owner, 2026-11-14): a test build, from a feature branch (e.g. stereo). Gated like any
 other; the patcher lists it apart, under TEST, never as the latest, with a warning.
@@ -52,12 +53,19 @@ def worker_version(zname: str) -> str | None:
 
 def cleared(record: dict | None, sha: str) -> bool:
     """Does this gate record (scripts/ship_gate.py's BUILD.syx.gate.json) clear the file SHA?
-    Its sha256 is SHA and every gate passed (n/a: a step that did not apply, e.g. a data-only chunk)."""
+    Its sha256 is SHA and every gate passed (n/a: a step that did not apply, e.g. a data-only chunk), or, as
+    ship_gate's CLEARED TO FLASH allows (the User, 2026-11-16), is a feature step's KNOWN ISSUE: that gate's value
+    starts with KNOWN and its name is one of the record's own known_issues (2026-11-20, the User's OK)."""
     if not isinstance(record, dict) or record.get("sha256") != sha or not sha:
         return False
     gates = record.get("gates")
-    return isinstance(gates, dict) and bool(gates) and \
-        all(str(v).startswith(("PASS", "n/a")) for v in gates.values())
+    known = record.get("known_issues") or {}
+    if not isinstance(known, (dict, list)):
+        return False
+
+    def ok(name, v) -> bool:
+        return str(v).startswith(("PASS", "n/a")) or (str(v).startswith("KNOWN") and name in known)
+    return isinstance(gates, dict) and bool(gates) and all(ok(k, v) for k, v in gates.items())
 
 
 def isolated_rebuild(zbytes: bytes, version: str) -> str:

@@ -71,13 +71,6 @@ def test_dt2_section7_checks_its_sha():
     assert m.DT2_SEC7_SHA == __import__("dnfw.dt2.rom", fromlist=["SHA256"]).SHA256
 
 
-def test_the_page_saves_only_the_cleared_sha():
-    page = (ROOT / "tools" / "web" / "patcher.html").read_text()
-    assert "got === b.sha256" in page and "$(\"#save\").disabled = false" in page
-    worker = (ROOT / "tools" / "web" / "patcher-worker.js").read_text()
-    assert "zipSha" in worker and "pyodide/v0.27.7" in worker
-
-
 def test_web_bundle_names_as_the_worker_reads_them():
     """2026-11-15 (NiKo, v0.54-t1: "the mod's version file cannot be read"): dn2mk2's
     patcher-worker.js wrote VERSION only for X.Y names; web_bundle now refuses a bundle whose

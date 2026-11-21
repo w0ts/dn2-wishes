@@ -1,10 +1,10 @@
 /* SPDX-License-Identifier: AGPL-3.0-or-later
  * The Wishes builder: the build in Python (Pyodide) off the page's thread.
  * The route is the command line's (tools/patcher/dn2patch.build with noboot=True, OS 1.12): the code
- * zip of one cleared preset (scripts/wishes_bundle.py), the user's own Elektron files, nothing else.
+ * zip of the release's one build (scripts/wishes_bundle.py), the user's own Elektron files, nothing else.
  * In:  {zip: url, zipSha, modVersion, dn2Sha, inputs: ["dn2","dt2","md"(,"mnm")],
  *       files: {dn2, dt2, md[, mnm]}: {name, bytes}}
- * Out: {log: text} ... then {done: bytes} or {error: text}
+ * Out: {log: text} ... then {done: bytes, stock: the stock 1.12 .syx it was built from} or {error: text}
  * The page checks the bytes' sha256 against the gate record itself (wishes-verdict.js). */
 const PYODIDE = "https://cdn.jsdelivr.net/pyodide/v0.27.7/full/";
 importScripts(PYODIDE + "pyodide.js");
@@ -79,19 +79,22 @@ import sys, os, pathlib, hashlib
 for m in [m for m in sys.modules if m == "dnfw" or m.startswith("dnfw.") or m in ("dn2patch", "noboot")]:
     del sys.modules[m]
 for k in ("DT2_SECTIONS", "DT2_SECTION7", "MD_OS_BIN", "MNM_OS", "DN2MK2_PARTS"):
-    os.environ.pop(k, None)          # Full: the tree's own choice, nothing from an earlier run
+    os.environ.pop(k, None)          # the whole mod, as the tree builds it: nothing from an earlier run
 sys.path = [p for p in sys.path if not p.startswith("/tree")]
 sys.path.insert(0, TREE + "/code")
 import dn2patch
 dn2patch.WORK = pathlib.Path(RUN + "/work")
-if hashlib.sha256(dn2patch.unzip(pathlib.Path(RUN + "/in/dn2").read_bytes(), (".syx",))).hexdigest() != DN2SHA:
+STOCK = dn2patch.unzip(pathlib.Path(RUN + "/in/dn2").read_bytes(), (".syx",))
+if hashlib.sha256(STOCK).hexdigest() != DN2SHA:
     raise dn2patch.PatchError("the Digitone II file is not Elektron's OS 1.12 (another OS, or a modified file). Wishes is built only from the stock OS 1.12 file.")
 SHA = dn2patch.build(RUN + "/in/dn2", RUN + "/in/dt2", RUN + "/in/md", RUN + "/out.syx", mnm=MNM, noboot=True)
+pathlib.Path(RUN + "/stock.syx").write_bytes(STOCK)     # for the page's optional flash back to stock (it re-checks the sha256)
 `);
     log("Built in " + ((performance.now() - tb) / 1000).toFixed(1) + " s [" + stamp() + " since this request]");
     const out = py.FS.readFile(run + "/out.syx");
-    try { py.FS.unlink(run + "/out.syx"); } catch (_) { /* the page has the bytes */ }
-    self.postMessage({ done: out, buildSeconds: (performance.now() - tb) / 1000 }, [out.buffer]);
+    const stock = py.FS.readFile(run + "/stock.syx");
+    for (const f of ["/out.syx", "/stock.syx"]) { try { py.FS.unlink(run + f); } catch (_) { /* the page has the bytes */ } }
+    self.postMessage({ done: out, stock, buildSeconds: (performance.now() - tb) / 1000 }, [out.buffer, stock.buffer]);
   } catch (err) {
     self.postMessage({ error: shortError(err) });
   }

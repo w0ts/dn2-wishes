@@ -1,18 +1,28 @@
 """The Wishes builder page's bundle (tools/web/builder.html; scripts/web_bundle.py --wishes).
 
-    python scripts/web_bundle.py --wishes BUILD.syx RELEASE PRESET OUTDIR [--uncleared-test]
+    python scripts/web_bundle.py --wishes BUILD.syx RELEASE OUTDIR [--uncleared-test | --local-test SHA256]
     python scripts/web_bundle.py --check-site OUTDIR
 
-BUILD.syx is a cleared OS 1.12 build of this tree (its BUILD.syx.gate.json beside it, CLEARED,
+One build per release, the whole mod (there is nothing to choose: the User, 2026-11-19, "everything
+fits"). BUILD.syx is a cleared OS 1.12 build of this tree (its BUILD.syx.gate.json beside it, CLEARED,
 the same sha256). This builds it again the browser's way (tools/patcher/dn2patch.build with
-noboot=True, the DN2's own section 7) from Elektron's files, noting every dnfw file it reads;
-zips those, dn2patch.py and noboot.py; rebuilds from the zip ALONE in a clean interpreter; and
-only if that gives BUILD.syx's sha256 writes OUTDIR/vRELEASE/PRESET-<zip sha>.zip, the gate
-record (only its verdicts: no paths) and the release's entry in OUTDIR/wishes.json.
+noboot=True, the DN2's own section 7) from Elektron's files, noting every dnfw file it reads; zips
+those, dn2patch.py and noboot.py; rebuilds from the zip ALONE in a clean interpreter; and only if
+that gives BUILD.syx's sha256 writes OUTDIR/vRELEASE/code-<zip sha>.zip, the gate record (only its
+verdicts: no paths) and the release's row in OUTDIR/wishes.json (newest first):
+
+    {"release", "mod_version", "os": "1.12", "file", "sha256", "gate", "zip", "zip_sha256",
+     "inputs", "dn2_sha256", "budgets"}
 
 --uncleared-test builds and checks the same pipeline for a build with no clearing record. Its
-entry has "gate": null: the page then offers no Save, and --check-site (the Pages workflow)
+row has "gate": null: the page then offers no Save, and --check-site (the Pages workflow)
 refuses the folder. It is for testing the route, never for publishing.
+
+--local-test SHA256 is --uncleared-test for ONE named TEST build that passed the brick-risk steps (no
+machine-readable record exists for it: the coordinator passes the sha256 from the build's .txt, and it is
+printed). The build must have exactly that sha256. The row gets "local_test": {"brick_risk_sha256": ...};
+the page honours it only on localhost, in a scripts/make_site.sh --preview site, with ?localtest=1, and
+make_site.sh without --preview and --check-site both refuse such a row. Never for publishing.
 
 Elektron's files are read from: DN2_OS112 (the Digitone II OS 1.12 .syx or Elektron's .zip,
 default ../Digitone_II_OS1.12.syx) and DN2_STOCK_DIR (searched for the Digitakt II OS 1.17 or
@@ -49,9 +59,11 @@ def cleared(record: dict | None, sha: str) -> bool:
 def public_record(record: dict) -> dict:
     """What the site publishes of a gate record: the file, its sha256, the date and each gate's
     verdict word. Its logs and interpreters are local paths: never published."""
+    known = record.get("known_issues") or {}
     return {"build": record.get("build"), "sha256": record["sha256"], "stock": record.get("stock"),
             "date": record.get("date"),
-            "gates": {k: str(v).split(":")[0].split(" ")[0] for k, v in record["gates"].items()}}
+            "gates": {k: str(v).split(":")[0].split(" ")[0] for k, v in record["gates"].items()},
+            "known_issues": sorted(known)}        # the names only (their details hold local paths)
 
 
 def stock_paths() -> dict[str, pathlib.Path]:
@@ -138,22 +150,32 @@ def budgets(built: bytes) -> dict:
             "usb": {"used": safety.usb_upgrade_bytes(built), "limit": safety.USB_UPGRADE_BUFFER}}
 
 
-def part_list() -> list[dict]:
-    """the parts, grouped, with this tree's default (Full: DN2MK2_PARTS unset)"""
-    from dnfw.builder import parts as P
-    vals = P.defaults()
-    return [{"group": name, "parts": [{"label": p.label, "on": bool(vals[p.key])} for p in P.PARTS if p.group == gid]}
-            for gid, name in P.GROUPS]
+ROW_KEYS = ("release", "mod_version", "os", "file", "sha256", "gate", "zip", "zip_sha256", "inputs",
+            "dn2_sha256", "budgets")
 
 
 def main(argv: list[str]) -> int:
-    test = "--uncleared-test" in argv
+    local_sha = None
+    if "--local-test" in argv:
+        i = argv.index("--local-test")
+        local_sha = argv[i + 1].lower() if i + 1 < len(argv) else ""
+        if len(local_sha) != 64 or any(c not in "0123456789abcdef" for c in local_sha):
+            print("--local-test needs the build's full 64-hex sha256")
+            return 2
+        argv = argv[:i] + argv[i + 2:]
+    test = "--uncleared-test" in argv or local_sha is not None
     args = [a for a in argv if a != "--uncleared-test"]
-    if len(args) != 4:
+    if len(args) != 3:
         print(__doc__)
         return 2
-    build, release, preset, outdir = pathlib.Path(args[0]), args[1], args[2], pathlib.Path(args[3])
+    build, release, outdir = pathlib.Path(args[0]), args[1], pathlib.Path(args[2])
     want = hashlib.sha256(build.read_bytes()).hexdigest()
+    if local_sha is not None:
+        if want != local_sha:
+            print(f"REFUSED: {build.name} has sha256 {want}, not the {local_sha} named for the local test")
+            return 1
+        print(f"LOCAL TEST bundle: {build.name} sha256 {want}, the coordinator's word that its brick-risk steps passed "
+              "(not a release clearing). Page honours it on localhost, --preview site, ?localtest=1 only.")
     rec_path = pathlib.Path(str(build) + ".gate.json")
     record = json.loads(rec_path.read_text()) if rec_path.is_file() else None
     if not cleared(record, want) and not test:
@@ -186,24 +208,21 @@ def main(argv: list[str]) -> int:
     zsha = hashlib.sha256(zbytes).hexdigest()
     rel = outdir / f"v{release}"
     rel.mkdir(parents=True, exist_ok=True)
-    zname = f"{preset.lower()}-{zsha[:12]}.zip"
+    zname = f"code-{zsha[:12]}.zip"
     (rel / zname).write_bytes(zbytes)
-    fname = f"DN2wishes_v{release}.syx" if preset.lower() == "full" else f"DN2wishes_v{release}_{preset}.syx"
+    fname = f"DN2wishes_v{release}.syx"
     gate = None
     if cleared(record, want):
         gate = f"v{release}/{fname}.gate.json"
         (outdir / gate).write_text(json.dumps(public_record(record), indent=1) + "\n")
-    entry = {"name": preset, "about": "Every part of this release." if preset.lower() == "full" else "",
-             "file": fname, "sha256": want, "zip": f"v{release}/{zname}", "zip_sha256": zsha,
-             "inputs": inputs, "dn2_sha256": dn2_sha, "gate": gate,
-             "budgets": budgets(build.read_bytes()), "parts": part_list()}
+    row = {"release": release, "mod_version": mod_version, "os": "1.12", "file": fname, "sha256": want,
+           "gate": gate, "zip": f"v{release}/{zname}", "zip_sha256": zsha, "inputs": inputs,
+           "dn2_sha256": dn2_sha, "budgets": budgets(build.read_bytes())}
+    if local_sha is not None and gate is None:
+        row["local_test"] = {"brick_risk_sha256": want}
     man = outdir / "wishes.json"
     rows = json.loads(man.read_text()) if man.is_file() else []
-    row = next((r for r in rows if r["release"] == release), None)
-    if row is None:
-        row = {"release": release, "mod_version": mod_version, "os": "1.12", "presets": []}
-        rows.insert(0, row)
-    row["presets"] = [p for p in row["presets"] if p["name"] != preset] + [entry]
+    rows = [row] + [r for r in rows if r.get("release") != release]
     man.write_text(json.dumps(rows, indent=1) + "\n")
     print(f"{zname}: {len(files)} files, {len(zbytes):,} bytes; the zip alone rebuilds {want[:16]}...; "
           f"inputs {', '.join(inputs)}")
@@ -214,27 +233,33 @@ def main(argv: list[str]) -> int:
 
 
 def check_site(outdir: pathlib.Path) -> int:
-    """the Pages workflow's check: every listed zip is there with its sha256, and every listed file
-    has a published gate record that clears its sha256. Any miss: exit 1, publish nothing."""
+    """the Pages workflow's check: wishes.json is a list (an empty list is allowed: the builder then says
+    "No release published yet"); every row listed is one build in this format, its zip is there with its
+    sha256, and it has a published gate record that clears its sha256. Any miss: exit 1, publish nothing."""
     man = outdir / "wishes.json"
     if not man.is_file():
         print(f"no {man}: nothing cleared to publish")
         return 1
     bad = []
     rows = json.loads(man.read_text())
+    if not isinstance(rows, list):
+        bad.append("wishes.json is not a list of releases")
+        rows = []
+    elif not rows:
+        print("no release listed yet: the builder will say so")
     for row in rows:
-        for p in row.get("presets", []):
-            what = f"v{row['release']} {p.get('name')}"
-            z = outdir / str(p.get("zip"))
-            if not z.is_file() or hashlib.sha256(z.read_bytes()).hexdigest() != p.get("zip_sha256"):
-                bad.append(f"{what}: its zip is missing or not the one listed")
-            rec = outdir / str(p.get("gate")) if p.get("gate") else None
-            if rec is None or not rec.is_file() or not cleared(json.loads(rec.read_text()), p.get("sha256", "")):
-                bad.append(f"{what}: no gate record clears {str(p.get('sha256'))[:16]}...")
-    if not rows or not any(r.get("presets") for r in rows):
-        bad.append("no release listed")
+        what = f"v{row.get('release') if isinstance(row, dict) else row}"
+        if not isinstance(row, dict) or set(row) != set(ROW_KEYS):
+            bad.append(f"{what}: not one build in this bundle's format ({', '.join(ROW_KEYS)})")
+            continue
+        z = outdir / str(row["zip"])
+        if not z.is_file() or hashlib.sha256(z.read_bytes()).hexdigest() != row["zip_sha256"]:
+            bad.append(f"{what}: its zip is missing or not the one listed")
+        rec = outdir / str(row["gate"]) if row["gate"] else None
+        if rec is None or not rec.is_file() or not cleared(json.loads(rec.read_text()), str(row["sha256"])):
+            bad.append(f"{what}: no gate record clears {str(row['sha256'])[:16]}...")
     for b in bad:
         print("REFUSED: " + b)
     if not bad:
-        print(f"{man}: every file listed is cleared and every zip is the one listed")
+        print(f"{man}: every release listed is cleared and every zip is the one listed")
     return 1 if bad else 0

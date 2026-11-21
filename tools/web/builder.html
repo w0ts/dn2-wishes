@@ -4,91 +4,90 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Wishes · DN2 mod builder</title>
-<meta name="theme-color" content="#000000">
+
+<link rel="icon" type="image/png" href="data:image/png;base64,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">
+<link rel="apple-touch-icon" href="icons/wishes-180.png">
+<link rel="stylesheet" href="https://w0ts.github.io/site-style/common.css">
 <link rel="stylesheet" href="wishes.css">
 <style>
-/* the builder's own layout (the tokens and the shared components: wishes.css) */
-section { background: var(--s1); border: 1px solid var(--line); margin-bottom: var(--sp-3); padding: 0 0 var(--sp-3); min-width: 0; }
-section > h2 { display: flex; align-items: center; min-height: 30px; margin: 0 0 var(--sp-3); padding: 3px var(--sp-3);
-  background: var(--s2); box-shadow: inset 0 -3px var(--accent); font-size: var(--fs-1); font-weight: 400; text-transform: uppercase; color: var(--fg); }
-section > :not(h2) { margin-left: var(--sp-3); margin-right: var(--sp-3); }
-.files { display: grid; gap: var(--sp-2); }
-.file { display: grid; grid-template-columns: 1fr auto; gap: var(--sp-1) var(--sp-3); align-items: center; background: var(--bg); border: 1px solid var(--line);
-  border-left: 3px solid var(--s3); padding: var(--sp-2) var(--sp-3); }
-.file.over { border-left-color: var(--accent); }
-.file small { color: var(--dim); grid-column: 1 / -1; overflow-wrap: anywhere; font-size: var(--fs-2); }
-.file[hidden] { display: none; }
+/* the builder's own layout: common.css does the rest */
 input[type=file] { display: none; }
-.card { border: 1px solid var(--line); background: var(--bg); border-left: 3px solid var(--accent); }
-.card > h3 { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); min-height: 30px; margin: 0; padding: 3px var(--sp-3); background: var(--s2);
-  font-size: var(--fs-1); font-weight: 400; text-transform: uppercase; color: var(--fg); }
-.card > .body { padding: var(--sp-2) var(--sp-3) var(--sp-3); }
-.card dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px var(--sp-3); margin: 0 0 var(--sp-2); font-size: var(--fs-2); }
-.card dt { color: var(--dim); } .card dd { margin: 0; color: var(--text); overflow-wrap: anywhere; }
-.bars { display: grid; gap: var(--sp-2); margin: var(--sp-2) 0; }
-.bar { display: grid; grid-template-columns: 120px 1fr; gap: 2px var(--sp-3); align-items: center; font-variant-numeric: tabular-nums; }
-.bar b { font-size: var(--fs-1); font-weight: 400; text-transform: uppercase; color: var(--dim); }
-.bar .track { height: 6px; background: var(--s3); overflow: hidden; }
-.bar .fill { height: 100%; background: var(--accent); } .bar .fill.warn { background: var(--warn); }
-.bar .fig { grid-column: 2; color: var(--text); font: var(--fs-1) var(--font-mono); }
-details.parts summary { cursor: pointer; color: var(--fg); font-size: var(--fs-2); }
-.group h4 { margin: var(--sp-2) 0 var(--sp-1); font-size: var(--fs-1); font-weight: 400; text-transform: uppercase; color: var(--dim); }
-.chips { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
-.chips .pill.off { text-decoration: line-through; }
-#result > .note { padding: var(--sp-1) var(--sp-3); background: var(--bg); border-left: 3px solid var(--s3); color: var(--text); }
-#result > .note.ok { border-left-color: var(--accent); }
-#result > .note.bad { border-left-color: var(--err); background: var(--err-soft); }
-#result .hashes { display: grid; grid-template-columns: max-content 1fr; gap: 2px var(--sp-3); font-size: var(--fs-2); margin: var(--sp-1) 0 0; }
+.file.over { border-color: var(--accent); }
+.verdict { font-weight: 600; }
+#result:empty, #fMsg:empty, #fState:empty { display: none; }
+#result .hashes { display: grid; grid-template-columns: max-content 1fr; gap: 2px var(--sp-3); font-size: 14px; margin: var(--sp-1) 0 0; }
 #result .hashes span { overflow-wrap: anywhere; }
-.verdict { font-weight: 600; color: var(--fg); }
-#log { font: var(--fs-1)/1.5 var(--font-mono); color: var(--dim); white-space: pre-wrap; max-height: 220px; overflow: auto; margin-top: var(--sp-2);
-  background: var(--bg); border: 1px solid var(--line); padding: var(--sp-2); }
-#log:empty { display: none; }
-.spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--s3); border-top-color: var(--accent); border-radius: 50%; animation: s 1s linear infinite; vertical-align: -2px; }
-@keyframes s { to { transform: rotate(360deg); } }
-nav.top { display: flex; flex-wrap: wrap; gap: var(--sp-1); align-items: center; margin: 0 0 var(--sp-3); }
-nav.top a { display: inline-flex; align-items: center; min-height: 26px; padding: 2px 10px; background: var(--s2); color: var(--fg); text-decoration: none; text-transform: lowercase; }
-nav.top a:hover { background: var(--s3); }
-nav.top a[aria-current=page] { background: var(--s3); box-shadow: inset 0 -3px var(--accent); }
-nav.top .spacer { flex: 1; }
-@media (max-width: 560px) { .bar { grid-template-columns: 1fr; } .bar .fig { grid-column: 1; } .card dl { grid-template-columns: 1fr; } }
+.card .body { padding-top: var(--sp-1); }
 </style>
 <script src="wishes-verdict.js"></script>
+<script src="wishes-flash.js"></script>
 </head>
 <body>
+<div id="testBanner" class="banner err" hidden>TEST BUILD: local test switch on. This file passed the brick-risk steps only, NOT the release clearing.</div>
 <main>
-  <nav class="top" aria-label="Wishes pages"><a href="./" aria-current="page">builder</a><a href="samples.html">sample import</a><a href="help.html">help</a><span class="spacer"></span><a href="https://github.com/w0ts/dn2-wishes">github.com/w0ts/dn2-wishes</a></nav>
-  <h1>WISHES</h1>
+  <nav class="site" aria-label="Wishes pages"><a href="./" aria-current="page">builder</a><a href="samples.html">sample import</a><a href="help.html">help</a><a href="presets.html">presets</a><a href="about.html">about</a><span class="spacer"></span><a href="https://github.com/w0ts/dn2-wishes">github.com/w0ts/dn2-wishes</a></nav>
+  <div class="titlebar"><h1>Wishes</h1></div>
   <p class="sub">A Digitone II mod, built here in this page from your own copies of Elektron's OS files. Nothing is uploaded anywhere. The page lets you save only a file that is byte for byte one the project's gate cleared. <a id="helpLink" href="help.html">How to reach the hidden functions</a> <span id="src" class="mono"></span></p>
-  <p class="note unoff"><b>Unofficial.</b> Not made, endorsed or supported by Elektron. Wishes is a fork of <a href="https://github.com/De-Pattern/dn2mk2-firmware">De-Pattern's dn2mk2-firmware</a>, with extra machines and effects that are not in upstream's releases. For upstream's own cleared builds use <a href="https://de-pattern.github.io/dn2mk2/patcher.html">the dn2mk2 patcher</a>.</p>
+  <p class="msg warn"><b>Unofficial</b> Not made, endorsed or supported by Elektron. Wishes is a fork of <a href="https://github.com/De-Pattern/dn2mk2-firmware">De-Pattern's dn2mk2-firmware</a>, with extra machines and effects that are not in upstream's releases. For upstream's own cleared builds use <a href="https://de-pattern.github.io/dn2mk2/patcher.html">the dn2mk2 patcher</a>.</p>
 
   <section>
     <h2>1 · Your stock files</h2>
     <div class="files">
-      <label class="file" data-k="dn2"><span><b>Digitone II OS 1.12</b> <span class="mono">.syx</span> or Elektron's .zip — the file that gets patched (exactly stock 1.12)</span><button type="button">Choose…</button><small>not chosen</small><input type="file" accept=".syx,.zip"></label>
-      <label class="file" data-k="dt2"><span><b>Digitakt II OS 1.17</b> (or 1.16) <span class="mono">.syx</span> or .zip — its DSP's sample-reading tables</span><button type="button">Choose…</button><small>not chosen</small><input type="file" accept=".syx,.zip"></label>
-      <label class="file" data-k="md"><span><b>Machinedrum UW OS 1.63</b> <span class="mono">.syx</span>, .bin or .zip — its machines' tables, for PERC</span><button type="button">Choose…</button><small>not chosen</small><input type="file" accept=".syx,.bin,.zip"></label>
-      <label class="file" data-k="mnm"><span><b>Monomachine SFX-6/60 OS 1.32B</b> <span class="mono">.syx</span> or .zip — the Monomachine machines' tables</span><button type="button">Choose…</button><small>not chosen</small><input type="file" accept=".syx,.zip"></label>
+      <label class="file" data-k="dn2"><span><b>Digitone II OS 1.12</b> <span class="mono">.syx</span> or Elektron's .zip — the file that gets patched (exactly stock 1.12)</span><button type="button" class="quiet">Choose…</button><small>not chosen</small><input type="file" accept=".syx,.zip"></label>
+      <label class="file" data-k="dt2"><span><b>Digitakt II OS 1.17</b> (or 1.16) <span class="mono">.syx</span> or .zip — its DSP's sample-reading tables</span><button type="button" class="quiet">Choose…</button><small>not chosen</small><input type="file" accept=".syx,.zip"></label>
+      <label class="file" data-k="md"><span><b>Machinedrum UW OS 1.63</b> <span class="mono">.syx</span>, .bin or .zip — its machines' tables, for PERC</span><button type="button" class="quiet">Choose…</button><small>not chosen</small><input type="file" accept=".syx,.bin,.zip"></label>
+      <label class="file" data-k="mnm"><span><b>Monomachine SFX-6/60 OS 1.32B</b> <span class="mono">.syx</span> or .zip — the Monomachine machines' tables</span><button type="button" class="quiet">Choose…</button><small>not chosen</small><input type="file" accept=".syx,.zip"></label>
     </div>
-    <p class="note">Free downloads from Elektron's support pages. This browser remembers them for next time (on this device only). <a href="#" id="forget">Forget my files</a></p>
+    <p class="note">Only the files this release's build reads are asked for. Free downloads from Elektron's support pages. This browser remembers them for next time (on this device only). <a href="#" id="forget">Forget my files</a></p>
   </section>
 
   <section>
-    <h2>2 · What goes in</h2>
-    <div class="row" id="verRow" hidden><label for="ver"><b>Version</b></label><select id="ver"></select></div>
-    <div id="cards"></div>
+    <h2>2 · Build</h2>
+    <div class="row" id="verRow" hidden><label for="ver"><b>Release</b></label><select id="ver"></select></div>
+    <div id="release"></div>
+    <div class="row"><button id="go" disabled>Build</button><span id="state" class="tag">waiting for the files</span></div>
+    <div id="log" class="log"></div>
+    <p class="note">One build: the whole mod, every machine and effect in it. There is nothing to choose.</p>
   </section>
 
   <section>
-    <h2>3 · Build</h2>
-    <div class="row"><button id="go" class="primary" disabled>Build</button><span id="state" class="pill">waiting for the files</span><button id="save" disabled>Save the .syx</button></div>
+    <h2>3 · Save and flash</h2>
+    <div class="row"><button id="save" disabled>Save the .syx</button></div>
     <div id="result"></div>
-    <div id="log"></div>
-    <p class="note">Save appears only when your build's sha256 is the one in the version's gate record: then it is the very file that passed the project's whole gate (unit tests, the ColdFire emulator, the SHARC runner). Anything else is not offered. Before you flash: back up the +Drive and your projects; the stock OS 1.12 file sent the same way puts the instrument back.</p>
+    <p class="note">Save appears only when your build's sha256 is the one in the release's gate record: then it is the very file that passed the project's whole gate (unit tests, the ColdFire emulator, the SHARC runner). Anything else is not offered.</p>
+    <ol class="steps">
+      <li>Back up the +Drive and your projects with Elektron Transfer.</li>
+      <li>With the Digitone II on and connected by USB, send the saved .syx with Elektron Transfer, as an OS update. Keep the volume low.</li>
+      <li>Switch the Digitone II off and on once after the update.</li>
+    </ol>
+    <p class="note"><b>Back to stock 1.12:</b> send Elektron's own Digitone II OS 1.12 .syx the same way. To remove what the mod stored on the +Drive, run ERASE MOD DATA first (<a href="help.html">help</a>).</p>
+  </section>
+
+  <section id="flashSec" hidden>
+    <h2>4 · Flash from this page (optional)</h2>
+    <p class="note" style="margin-top:0">Instead of Transfer, this page can send the cleared file to the Digitone II over USB, the same way Elektron Transfer does it (the DN2's own OS update: 2,048-byte chunks, each checked and answered by the DN2). Chrome or Edge only. The DN2 then asks <b>UPGRADE OS NOW?</b> on its own screen: nothing is written to its flash before YES is pressed there. Save and Transfer (step 3) stays the usual route.</p>
+    <p class="msg err" id="fNoMidi" hidden>This browser has no Web MIDI: use Chrome or Edge, or save the file and send it with Transfer.</p>
+    <div class="row" id="fTarget">
+      <label class="check"><input type="radio" name="ftarget" value="build" checked> the cleared Wishes build</label>
+      <label id="fStockOpt" class="check" hidden><input type="radio" name="ftarget" value="stock"> back to Elektron's stock OS 1.12 (your file from step 1)</label>
+    </div>
+    <p class="note" id="fImage"></p>
+    <div class="row"><button id="fConnect" type="button" class="quiet">Connect to the Digitone II</button><span id="fDevice" class="tag">not connected</span></div>
+    <div class="checks" id="fChecks">
+      <label class="check top"><input type="checkbox"> The +Drive and the projects are backed up (Transfer).</label>
+      <label class="check top"><input type="checkbox"> Stable power: the DN2 on its own power supply, the computer on mains or charged, set not to sleep.</label>
+      <label class="check top"><input type="checkbox"> Elektron Transfer, Overbridge and every other MIDI program are closed (they share the port).</label>
+      <label class="check top"><input type="checkbox"> A DIN MIDI cable and Elektron's stock OS 1.12 .syx are at hand (the recovery route if the new OS does not start).</label>
+      <label class="check top"><input type="checkbox"> I will answer UPGRADE OS NOW? on the DN2 myself, and leave the cable and this tab alone until it has restarted.</label>
+    </div>
+    <div class="row"><button id="fGo" type="button" disabled>Flash…</button><button id="fAbort" type="button" class="quiet" disabled>Abort</button><span id="fState" class="tag"></span></div>
+    <div class="bar" id="fBar" hidden><b>sent</b><div class="track"><div class="fill" id="fFill" style="width:0%"></div></div><span class="fig" id="fFig"></span></div>
+    <div id="fMsg"></div>
+    <pre id="fLog" class="log"></pre>
   </section>
 
   <section>
-    <h2>4 · Licences and source</h2>
+    <h2>5 · Licences and source</h2>
     <p class="note" style="margin-top:0">The mod and this builder are free software under the <a href="LICENSE">GNU AGPL-3.0-or-later</a>. The Python this page runs is its source: <a id="zipLink" href="#">the build code (.zip)</a>. Ported parts keep their own notices (<a href="THIRD-PARTY.md">THIRD-PARTY.md</a>).</p>
     <p class="note">Wishes builds on De-Pattern's dn2mk2 (<a href="https://github.com/De-Pattern/dn2mk2">site</a>, <a href="https://github.com/De-Pattern/dn2mk2-firmware">firmware source</a>), AGPL-3.0: all of its work is theirs; the additions and any fault in them are Wishes'. Please report problems with a Wishes build on the Wishes repository, not to upstream.</p>
     <p class="note">Nothing here is Elektron's: no firmware and no tables. The page reads those from your own files, in this browser, and sends nothing anywhere. Not affiliated with Elektron.</p>
@@ -100,7 +99,12 @@ const $ = (s, el = document) => el.querySelector(s);
 const DATA = "wishes/";
 const KEYS = ["dn2", "dt2", "md", "mnm"];
 const files = {};
-let releases = [], release = null, preset = null, record = null, worker = null, built = null;
+let releases = [], release = null, record = null, worker = null, built = null;
+// the local test switch (wishes-verdict.js localTestAllowed): off unless localhost + a --preview site + ?localtest=1
+const env = { hostname: location.hostname, preview: false, query: location.search };
+const verdictOf = (r, rec, got) => WishesVerdict.verdictLocal(r, rec, got, env);
+const testOn = () => WishesVerdict.localTestAllowed(env, release);
+const fl = { access: null, input: null, output: null, flasher: null, dev: null, busy: false, wake: null, img: null };
 
 function fmt(n) { return Number(n).toLocaleString("en-US"); }
 function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
@@ -110,7 +114,7 @@ async function hex(buf) {
 }
 async function getJson(url) {
   const r = await fetch(url, { cache: "no-cache" });
-  if (!r.ok) throw new Error(url + ": " + r.status);
+  if (!r.ok) { const e = new Error(url + ": " + r.status); e.status = r.status; throw e; }
   return r.json();
 }
 
@@ -158,120 +162,257 @@ document.querySelectorAll(".file").forEach(el => {
   el.ondrop = (e) => { e.preventDefault(); el.classList.remove("over"); if (e.dataTransfer.files[0]) setFile(k, e.dataTransfer.files[0]); };
 });
 
-// -- the preset card: its gate record and its own measured figures --
+// -- the release: its one build, its gate record and its own measured figures --
 function bar(label, b) {
   const pct = Math.min(100, 100 * b.used / b.limit);
   return `<div class="bar"><b>${label}</b><div class="track"><div class="fill ${pct > 98.5 ? "warn" : ""}" style="width:${pct.toFixed(2)}%"></div></div>
     <span class="fig">${fmt(b.used)} of ${fmt(b.limit)} B · ${fmt(b.limit - b.used)} free</span></div>`;
 }
-function drawCard() {
-  const p = preset, ok = !!(p.gate && record && WishesVerdict.cleared(record, p.sha256));
-  const gate = ok ? `<span class="pill ok">CLEARED</span>` : `<span class="pill bad">NOT CLEARED</span>`;
-  const passed = ok ? Object.keys(record.gates).length : 0;
-  const groups = (p.parts || []).map(g => `<div class="group"><h4>${esc(g.group)}</h4><div class="chips">${g.parts.map(x =>
-    `<span class="pill ${x.on ? "" : "off"}">${esc(x.label)}</span>`).join("")}</div></div>`).join("");
-  $("#cards").innerHTML = `<div class="card"><h3>${esc(p.name)} ${gate}</h3><div class="body">
-    <p class="note" style="margin-top:0">${esc(p.about || "")}</p>
-    <dl><dt>file</dt><dd class="mono">${esc(p.file)}</dd>
-      <dt>sha256</dt><dd class="mono">${esc(p.sha256)}</dd>
-      <dt>gate</dt><dd>${ok ? `cleared ${esc(record.date || "")}: ${passed} gates passed` : "no gate record clears this file yet: the page will build it but offers no Save"}</dd>
-      <dt>for</dt><dd>Digitone II OS ${esc(release.os)} · mod ${esc(release.mod_version)}</dd></dl>
-    <div class="bars">${p.budgets ? bar("DSP upload", p.budgets.dsp_upload) + bar("USB image", p.budgets.usb) : ""}</div>
-    <details class="parts"><summary>What is in it (${(p.parts || []).reduce((n, g) => n + g.parts.filter(x => x.on).length, 0)} parts)</summary>${groups}</details>
+function isCleared() { return !!(release && release.gate && record && WishesVerdict.cleared(record, release.sha256)); }
+function drawRelease() {
+  const r = release, ok = isCleared();
+  const gate = ok ? `<span class="tag accent">CLEARED</span>` : (testOn() ? `<span class="tag err">TEST BUILD (brick-risk steps only)</span>` : `<span class="tag err">NOT CLEARED</span>`);
+  $("#release").innerHTML = `<div class="card accent"><div class="card-head"><h3>DN2wishes v${esc(r.release)}</h3>${gate}</div><div class="body">
+    <dl class="kv"><dt>file</dt><dd class="mono">${esc(r.file)}</dd>
+      <dt>sha256</dt><dd class="mono">${esc(r.sha256)}</dd>
+      <dt>gate</dt><dd>${ok ? `cleared ${esc(record.date || "")}: ${Object.keys(record.gates).length} gates passed` : "no gate record clears this file: the page will build it but offers no Save"}</dd>
+      <dt>for</dt><dd>Digitone II OS ${esc(r.os)}</dd></dl>
+    <div class="bars">${r.budgets ? bar("DSP upload", r.budgets.dsp_upload) + bar("USB image", r.budgets.usb) : ""}</div>
   </div></div>`;
+}
+function noRelease(html) {
+  release = null; record = null; built = null;
+  $("#release").innerHTML = html;
+  $("#src").textContent = "";
+  $("#state").className = "tag"; $("#state").textContent = "nothing to build";
+  refresh();
 }
 
 function refresh() {
-  if (!preset) return;
-  const need = preset.inputs;
+  const need = release ? release.inputs : KEYS;
   for (const el of document.querySelectorAll(".file")) el.hidden = !need.includes(el.dataset.k);
-  const ready = need.every(k => files[k]);
+  const ready = !!release && need.every(k => files[k]);
   const busy = $("#go").dataset.busy === "1";
-  $("#go").disabled = !ready || busy;
-  if (!busy && !built) { $("#state").className = "pill"; $("#state").textContent = ready ? "ready" : "waiting for the files"; }
+  $("#go").disabled = !ready || busy || fl.busy;
+  if (release && !busy && !built) { $("#state").className = "tag"; $("#state").textContent = ready ? "ready" : "waiting for the files"; }
 }
 
 // -- build --
 $("#go").onclick = async () => {
-  built = null;
+  if (!release) return;
+  built = null; drawFlash();
   $("#save").disabled = true;
   $("#result").innerHTML = "";
   $("#log").textContent = "";
   $("#go").dataset.busy = "1"; $("#go").disabled = true;
   $("#state").innerHTML = '<span class="spin"></span> building';
   const t0 = Date.now();
-  const p = preset, rec = record;
-  const payload = { zip: DATA + p.zip, zipSha: p.zip_sha256, modVersion: release.mod_version, dn2Sha: p.dn2_sha256,
-    inputs: p.inputs, files: {} };
-  for (const k of p.inputs) payload.files[k] = { name: files[k].name, bytes: new Uint8Array(await files[k].arrayBuffer()) };
+  const r = release, rec = record;
+  const payload = { zip: DATA + r.zip, zipSha: r.zip_sha256, modVersion: r.mod_version, dn2Sha: r.dn2_sha256,
+    inputs: r.inputs, files: {} };
+  for (const k of r.inputs) payload.files[k] = { name: files[k].name, bytes: new Uint8Array(await files[k].arrayBuffer()) };
   if (!worker) worker = new Worker("builder-worker.js");
   worker.onmessage = async (e) => {
     const d = e.data;
     if ("log" in d) { const l = $("#log"); l.textContent += d.log + "\n"; l.scrollTop = l.scrollHeight; return; }
     $("#go").dataset.busy = "0";
-    if (d.error) { $("#state").className = "pill bad"; $("#state").textContent = "stopped"; $("#result").innerHTML = `<p class="note bad">${esc(d.error)}</p>`; refresh(); return; }
-    await done(d.done, p, rec, (Date.now() - t0) / 1000);
+    if (d.error) { $("#state").className = "tag err"; $("#state").textContent = "stopped"; $("#result").innerHTML = `<p class="msg err">${esc(d.error)}</p>`; refresh(); return; }
+    await done(d.done, r, rec, (Date.now() - t0) / 1000, d.stock);
     refresh();
   };
   worker.onerror = (e) => {
     $("#go").dataset.busy = "0";
-    $("#state").className = "pill bad"; $("#state").textContent = "stopped";
+    $("#state").className = "tag err"; $("#state").textContent = "stopped";
     $("#result").innerHTML = `<p class="note bad">The build's worker stopped: ${esc(e.message || "no message (out of memory?)")}. Reload the page and try again.</p>`;
     worker = null; refresh();
   };
   worker.postMessage(payload);
 };
 
-async function done(syx, p, rec, secs) {
+async function done(syx, r, rec, secs, stock) {
   const got = await hex(syx);
-  const v = WishesVerdict.verdict(p, rec, got);
-  built = v.save ? { syx, got, p, rec } : null;
-  $("#state").className = "pill " + (v.save ? "ok" : "bad");
-  $("#state").textContent = v.save ? "CLEARED" : "do not flash";
-  $("#result").innerHTML = `<p class="note ${v.save ? "ok" : "bad"}"><span class="verdict">${esc(v.text)}</span> Built in ${secs.toFixed(0)} s.</p>
+  const v = verdictOf(r, rec, got);
+  // the stock file the build was made from: offered for a flash back to stock only when it is Elektron's own 1.12
+  const stockOk = !!(stock && r.dn2_sha256 && (await hex(stock)) === r.dn2_sha256);
+  built = v.save ? { syx, got, r, rec, stock: stockOk ? stock : null } : null;
+  drawFlash();
+  $("#state").className = "tag " + (v.save ? "accent" : "err");
+  $("#state").textContent = v.save ? (v.test ? "TEST BUILD" : "CLEARED") : "do not flash";
+  $("#result").innerHTML = `<p class="msg ${v.save ? "ok" : "err"}"><span class="verdict">${esc(v.text)}</span> Built in ${secs.toFixed(0)} s.</p>
     <div class="hashes"><b>your build</b><span class="mono">${esc(got)}</span>
-    <b>cleared file</b><span class="mono">${p.gate && WishesVerdict.cleared(rec, p.sha256) ? esc(v.want) : "none: no gate record clears this version (its build: " + esc(v.want || "?") + ")"}</span></div>`;
+    <b>cleared file</b><span class="mono">${r.gate && WishesVerdict.cleared(rec, r.sha256) ? esc(v.want) : "none: no gate record clears this release (its build: " + esc(v.want || "?") + ")"}</span></div>`;
   $("#save").disabled = !v.save;
 }
 
 $("#save").onclick = async () => {
   if (!built) return;
   // once more, on the bytes about to leave the page
-  const v = WishesVerdict.verdict(built.p, built.rec, await hex(built.syx));
+  const v = verdictOf(built.r, built.rec, await hex(built.syx));
   if (!v.save) { $("#save").disabled = true; return; }
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([built.syx], { type: "application/octet-stream" }));
-  a.download = built.p.file; a.click();
+  a.download = built.r.file; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 };
 
-// -- start: wishes/wishes.json (releases, newest first; one card each: Full) --
+// -- flash from this page (wishes-flash.js: Transfer's own USB OS update; only the cleared build or stock 1.12) --
+function flashTarget() {
+  const c = document.querySelector("input[name=ftarget]:checked");
+  return built && c && c.value === "stock" && built.stock ? "stock" : "build";
+}
+function flashBytes() { return !built ? null : (flashTarget() === "stock" ? built.stock : built.syx); }
+function flashName() { return flashTarget() === "stock" ? "Elektron's Digitone II OS 1.12" : "DN2wishes v" + built.r.release; }
+async function flashVerified() {
+  // once more, on the bytes about to leave the page: the cleared file, or Elektron's stock 1.12
+  if (!built) return false;
+  const b = flashBytes(), sha = await hex(b);
+  return flashTarget() === "stock" ? sha === built.r.dn2_sha256 : verdictOf(built.r, built.rec, sha).save;
+}
+function flog(t) { const l = $("#fLog"); l.textContent += new Date().toISOString().slice(11, 23) + " " + t + "\n"; l.scrollTop = l.scrollHeight; }
+function fmsg(cls, html) { $("#fMsg").innerHTML = html ? `<p class="msg ${cls === "bad" ? "err" : cls}">${html}</p>` : ""; }
+function drawFlash() {
+  // (2026-11-21, the User: connect without waiting for the build) the section shows from the start: Connect works
+  // at once, Flash waits for a build whose verdict lets it be saved
+  $("#flashSec").hidden = false;
+  const midi = !!navigator.requestMIDIAccess;
+  $("#fNoMidi").hidden = midi;
+  $("#fStockOpt").hidden = !(built && built.stock);
+  const b = flashBytes();
+  fl.img = b ? WishesFlash.checkImage(b) : { ok: false, errors: [] };
+  $("#fImage").textContent = !b
+    ? "No file yet: build it in step 2 (connecting to the Digitone II can be done meanwhile)."
+    : fl.img.ok
+      ? `${flashName()}: ${fmt(b.length)} bytes, ${fmt(fl.img.packets)} packets in order, ${fmt(fl.img.usbBytes)} of ${fmt(WishesFlash.C.USB_BUFFER)} bytes of the DN2's receive buffer.`
+      : `Not sendable: ${fl.img.errors.join("; ")}`;
+  const ticked = [...document.querySelectorAll("#fChecks input")].every(i => i.checked);
+  $("#fConnect").disabled = !midi || fl.busy;
+  $("#fGo").disabled = !midi || fl.busy || !fl.img.ok || !(fl.dev && fl.dev.ok) || !ticked;
+  $("#fAbort").disabled = !fl.busy;
+  document.querySelectorAll("#fTarget input, #fChecks input").forEach(i => i.disabled = fl.busy);
+}
+document.querySelectorAll("#fTarget input, #fChecks input").forEach(i => i.onchange = drawFlash);
+drawFlash();                                     // shown at load: Connect before any build
+function fprogress(n, total) {
+  $("#fBar").hidden = false;
+  $("#fFill").style.width = (100 * n / total).toFixed(1) + "%";
+  $("#fFig").textContent = `${fmt(n)} of ${fmt(total)} B`;
+}
+function fdevice(cls, text) { const d = $("#fDevice"); d.className = "tag " + ({ ok: "accent", bad: "err" }[cls] || ""); d.textContent = text; }
+function onMidiState(e) {
+  const p = e.port;
+  if (p.state !== "disconnected" || (p !== fl.input && p !== fl.output)) return;
+  if (fl.flasher && fl.flasher.state === "confirm") {
+    flog("the DN2's USB port went away: expected once it installs the OS and restarts");
+  } else if (fl.flasher && fl.busy) {
+    flog("the USB port went away during the transfer");
+    fl.flasher.portLost();
+  }
+  fl.input = fl.output = null; fl.dev = null;
+  fdevice("", "not connected");
+  drawFlash();
+}
+$("#fConnect").onclick = async () => {
+  if (!navigator.requestMIDIAccess || fl.busy) return;
+  fmsg("", ""); fl.dev = null; fdevice("", "connecting");
+  try {
+    if (!fl.access) { fl.access = await navigator.requestMIDIAccess({ sysex: true }); fl.access.onstatechange = onMidiState; }
+  } catch (e) { fdevice("bad", "no MIDI access"); fmsg("bad", "The browser refused MIDI access with SysEx: " + esc(e.message || e) + ". Allow it for this site and try again."); return; }
+  const dn2 = (m) => [...m.values()].filter(p => /Digitone II/i.test(p.name || "") && p.state === "connected");
+  const ins = dn2(fl.access.inputs), outs = dn2(fl.access.outputs);
+  if (ins.length !== 1 || outs.length !== 1) {
+    fdevice("bad", "no single Digitone II");
+    fmsg("bad", `Found ${ins.length} Digitone II input(s) and ${outs.length} output(s). Connect exactly one Digitone II by USB (USB CONFIG: USB MIDI or Overbridge), close other MIDI programs, and try again.`);
+    drawFlash(); return;
+  }
+  if (fl.input && fl.input !== ins[0]) fl.input.onmidimessage = null;
+  fl.input = ins[0]; fl.output = outs[0];
+  fl.flasher = WishesFlash.createFlasher({ send: (b) => fl.output.send(b), log: flog, progress: fprogress });
+  fl.input.onmidimessage = (e) => fl.flasher && fl.flasher.receive(e.data);
+  flog(`ports: in "${fl.input.name}", out "${fl.output.name}"`);
+  try {
+    const d = await fl.flasher.probe();
+    fl.dev = d;
+    const what = `${d.ping.name || "?"} · OS ${d.version.version || "?"} (build ${d.version.build || "?"})`;
+    flog("Ping and SoftwareVersion answered: " + what);
+    if (d.ok) fdevice("ok", what);
+    else { fdevice("bad", what); fmsg("bad", "Not flashed from here: " + esc(d.errors.join("; ")) + "."); }
+  } catch (e) {
+    fdevice("bad", "no answer"); fmsg("bad", "The Digitone II did not answer Ping/SoftwareVersion (" + esc(e.message) + "). Is Transfer or Overbridge still open? If not, quit the browser completely (Cmd+Q / close every window) and reopen this page: a browser that was open while the Digitone II restarted often keeps a dead MIDI connection.");
+  }
+  drawFlash();
+};
+$("#fAbort").onclick = () => {
+  if (fl.flasher && fl.flasher.abort()) { flog("Abort pressed: stopping and sending the cancel"); $("#fState").textContent = "cancelling"; }
+  else if (fl.flasher && fl.flasher.state === "confirm") fmsg("", "The DN2 already has the whole file: answer <b>NO</b> on the DN2 to keep the current OS.");
+};
+window.addEventListener("beforeunload", (e) => { if (fl.busy) { e.preventDefault(); e.returnValue = ""; } });
+$("#fGo").onclick = async () => {
+  if (fl.busy || !built || !fl.flasher || !(fl.dev && fl.dev.ok)) return;
+  if (!(await flashVerified())) { fmsg("bad", "These bytes are not the cleared file (or not stock 1.12): not sent."); return; }
+  const bytes = flashBytes();
+  if (!confirm(`Send ${flashName()} (${fmt(bytes.length)} bytes) to the Digitone II now?\n\nWhen all of it is sent, the DN2 asks UPGRADE OS NOW? on its own screen: YES installs it, NO keeps the current OS. Do not switch it off or unplug it while it installs.`)) return;
+  fl.busy = true; fmsg("", ""); $("#fLog").textContent = ""; fprogress(0, bytes.length);
+  $("#fState").className = "tag"; $("#fState").innerHTML = '<span class="spin"></span> sending';
+  drawFlash(); refresh();
+  try { fl.wake = navigator.wakeLock ? await navigator.wakeLock.request("screen") : null; } catch (_) { fl.wake = null; }
+  try {
+    await fl.flasher.flash(bytes);
+    $("#fState").className = "tag accent"; $("#fState").textContent = "answer on the DN2";
+    fmsg("ok", `All ${fmt(bytes.length)} bytes sent and accepted. <b>The Digitone II now asks UPGRADE OS NOW? on its own screen.</b> YES installs ${esc(flashName())}; NO keeps the current OS. After YES, do not switch it off or unplug it: it writes the OS and restarts by itself (its USB port disappears then; that is expected). Then switch it off and on once.`);
+  } catch (e) {
+    $("#fState").className = "tag err"; $("#fState").textContent = "stopped";
+    const why = e.code === "lost" ? "The USB port disappeared before the end."
+      : e.code === "aborted" ? "Stopped by Abort; the DN2 was told to cancel."
+      : "Stopped: " + esc(e.message) + ".";
+    fmsg("bad", `${why} Nothing was written to the DN2's flash (it writes only after its own UPGRADE OS NOW? YES). Switch the DN2 off and on before trying again. If it does not start, use the recovery route (docs/flashing.md: the Early Start-up Menu over DIN with the stock 1.12 .syx).`);
+    flog("stopped: " + e.message);
+  } finally {
+    fl.busy = false;
+    try { if (fl.wake) await fl.wake.release(); } catch (_) { /* */ }
+    fl.wake = null; fl.dev = null; fdevice("", "connect again for another run");
+    drawFlash(); refresh();
+  }
+};
+
+// -- start: wishes/wishes.json (releases, newest first; one build each) --
 async function loadRelease(r) {
-  release = r; preset = r.presets[0]; record = null; built = null;
+  release = r; record = null; built = null;
   $("#result").innerHTML = ""; $("#save").disabled = true;
-  if (preset.gate) {
-    try { record = await getJson(DATA + preset.gate); } catch (e) { record = null; }
+  if (r.gate) {
+    try { record = await getJson(DATA + r.gate); } catch (e) { record = null; }
   }
   $("#src").textContent = `· v${r.release} · OS ${r.os}`;
-  $("#zipLink").href = DATA + preset.zip;
-  drawCard(); refresh();
+  $("#testBanner").hidden = !testOn();
+  $("#zipLink").href = DATA + r.zip;
+  drawRelease(); refresh();
 }
 (async () => {
-  try {
-    releases = (await getJson(DATA + "wishes.json")).filter(r => r.os === "1.12" && r.presets && r.presets.length);
-    if (!releases.length) throw new Error("no release listed");
-    const sel = $("#ver");
-    for (const r of releases) {
-      const o = document.createElement("option");
-      o.value = r.release; o.textContent = `v${r.release} (OS ${r.os})`;
-      sel.appendChild(o);
-    }
-    $("#verRow").hidden = releases.length < 2;
-    sel.onchange = () => loadRelease(releases.find(r => r.release === sel.value));
-    await loadRelease(releases[0]);
-  } catch (e) {
-    $("#cards").innerHTML = `<p class="note bad">Could not load the builder's data: ${esc(e.message || e)}</p>`; return;
+  let rows;
+  if (/(^|[?&])localtest=1(&|$)/.test(location.search)) {      // only asked for: the marker exists only in a --preview site
+    try { env.preview = (await getJson("localtest-preview.json")).preview === true; } catch (e) { env.preview = false; }
   }
+  try {
+    rows = await getJson(DATA + "wishes.json");
+  } catch (e) {
+    if (e.status === 404) rows = [];       // nothing published yet: not an error
+    else { noRelease(`<p class="msg err">Could not load the builder's data: ${esc(e.message || e)}</p>`); recall(); return; }
+  }
+  if (!Array.isArray(rows)) { noRelease(`<p class="msg err">Could not load the builder's data: wishes.json is not a list of releases</p>`); recall(); return; }
+  releases = rows.filter(r => r && r.os === "1.12" && r.sha256 && r.zip);
+  if (!releases.length) {
+    noRelease(rows.length ? `<p class="msg err">Could not load the builder's data: no release in wishes.json is one this page can build</p>`
+                          : `<p class="note">No release published yet.</p>`);
+    recall(); return;
+  }
+  const sel = $("#ver");
+  for (const r of releases) {
+    const o = document.createElement("option");
+    o.value = r.release; o.textContent = `v${r.release} (OS ${r.os})`;
+    sel.appendChild(o);
+  }
+  $("#verRow").hidden = releases.length < 2;
+  sel.onchange = () => loadRelease(releases.find(r => r.release === sel.value));
+  await loadRelease(releases[0]);
   recall();
 })();
 </script>
