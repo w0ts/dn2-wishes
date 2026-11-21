@@ -55,7 +55,7 @@ def convert(md: str, icons: str) -> tuple[str, str]:
                 raise SystemExit("make_about: unsupported heading: %r" % line)
             if len(m.group(1)) == 1:
                 title = m.group(2)
-                body.append('<header class="site"><div class="titlebar"><h1>%s</h1></div>%s</header>' % (inline(title), "@@NAV@@"))
+                body.append('<header class="site"><div class="titlebar"><h1><a href="https://w0ts.github.io/">w0ts</a> / Wishes · about</h1></div>%s</header>' % "@@NAV@@")
             else:
                 body.append("<h2>%s</h2>" % inline(m.group(2)))
             i += 1
@@ -88,7 +88,7 @@ PAGE = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Wishes · about</title>
+<title>w0ts / Wishes · about</title>
 <link rel="icon" type="image/png" href="icons/wishes-192.png">
 <link rel="apple-touch-icon" href="icons/wishes-180.png">
 <link rel="stylesheet" href="https://w0ts.github.io/site-style/common.css">
