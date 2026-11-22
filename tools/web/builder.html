@@ -32,12 +32,12 @@ input[type=file] { display: none; }
   <section>
     <h2>1 · Your stock files</h2>
     <div class="files">
-      <label class="file" data-k="dn2"><span><b>Digitone II OS 1.12</b> <span class="mono">.syx</span> or Elektron's .zip — the file that gets patched (exactly stock 1.12)</span><button type="button" class="quiet">Choose…</button><small>not chosen</small><input type="file" accept=".syx,.zip"></label>
-      <label class="file" data-k="dt2"><span><b>Digitakt II OS 1.17</b> (or 1.16) <span class="mono">.syx</span> or .zip — its DSP's sample-reading tables</span><button type="button" class="quiet">Choose…</button><small>not chosen</small><input type="file" accept=".syx,.zip"></label>
-      <label class="file" data-k="md"><span><b>Machinedrum UW OS 1.63</b> <span class="mono">.syx</span>, .bin or .zip — its machines' tables, for PERC</span><button type="button" class="quiet">Choose…</button><small>not chosen</small><input type="file" accept=".syx,.bin,.zip"></label>
-      <label class="file" data-k="mnm"><span><b>Monomachine SFX-6/60 OS 1.32B</b> <span class="mono">.syx</span> or .zip — the Monomachine machines' tables</span><button type="button" class="quiet">Choose…</button><small>not chosen</small><input type="file" accept=".syx,.zip"></label>
+      <label class="file" data-k="dn2"><span><b>Digitone II OS 1.12</b> <span class="mono">.syx</span> or Elektron's .zip</span><button type="button" class="quiet">Choose…</button><small>not chosen</small><input type="file" accept=".syx,.zip"></label>
+      <label class="file" data-k="dt2"><span><b>Digitakt II OS 1.17</b> (or 1.16) <span class="mono">.syx</span> or .zip</span><button type="button" class="quiet">Choose…</button><small>not chosen</small><input type="file" accept=".syx,.zip"></label>
+      <label class="file" data-k="md"><span><b>Machinedrum UW OS 1.63</b> <span class="mono">.syx</span>, .bin or .zip</span><button type="button" class="quiet">Choose…</button><small>not chosen</small><input type="file" accept=".syx,.bin,.zip"></label>
+      <label class="file" data-k="mnm"><span><b>Monomachine SFX-6/60 OS 1.32B</b> <span class="mono">.syx</span> or .zip</span><button type="button" class="quiet">Choose…</button><small>not chosen</small><input type="file" accept=".syx,.zip"></label>
     </div>
-    <p class="note">Only the files this release's build reads are asked for. Free downloads from Elektron's support pages. This browser remembers them for next time (on this device only). <a href="#" id="forget">Forget my files</a></p>
+    <p class="note"><a href="#" id="forget">Forget my files</a></p>
   </section>
 
   <section>
@@ -46,7 +46,6 @@ input[type=file] { display: none; }
     <div id="release"></div>
     <div class="row"><button id="go" disabled>Build</button><span id="state" class="tag">waiting for the files</span></div>
     <div id="log" class="log"></div>
-    <p class="note">One build: the whole mod, every machine and effect in it. There is nothing to choose.</p>
   </section>
 
   <section>
