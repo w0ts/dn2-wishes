@@ -53,10 +53,6 @@ input[type=file] { display: none; }
   <section id="flashSec" hidden>
     <h2>3 · Flash</h2>
     <p class="msg err" id="fNoMidi" hidden>This browser has no Web MIDI: use Chrome or Edge, or save the file and send it with Transfer.</p>
-    <div class="row" id="fTarget">
-      <label class="check"><input type="radio" name="ftarget" value="build" checked> the cleared Wishes build</label>
-      <label id="fStockOpt" class="check" hidden><input type="radio" name="ftarget" value="stock"> back to Elektron's stock OS 1.12 (your file from step 1)</label>
-    </div>
     <p class="note" id="fImage"></p>
     <div class="row"><button id="fConnect" type="button" class="quiet">Connect to the Digitone II</button><span id="fDevice" class="tag">not connected</span></div>
     <div class="checks" id="fChecks">
@@ -231,18 +227,14 @@ $("#save").onclick = async () => {
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 };
 
-// -- flash from this page (wishes-flash.js: Transfer's own USB OS update; only the cleared build or stock 1.12) --
-function flashTarget() {
-  const c = document.querySelector("input[name=ftarget]:checked");
-  return built && c && c.value === "stock" && built.stock ? "stock" : "build";
-}
-function flashBytes() { return !built ? null : (flashTarget() === "stock" ? built.stock : built.syx); }
-function flashName() { return flashTarget() === "stock" ? "Elektron's Digitone II OS 1.12" : "DN2wishes v" + built.r.release; }
+// -- flash from this page (wishes-flash.js: Transfer's own USB OS update; only the cleared build this page made) --
+// (2026-11-22, the User: "we only allow to flash what we built": no stock 1.12 option)
+function flashBytes() { return built ? built.syx : null; }
+function flashName() { return "DN2wishes v" + built.r.release; }
 async function flashVerified() {
-  // once more, on the bytes about to leave the page: the cleared file, or Elektron's stock 1.12
+  // once more, on the bytes about to leave the page: the cleared file
   if (!built) return false;
-  const b = flashBytes(), sha = await hex(b);
-  return flashTarget() === "stock" ? sha === built.r.dn2_sha256 : verdictOf(built.r, built.rec, sha).save;
+  return verdictOf(built.r, built.rec, await hex(built.syx)).save;
 }
 function flog(t) { const l = $("#fLog"); l.textContent += new Date().toISOString().slice(11, 23) + " " + t + "\n"; l.scrollTop = l.scrollHeight; }
 function fmsg(cls, html) { $("#fMsg").innerHTML = html ? `<p class="msg ${cls === "bad" ? "err" : cls}">${html}</p>` : ""; }
@@ -252,20 +244,19 @@ function drawFlash() {
   $("#flashSec").hidden = false;
   const midi = !!navigator.requestMIDIAccess;
   $("#fNoMidi").hidden = midi;
-  $("#fStockOpt").hidden = !(built && built.stock);
   const b = flashBytes();
   fl.img = b ? WishesFlash.checkImage(b) : { ok: false, errors: [] };
   $("#fImage").textContent = !b
-    ? "No file yet: build it in step 2 (connecting to the Digitone II can be done meanwhile)."
+    ? ""
     : fl.img.ok
       ? `${flashName()}: ${fmt(b.length)} bytes, ${fmt(fl.img.packets)} packets in order, ${fmt(fl.img.usbBytes)} of ${fmt(WishesFlash.C.USB_BUFFER)} bytes of the DN2's receive buffer.`
       : `Not sendable: ${fl.img.errors.join("; ")}`;
   const ticked = [...document.querySelectorAll("#fChecks input")].every(i => i.checked);
   $("#fConnect").disabled = !midi || fl.busy;
   $("#fGo").disabled = !midi || fl.busy || !fl.img.ok || !(fl.dev && fl.dev.ok) || !ticked;
-  document.querySelectorAll("#fTarget input, #fChecks input").forEach(i => i.disabled = fl.busy);
+  document.querySelectorAll("#fChecks input").forEach(i => i.disabled = fl.busy);
 }
-document.querySelectorAll("#fTarget input, #fChecks input").forEach(i => i.onchange = drawFlash);
+document.querySelectorAll("#fChecks input").forEach(i => i.onchange = drawFlash);
 drawFlash();                                     // shown at load: Connect before any build
 function fprogress(n, total) {
   $("#fBar").hidden = false;

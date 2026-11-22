@@ -77,15 +77,15 @@ def test_the_page_offers_the_flash_only_beside_the_cleared_build():
     # (2026-11-21, the User: connect without waiting for the build) the section shows at load and Connect works;
     # with no build there are no bytes, the image check fails, and Flash stays disabled
     assert '<section id="flashSec" hidden>' in page and '$("#flashSec").hidden = false;' in page
-    assert "function flashBytes() { return !built ? null" in page
+    assert "function flashBytes() { return built ? built.syx : null; }" in page
     assert "fl.img = b ? WishesFlash.checkImage(b) : { ok: false, errors: [] };" in page
     assert '$("#fGo").disabled = !midi || fl.busy || !fl.img.ok' in page
     assert "if (fl.busy || !built || !fl.flasher" in page
     # built is set only by the verdict; the bytes are re-checked right before they are sent
     assert "built = v.save ? { syx, got, r, rec, stock: stockOk ? stock : null } : null;" in page
     assert "if (!(await flashVerified()))" in page
-    assert "verdictOf(built.r, built.rec, sha).save" in page
-    assert "sha === built.r.dn2_sha256" in page                       # stock: Elektron's own 1.12 only
+    assert "verdictOf(built.r, built.rec, await hex(built.syx)).save" in page
+    assert "ftarget" not in page and "fStockOpt" not in page          # only the cleared build this page made (User 2026-11-22)
     # never a file picked for the flash: the only file inputs are step 1's
     assert page.count('<input type="file"') == 4                       # the four of step 1
     assert "<input type=\"file\"" not in page.split('id="flashSec"', 1)[1].split("</section>", 1)[0]
