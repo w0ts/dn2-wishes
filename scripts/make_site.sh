@@ -23,10 +23,10 @@ cp "$web/help.html" "$out/help.html"
 cp "$web/presets.html" "$out/presets.html"
 python3 "$here/scripts/presets_zip.py" "$out/presets" >/dev/null
 cp "$web/manifest.webmanifest" "$out/"
-# the About page: README.md through scripts/make_about.py, with the README's icons beside it
+# the About page: tools/web/about.md (its source) through scripts/make_about.py, with its icons (docs/img/icons) beside it
 mkdir -p "$out/about-icons"
 cp "$here/docs/img/icons/"*.png "$out/about-icons/"
-python3 "$here/scripts/make_about.py" "$here/README.md" "$out/about.html" about-icons/
+python3 "$here/scripts/make_about.py" "$web/about.md" "$out/about.html" about-icons/
 cp "$out/about.html" "$out/index.html"
 cp "$web/icons/wishes-"*.png "$out/icons/"
 cp "$here/LICENSE" "$here/THIRD-PARTY.md" "$out/"
