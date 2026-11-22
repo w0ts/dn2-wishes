@@ -46,24 +46,12 @@ input[type=file] { display: none; }
     <div id="release"></div>
     <div class="row"><button id="go" disabled>Build</button><span id="state" class="tag">waiting for the files</span></div>
     <div id="log" class="log"></div>
-  </section>
-
-  <section>
-    <h2>3 · Save and flash</h2>
-    <div class="row"><button id="save" disabled>Save the .syx</button></div>
     <div id="result"></div>
-    <p class="note">Save appears only when your build's sha256 is the one in the release's gate record: then it is the very file that passed the project's whole gate (unit tests, the ColdFire emulator, the SHARC runner). Anything else is not offered.</p>
-    <ol class="steps">
-      <li>Back up the +Drive and your projects with Elektron Transfer.</li>
-      <li>With the Digitone II on and connected by USB, send the saved .syx with Elektron Transfer, as an OS update. Keep the volume low.</li>
-      <li>Switch the Digitone II off and on once after the update.</li>
-    </ol>
-    <p class="note"><b>Back to stock 1.12:</b> send Elektron's own Digitone II OS 1.12 .syx the same way. To remove what the mod stored on the +Drive, run ERASE MOD DATA first (<a href="help.html">help</a>).</p>
+    <div class="row"><button id="save" class="quiet" disabled>Save the .syx</button></div>
   </section>
 
   <section id="flashSec" hidden>
-    <h2>4 · Flash from this page (optional)</h2>
-    <p class="note" style="margin-top:0">Instead of Transfer, this page can send the cleared file to the Digitone II over USB, the same way Elektron Transfer does it (the DN2's own OS update: 2,048-byte chunks, each checked and answered by the DN2). Chrome or Edge only. The DN2 then asks <b>UPGRADE OS NOW?</b> on its own screen: nothing is written to its flash before YES is pressed there. Save and Transfer (step 3) stays the usual route.</p>
+    <h2>3 · Flash</h2>
     <p class="msg err" id="fNoMidi" hidden>This browser has no Web MIDI: use Chrome or Edge, or save the file and send it with Transfer.</p>
     <div class="row" id="fTarget">
       <label class="check"><input type="radio" name="ftarget" value="build" checked> the cleared Wishes build</label>
@@ -85,7 +73,7 @@ input[type=file] { display: none; }
   </section>
 
   <section>
-    <h2>5 · Licences and source</h2>
+    <h2>4 · Licences and source</h2>
     <p class="note" style="margin-top:0">The mod and this builder are free software under the <a href="LICENSE">GNU AGPL-3.0-or-later</a>. The Python this page runs is its source: <a id="zipLink" href="#">the build code (.zip)</a>. Ported parts keep their own notices (<a href="THIRD-PARTY.md">THIRD-PARTY.md</a>).</p>
     <p class="note">Wishes builds on De-Pattern's dn2mk2 (<a href="https://github.com/De-Pattern/dn2mk2">site</a>, <a href="https://github.com/De-Pattern/dn2mk2-firmware">firmware source</a>), AGPL-3.0: all of its work is theirs; the additions and any fault in them are Wishes'. Please report problems with a Wishes build on the Wishes repository, not to upstream.</p>
     <p class="note">Nothing here is Elektron's: no firmware and no tables. The page reads those from your own files, in this browser, and sends nothing anywhere. Not affiliated with Elektron.</p>

@@ -193,7 +193,7 @@ def test_the_page_builds_the_release_with_no_choices():
     with more than one release; no release published: a plain note, not an error"""
     page = (WEB / "builder.html").read_text()
     heads = re.findall(r"<h2>(.*?)</h2>", page)
-    assert heads == ["1 · Your stock files", "2 · Build", "3 · Save and flash", "4 · Flash from this page (optional)", "5 · Licences and source"]
+    assert heads == ["1 · Your stock files", "2 · Build", "3 · Flash", "4 · Licences and source"]
     body = re.sub(r'<nav class="site".*?</nav>', "", page, flags=re.S)      # the tabs name the presets page
     for gone in ("preset", "What goes in", "details class=\"parts\"", "chips"):
         assert gone not in body, gone
