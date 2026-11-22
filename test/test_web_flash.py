@@ -109,7 +109,7 @@ def test_the_site_carries_the_module(tmp_path):
     out = tmp_path / "site"
     subprocess.run(["bash", str(ROOT / "scripts" / "make_site.sh"), str(out), "--preview"], check=True, capture_output=True)
     assert (out / "wishes-flash.js").read_bytes() == (WEB / "wishes-flash.js").read_bytes()
-    assert '<script src="wishes-flash.js"></script>' in (out / "index.html").read_text(encoding="utf-8")
+    assert '<script src="wishes-flash.js"></script>' in (out / "builder.html").read_text(encoding="utf-8")
 
 
 # -- the local test switch (2026-11-21): a brick-risk-only TEST build, localhost + --preview + ?localtest=1 only --

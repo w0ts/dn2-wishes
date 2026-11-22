@@ -16,7 +16,7 @@ web="$here/tools/web"
 rm -rf "$out"
 mkdir -p "$out/icons"
 cp "$web/builder-worker.js" "$web/wishes-verdict.js" "$web/wishes-flash.js" "$web/wishes.css" "$out/"
-cp "$web/builder.html" "$out/index.html"
+# the About page is the front page (the User, 2026-11-22); index.html is written beside about.html below
 cp "$web/builder.html" "$out/builder.html"
 cp "$web/index.html" "$out/samples.html"
 cp "$web/help.html" "$out/help.html"
@@ -27,6 +27,7 @@ cp "$web/manifest.webmanifest" "$out/"
 mkdir -p "$out/about-icons"
 cp "$here/docs/img/icons/"*.png "$out/about-icons/"
 python3 "$here/scripts/make_about.py" "$here/README.md" "$out/about.html" about-icons/
+cp "$out/about.html" "$out/index.html"
 cp "$web/icons/wishes-"*.png "$out/icons/"
 cp "$here/LICENSE" "$here/THIRD-PARTY.md" "$out/"
 if [ -d "$here/wishes" ]; then

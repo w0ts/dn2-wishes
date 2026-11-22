@@ -43,9 +43,9 @@ def test_the_page_uses_its_stylesheet_and_no_page_this_build_lacks(tmp_path: pat
 def test_every_page_has_the_tabs_and_they_lead_to_pages(tmp_path: pathlib.Path):
     """builder, sample import, help, presets and about each carry the same tab bar, styled once (common.css's
     nav.site, loaded by URL before wishes.css), and each tab opens the right page in the served layout (the front
-    page is the builder)."""
+    page is the About page, the User 2026-11-22)."""
     site = _site(tmp_path)
-    want = {"./": "w0ts / DN2-Wishes · DN2 mod builder", "samples.html": "w0ts / DN2-Wishes · DN2 sample import",
+    want = {"builder.html": "w0ts / DN2-Wishes · DN2 mod builder", "samples.html": "w0ts / DN2-Wishes · DN2 sample import",
             "help.html": "w0ts / DN2-Wishes · hidden functions", "presets.html": "w0ts / DN2-Wishes · presets", "about.html": "w0ts / DN2-Wishes · about"}
     for page in ("index.html", "samples.html", "help.html", "presets.html", "about.html"):
         html = (site / page).read_text(encoding="utf-8")
@@ -54,12 +54,12 @@ def test_every_page_has_the_tabs_and_they_lead_to_pages(tmp_path: pathlib.Path):
         assert html.index("site-style/common.css") < html.index("wishes.css"), page
         for href, title in want.items():
             assert f'href="{href}"' in nav.group(1), (page, href)
-            target = site / ("index.html" if href == "./" else href)
+            target = site / href
             assert f"<title>{title}</title>" in target.read_text(encoding="utf-8"), (page, href)
         assert nav.group(1).count('aria-current="page"') == 1, page
         # the order every w0ts site keeps: about first, GitHub last
         assert re.findall(r'<a href="([^"]+)"', nav.group(1)) == [
-            "about.html", "./", "samples.html", "presets.html", "help.html",
+            "about.html", "builder.html", "samples.html", "presets.html", "help.html",
             "https://github.com/w0ts/dn2-wishes"], page
 
 
