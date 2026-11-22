@@ -1,5 +1,49 @@
 # DN2 WISHES — CHANGELOG — Digitone II (all builds are based on OS 1.12)
 
+## v0.69.2-fdn8lite2 (22 Nov 2026)
+
+- **Status:** TEST build. Not released: the checks that guard against bricking the unit passed on this file; the full release check was not run.
+- **Based on:** v0.69.2-fdn8lite
+- **File:** DN2wishes_v0.69.2-fdn8lite2_76e48431_TEST.syx
+- **SHA-256:** 76e48431743345f174f916181a0587e559f92cf5c5b69e506c772bd4364fa1c6
+- **Hardware:** Not installed.
+
+**Changes**
+
+  - The insert guard charges a bus FDN8 18,500 a block, its cost measured on the unit (about 17.8-18.4k,
+    v0.69.2-fdn8lite's ladder) plus a small margin; it charged 15,200, the emulator's figure. The guard
+    admits a bus FDN8 only when that cost still fits before the deadline. The sound is unchanged.
+
+**Known issues**
+
+  - With many bus FDN8 playing, fewer may be admitted at once than on v0.69.2-fdn8lite (not yet measured
+    on the unit).
+
+## v0.69.2-fdn8lite (22 Nov 2026)
+
+- **Status:** TEST build. Not released: the checks that guard against bricking the unit passed on this file; the full release check was not run.
+- **Based on:** v0.69.2
+- **File:** DN2wishes_v0.69.2-fdn8lite_0cd88167_TEST.syx
+- **SHA-256:** 0cd88167c301725269bb13850a6fe14ac34d164817ba7462b64b1e5ea2a4163c
+- **Hardware:** Installed on the unit 22 Nov 2026. The FDN8 ladder (INSERT 1 = FDN8 MIX 100 on T1..T8, chords
+  waking the stock voices, the system meter's D per rung): D 75.1 % with none playing, 77.8 / 80.4 / 83.1 % with
+  1 / 2 / 3, then 84.4 % and 4 insert skips a block from 4 to 8: one playing bus FDN8 costs about 17.8-18.4k cycles a
+  block (was about 22-24k), and 4 run at once (was 2-3).
+
+**Changes**
+
+  - The FDN8 INSERT on a track's bus runs HALF, the User's pick from the A/B: the reverb's tank at 24 kHz,
+    two input diffusers instead of four, the same eight lines, delay times and decay time. The wet's top is
+    about 9 kHz (the first second of the tail a little darker on bright hits).
+  - The SEND reverb (TYPE FDN8 / LONG on the Reverb page) is unchanged, bit for bit as v0.69.2.
+  - XDLY's code moved to another place in the DSP's memory; it plays as before.
+
+**Known issues**
+
+  - The insert guard still charges a bus FDN8 15,200 (the emulator's figure), under its cost on the unit
+    measured above; fixed in v0.69.2-fdn8lite2.
+  - The sound at the DN2's levels: no listening check recorded on this file.
+
 ## v0.69.2 (22 Nov 2026)
 
 - **Status:** TEST build. Not released: the checks that guard against bricking the unit passed on this file; the full release check was not run.

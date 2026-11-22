@@ -9,17 +9,19 @@ Finished work is in [CHANGELOG.md](CHANGELOG.md).
   page (3/3).
     - DSP part: done, and proven bit-exact against its model.
     - ColdFire part (the page, the parameters, saving): being built.
-- **A cheaper bus FDN8 reverb.** The tank runs at 24 kHz, with 2 diffusers.
-    - Measured on the unit: 20 to 25 % cheaper; 4 bus FDN8s run at once.
-    - Being built: the frame guard's cost for it, to match the new cost.
-    - Then: the DSP's hardware loops and long-word access to the delay lines, aiming for 8 at once.
-      The result must stay bit-exact.
+- **Bus FDN8 toward 8 at once.** The cheaper bus FDN8 (24 kHz tank, 2 diffusers; 20 to 25 % cheaper
+  on the unit, 4 at once) is done, with the frame guard's cost set to what the unit measured.
+  Being built: the DSP's hardware loops and long-word access to the delay lines, bit-exact, to
+  fit more at once.
+- **MACHINE SEL icons for the six DT2 sample machines** (ONESHOT, WERP, STRETCH, REPITCH, GRID,
+  SLICE), each its own, based on the waveform: drawn (and on the About page); in the next build.
 - **Dual boot.** SAFE MODE runs Elektron's stock DSP program, from a copy on the +Drive that the
   builder page sends. Stage 2 is being built.
 
 ## Open checks on the unit
 
-- v0.69.2: a second power-on after the first one makes no new copies on the +Drive.
+- After a power-on, the remote channel's build identity read 0 and "not ready", and the highest
+  DSP load since boot read 100 %. Cause not found; nothing visible went wrong.
 - "!CLIP" was seen with nothing playing. Cause not found.
 - Filter envelope ATK: check by ear.
 - FLEX take levels: measured on the SHARC runner only, not yet on the unit.
