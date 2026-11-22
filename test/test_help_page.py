@@ -72,7 +72,7 @@ def test_no_card_is_tied_to_a_part():
 
 
 def test_the_version_comes_from_the_published_release():
-    sub = re.search(r'<p class="sub">(.*?)</p>', PAGE, re.S).group(1)
+    sub = re.search(r'<p class="lead">(.*?)</p>', PAGE, re.S).group(1)
     assert not re.search(r"v\d+\.\d+", sub), sub                 # no stale number written in
     assert 'DN2wishes<span id="ver"></span>' in sub
     assert 'fetch("wishes/wishes.json"' in SCRIPT

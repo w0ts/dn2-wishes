@@ -1,11 +1,9 @@
 /* SPDX-License-Identifier: AGPL-3.0-or-later
-   Wishes' own part of the style. Everything shared (tokens, light and dark, buttons, forms, tags, messages, cards, tables,
-   bars, tabs, panes, overlays) is common.css, https://w0ts.github.io/site-style/common.css, which every page loads BEFORE
-   this file. This file sets Wishes' accent (the teal of the Digitone II's FUNC button: bright for fills, darker for
-   small text in light mode) and the few things that are only Wishes'. */
+   Wishes' own part of the style. Everything shared (tokens, light and dark, the page column, the .lead line, buttons,
+   forms, tags, messages, boxes (section / .card / details.sec), tables, bars, tabs, panes, overlays) is common.css,
+   https://w0ts.github.io/site-style/common.css, which every page loads BEFORE this file. This file sets Wishes' accent
+   (the teal of the Digitone II's FUNC button: bright for fills, darker for small text in light mode) and the few things
+   that are only Wishes'. */
 :root { --accent: #67d0ca; --accent-text-l: #247570; --accent-text-d: #67d0ca; }
-body { padding: var(--sp-4); }
-main { max-width: 1100px; margin: 0 auto; }
-.sub { font-size: var(--fs-4); margin: 0 0 var(--sp-4); max-width: 760px; }
 /* the page tabs (builder, sample import, help, presets, about): common.css's nav.site */
 nav.site { gap: var(--sp-3); }

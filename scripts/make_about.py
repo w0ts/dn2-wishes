@@ -7,6 +7,7 @@ Wishes site, in the shared style (tools/web/wishes.css on top of https://w0ts.gi
 Only the Markdown README.md uses is handled: # ## ### headings, paragraphs, - lists (a line indented under an item
 continues it), `code`, **bold**, *italic*, [text](url), and raw HTML blocks (the icon tables), whose
 docs/img/icons/ paths are moved to ICONS_URL_PREFIX (default about-icons/), where make_site.sh copies the icons.
+The text before the first "## " is the page's lead; each "## " part is a box (<section>), as on the other pages.
 Anything else in the README fails loudly instead of being published half-formed."""
 import html
 import re
@@ -43,6 +44,7 @@ def inline(text: str) -> str:
 
 def convert(md: str, icons: str) -> tuple[str, str]:
     title, body = "About", []
+    closer = ""            # the box open at this point: the lead under the title, then one <section> per "## " part
     lines = md.split("\n")
     i = 0
     while i < len(lines):
@@ -56,7 +58,12 @@ def convert(md: str, icons: str) -> tuple[str, str]:
             if len(m.group(1)) == 1:
                 title = m.group(2)
                 body.append('<header class="site"><div class="titlebar"><h1><a href="https://w0ts.github.io/">w0ts</a> / DN2-Wishes · about</h1></div>%s</header>' % "@@NAV@@")
+                body.append('<div class="lead">')
+                closer = "</div>"
             else:
+                if len(m.group(1)) == 2:
+                    body.append(closer + "<section>")
+                    closer = "</section>"
                 tag = "h%d" % len(m.group(1))
                 body.append("<%s>%s</%s>" % (tag, inline(m.group(2)), tag))
             i += 1
@@ -81,6 +88,7 @@ def convert(md: str, icons: str) -> tuple[str, str]:
                 para.append(lines[i].strip())
                 i += 1
             body.append("<p>%s</p>" % inline(" ".join(para)))
+    body.append(closer)
     return title, "\n".join(body)
 
 
@@ -95,9 +103,7 @@ PAGE = """<!doctype html>
 <link rel="stylesheet" href="https://w0ts.github.io/site-style/common.css">
 <link rel="stylesheet" href="wishes.css">
 <style>
-/* the About page's own layout: the README, in a column */
-main { max-width: 860px; }
-h2 { margin: var(--sp-5) 0 var(--sp-2); }
+/* the About page's own layout: the README's intro as the lead, each "## " part a box (common.css does the column) */
 table { margin: var(--sp-2) 0; }
 td { padding: 6px 10px 6px 0; }
 td:first-child { width: 64px; }
