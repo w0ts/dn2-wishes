@@ -1,0 +1,30 @@
+[
+ {
+  "release": "0.69.2-all",
+  "mod_version": "0.69.2",
+  "os": "1.12",
+  "file": "DN2wishes_v0.69.2-all_TEST.syx",
+  "sha256": "43117209a2a2114ff254cd4085c694ea566e687ee493cd8c3b3a6b3d245f19ad",
+  "gate": "v0.69.2-all/DN2wishes_v0.69.2-all_TEST.syx.gate.json",
+  "zip": "v0.69.2-all/code-443fac642553.zip",
+  "zip_sha256": "443fac64255384fb5881e9c8071f8f6a04fc8178b642ed7a7db125a0b6227cd5",
+  "inputs": [
+   "dn2",
+   "dt2",
+   "md",
+   "mnm"
+  ],
+  "dn2_sha256": "7e5b8a733d4ab1fdf7e5d22757f7d8eddaa3cbf71d0858874a791844c02ceb35",
+  "budgets": {
+   "dsp_upload": {
+    "used": 1045500,
+    "limit": 1048575
+   },
+   "usb": {
+    "used": 2043129,
+    "limit": 2097152
+   }
+  },
+  "test": true
+ }
+]

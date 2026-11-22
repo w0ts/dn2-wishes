@@ -133,11 +133,11 @@ def test_the_site_check_publishes_only_cleared_files(WB, tmp_path):
     assert WB.check_site(tmp_path / "none") == 1
 
 
-def test_the_site_check_refuses_no_release_and_the_old_preset_rows(WB, tmp_path):
+def test_the_site_check_allows_no_release_and_refuses_the_old_preset_rows(WB, tmp_path):
     empty = tmp_path / "empty"
     empty.mkdir()
     (empty / "wishes.json").write_text("[]")
-    assert WB.check_site(empty) == 1                                 # nothing to publish
+    assert WB.check_site(empty) == 0                                 # none yet: the page says so (wishes-pages.yml)
     old = _site(tmp_path / "old", gate=True)
     row = json.loads((old / "wishes.json").read_text())[0]
     preset = {k: row[k] for k in ("file", "sha256", "zip", "zip_sha256", "inputs", "gate")}
@@ -187,20 +187,20 @@ def test_the_page_saves_only_the_cleared_file():
 
 
 def test_the_page_builds_the_release_with_no_choices():
-    """sections: 1 the stock files (only the release's inputs), 2 build, 3 save and flash; a release picker only
+    """sections: 1 the stock files (only the release's inputs), 2 build, 3 flash; a release picker only
     with more than one release; no release published: a plain note, not an error"""
     page = (WEB / "builder.html").read_text()
     heads = re.findall(r"<h2>(.*?)</h2>", page)
-    assert heads == ["1 · Your stock files", "2 · Build", "3 · Save and flash", "4 · Flash from this page (optional)", "5 · Licences and source"]
-    body = re.sub(r'<nav class="top".*?</nav>', "", page, flags=re.S)      # the tabs name the presets page
+    assert heads == ["1 · Your stock files", "2 · Build", "3 · Flash"]
+    body = re.sub(r'<nav class="site".*?</nav>', "", page, flags=re.S)      # the tabs name the presets page
     for gone in ("preset", "What goes in", "details class=\"parts\"", "chips"):
         assert gone not in body, gone
     assert '$("#verRow").hidden = releases.length < 2;' in page
     assert "el.hidden = !need.includes(el.dataset.k)" in page and "release ? release.inputs : KEYS" in page
     assert '`<p class="note">No release published yet.</p>`' in page          # neutral, not .bad
     assert "if (e.status === 404) rows = [];" in page                           # a missing wishes.json is no error
-    assert 'note bad">Could not load the builder\'s data' in page               # a real load error stays red
-    assert "Elektron Transfer" in page and "Back to stock 1.12" in page
+    assert 'msg err">Could not load the builder\'s data' in page                # a real load error stays red
+    assert "Elektron Transfer" in page
 
 
 def test_the_page_wires_save_to_the_verdict_only():
@@ -247,3 +247,54 @@ def test_dn2patch_takes_section_7_from_the_dn2_file(tmp_path):
     assert hashlib.sha256(body).hexdigest() == "336e340aa0cdcd34e314cfa44849f709a3134f6bd4cd57dfc7e15702c83115e2"
     with pytest.raises(P.PatchError):
         P.dn2_sections(b"\xf0 not an OS \xf7", tmp_path / "bad")
+
+
+# -- the hidden TEST entry (the User, 2026-11-22: Shift+click; wishes-test.json; a brick-risk record) --
+
+def _brick(sha: str) -> dict:
+    return {**_record(sha, **{k: "PASS" for k in ("preflight", "rammap", "code-fresh", "rebuild", "dsp-identity",
+            "hwrules", "symbols", "coldfire", "overbridge", "boot", "machines", "engine", "fuzz")}), "scope": "brick-risk"}
+
+
+def _test_site(tmp_path: pathlib.Path, record: dict | None) -> pathlib.Path:
+    out = _site(tmp_path, gate=True)
+    (out / "wishes.json").write_text("[]")
+    zb = (out / "v0.56.1" / "code-0123456789ab.zip").read_bytes()
+    row = {**_row("v0.56.1/t.gate.json", zb), "test": True}
+    (out / "v0.56.1" / "t.gate.json").write_text(json.dumps(record))
+    (out / "wishes-test.json").write_text(json.dumps([row]))
+    return out
+
+
+def test_the_site_check_takes_a_test_row_only_with_a_brick_risk_record(WB, tmp_path):
+    assert WB.test_cleared(_brick(SHA), SHA) and not WB.test_cleared(_record(SHA), SHA)
+    assert WB.check_site(_test_site(tmp_path / "a", _brick(SHA))) == 0
+    assert WB.check_site(_test_site(tmp_path / "b", _record(SHA))) == 1          # not a brick-risk record
+    assert WB.check_site(_test_site(tmp_path / "c", _brick(OTHER))) == 1         # another sha256
+    short = _brick(SHA)
+    del short["gates"]["fuzz"]
+    assert WB.check_site(_test_site(tmp_path / "d", short)) == 1                 # a brick-risk step missing
+    # a brick-risk record never clears a release row
+    rel = _site(tmp_path / "e", gate=True)
+    (rel / "v0.56.1" / "DN2wishes_v0.56.1.syx.gate.json").write_text(json.dumps(_brick(SHA)))
+    assert WB.check_site(rel) == 1
+
+
+def test_the_page_saves_a_test_entry_only_as_that_exact_file():
+    rec, row = _brick(SHA), {"sha256": SHA, "gate": "g", "test": True}
+    assert _verdict(f"V.verdictTest({json.dumps(row)}, {json.dumps(rec)}, {json.dumps(SHA)})")["save"] is True
+    assert _verdict(f"V.verdictTest({json.dumps(row)}, {json.dumps(rec)}, {json.dumps(OTHER)})")["save"] is False
+    assert _verdict(f"V.verdictTest({json.dumps(row)}, {json.dumps(_record(SHA))}, {json.dumps(SHA)})")["save"] is False
+    assert _verdict(f"V.verdictTest({json.dumps({**row, 'test': False})}, {json.dumps(rec)}, {json.dumps(SHA)})")["save"] is False
+    # and a brick-risk record does not clear a release row
+    assert _verdict(f"V.verdict({json.dumps({**row, 'test': False})}, {json.dumps(rec)}, {json.dumps(SHA)})")["save"] is False
+
+
+def test_the_page_offers_the_test_entry_only_after_a_shift_click():
+    page = (WEB / "builder.html").read_text()
+    script = page.split("<script>")[-1]
+    assert script.count('"wishes-test.json"') == 1
+    hidden = script.split('addEventListener("click", async (e) => {', 1)[1]
+    assert hidden.index("if (!e.shiftKey") < hidden.index('"wishes-test.json"')
+    assert "TEST build: checked for brick risks only, not a release; for testing." in script
+    assert "r && r.test ? WishesVerdict.verdictTest(" in script

@@ -77,15 +77,14 @@ def test_the_page_offers_the_flash_only_beside_the_cleared_build():
     # (2026-11-21, the User: connect without waiting for the build) the section shows at load and Connect works;
     # with no build there are no bytes, the image check fails, and Flash stays disabled
     assert '<section id="flashSec" hidden>' in page and '$("#flashSec").hidden = false;' in page
-    assert "function flashBytes() { return !built ? null" in page
+    assert "function flashBytes() { return built ? built.syx : null; }" in page
     assert "fl.img = b ? WishesFlash.checkImage(b) : { ok: false, errors: [] };" in page
     assert '$("#fGo").disabled = !midi || fl.busy || !fl.img.ok' in page
     assert "if (fl.busy || !built || !fl.flasher" in page
     # built is set only by the verdict; the bytes are re-checked right before they are sent
     assert "built = v.save ? { syx, got, r, rec, stock: stockOk ? stock : null } : null;" in page
     assert "if (!(await flashVerified()))" in page
-    assert "verdictOf(built.r, built.rec, sha).save" in page
-    assert "sha === built.r.dn2_sha256" in page                       # stock: Elektron's own 1.12 only
+    assert "verdictOf(built.r, built.rec, await hex(built.syx)).save" in page    # no stock flash (the User, 2026-11-22)
     # never a file picked for the flash: the only file inputs are step 1's
     assert page.count('<input type="file"') == 4                       # the four of step 1
     assert "<input type=\"file\"" not in page.split('id="flashSec"', 1)[1].split("</section>", 1)[0]
@@ -109,7 +108,7 @@ def test_the_site_carries_the_module(tmp_path):
     out = tmp_path / "site"
     subprocess.run(["bash", str(ROOT / "scripts" / "make_site.sh"), str(out), "--preview"], check=True, capture_output=True)
     assert (out / "wishes-flash.js").read_bytes() == (WEB / "wishes-flash.js").read_bytes()
-    assert '<script src="wishes-flash.js"></script>' in (out / "index.html").read_text(encoding="utf-8")
+    assert '<script src="wishes-flash.js"></script>' in (out / "builder.html").read_text(encoding="utf-8")
 
 
 # -- the local test switch (2026-11-21): a brick-risk-only TEST build, localhost + --preview + ?localtest=1 only --
@@ -157,7 +156,7 @@ def test_the_public_bundle_refuses_the_switch(tmp_path):
     # make_site.sh in a layout whose wishes/ holds that row: refused without --preview, marker with it
     repo = tmp_path / "repo"
     repo.mkdir()
-    for n in ("scripts", "tools", "presets", "LICENSE", "THIRD-PARTY.md"):
+    for n in ("scripts", "tools", "presets", "docs", "LICENSE", "THIRD-PARTY.md"):
         (repo / n).symlink_to(ROOT / n)
     shutil.copytree(wish, repo / "wishes")
     site = tmp_path / "public"
@@ -175,6 +174,6 @@ def test_the_public_bundle_refuses_the_switch(tmp_path):
 
 def test_the_page_shows_the_banner_and_asks_the_marker_only_for_the_switch():
     page = (WEB / "builder.html").read_text(encoding="utf-8")
-    assert 'id="testBanner" hidden' in page and "background: #c00" in page and "TEST BUILD" in page.split('id="testBanner"')[1][:200]
+    assert 'id="testBanner" class="banner err" hidden' in page and "TEST BUILD" in page.split('id="testBanner"')[1][:200]
     assert 'getJson("localtest-preview.json")' in page and "localtest=1" in page
     assert page.count("verdictOf(") >= 3 and "WishesVerdict.verdict(" not in page

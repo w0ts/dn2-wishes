@@ -74,8 +74,9 @@ const files = {};
 let releases = [], release = null, record = null, worker = null, built = null;
 // the local test switch (wishes-verdict.js localTestAllowed): off unless localhost + a --preview site + ?localtest=1
 const env = { hostname: location.hostname, preview: false, query: location.search };
-const verdictOf = (r, rec, got) => WishesVerdict.verdictLocal(r, rec, got, env);
-const testOn = () => WishesVerdict.localTestAllowed(env, release);
+const verdictOf = (r, rec, got) => (r && r.test ? WishesVerdict.verdictTest(r, rec, got) : WishesVerdict.verdictLocal(r, rec, got, env));
+const testOn = () => WishesVerdict.localTestAllowed(env, release) || !!(release && release.test);
+const TEST_WARN = "TEST build: checked for brick risks only, not a release; for testing.";
 const fl = { access: null, input: null, output: null, flasher: null, dev: null, busy: false, wake: null, img: null };
 
 function fmt(n) { return Number(n).toLocaleString("en-US"); }
@@ -140,14 +141,17 @@ function bar(label, b) {
   return `<div class="bar"><b>${label}</b><div class="track"><div class="fill ${pct > 98.5 ? "warn" : ""}" style="width:${pct.toFixed(2)}%"></div></div>
     <span class="fig">${fmt(b.used)} of ${fmt(b.limit)} B · ${fmt(b.limit - b.used)} free</span></div>`;
 }
-function isCleared() { return !!(release && release.gate && record && WishesVerdict.cleared(record, release.sha256)); }
+function isCleared() { return !!(release && !release.test && release.gate && record && !record.scope && WishesVerdict.cleared(record, release.sha256)); }
+function testCleared() { return !!(release && release.test && WishesVerdict.verdictTest(release, record, release.sha256).save); }
 function drawRelease() {
   const r = release, ok = isCleared();
   const gate = ok ? `<span class="tag accent">CLEARED</span>` : (testOn() ? `<span class="tag err">TEST BUILD (brick-risk steps only)</span>` : `<span class="tag err">NOT CLEARED</span>`);
   $("#release").innerHTML = `<div class="card accent"><div class="card-head"><h3>DN2wishes v${esc(r.release)}</h3>${gate}</div><div class="body">
     <dl class="kv"><dt>file</dt><dd class="mono">${esc(r.file)}</dd>
       <dt>sha256</dt><dd class="mono">${esc(r.sha256)}</dd>
-      <dt>gate</dt><dd>${ok ? `cleared ${esc(record.date || "")}: ${Object.keys(record.gates).length} gates passed` : "no gate record clears this file: the page will build it but offers no Save"}</dd>
+      <dt>gate</dt><dd>${ok ? `cleared ${esc(record.date || "")}: ${Object.keys(record.gates).length} gates passed`
+        : testCleared() ? `<span class="tag err">${TEST_WARN}</span> ${esc(record.date || "")}: ${Object.keys(record.gates).length} steps passed`
+        : "no gate record clears this file: the page will build it but offers no Save"}</dd>
       <dt>for</dt><dd>Digitone II OS ${esc(r.os)}</dd></dl>
     <div class="bars">${r.budgets ? bar("DSP upload", r.budgets.dsp_upload) + bar("USB image", r.budgets.usb) : ""}</div>
   </div></div>`;
@@ -312,6 +316,7 @@ $("#fGo").onclick = async () => {
   if (fl.busy || !built || !fl.flasher || !(fl.dev && fl.dev.ok)) return;
   if (!(await flashVerified())) { fmsg("bad", "These bytes are not the cleared file (or not stock 1.12): not sent."); return; }
   const bytes = flashBytes();
+  if (built.r.test && !confirm(`${TEST_WARN}\n\nThis is the hidden TEST entry, not a published release. Continue?`)) return;
   if (!confirm(`Send ${flashName()} (${fmt(bytes.length)} bytes) to the Digitone II now?\n\nWhen all of it is sent, the DN2 asks UPGRADE OS NOW? on its own screen: YES installs it, NO keeps the current OS. Do not switch it off or unplug it while it installs.`)) return;
   fl.busy = true; fmsg("", ""); $("#fLog").textContent = ""; fprogress(0, bytes.length);
   $("#fState").className = "tag"; $("#fState").innerHTML = '<span class="spin"></span> sending';
@@ -345,6 +350,7 @@ async function loadRelease(r) {
   }
   $("#src").textContent = `· v${r.release} · OS ${r.os}`;
   $("#testBanner").hidden = !testOn();
+  if (r.test) $("#testBanner").textContent = TEST_WARN;
   drawRelease(); refresh();
 }
 (async () => {
@@ -372,10 +378,32 @@ async function loadRelease(r) {
     sel.appendChild(o);
   }
   $("#verRow").hidden = releases.length < 2;
-  sel.onchange = () => loadRelease(releases.find(r => r.release === sel.value));
   await loadRelease(releases[0]);
   recall();
 })();
+$("#ver").onchange = () => loadRelease(releases.find(r => r.release === $("#ver").value));
+// -- hidden TEST entry (the User, 2026-11-22): Shift+click in the Build section (the Build button, the release card or
+// the heading) loads wishes/wishes-test.json and offers its TEST build under a red warning. Nothing changes otherwise.
+let testShown = false;
+$("#go").closest("section").addEventListener("click", async (e) => {
+  if (!e.shiftKey || testShown || $("#go").dataset.busy === "1") return;
+  e.preventDefault(); e.stopImmediatePropagation();
+  let rows;
+  try { rows = await getJson(DATA + "wishes-test.json"); } catch (_) { return; }
+  const tests = (Array.isArray(rows) ? rows : []).filter(r => r && r.test === true && r.os === "1.12" && r.sha256 && r.zip);
+  if (!tests.length) return;
+  testShown = true;
+  const sel = $("#ver");
+  for (const r of tests) {
+    const o = document.createElement("option");
+    o.value = r.release; o.textContent = `v${r.release} TEST (brick-risk steps only)`;
+    sel.appendChild(o);
+  }
+  releases = releases.concat(tests);
+  $("#verRow").hidden = false;
+  sel.value = tests[0].release;
+  await loadRelease(tests[0]);
+}, true);
 </script>
 </body>
 </html>

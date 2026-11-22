@@ -24,7 +24,7 @@
     const no = (text) => ({ save: false, text, got, want: want || null });
     if (!HEX.test(String(got))) return no("The build gave no file; do not flash.");
     if (!release || !release.gate || !record) return no("Not the cleared file; do not flash. No gate record clears this release yet.");
-    if (!cleared(record, want)) return no("Not the cleared file; do not flash. The gate record does not clear this release's file.");
+    if (!cleared(record, want) || record.scope) return no("Not the cleared file; do not flash. The gate record does not clear this release's file.");
     if (got !== want) return no("Not the cleared file; do not flash. Your build differs from the cleared file.");
     return { save: true, text: "The cleared file, byte for byte.", got, want };
   }
@@ -48,7 +48,21 @@
     return { save: true, test: true, got, want: release.sha256,
       text: "TEST BUILD, byte for byte the file that passed the brick-risk steps (not the release clearing)." };
   }
-  const api = { cleared, verdict, verdictLocal, localTestAllowed };
+  // HIDDEN TEST ENTRY (the User, 2026-11-22: "a secret key (like shift + click) on the web flasher ... just for me to
+  // test flashing"): a row of wishes-test.json (scripts/web_bundle.py --wishes ... --hidden-test), shown only after a
+  // Shift+click. Saved only when the row is marked test, its record is a brick-risk record (scope "brick-risk") that
+  // clears the row's sha256, and the build's own sha256 is that sha256: the same byte-for-byte rule.
+  function verdictTest(release, record, got) {
+    const want = release && release.sha256;
+    const no = (text) => ({ save: false, text, got, want: want || null });
+    if (!release || release.test !== true) return no("Not a test entry; do not flash.");
+    if (!HEX.test(String(got))) return no("The build gave no file; do not flash.");
+    if (!record || record.scope !== "brick-risk" || !cleared(record, want)) return no("No brick-risk record clears this TEST file; do not flash.");
+    if (got !== want) return no("Not the TEST file; do not flash. Your build differs from it.");
+    return { save: true, test: true, got, want,
+      text: "TEST BUILD, byte for byte the file that passed the brick-risk steps (not a release; for testing)." };
+  }
+  const api = { cleared, verdict, verdictLocal, localTestAllowed, verdictTest };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.WishesVerdict = api;
 })(typeof self !== "undefined" ? self : this);

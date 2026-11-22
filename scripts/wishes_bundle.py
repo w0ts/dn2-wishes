@@ -1,6 +1,6 @@
 """The Wishes builder page's bundle (tools/web/builder.html; scripts/web_bundle.py --wishes).
 
-    python scripts/web_bundle.py --wishes BUILD.syx RELEASE OUTDIR [--uncleared-test | --local-test SHA256]
+    python scripts/web_bundle.py --wishes BUILD.syx RELEASE OUTDIR [--uncleared-test | --local-test SHA256 | --hidden-test]
     python scripts/web_bundle.py --check-site OUTDIR
 
 One build per release, the whole mod (there is nothing to choose: the User, 2026-11-19, "everything
@@ -23,6 +23,13 @@ machine-readable record exists for it: the coordinator passes the sha256 from th
 printed). The build must have exactly that sha256. The row gets "local_test": {"brick_risk_sha256": ...};
 the page honours it only on localhost, in a scripts/make_site.sh --preview site, with ?localtest=1, and
 make_site.sh without --preview and --check-site both refuse such a row. Never for publishing.
+
+--hidden-test (the User, 2026-11-22: "a secret key (like shift + click) on the web flasher ... just for me to
+test flashing"): ONE TEST build that passed the brick-risk steps, for the public page's hidden entry (Shift+click on
+Build). Its BUILD.syx.gate.json must have "scope": "brick-risk", its sha256, and every BRICK_RISK step passed. Its
+row (ROW_KEYS + "test": true) goes to OUTDIR/wishes-test.json, never wishes.json, so the page lists nothing new; the
+page offers it only after a Shift+click, with a red TEST warning, and saves/flashes only that exact sha256.
+--check-site checks those rows the same way, and refuses a brick-risk record on a release row.
 
 Elektron's files are read from: DN2_OS112 (the Digitone II OS 1.12 .syx or Elektron's .zip,
 default ../Digitone_II_OS1.12.syx) and DN2_STOCK_DIR (searched for the Digitakt II OS 1.17 or
@@ -63,7 +70,8 @@ def public_record(record: dict) -> dict:
     return {"build": record.get("build"), "sha256": record["sha256"], "stock": record.get("stock"),
             "date": record.get("date"),
             "gates": {k: str(v).split(":")[0].split(" ")[0] for k, v in record["gates"].items()},
-            "known_issues": sorted(known)}        # the names only (their details hold local paths)
+            "known_issues": sorted(known),        # the names only (their details hold local paths)
+            **({"scope": record["scope"]} if "scope" in record else {})}
 
 
 def stock_paths() -> dict[str, pathlib.Path]:
@@ -105,6 +113,10 @@ def traced_build(paths: dict[str, pathlib.Path], work: pathlib.Path) -> tuple[st
              if k.split(".")[0] == "dnfw" and getattr(m, "__file__", None)}
     files |= {pathlib.Path(p) for p in touched if p.startswith(str(SRC / "dnfw")) and not p.endswith(".pyc")}
     out = {str(f.relative_to(SRC)): f.read_bytes() for f in files}
+    # 2026-11-22: files the build reads beside the package (csrc/..., e.g. PERC's constant pool perc_pool.json, read by
+    # dnfw.waverider.dsp at the tree's root): zipped under _root/, which the worker (and ISOLATED) copy to the code's parent
+    extra = {pathlib.Path(p) for p in touched if p.startswith(str(ROOT / "csrc") + os.sep) and pathlib.Path(p).is_file()}
+    out |= {"_root/" + str(f.relative_to(ROOT)): f.read_bytes() for f in extra}
     out["dn2patch.py"] = (ROOT / "tools" / "patcher" / "dn2patch.py").read_bytes()
     out["noboot.py"] = (ROOT / "scripts" / "noboot.py").read_bytes()
     return sha, out, tables.mnm_os_on()
@@ -114,6 +126,9 @@ ISOLATED = """
 import sys, pathlib
 run = sys.argv[1]
 sys.path.insert(0, run + '/code')
+import os, shutil
+if os.path.isdir(run + '/code/_root'):
+    shutil.copytree(run + '/code/_root', run, dirs_exist_ok=True)
 import dn2patch
 dn2patch.WORK = pathlib.Path(run + '/work')
 mnm = sys.argv[5] if len(sys.argv) > 5 else None
@@ -153,6 +168,18 @@ def budgets(built: bytes) -> dict:
             "usb": {"used": safety.usb_upgrade_bytes(built), "limit": safety.USB_UPGRADE_BUFFER}}
 
 
+# the brick-risk steps (CLAUDE.md, ship_gate.py FIRST + BRICK_EMU): a --hidden-test record names each as passed
+BRICK_RISK = ("preflight", "rammap", "code-fresh", "rebuild", "dsp-identity", "hwrules", "symbols", "coldfire",
+              "overbridge", "boot", "machines", "engine", "fuzz")
+TEST_SCOPE = "brick-risk"
+
+
+def test_cleared(record: dict | None, sha: str) -> bool:
+    """a --hidden-test record: scope brick-risk, clears SHA, and every brick-risk step is in it (passed)"""
+    return (isinstance(record, dict) and record.get("scope") == TEST_SCOPE and cleared(record, sha)
+            and all(k in record["gates"] for k in BRICK_RISK))
+
+
 ROW_KEYS = ("release", "mod_version", "os", "file", "sha256", "gate", "zip", "zip_sha256", "inputs",
             "dn2_sha256", "budgets")
 
@@ -166,8 +193,9 @@ def main(argv: list[str]) -> int:
             print("--local-test needs the build's full 64-hex sha256")
             return 2
         argv = argv[:i] + argv[i + 2:]
+    hidden = "--hidden-test" in argv
     test = "--uncleared-test" in argv or local_sha is not None
-    args = [a for a in argv if a != "--uncleared-test"]
+    args = [a for a in argv if a not in ("--uncleared-test", "--hidden-test")]
     if len(args) != 3:
         print(__doc__)
         return 2
@@ -181,6 +209,13 @@ def main(argv: list[str]) -> int:
               "(not a release clearing). Page honours it on localhost, --preview site, ?localtest=1 only.")
     rec_path = pathlib.Path(str(build) + ".gate.json")
     record = json.loads(rec_path.read_text()) if rec_path.is_file() else None
+    if hidden and not test_cleared(record, want):
+        print(f"REFUSED: {build.name} ({want[:16]}...): --hidden-test needs {rec_path.name} with scope {TEST_SCOPE}, "
+              f"this sha256 and every brick-risk step passed ({', '.join(BRICK_RISK)})")
+        return 1
+    if not hidden and record is not None and record.get("scope"):
+        print(f"REFUSED: {rec_path.name} is a {record['scope']} record, not a release clearing (use --hidden-test)")
+        return 1
     if not cleared(record, want) and not test:
         print(f"REFUSED: {build.name} ({want[:16]}...) has no gate record that clears it "
               f"({'no ' + rec_path.name if record is None else rec_path.name + ' does not clear this sha256'}). "
@@ -213,7 +248,7 @@ def main(argv: list[str]) -> int:
     rel.mkdir(parents=True, exist_ok=True)
     zname = f"code-{zsha[:12]}.zip"
     (rel / zname).write_bytes(zbytes)
-    fname = f"DN2wishes_v{release}.syx"
+    fname = f"DN2wishes_v{release}{'_TEST' if hidden else ''}.syx"
     gate = None
     if cleared(record, want):
         gate = f"v{release}/{fname}.gate.json"
@@ -223,7 +258,9 @@ def main(argv: list[str]) -> int:
            "dn2_sha256": dn2_sha, "budgets": budgets(build.read_bytes())}
     if local_sha is not None and gate is None:
         row["local_test"] = {"brick_risk_sha256": want}
-    man = outdir / "wishes.json"
+    if hidden:
+        row["test"] = True
+    man = outdir / ("wishes-test.json" if hidden else "wishes.json")
     rows = json.loads(man.read_text()) if man.is_file() else []
     rows = [row] + [r for r in rows if r.get("release") != release]
     man.write_text(json.dumps(rows, indent=1) + "\n")
@@ -235,30 +272,50 @@ def main(argv: list[str]) -> int:
     return 0
 
 
-def check_site(outdir: pathlib.Path) -> int:
-    """the Pages workflow's check: at least one release is listed, each row is one build in this format,
-    its zip is there with its sha256, and it has a published gate record that clears its sha256. Any
-    miss: exit 1, publish nothing."""
-    man = outdir / "wishes.json"
-    if not man.is_file():
-        print(f"no {man}: nothing cleared to publish")
-        return 1
+def _check_rows(outdir: pathlib.Path, rows: list, test: bool) -> list[str]:
     bad = []
-    rows = json.loads(man.read_text())
-    if not isinstance(rows, list) or not rows:
-        bad.append("no release listed")
-        rows = []
+    keys = set(ROW_KEYS) | ({"test"} if test else set())
     for row in rows:
-        what = f"v{row.get('release') if isinstance(row, dict) else row}"
-        if not isinstance(row, dict) or set(row) != set(ROW_KEYS):
-            bad.append(f"{what}: not one build in this bundle's format ({', '.join(ROW_KEYS)})")
+        what = f"v{row.get('release') if isinstance(row, dict) else row}{' (test)' if test else ''}"
+        if not isinstance(row, dict) or set(row) != keys or (test and row["test"] is not True):
+            bad.append(f"{what}: not one build in this bundle's format ({', '.join(sorted(keys))})")
             continue
         z = outdir / str(row["zip"])
         if not z.is_file() or hashlib.sha256(z.read_bytes()).hexdigest() != row["zip_sha256"]:
             bad.append(f"{what}: its zip is missing or not the one listed")
         rec = outdir / str(row["gate"]) if row["gate"] else None
-        if rec is None or not rec.is_file() or not cleared(json.loads(rec.read_text()), str(row["sha256"])):
-            bad.append(f"{what}: no gate record clears {str(row['sha256'])[:16]}...")
+        record = json.loads(rec.read_text()) if rec is not None and rec.is_file() else None
+        sha = str(row["sha256"])
+        if test and not test_cleared(record, sha):
+            bad.append(f"{what}: no brick-risk record clears {sha[:16]}...")
+        elif not test and (not cleared(record, sha) or record.get("scope")):
+            bad.append(f"{what}: no gate record clears {sha[:16]}...")
+    return bad
+
+
+def check_site(outdir: pathlib.Path) -> int:
+    """the Pages workflow's check: wishes.json is a list (an empty list is allowed: the builder then says
+    "No release published yet"); every row listed is one build in this format, its zip is there with its
+    sha256, and it has a published gate record that clears its sha256 (a release clearing: a brick-risk
+    record never clears a release). wishes-test.json (--hidden-test), if there, the same with a brick-risk
+    record. Any miss: exit 1, publish nothing."""
+    man = outdir / "wishes.json"
+    if not man.is_file():
+        print(f"no {man}: nothing cleared to publish")
+        return 1
+    rows = json.loads(man.read_text())
+    bad = [] if isinstance(rows, list) else ["wishes.json is not a list of releases"]
+    rows = rows if isinstance(rows, list) else []
+    if not rows and not bad:
+        print("no release listed yet: the builder will say so")
+    bad += _check_rows(outdir, rows, test=False)
+    tman = outdir / "wishes-test.json"
+    if tman.is_file():
+        trows = json.loads(tman.read_text())
+        if not isinstance(trows, list):
+            bad.append("wishes-test.json is not a list")
+        else:
+            bad += _check_rows(outdir, trows, test=True)
     for b in bad:
         print("REFUSED: " + b)
     if not bad:

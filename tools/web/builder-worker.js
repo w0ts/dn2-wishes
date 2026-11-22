@@ -82,6 +82,9 @@ for k in ("DT2_SECTIONS", "DT2_SECTION7", "MD_OS_BIN", "MNM_OS", "DN2MK2_PARTS")
     os.environ.pop(k, None)          # the whole mod, as the tree builds it: nothing from an earlier run
 sys.path = [p for p in sys.path if not p.startswith("/tree")]
 sys.path.insert(0, TREE + "/code")
+if os.path.isdir(TREE + "/code/_root"):     # files the build reads beside the package (csrc/...): where the tree has them
+    import shutil
+    shutil.copytree(TREE + "/code/_root", TREE, dirs_exist_ok=True)
 import dn2patch
 dn2patch.WORK = pathlib.Path(RUN + "/work")
 STOCK = dn2patch.unzip(pathlib.Path(RUN + "/in/dn2").read_bytes(), (".syx",))
