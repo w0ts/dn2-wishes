@@ -4,7 +4,7 @@
 
 README.md is the one source: it is the repository's front page and, through this script, the About page of the
 Wishes site, in the shared style (tools/web/wishes.css on top of https://w0ts.github.io/site-style/common.css).
-Only the Markdown README.md uses is handled: # ## headings, paragraphs, - lists (a line indented under an item
+Only the Markdown README.md uses is handled: # ## ### headings, paragraphs, - lists (a line indented under an item
 continues it), `code`, **bold**, *italic*, [text](url), and raw HTML blocks (the icon tables), whose
 docs/img/icons/ paths are moved to ICONS_URL_PREFIX (default about-icons/), where make_site.sh copies the icons.
 Anything else in the README fails loudly instead of being published half-formed."""
@@ -14,8 +14,8 @@ import sys
 from pathlib import Path
 
 REPO = "https://github.com/w0ts/dn2-wishes"
-NAV = ('<nav class="site" aria-label="Wishes pages"><a href="./">builder</a><a href="samples.html">sample import</a>'
-       '<a href="help.html">help</a><a href="presets.html">presets</a><a href="about.html" aria-current="page">about</a>'
+NAV = ('<nav class="site" aria-label="Wishes pages"><a href="about.html" aria-current="page">about</a><a href="./">builder</a>'
+       '<a href="samples.html">sample import</a><a href="presets.html">presets</a><a href="help.html">help</a>'
        '<a href="%s" aria-label="GitHub" title="GitHub"><svg viewBox="0 0 16 16" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg></a></nav>' % REPO)
 # files the README links to that are not on the site: the repository's own page
 SITE_FILES = {"LICENSE", "THIRD-PARTY.md"}
@@ -51,13 +51,14 @@ def convert(md: str, icons: str) -> tuple[str, str]:
             i += 1
         elif line.startswith("#"):
             m = re.match(r"(#+) (.*)", line)
-            if not m or len(m.group(1)) > 2:
+            if not m or len(m.group(1)) > 3:
                 raise SystemExit("make_about: unsupported heading: %r" % line)
             if len(m.group(1)) == 1:
                 title = m.group(2)
                 body.append('<header class="site"><div class="titlebar"><h1><a href="https://w0ts.github.io/">w0ts</a> / DN2-Wishes · about</h1></div>%s</header>' % "@@NAV@@")
             else:
-                body.append("<h2>%s</h2>" % inline(m.group(2)))
+                tag = "h%d" % len(m.group(1))
+                body.append("<%s>%s</%s>" % (tag, inline(m.group(2)), tag))
             i += 1
         elif line.startswith("<"):
             block = []

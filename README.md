@@ -14,7 +14,9 @@ Custom firmware for the Elektron Digitone II, OS 1.12. Built on
 
 ## Machines
 
-Ours are machine types 50 to 56 in MACHINE SEL; the machines below DRUM come from dn2mk2.
+Ours are machine types 50 to 56 in MACHINE SEL; the others come from dn2mk2, grouped by the machine they were ported from.
+
+### Ours
 
 <table>
 <tr><td width="60"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/icons/machine-juno-dark.png"><img src="docs/img/icons/machine-juno.png" width="54" height="42" alt="JUNO"></picture></td><td><b>JUNO</b></td><td>The Juno-106 voice: DCO with saw, pulse and sub, noise, ladder filter, high-pass. From Optimist.</td></tr>
@@ -24,7 +26,11 @@ Ours are machine types 50 to 56 in MACHINE SEL; the machines below DRUM come fro
 <tr><td width="60"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/icons/machine-tb-303-dark.png"><img src="docs/img/icons/machine-tb-303.png" width="54" height="42" alt="TB-303"></picture></td><td><b>TB-303</b></td><td>An acid bass voice (Open303, as Schwung 303 plays it).</td></tr>
 <tr><td width="60"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/icons/machine-plaits-dark.png"><img src="docs/img/icons/machine-plaits.png" width="54" height="42" alt="PLAITS"></picture></td><td><b>PLAITS</b></td><td>Mutable Instruments Plaits' engines, chosen by MODL: WS, VA, FM, ADD, SWRM, NOIS, PART, STRG, MDAL, BD, SD, HH.</td></tr>
 <tr><td width="60"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/icons/machine-drum-dark.png"><img src="docs/img/icons/machine-drum.png" width="54" height="42" alt="DRUM"></picture></td><td><b>DRUM</b></td><td>A synth drum machine; TYPE (page 1, knob H) chooses the drum: KICK, SNAR, CLHH, OPHH, TOM, CLAP, RIDE, CRSH.</td></tr>
-<tr><td width="60"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/icons/machine-machinedrum-dark.png"><img src="docs/img/icons/machine-machinedrum.png" width="54" height="42" alt="MACHINEDRUM"></picture></td><td><b>MACHINEDRUM</b></td><td>The Machinedrum's TRX, EFM, GND and P-I machines (34), chosen by TYPE, with its track effects. From dn2mk2, ported from the Machinedrum's own firmware (UW OS 1.63).</td></tr>
+</table>
+
+### From the Monomachine
+
+<table>
 <tr><td width="60"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/icons/machine-sid-6581-dark.png"><img src="docs/img/icons/machine-sid-6581.png" width="54" height="42" alt="SID 6581"></picture></td><td><b>SID 6581</b></td><td>The Commodore 64's sound chip. From dn2mk2, ported from the Monomachine's own firmware (SFX-6/60 OS 1.32B), polyphonic.</td></tr>
 <tr><td width="60"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/icons/machine-dpro-wave-dark.png"><img src="docs/img/icons/machine-dpro-wave.png" width="54" height="42" alt="DPRO WAVE"></picture></td><td><b>DPRO WAVE</b></td><td>DigiPRO wavetables. From dn2mk2, ported from the Monomachine's own firmware (SFX-6/60 OS 1.32B), polyphonic.</td></tr>
 <tr><td width="60"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/icons/machine-dpro-ddrw-dark.png"><img src="docs/img/icons/machine-dpro-ddrw.png" width="54" height="42" alt="DPRO DDRW"></picture></td><td><b>DPRO DDRW</b></td><td>DigiPRO DDRW. From dn2mk2, ported from the Monomachine's own firmware (SFX-6/60 OS 1.32B), polyphonic.</td></tr>
@@ -33,12 +39,28 @@ Ours are machine types 50 to 56 in MACHINE SEL; the machines below DRUM come fro
 <tr><td width="60"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/icons/machine-fmplus-stat-dark.png"><img src="docs/img/icons/machine-fmplus-stat.png" width="54" height="42" alt="FM+ STAT"></picture></td><td><b>FM+ STAT</b></td><td>Two operators, self feedback. From dn2mk2, ported from the Monomachine's own firmware (SFX-6/60 OS 1.32B), polyphonic.</td></tr>
 <tr><td width="60"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/icons/machine-fmplus-par-dark.png"><img src="docs/img/icons/machine-fmplus-par.png" width="54" height="42" alt="FM+ PAR"></picture></td><td><b>FM+ PAR</b></td><td>Three operators in parallel, each with its own decay. From dn2mk2, ported from the Monomachine's own firmware (SFX-6/60 OS 1.32B), polyphonic.</td></tr>
 <tr><td width="60"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/icons/machine-fmplus-dyn-dark.png"><img src="docs/img/icons/machine-fmplus-dyn.png" width="54" height="42" alt="FM+ DYN"></picture></td><td><b>FM+ DYN</b></td><td>Two operators with pitch and volume envelopes. From dn2mk2, ported from the Monomachine's own firmware (SFX-6/60 OS 1.32B), polyphonic.</td></tr>
+</table>
+
+### From the Machinedrum
+
+<table>
+<tr><td width="60"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/icons/machine-machinedrum-dark.png"><img src="docs/img/icons/machine-machinedrum.png" width="54" height="42" alt="MACHINEDRUM"></picture></td><td><b>MACHINEDRUM</b></td><td>The Machinedrum's TRX, EFM, GND and P-I machines (34), chosen by TYPE, with its track effects. From dn2mk2, ported from the Machinedrum's own firmware (UW OS 1.63).</td></tr>
+</table>
+
+### From the Digitakt II
+
+<table>
 <tr><td width="60"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/icons/machine-oneshot-dark.png"><img src="docs/img/icons/machine-oneshot.png" width="54" height="42" alt="ONESHOT"></picture></td><td><b>ONESHOT</b></td><td>From dn2mk2, the Digitakt II's sample machine.</td></tr>
 <tr><td width="60"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/icons/machine-werp-dark.png"><img src="docs/img/icons/machine-werp.png" width="54" height="42" alt="WERP"></picture></td><td><b>WERP</b></td><td>From dn2mk2, the Digitakt II's sample machine.</td></tr>
 <tr><td width="60"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/icons/machine-stretch-dark.png"><img src="docs/img/icons/machine-stretch.png" width="54" height="42" alt="STRETCH"></picture></td><td><b>STRETCH</b></td><td>From dn2mk2, the Digitakt II's sample machine.</td></tr>
 <tr><td width="60"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/icons/machine-repitch-dark.png"><img src="docs/img/icons/machine-repitch.png" width="54" height="42" alt="REPITCH"></picture></td><td><b>REPITCH</b></td><td>From dn2mk2, the Digitakt II's sample machine.</td></tr>
 <tr><td width="60"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/icons/machine-grid-dark.png"><img src="docs/img/icons/machine-grid.png" width="54" height="42" alt="GRID"></picture></td><td><b>GRID</b></td><td>From dn2mk2, the Digitakt II's sample machine.</td></tr>
 <tr><td width="60"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/icons/machine-slice-dark.png"><img src="docs/img/icons/machine-slice.png" width="54" height="42" alt="SLICE"></picture></td><td><b>SLICE</b></td><td>From dn2mk2, the Digitakt II's sample machine.</td></tr>
+</table>
+
+### From dn2mk2, origin not stated
+
+<table>
 <tr><td width="60"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/icons/machine-bounce-dark.png"><img src="docs/img/icons/machine-bounce.png" width="54" height="42" alt="BOUNCE"></picture></td><td><b>BOUNCE</b></td><td>FLEX: plays the recorder's buffers. From dn2mk2.</td></tr>
 </table>
 

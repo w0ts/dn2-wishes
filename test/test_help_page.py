@@ -45,8 +45,8 @@ def test_every_page_has_the_tabs_and_they_lead_to_pages(tmp_path: pathlib.Path):
     nav.site, loaded by URL before wishes.css), and each tab opens the right page in the served layout (the front
     page is the builder)."""
     site = _site(tmp_path)
-    want = {"./": "Wishes · DN2 mod builder", "samples.html": "Wishes · DN2 sample import",
-            "help.html": "Wishes · hidden functions", "presets.html": "Wishes · presets", "about.html": "Wishes · about"}
+    want = {"./": "w0ts / DN2-Wishes · DN2 mod builder", "samples.html": "w0ts / DN2-Wishes · DN2 sample import",
+            "help.html": "w0ts / DN2-Wishes · hidden functions", "presets.html": "w0ts / DN2-Wishes · presets", "about.html": "w0ts / DN2-Wishes · about"}
     for page in ("index.html", "samples.html", "help.html", "presets.html", "about.html"):
         html = (site / page).read_text(encoding="utf-8")
         nav = re.search(r'<nav class="site"[^>]*>(.*?)</nav>', html, re.S)
@@ -57,6 +57,10 @@ def test_every_page_has_the_tabs_and_they_lead_to_pages(tmp_path: pathlib.Path):
             target = site / ("index.html" if href == "./" else href)
             assert f"<title>{title}</title>" in target.read_text(encoding="utf-8"), (page, href)
         assert nav.group(1).count('aria-current="page"') == 1, page
+        # the order every w0ts site keeps: about first, GitHub last
+        assert re.findall(r'<a href="([^"]+)"', nav.group(1)) == [
+            "about.html", "./", "samples.html", "presets.html", "help.html",
+            "https://github.com/w0ts/dn2-wishes"], page
 
 
 def test_no_card_is_tied_to_a_part():
