@@ -7,8 +7,9 @@ Finished work is in [CHANGELOG.md](CHANGELOG.md).
 
 - **FILTER 2.** A second filter on every voice, after the stock filter, on the FLTR page's third
   page (3/3).
-    - DSP part: done, and proven bit-exact against its model.
-    - ColdFire part (the page, the parameters, saving): being built.
+    - DSP part and ColdFire part (the page, p-locks, modulation routes, saving): built and checked
+      in the emulator; a test build is on the unit being checked. Not built yet: FILTER 2 in an
+      LFO's DEST list, and trig copy/paste of its locks.
 - **Bus FDN8 toward 8 at once.** The cheaper bus FDN8 (24 kHz tank, 2 diffusers; 20 to 25 % cheaper
   on the unit, 4 at once) is done, with the frame guard's cost set to what the unit measured.
   Being built: the DSP's hardware loops and long-word access to the delay lines, bit-exact, to
