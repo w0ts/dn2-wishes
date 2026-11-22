@@ -30,160 +30,233 @@ svg.panel .enc text { fill: var(--dim); font: 9px var(--font-mono); text-anchor:
   <p class="lead">The hidden functions of DN2wishes<span id="ver"></span> on a Digitone II: key combinations, held keys and behaviour the screen does not show, one card each. What the menus and lists show (the new machines, the inserts, their knobs) is not repeated here. Unofficial: not made or supported by Elektron.</p>
   <div class="tabs" id="filters" style="margin-bottom:var(--sp-4)"></div>
   <div class="grid cards" id="cards"></div>
-  <p class="note">The drawings are a schematic of the keys a function uses, not the instrument's layout. Written from the firmware's docs/HIDDEN-FUNCTIONS.md; items marked "unverified" were read from notes or code, not confirmed on a unit.</p>
+  <p class="note">The drawings show the keys a function uses, not the instrument's layout. Each card was checked against the firmware's code.</p>
 </main>
 <script>
 "use strict";
-// keys the schematic draws: [id, label, x, y, w]
+// the keys the cards use: [id, label, x, y, w]. Each card's drawing shows only its own keys (the User, 2026-11-22:
+// "remove the buttons, only keep the ones used"), at the same place on every card.
 const KEYS = [
-  ["VOICE", "VOICE", 10, 62, 36], ["TRIGPG", "TRIG", 50, 62, 32], ["SYN", "SYN", 86, 62, 30], ["FLTR", "FLTR", 120, 62, 32],
-  ["AMP", "AMP", 156, 62, 30], ["FX", "FX", 190, 62, 24], ["PTN", "PTN", 218, 62, 26],
-  ["FUNC", "FUNC", 10, 92, 40], ["NO", "NO", 54, 92, 30], ["YES", "YES", 88, 92, 32], ["PLAY", "PLAY", 124, 92, 24],
-  ["UP", "▲", 182, 86, 26], ["LEFT", "◀", 152, 104, 26], ["DOWN", "▼", 182, 104, 26], ["RIGHT", "▶", 212, 104, 26],
+  ["TRIGPG", "TRIG", 10, 62, 32], ["SYN", "SYN", 46, 62, 30], ["FLTR", "FLTR", 80, 62, 32], ["AMP", "AMP", 116, 62, 30],
+  ["FX", "FX", 150, 62, 24], ["MOD", "MOD", 178, 62, 30],
+  ["VOICE", "VOICE", 10, 84, 36], ["PRESET", "PRESET", 50, 84, 40], ["TEMPO", "TEMPO", 94, 84, 36], ["PTN", "PTN", 134, 84, 26],
+  ["KB", "KEYBOARD", 164, 84, 46], ["STOP", "STOP", 214, 84, 28],
+  ["FUNC", "FUNC", 10, 106, 40], ["NO", "NO", 54, 106, 30], ["YES", "YES", 88, 106, 32],
+  ["UP", "▲", 182, 106, 26], ["LEFT", "◀", 152, 124, 26], ["DOWN", "▼", 182, 124, 26], ["RIGHT", "▶", 212, 124, 26],
 ];
 const ENC = "ABCDEFGH".split("");
 
 function panel(hl) {
   const on = new Set(hl);
-  let s = `<svg class="panel" viewBox="0 0 248 150" role="img" aria-label="keys: ${[...on].join(", ")}">`;
+  if (!on.size) return "";
+  let s = "", y0 = 999, y1 = 0;
+  const span = (a, b) => { y0 = Math.min(y0, a); y1 = Math.max(y1, b); };
   ENC.forEach((e, i) => {
-    s += `<g class="enc ${on.has("ENC" + e) ? "hl" : ""}"><circle cx="${18 + i * 30}" cy="22" r="11"/><text x="${18 + i * 30}" y="22">${e}</text></g>`;
+    if (!on.has("ENC" + e)) return;
+    s += `<g class="enc hl"><circle cx="${18 + i * 30}" cy="22" r="11"/><text x="${18 + i * 30}" y="22">${e}</text></g>`;
+    span(11, 33);
   });
   for (const [id, lab, x, y, w] of KEYS) {
-    s += `<g class="key ${on.has(id) ? "hl" : ""}"><rect x="${x}" y="${y}" width="${w}" height="16" rx="3"/><text x="${x + w / 2}" y="${y + 8}">${lab}</text></g>`;
+    if (!on.has(id)) continue;
+    s += `<g class="key hl"><rect x="${x}" y="${y}" width="${w}" height="16" rx="3"/><text x="${x + w / 2}" y="${y + 8}">${lab}</text></g>`;
+    span(y, y + 16);
   }
   for (let i = 0; i < 16; i++) {
     const id = "TRIG" + (i + 1), x = 10 + i * 14.4;
-    s += `<g class="key ${on.has(id) || on.has("TRIG") ? "hl" : ""}"><rect x="${x}" y="128" width="12" height="14" rx="2"/><text x="${x + 6}" y="135" style="font-size:6.5px">${i + 1}</text></g>`;
+    if (!on.has(id) && !on.has("TRIG")) continue;
+    s += `<g class="key hl"><rect x="${x}" y="148" width="12" height="14" rx="2"/><text x="${x + 6}" y="155" style="font-size:6.5px">${i + 1}</text></g>`;
+    span(148, 162);
   }
-  return s + "</svg>";
+  const top = y0 - 4, h = y1 - y0 + 8;
+  return `<svg class="panel" viewBox="0 ${top} 248 ${h}" role="img" aria-label="keys: ${[...on].join(", ")}">${s}</svg>`;
 }
 
 const k = (t, hl = true) => `<kbd${hl ? ' class="hl"' : ""}>${t}</kbd>`;
 const plus = " + ", then = " → ";
 
-// g: the filter. Source of every card:
-// docs/HIDDEN-FUNCTIONS.md (and docs/flex-pool.md, docs/paraphonic.md); "unverified" as that doc marks it.
+// g: the filter. Every card checked against the code of the newest build (csrc/: inserts/ovw.c, meter/, scope/,
+// matrix/, msel/, inserts/ins.c, fxpage/, sampler/, slides/, para/, hold/, jump/, safemode/, knobs/).
 const CARDS = [
+  // -- overviews: a key held one second
+  { t: "OUTPUTS overview", g: "Overviews", keys: ["FUNC", "MOD"], combo: k("FUNC") + plus + "hold " + k("MOD") + " 1 s",
+    li: ["25 bars, live: T1-16 (each track's own Overbridge / USB channel), D R C (the send returns), OB L R (Overbridge / USB main), OUT L R (the analog outputs and headphones), IN (the input), REC (the recorder).",
+         "Only the outputs where audio can really clip (fixed point). Each bar is 48 dB, its top that output's own full scale, with a peak tick for the last 3 s.",
+         "A dotted bar: that output is not in use (T, D R C and OB in Overbridge mode; in USB audio mode only the USB OUT pair; REC only while it records).",
+         "A block above a bar: that output clipped while in use; the title names it, e.g. CLIP 5 R OUT. One mark for a pair (L and R).",
+         "Let go: the screen you were on. A short FUNC + [MOD] still opens stock's MIXER."] },
+  { t: "System meter", g: "Overviews", keys: ["TEMPO"], combo: "hold " + k("TEMPO") + " 1 s",
+    li: ["DSP, CPU and RAM in large figures and bars over the page; DSP and CPU with a tick at their peak of the last 3 s.",
+         "Shown while [TEMPO] is held; let go: the page you were on (the TEMPO screen does not open).",
+         "A short press of [TEMPO] is still the TEMPO screen; FUNC + [TEMPO] is still tap tempo."] },
+  { t: "Machines overview", g: "Overviews", keys: ["SYN"], combo: "hold " + k("SYN") + " 1 s",
+    li: ["Every track's machine, with its engine or model under it; a muted track's machine is framed. The title counts the muted tracks.",
+         "Let go: it closes. A short press of [SYN] is stock's."] },
+  { t: "Filters overview", g: "Overviews", keys: ["FLTR"], combo: "hold " + k("FLTR") + " 1 s",
+    li: ["Every track's filter machine; on ANALOG 2 also its FLT2.", "Let go: it closes. A short press of [FLTR] is stock's."] },
+  { t: "LFO overview", g: "Overviews", keys: ["MOD"], combo: "hold " + k("MOD") + " 1 s",
+    li: ["Per track: a mark for each LFO that has a route, and the count of routes in use and muted.",
+         "The title: LFO POOL n/256 and MUTED n.", "Let go: it closes. A short press of [MOD] is stock's."] },
+  { t: "Voices and load overview", g: "Overviews", keys: ["AMP"], combo: "hold " + k("AMP") + " 1 s",
+    li: ["Per track: the voices sounding (nV) and the track's share of the DSP time (%); the busiest track lit.",
+         "The title: VOICES n/16, C (the CPU) and D (the DSP) in %.", "Let go: it closes, the page does not change."] },
+  { t: "Inserts overview", g: "Overviews", keys: ["FX"], combo: "hold " + k("FX") + " 1 s",
+    li: ["Every track's two insert slots: a lit icon runs on the DSP, a plain icon is at MIX 0, a blinking FUL is an FDN8 or XDLY with no free instance, a dot is OFF.",
+         "The title: INSERTS n/32 and the DSP load.", "Let go: it closes, the page does not change."] },
+  { t: "VOICE SETUP overview", g: "Overviews", keys: ["VOICE"], combo: "hold " + k("VOICE") + " 1 s",
+    li: ["Every track's machine, voice mode (PAR = PARA ON, UNI = UNISON, MON = one fixed voice, PLY) and VOICES (DYN or the fixed count); the DYN pool in the title.",
+         "Let go: the screen as before (the VOICE menu does not open). A short press is stock's VOICE menu; FUNC + VOICE is the RECORDER."] },
+  { t: "Scope", g: "Overviews", keys: ["TRIGPG", "ENCG"], combo: "hold " + k("TRIG") + " 1 s",
+    li: ["The oscilloscope (titled WAVEFORM) of the active track opens over the TRIG page and stays up after [TRIG] is let go; any page key ([TRIG] too), TRK or NO closes it.",
+         "Any encoder but G: the time across the screen, 2-67 ms. G: the vertical zoom, x1/8-x16 or AUTO (the default). Shared by all tracks, kept after power-off.",
+         "A short press of [TRIG] is stock's; FUNC + [TRIG] is still QUANTIZE."] },
+  { t: "Title bar labels", g: "Overviews", keys: [], combo: "the title bar's right end",
+    li: ["DSP: the DSP left a voice out for lack of time, or its load is 99 % or more. CPU: the ColdFire's load is 90 % or more.",
+         "RAM: an FDN8 or XDLY insert found no free instance, or 90 % of the memory is used.",
+         "CLIP: for 3 s after an output in use clipped, or a stage inside a voice (an engine, an insert, XDLY) clipped or limited.",
+         "They blink over the tempo while they hold."] },
+  { t: "MIXER meters", g: "Overviews", keys: ["FUNC", "MOD"], combo: "stock's MIXER: " + k("FUNC") + plus + k("MOD"),
+    li: ["Internal Mixer 2/5 and 3/5: each track's right tick column is its level meter, 3 dB a row, with a peak tick of the last 3 s.",
+         "FX Mixer 4/5: meters beside DEL, REV, CHR and the main OUT L R. External Mixer 5/5: IN LR.",
+         "A \"!\" left of a channel: it clipped while in use (it stays until the page has been up 2 s)."] },
   // -- sound pages
-  { t: "System meter", g: "Sound", keys: ["FUNC"], combo: "hold " + k("FUNC"),
-    li: ["On any page, the title bar's right end shows D (DSP load), C (ColdFire load) and M (memory).",
-         "On Monomachine and Machinedrum pages the DSP % also shows in the tempo's place.",
-         "Let go of FUNC: the stock screen is back."] },
-  { t: "Coarse turns", g: "Sound", keys: ["FUNC"], combo: k("FUNC") + plus + "turn",
-    li: ["On our machines' controls: a coarse jump.", "Monomachine TUNE: one semitone a click. Sample TUNE: 12.00 a click.",
+  { t: "Knob notches", g: "Sound", keys: [], combo: "a slow turn",
+    li: ["Every value with a centre (PAN, BAL, TUNE, filter ENV, EQ GAIN, LFO SPD, FADE, DEP ...) stops at its centre on a slow turn; turn on the same way to pass it. A fast turn goes straight through.",
+         "P-locks too. CC, Overbridge, loads and the sequencer are never stopped."] },
+  { t: "FUNC + turn", g: "Sound", keys: ["FUNC"], combo: k("FUNC") + plus + "turn",
+    li: ["Our machines' list controls: the next choice, one a click; their other controls do not move.",
+         "Monomachine TUNE: one semitone a click. FM+ DYN 1FRQ and 2FRQ: the next whole ratio. Sample TUNE: one octave a click.",
          "A send page 2: the next of 0, the default and 127."] },
   { t: "Sample STRT, LEN, LOOP", g: "Sound", keys: [], combo: "push + turn",
-    li: ["A plain turn is the fine control, 0.00 .. 120.00; push and turn moves whole steps."] },
+    li: ["A plain turn is the fine control, 0.00-120.00; push and turn moves whole steps.",
+         "ONESHOT: STRT, LEN and LOOP. STRETCH, REPITCH and BOUNCE: STRT and LEN."] },
   { t: "Parameter slides", g: "Sound", keys: ["TRIG", "ENCE", "ENCF"], combo: "TRIG page 2: hold a " + k("TRIG") + plus + "turn E / F",
-    li: ["E = SLD: turn it right on a held trig for a slide on that trig. F = SLEN: the slide's length, 1/8 .. 64 steps.",
-         "Pushing E or F on held steps clears their slides.", "Holding a trig and turning also locks the ENV2 knobs, as stock's p-locks."] },
-  { t: "AMP pages", g: "Sound", keys: ["AMP"], combo: k("AMP") + then + k("AMP"),
-    li: ["1/2 is stock's (titled ENV1/AMP), 2/2 is ENV2; NO or any page key closes 2/2."] },
-  { t: "Scope", g: "Sound", keys: ["TRIGPG", "ENCG"], combo: "hold " + k("TRIG") + " one second",
-    li: ["The oscilloscope (titled WAVEFORM) opens over the TRIG page and stays up after [TRIG] is let go; any page key ([TRIG] too), TRK or NO closes it.",
-         "A short press of [TRIG] is stock's; FUNC + [TRIG] is still stock's QUANTIZE.",
-         "Any encoder but G sets the time across the screen (2 .. 67 ms); G the vertical zoom (x1/8 .. x16, AUTO). Shared by all tracks, kept after power-off."] },
+    li: ["E = SLD: on, the parameters this trig p-locks glide to their locked values instead of jumping.",
+         "F = SLEN: NXT (the default: until the track's next trig) or 1/8-64 steps."] },
+  { t: "AMP pages and ENV2", g: "Sound", keys: ["AMP", "UP", "DOWN", "ENCG", "ENCH"], combo: k("AMP") + then + k("AMP"),
+    li: ["AMP 1/2 is stock's (titled ENV1/AMP), 2/2 is ENV2; on an AMP page the other one comes when [AMP] is let go. ▲▼ step the pages too (also on FX). NO or any page key closes 2/2.",
+         "ENV2: a copy of the amp envelope that only routes. Its knobs can be p-locked (hold a trig + turn).",
+         "G = DEST (push: the DEST popup of ENV2's routes, 4 at most), H = DEP (ENV2's attenuverter)."] },
+  { t: "AMP ON/OFF on drums", g: "Sound", keys: ["AMP", "ENCH"], combo: "AMP 1/2 on a drum: knob H",
+    li: ["MACHINEDRUM, SOPHIE, DRUM and PLAITS BD, SD, HH: H (VOL's place) is AMP ON/OFF. A turn right is ON, left OFF; a push switches it.",
+         "OFF (the default): the drum skips the AMP envelope and VOL and decays by itself. ON: stock's AMP and VOL. Saved with the sound."] },
   { t: "LFO destinations", g: "Sound", keys: [], combo: "an LFO's DEST list",
     li: ["13 controls stock hides are offered (PTIM, PORT, amp DEL / MODE / RSET, several FM TONE ones).",
-         "Each LFO can modulate the other two LFOs' controls."] },
+         "Each LFO can modulate the other two LFOs' SPD, MULT, FADE, WAVE, SPH, MODE and DEP."] },
   // -- matrix
-  { t: "Matrix routes popup", g: "Matrix", keys: ["FUNC", "YES", "NO", "UP", "DOWN"], combo: k("FUNC") + plus + "short push on a sound knob",
-    li: ["Rows LFO1, LFO2, LFO3, ENV1, ENV2: the depth routed to that knob, with a moving bar; stock's VEL / MW / PB / AT / BC / KEY rows are read-only.",
-         "Turn the knob: the lit row's depth. Push + turn, or ▲▼: another row. A row left at 0 goes when the popup closes.",
-         "YES keeps, NO undoes every change. It also closes (kept) on the knob pushed again, another knob, a page key, a track change or 6 s untouched.",
-         "The LOCKS strip at the bottom: this knob's p-locks, per step, for the pattern page playing.",
-         "Up to 16 LFO routes a track, 4 per envelope. ENV1 is stock's AMP envelope; ENV2 (AMP 2/3) a copy, routable only."] },
-  { t: "Reset and delete routes", g: "Matrix", keys: ["FUNC"], combo: k("FUNC") + plus + "long push (0.6 s)",
-    li: ["On a knob, popup closed: resets the knob to its default. A FUNC + push begun while the popup is up is ignored.",
-         "In the popup: NO held 0.6 s deletes the lit row's route; FUNC + NO deletes every route of ours into this knob."] },
+  { t: "Routes popup", g: "Matrix", keys: [], combo: "push a sound knob and let go",
+    li: ["Opens on the release when nothing else happened while the knob was held (a small wobble is ignored). Stock's push gestures stay stock's.",
+         "On the SYN pages of every machine, FLTR, AMP, FX 1/3, ENV2 and TRIG 2/2 PTIM / PORT; not with a trig held, not on a MIDI track.",
+         "Rows LFO1-3, ENV1 (stock's AMP envelope), ENV2, then stock's MOD SETUP: VEL/V, MW/T, PB/T, AT/T, BC/T, KEY/V. Rows in use come first; a row with no route shows its source's level as a dotted line.",
+         "LOCKS at the bottom: this knob's p-locks on the page playing. PER NOTE in the header: the control is read only when a note starts."] },
+  { t: "Routes popup keys", g: "Matrix", keys: ["YES", "NO", "FUNC", "UP", "DOWN"], combo: "routes popup up",
+    li: ["Turn the knob: the lit row's depth (turned to 0, the route goes). Push + turn, or ▲▼: another row. FUNC + ▲▼: the next / previous section.",
+         "YES: unmutes the lit route (an empty row: adds one at +32). NO: mutes it. NO held 0.6 s: deletes it. FUNC + NO: deletes every route into this knob.",
+         "Up to 16 LFO routes a track, 4 per envelope, 4 per MOD SETUP source (NOT IN SETUP where stock's list does not offer the knob).",
+         "It closes (everything kept) on the knob pushed again, another knob, a page key, a track change or 6 s untouched."] },
+  { t: "Reset a knob", g: "Matrix", keys: ["FUNC"], combo: k("FUNC") + plus + "push held 0.6 s",
+    li: ["The knob goes back to its default (never an LFO's DEST).",
+         "On an INSERT page: B-G only (M.SEL and MIX stay).",
+         "A short FUNC + push is stock's (on a MIDI track it switches CHAN, BANK, PROG, CC VAL; on an LFO's DEST, stock's list)."] },
+  { t: "LFO DEST popup", g: "Matrix", keys: ["ENCD", "YES", "NO", "UP", "DOWN"], combo: "LFO page: push or turn D",
+    li: ["This LFO's routes on top, each with its depth and a moving bar, then the destination list.",
+         "D: the lit row's depth (from 0 it adds the route, to 0 it goes). Push + turn or ▲▼: another row; FUNC + ▲▼: by sections.",
+         "YES, NO, NO held and FUNC + NO as in the routes popup (FUNC + NO: every route of this LFO).",
+         "FUNC + push D is stock's DEST list."] },
+  { t: "LFO DEP", g: "Matrix", keys: [], combo: "LFO page: DEP",
+    li: ["DEP is the LFO's attenuverter: every route of that LFO is heard at its own depth x DEP. +63 is 100 %, a negative DEP inverts.",
+         "An old project: the LFO's DEP moves into its first route's depth and DEP becomes 100 %, so it sounds as before."] },
   // -- lists
   { t: "List popups", g: "Lists", keys: ["TRIG", "UP", "DOWN", "LEFT", "RIGHT"], combo: "turn a list knob",
-    li: ["Engine, sub-engine or model, FLT2: a five-row list opens round the value; the first turn only opens it.",
-         "The trig keys play the track with the list open, to hear the choice.",
-         "▲▼ one entry, ◀▶ one page. It closes 1.5 s after the last turn, or on any other key or encoder."] },
+    li: ["Our machines' and FX lists, and stock's short lists (LFO WAVE and MODE, filter modes ...): a five-row list opens round the value; the first turn only opens it.",
+         "▲▼ one entry, ◀▶ five. The trig keys play the track with the list open.",
+         "It closes 1.5 s after the last turn, or on any other key."] },
   { t: "Filter list", g: "Lists", keys: ["FUNC", "FLTR", "ENCG", "YES", "NO"], combo: "FLTR page: " + k("FUNC") + plus + "turn G",
-    li: ["Opens the filter list. YES, pushing G or letting go of FUNC keeps; NO or another key leaves the type as it was.",
-         "A trig key leaves it open (with FUNC held it is stock's FUNC + trig)."] },
-  { t: "MACHINE SEL and LIVE SELECT", g: "Lists", keys: ["LEFT", "RIGHT", "YES", "NO"], combo: "MACHINE SEL: " + k("◀") + " / " + k("▶"),
-    li: ["Two columns: ◀▶ switch between the machines and the filter engines.",
-         "LIVE SELECT (on by default): the machine or filter under the cursor goes on the track once the cursor rests, no YES needed.",
-         "YES keeps and closes; NO puts back the machine, the filter and the whole sound as they were. The same on the FUNC + G filter list.",
-         "FUNC + SYN with MACHINE SEL up: the same switch as ◀▶ (unverified)."] },
+    li: ["Opens the filter list. YES, pushing G or letting go of FUNC keeps; NO or another key leaves the type as it was."] },
+  { t: "MACHINE SEL and LIVE SELECT", g: "Lists", keys: ["LEFT", "RIGHT", "FUNC", "SYN", "YES", "NO"], combo: "MACHINE SEL: " + k("◀") + " / " + k("▶"),
+    li: ["Two columns: ◀▶, or FUNC + SYN, switch between the machines and the filter machines.",
+         "LIVE SELECT (on by default): the machine under the cursor goes on the track once the cursor rests.",
+         "YES keeps and closes; NO puts back the machine, the filter and the whole sound as they were. The same on the filter list and INSERT SEL."] },
+  { t: "INSERT SEL", g: "Lists", keys: ["ENCA", "UP", "DOWN", "LEFT", "RIGHT", "YES", "NO"], combo: "INSERT page: push A",
+    li: ["The insert types, OFF then A-Z, with their icons (FUNC + turn A opens it too).",
+         "▲▼ a row, ◀▶ INSERT 1 / INSERT 2. YES picks and closes, NO closes (with LIVE SELECT on: both slots as they were).",
+         "A pick starts at MIX 0 with AUTO OFF."] },
   // -- inserts and send effects
-  { t: "Insert pages", g: "Inserts & FX", keys: ["FX", "FUNC", "ENCA", "ENCH"], combo: k("FX") + then + k("FX") + then + k("FX"),
-    li: ["FX 1/3 is stock's, 2/3 INSERT 1, 3/3 INSERT 2; NO or a page key closes an insert page. FUNC + FX: stock's send pages only.",
-         "A = M.SEL (bands, A to Z: OFF CHOR DIST FDN8 FOLD FUZZ GATR HARM JUNO RING SUB TAPE WIDE XDLY), B .. G the insert's knobs, H = MIX.",
-         "FX on an insert's page 1 opens its page 2 (FUZZ: GATE; TAPE: AGE, HISS).",
-         "Inserts are saved with the project; they cannot be p-locked or modulated."] },
+  { t: "Insert pages", g: "Inserts & FX", keys: ["FX", "ENCA", "ENCH"], combo: k("FX") + then + k("FX") + then + k("FX"),
+    li: ["FX 1/3 is stock's, 2/3 INSERT 1, 3/3 INSERT 2; on an FX page the next one comes when [FX] is let go. NO or a page key closes an insert page. FUNC + FX: stock's send pages.",
+         "A = M.SEL (OFF CHOR DIST FDN8 FOLD FUZZ GATR HARM JUNO RING SUB TAPE WIDE XDLY), B-G the insert's knobs, H = MIX. At MIX 0 an insert costs nothing.",
+         "The insert knobs and MIX can be p-locked and are matrix destinations (not M.SEL, nor the delay times). Saved with the project."] },
+  { t: "Insert page 2", g: "Inserts & FX", keys: ["FUNC"], combo: "INSERT page: tap " + k("FUNC"),
+    li: ["A FUNC tap (press and release, nothing else) switches page 1 and 2: FUZZ: GATE; TAPE: AGE, HISS.",
+         "[FX] goes on to the next FX page."] },
   { t: "AUTO LEVEL", g: "Inserts & FX", keys: ["ENCF", "ENCG"], combo: "DIST, FOLD, HARM, FUZZ, TAPE: F, G",
-    li: ["F = PGAIN. G = AUTO LEVEL: a turn right is ON (the level stays steady as the drive rises), left is OFF."] },
+    li: ["F = PGAIN. G = AUTO LEVEL: a turn right is ON (the level stays steady as the drive rises), left is OFF.",
+         "AUTO is OFF whenever one of them is picked."] },
   { t: "Insert slots", g: "Inserts & FX", keys: [], combo: "slot 1 runs before slot 2",
     li: ["CHOR, WIDE, FDN8 or XDLY in slot 1 over a voice insert in slot 2 moves slot 2 onto the track's bus (a chord is processed as a whole).",
          "FDN8 and XDLY: FULL under M.SEL when the DSP has no free one (8 FDN8, 4 XDLY); the slot passes the sound."] },
   { t: "Send effects' page 2", g: "Inserts & FX", keys: ["FUNC", "ENCE"], combo: "tap " + k("FUNC"),
-    li: ["On the send Delay page (TYPE XDLY) or Reverb page (TYPE FDN8 or LONG): a FUNC tap (press and release) switches page 1 and 2; page 1 shows a 1/2 tag.",
+    li: ["On the send Delay page (TYPE XDLY) or Reverb page (TYPE FDN8 or LONG): a FUNC tap switches page 1 and 2; a 1/2 tag shows.",
          "Delay page 2: SLEW, KNEE, WDTH, INPT. Reverb page 2: DIFF, WDTH, FREZ.",
-         "Send Chorus, E = TYPE: STOCK or JUNO (DPTH the mix, SPD the mode I / II / I+II); saved with the kit at stock's next save."] },
+         "Send Chorus, E = TYPE: STOCK or JUNO (DPTH the mix, SPD the mode I / II / I+II); saved with the kit."] },
   // -- samples
   { t: "Recorder", g: "Samples", keys: ["FUNC", "VOICE", "YES", "NO"], combo: k("FUNC") + plus + k("VOICE"),
     li: ["Opens the RECORDER over any page; FUNC + VOICE again, or NO, closes it. Page keys close it too; a running recording goes on.",
-         "YES records now, or stops. A SRC, D THRES, F R.LEN (steps at the pattern's scale), G R.STRT, H ARM."] },
+         "YES records now, or stops. A SRC, D THRES, E DEST, F R.LEN (steps at the tempo), G R.STRT, H ARM."] },
   { t: "After a take: TRIM, NAME, ASSIGN", g: "Samples", keys: ["FUNC", "YES", "NO", "TRIG"], combo: "TRIM" + then + "NAME" + then + "ASSIGN",
-    li: ["TRIM: E START, H END; FUNC + YES held plays START .. END; YES keeps; FUNC + NO drops the take.",
-         "The name: the Digitone's own NAME screen, as for RENAME and CREATE FOLDER (35 characters, random, copy and paste).",
+    li: ["TRIM: E START, H END; FUNC + YES held plays START-END; YES keeps; FUNC + NO drops the take.",
+         "The name: the Digitone's own NAME screen.",
          "ASSIGN SAMPLE TO TRACK: press a [TRIG] to give that track the take (a track that is not a sample track becomes ONESHOT first)."] },
   { t: "Sample list", g: "Samples", keys: ["TRIG", "YES", "NO", "FUNC", "UP", "DOWN"], combo: "turn SAMP",
-    li: ["The list stays open: ▲▼ or SAMP move, [TRIG] previews the slot.",
-         "YES or pushing SAMP keeps; NO puts SAMP back; FUNC + YES opens the browser."] },
-  { t: "FLEX buffers on any sample track", g: "Samples", keys: ["ENCD", "UP", "DOWN"], combo: "SAMP past 127: B1 .. B8",
-    li: ["ONESHOT, WERP, STRETCH, REPITCH, GRID and SLICE: SAMP goes on past 127 to the eight FLEX buffers (knob D at 127, a detent right: B1).",
-         "In the sample list they are the rows after 127 (FLEX BUF n with a take, FLEX EMPTY n without); ▲▼ step through them.",
-         "The track plays the buffer's playing take, the new one once a new take lands; an empty buffer plays nothing. A SAMP p-lock can name a buffer.",
-         "Page 2 shows FLEX BUF n / FLEX EMPTY n in place of the waveform."] },
-  { t: "Sample browser", g: "Samples", keys: ["YES", "RIGHT", "NO", "FUNC"], combo: "sample list: " + k("FUNC") + plus + k("YES"),
-    li: ["PROJECT RAM and +DRIVE. YES ticks a sample; ▶ opens SAMPLE ACTION (LOAD TO PROJECT, LOAD TO TRK, DELETE, SELECT ALL; MOVE HERE for ticked samples).",
-         "NO goes up a level, NO held to the top; FUNC + an arrow, or a pushed knob, jumps a page.",
-         "FUNC + YES previews the sample under the cursor (on +DRIVE it may toggle an auto preview instead: unverified)."] },
-  { t: "ERASE MOD DATA", g: "Samples", keys: ["FUNC", "YES", "RIGHT", "NO"], combo: "browser, on +DRIVE: " + k("▶"),
-    li: ["Removes everything the mod stored, before going back to stock: ▶, then YES, YES, YES (ERASE ALL ..., then ARE YOU SURE).",
+    li: ["The list stays open: ▲▼ or SAMP move, [TRIG] previews. YES or pushing SAMP keeps; NO puts SAMP back; FUNC + YES opens the browser.",
+         "PROJECT RAM has banks A-D: SAMP goes on from A127 to B001; FUNC + ▲▼ jumps a bank.",
+         "After the last bank: the eight FLEX buffers (FLEX BUF n with a take, FLEX EMPTY n without). The track plays the buffer's take; a SAMP p-lock can name a buffer."] },
+  { t: "Sample browser", g: "Samples", keys: ["PRESET", "FUNC", "YES", "NO", "RIGHT"], combo: "hold " + k("PRESET") + " 1 s, or sample list: " + k("FUNC") + plus + k("YES"),
+    li: ["Held [PRESET] opens it for the active track; on a track with no sample machine it only browses. A short [PRESET] is still the PRESET / KIT menu.",
+         "PROJECT RAM and +DRIVE. YES ticks a sample; ▶ opens SAMPLE ACTION (load, rename, move, new folder, delete, select all ...); NO goes up a level.",
+         "FUNC + YES: in PROJECT RAM it plays the sample while held; on +DRIVE it turns auto preview on or off (the sample under the cursor plays)."] },
+  { t: "ERASE MOD DATA", g: "Samples", keys: ["YES", "RIGHT", "NO"], combo: "browser, on +DRIVE: " + k("▶"),
+    li: ["Removes everything the mod stored, before going back to stock: ▶, then YES, YES, YES (ERASE ALL SAMPLES, then ARE YOU SURE?).",
          "NO or ◀ cancels. Restart the Digitone afterwards."] },
-  { t: "Slice and Grid", g: "Samples", keys: ["YES", "FUNC", "LEFT", "RIGHT", "ENCG"], combo: "SLICE / GRID page: " + k("YES"),
-    li: ["The slice menu: CREATE SLICE GRID (SLICES, TR.DET), EDIT SLICE POINTS, ALLOCATE SLICE (linear or random locks).",
-         "In the slice editor: FUNC + ▶ splits, FUNC + ◀ removes, FUNC + YES held previews, FUNC + G moves the whole slice.",
+  { t: "Slice and Grid", g: "Samples", keys: ["YES", "FUNC", "LEFT", "RIGHT", "ENCE", "ENCG", "ENCH"], combo: "SLICE / GRID page: " + k("YES"),
+    li: ["The slice menu: CREATE SLICE GRID (SLICES, TR.DET; FUNC + E jumps 2/4/8/16/32/64), EDIT SLICE POINTS, ALLOCATE SLICE (linear or random locks).",
+         "Slice editor: ◀▶ pick a slice; FUNC + ▶ splits, FUNC + ◀ removes, FUNC + YES held plays it, FUNC + G moves the whole slice, FUNC + E / H snap START / END to a zero crossing.",
          "KEYBOARD with SLCE = NOTE: trig key k plays slice k; KEYBOARD + ▲▼ moves the keys on by 16 slices."] },
   // -- FLEX
-  { t: "FLEX REC", g: "FLEX", keys: ["FUNC", "VOICE", "LEFT", "RIGHT", "TRIG"], combo: "FLEX track: " + k("FUNC") + plus + k("VOICE"),
+  { t: "FLEX REC", g: "FLEX", keys: ["FUNC", "VOICE", "LEFT", "RIGHT", "TRIG", "YES"], combo: "FLEX track: " + k("FUNC") + plus + k("VOICE"),
     li: ["Opens FLEX REC; ◀▶ switch REC TRIGS and REC SETUP.",
-         "REC TRIGS: [TRIG] sets a one-shot recorder trig (records once); FUNC + [TRIG] one that records every pass.",
-         "YES twice within 0.4 s re-arms spent one-shots (unverified for FLEX)."] },
+         "REC TRIGS: [TRIG] sets a one-shot recorder trig (records once); FUNC + [TRIG] one that records every pass; PAGE the next steps.",
+         "YES twice within 0.4 s arms the spent one-shots again."] },
   { t: "FLEX REC SETUP", g: "FLEX", keys: ["YES", "NO", "FUNC", "ENCC", "ENCG", "ENCH"], combo: "REC SETUP: " + k("YES"),
     li: ["YES records now, or at the next Q.REC boundary when set (NO cancels the wait).",
-         "C BUF, G GAIN (-24 .. +38 dB; 0 plays at the source's level), H MUTE: with SRC a track, that track leaves the mix and its FX sends once the buffer holds a take; FLEX still records it.",
-         "FUNC + NO: CLEAR BUF n? (YES empties it, refused while it records). FUNC + YES saves the take as a sample (TRIM, NAME, ASSIGN).",
-         "Settings are kept per FLEX track."] },
+         "C BUF, G GAIN (0 plays at the source's level), H MUTE: with SRC a track, that track leaves the mix and its FX sends once the buffer holds a take; FLEX still records it.",
+         "FUNC + NO: CLEAR BUF n? (YES empties it). FUNC + YES saves the take as a sample (TRIM, NAME, ASSIGN). Settings are kept per FLEX track."] },
   // -- sequencer
   { t: "Direct Jump", g: "Sequencer", keys: ["PTN", "YES", "NO"], combo: "hold " + k("PTN") + plus + k("YES") + " on / " + k("NO") + " off",
     li: ["ON: a cued pattern (PTN + TRIG) starts at once, from the current position.", "Off by default; a setting of the unit, kept through power-off."] },
+  { t: "Keyboard HOLD", g: "Sequencer", keys: ["PTN", "KB"], combo: "hold " + k("PTN") + plus + k("KEYBOARD"),
+    li: ["Turns HOLD on or off (KB HOLD ON / OFF while PTN is held): stock's sustain pedal on all 16 tracks.",
+         "A held note is never taken by another track's note nor by the VOICE BUDGET."] },
+  { t: "Arpeggiator on MIDI tracks", g: "Sequencer", keys: [], combo: "a MIDI track's ARPEGGIATOR menu",
+    li: ["The ARPEGGIATOR menu opens on a MIDI track. With the arp on, the track's notes (keys and trigs) go through the arp and out over MIDI, one note a step, N.LEN long.",
+         "Arp off: stock MIDI."] },
   // -- engines
   { t: "Paraphonic chords", g: "Engines", keys: ["VOICE", "ENCB"], combo: k("VOICE") + ": knob B, PARA",
-    li: ["ANALOG 2 and JUNO: PARA OFF / ON. ON plays a chord of up to 8 notes through one filter and amp envelope.",
-         "A full chord: a new key plays and the chord's oldest note fades out."] },
-  { t: "Engine pages", g: "Engines", keys: ["ENCG", "ENCH"], combo: "the engines' own knobs",
-    li: ["MONOMACHINE: page 1 H = ENGN (SID, WAVE, DDRW, DENS, VO-6), page 2 H = the engine's TUNE.",
-         "MACHINEDRUM (PERC): page 2 H = TYPE. SOPHIE and PLAITS: G = MODL. PLAITS TUNE is whole semitones, FINE cents.",
-         "JUNO (engine and insert): MODE I / II / I+II. TB-303: ACC and SLID are per step: p-lock them on the steps that accent or slide.",
-         "With VOICE BUDGET on, engine lists show N VOICES or DSP FULL beside choices that do not fit."] },
-  { t: "Legato and glide", g: "Engines", keys: [], combo: "held notes",
-    li: ["TB-303 SLIDE acts only while the previous note is still held.", "ANALOG 2 page 3: GLID (1 ms .. 5 min) and GLTY (OFF / RATE / TIME), for notes played legato.",
-         "DRONE: set the track's voice mode to REUSE to glide between separate trigs. DRONE HOLD (page 2 G, unverified): the note stays after key-up."] },
-  // -- settings
+    li: ["ANALOG 2 and JUNO: PARA OFF / ON. ON plays a chord of up to 8 notes through one filter and amp envelope; a 9th note drops the oldest.",
+         "On a PARA ON track the VOICE key lights magenta."] },
+  { t: "DRONE HOLD", g: "Engines", keys: ["ENCG"], combo: "DRONE page 2: G = HOLD",
+    li: ["ON: a note stays after the key is let go. The same key again lets it go; another key plays and lets the others go.",
+         "A held note is never taken by notes on other tracks nor by the VOICE BUDGET."] },
+  { t: "Microtuning", g: "Engines", keys: ["ENCH", "YES", "NO"], combo: "KB SETUP: H = TUNE",
+    li: ["Turn H: this track tuned (OFF or a tuning); one tuning per project, saved with it.",
+         "Push H: TUNING (A TUNE, B ROOT, C this track, D all tracks). YES on a USER tuning: EDIT (A NOTE, B CENT, C .1 CENT, D FROM; FUNC + YES copies FROM). NO goes back."] },
+  // -- settings and start-up
   { t: "Settings", g: "Settings", keys: [], combo: "SETTINGS",
-    li: ["PERSONALIZE > LIVE SELECT (last row; on by default; where it lives is unverified).",
-         "PERSONALIZE > VOICE BUDGET (on by default): when new voices do not fit the DSP, the oldest held voice is stolen.",
+    li: ["PERSONALIZE > LIVE SELECT (on by default).",
+         "PERSONALIZE > VOICE BUDGET (on by default): when new voices do not fit the DSP, the oldest held voice is stolen; engine lists show N VOICES or DSP FULL.",
          "SYSTEM > USB CONFIG > REMOTE CONTROL (on by default): off blocks the computer's remote-control channel. FACTORY RESET turns it off."] },
-  { t: "After flashing", g: "Settings", keys: [], combo: "power off and on once",
-    li: ["After installing a new build, switch the Digitone off and on once: a machine whose tables are new can stay silent on the first start (seen once, cause not confirmed)."] },
+  { t: "SAFE MODE", g: "Settings", keys: ["STOP"], combo: "power on, hold " + k("STOP") + " 1 s",
+    li: ["STOP held alone 1 s within about 3 s of power-on asks START SAFE MODE? (a STOP tap or FUNC + STOP does nothing). It is also asked after a start that failed.",
+         "YES: stock OS 1.12's own code, no sound, an empty project; a fixed firmware can then be sent with Elektron Transfer over USB. NO: one normal start."] },
 ];
 
 // the version: the newest release the site publishes (wishes/wishes.json, as the builder reads it); none: no version

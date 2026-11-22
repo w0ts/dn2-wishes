@@ -78,6 +78,17 @@ def test_the_version_comes_from_the_published_release():
     assert 'fetch("wishes/wishes.json"' in SCRIPT
 
 
+def test_only_the_keys_the_cards_use_and_plain_ranges():
+    """The User, 2026-11-22: "remove the buttons, only keep the ones used"; "A till H" -> "A-H"; no "After flashing"."""
+    used = set()
+    for card in _cards():
+        used |= set(re.findall(r'"(\w+)"', re.search(r"keys: \[([^\]]*)\]", card).group(1)))
+    for key in re.findall(r'\["(\w+)", "', _block("KEYS")):
+        assert key in used, key
+    assert "After flashing" not in PAGE
+    assert not re.search(r"\btill\b|\w \.\. \w|\d\.\.\d", PAGE)
+
+
 def test_every_lit_key_is_drawn():
     drawn = set(re.findall(r'\["(\w+)", "', _block("KEYS"))) | {"ENC" + e for e in "ABCDEFGH"} | {"TRIG"} \
         | {f"TRIG{i}" for i in range(1, 17)}
