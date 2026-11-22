@@ -193,7 +193,7 @@ def test_the_page_builds_the_release_with_no_choices():
     with more than one release; no release published: a plain note, not an error"""
     page = (WEB / "builder.html").read_text()
     heads = re.findall(r"<h2>(.*?)</h2>", page)
-    assert heads == ["1 · Your stock files", "2 · Build", "3 · Flash", "4 · Licences and source"]
+    assert heads == ["1 · Your stock files", "2 · Build", "3 · Flash"]
     body = re.sub(r'<nav class="site".*?</nav>', "", page, flags=re.S)      # the tabs name the presets page
     for gone in ("preset", "What goes in", "details class=\"parts\"", "chips"):
         assert gone not in body, gone
@@ -202,7 +202,7 @@ def test_the_page_builds_the_release_with_no_choices():
     assert '`<p class="note">No release published yet.</p>`' in page          # neutral, not .bad
     assert "if (e.status === 404) rows = [];" in page                           # a missing wishes.json is no error
     assert 'msg err">Could not load the builder\'s data' in page               # a real load error stays red
-    assert "Elektron Transfer" in page and "Back to stock 1.12" in page
+    assert "Elektron Transfer" in page and "stock OS 1.12" in page     # the risks tooltip and the back-to-stock flash option
 
 
 def test_the_page_wires_save_to_the_verdict_only():

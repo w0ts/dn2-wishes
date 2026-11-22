@@ -146,4 +146,7 @@ Not made or supported by Elektron. Flash at your own risk. Back up your +Drive f
 
 ## Licence
 
-[GNU AGPL-3.0-or-later](LICENSE).
+[GNU AGPL-3.0-or-later](LICENSE). The source, the builder page's included: [github.com/w0ts/dn2-wishes](https://github.com/w0ts/dn2-wishes).
+Ported parts keep their own notices ([THIRD-PARTY.md](THIRD-PARTY.md)). Report problems with a Wishes build on the
+Wishes repository, not to upstream. Nothing here is Elektron's: the builder reads their firmware and tables from your
+own files, in your browser, and sends nothing anywhere. Not affiliated with Elektron.
