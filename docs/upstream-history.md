@@ -1,6 +1,164 @@
 # Upstream's version history (De-Pattern/dn2mk2-firmware)
 
-One section per upstream version, newest first: its date, tag or source commit, the published firmware's sha256 (FIRMWARE.md), the room it leaves in the OS's 2 MiB USB upgrade buffer (measured on the published `.syx` with that tag's `dnfw.safety.usb_upgrade_bytes`), what it brought (FIRMWARE.md's table, its own words), and what it changed for our series. The per-release routine adds the next one (`autobuild/rebase/UPSTREAM.md`; `autobuild.py rebase history TAG`).
+One section per upstream version, newest first: its date, tag or source commit, the published firmware's sha256 (FIRMWARE.md), the room it leaves in the OS's 2 MiB USB upgrade buffer (measured on the published `.syx` with that tag's `dnfw.safety.usb_upgrade_bytes`), what it brought (FIRMWARE.md's table, its own words), and what it changed for our series. Each new upstream release adds its section here.
+
+## v0.69 · PERFORM
+
+- **Released:** 2026-11-21
+- **Commit:** tag `v0.69` = `4c4b239f`
+- **Firmware:** `DN2mod_v0.69_PERFORM_OS1.11.syx`, sha256 `bfbd62a33d3e20731eb6874761270da0c45f17d4c050374b07904a83d6ee7f2e` (the published file's)
+- **USB upgrade buffer:** 2,020,707 of 2,097,152 bytes, 76,445 free
+- **What it brought:**
+  - PERFORM: eight Analog Four MKII-style macros ([MOD] + [FX]), each offsetting up to five parameters on any tracks, saved per project, PERF MUTE
+  - DSP limit: MACHINE SEL refuses a machine that would take the kit past what the DSP can run
+- **Release note** (upstream's `releases/v0.69.md`): Analog Four-style performance macros, and a DSP limit in MACHINE SEL
+- **For us:** PERFORM taken at upstream's place (+Drive 0x6E0500..0x6E05FF); our inserts' records moved off 0x6E0400..0x6E0501 to 0x5FF000..0x5FF101 with a one-time copy at power-on (the User: "move our stuff"; docs/memory-map.md's rule: our +Drive data in ranges upstream does not use). The DSP limit (guardrail) is not taken: VOICE BUDGET prices every note and knows our engines, filters, inserts and PARA; its runner stress kits stay as frame-guard checks. Folded with v0.68 into one series, v0.69.1 (branch main-next-68).
+
+## v0.68 · ICONS
+
+- **Released:** 2026-11-21
+- **Commit:** tag `v0.68` = `f65d1479`
+- **Firmware:** `DN2mod_v0.68_ICONS_OS1.11.syx`, sha256 `b77f88fe778dc467250bcabc8681f10c73af8be6b2d4987fe2e40d2bae6eb29a` (the published file's)
+- **USB upgrade buffer:** 2,016,263 of 2,097,152 bytes, 80,889 free
+- **What it brought:**
+  - machine icons: MACHINE SEL's left pane shows the mod machine under the cursor, its icon and name (the owner's sheet)
+  - FLEX takes 12 dB louder (a track's and MAIN/IN's, +24 dB)
+- **Release note** (upstream's `releases/v0.68.md`): machine icons in MACHINE SEL, and FLEX takes louder
+- **For us:** FLEX level taken (the User, 2026-11-22): `TRK_HW_DB` 24 and `MAIN_PLAY_DB` 24 replace ours; a track's take keeps our 18 dB headroom mark, so it has 18 dB more room before the recorder's clamp than upstream's (docs/flex-trk-level.md). MACHINE SEL icons taken as our 7 x 5 cells (the User, "A"): the owner's sheet brought down for upstream's machines, MONOMACHINE the SID's; upstream's left-pane hooks left out (our two columns cover that pane). Folded into v0.69.1.
+
+## v0.67 · MIDIARP
+
+- **Released:** 2026-11-21
+- **Commit:** tag `v0.67` = `9c19e68f`
+- **Firmware:** `DN2mod_v0.67_MIDIARP_OS1.11.syx`, sha256 `0ab36b2afebebc113bd512f5e671beeecf06de8e929512889d1526f680323ab6` (the published file's)
+- **USB upgrade buffer:** 2,015,152 of 2,097,152 bytes, 82,000 free
+- **What it brought:**
+  - the arpeggiator on MIDI tracks: the ARPEGGIATOR menu on a MIDI track, its notes sent over MIDI one per arp step with N.LEN (upstream's midiarp, Angel Linares)
+- **Release note** (upstream's `releases/v0.67.md`): the arpeggiator on MIDI tracks
+- **For us:** Taken whole, with the features merged since v0.66.1 (the ANALOG 2 picks, MOD SETUP rows, the speedups), in series v0.67.1 (branch claude/combined-67-nosm; SAFE MODE added from v0.67.2 on claude/combined-67). Not yet tested on our unit; HOLD with the arp on a MIDI track untried. USB upgrade room of our builds: v0.67.1 71,092 bytes, v0.67.5 62,911 bytes.
+
+## v0.66 · NXT
+
+- **Released:** 2026-11-20
+- **Commit:** tag `v0.66` = `69274425`
+- **Firmware:** `DN2mod_v0.66_NXT_OS1.11.syx`, sha256 `a22a87943318f1cfbe2f3e2fa0eb10f799e2edbfb6304fe6a891c9fbec61f7e1` (the published file's)
+- **USB upgrade buffer:** 2,014,748 of 2,097,152 bytes, 82,404 free
+- **What it brought:**
+  - slides to the next trig: SLEN NXT (the default) lasts until the track's next trig
+  - FM+ DYN FUNC + turn jumps 1FRQ/2FRQ to whole ratios
+  - FLEX takes of MAIN and IN recorded as they are, +12 dB on playback
+- **Release note** (upstream's `releases/v0.66.md`): slides that last until the next trig, FM+ DYN jumps, and FLEX takes of MAIN and IN at a usable level
+- **For us:** Taken whole in series v0.66.1 (branch claude/integ-65), with every feature merged since v0.65.1. Slide trigs with no SLEN now slide to the next trig, so old projects with plain slide trigs sound different. In the same build the FLEX level of a single track's take changed to upstream v0.65's (the User's choice, 2026-11-21), 5.86 dB under ours of v0.65.1. USB upgrade room of our build 75,738 bytes.
+
+## v0.65 · BANKS
+
+- **Released:** 2026-11-20
+- **Commit:** tag `v0.65` = `3d22250c`
+- **Firmware:** `DN2mod_v0.65_BANKS_OS1.11.syx`, sha256 `bec1e2f995d9d34fd159073ed5626320e5803e7f1ef22cc18e3113badf992dd3` (the published file's)
+- **USB upgrade buffer:** 2,014,344 of 2,097,152 bytes, 82,808 free
+- **What it brought:**
+  - PROJECT RAM banks: four banks A–D (508 slots), the DT2's bank box, FUNC + UP/DOWN jumps a bank
+  - FLEX takes of a track at unity with GAIN 0 (12 dB, not 24)
+  - about 87 KB more room (optimal packer)
+- **Release note** (upstream's `releases/v0.65.md`): project RAM in four banks, and FLEX takes of a track at the right level
+- **For us:** Banks taken, in other places: upstream's bank lists on the +Drive (0x6E0600.., 0x6F0800..) are ours, so Wishes keeps them at 0x5E0000..0x5EE7FF (projects 1-64) and 0x5F0000..0x5FE7FF (projects 65-128), and in RAM at 0x47070000..0x47280000 (the CPU profiler moved to 0x47700000). An LFO or matrix route on SAMP keeps its bank. FLEX level: ours kept (GAIN 0 plays a track's take at its source's level, as measured on the unit), upstream's number not taken. The tighter packing is taken for MAIN OS; the DSP program stays our LZMA stream (new gate step depack). USB upgrade room of our build 85,737 bytes. Series v0.65.1 (branch main-next-65).
+
+## v0.64 · HOLD
+
+- **Released:** 2026-11-20
+- **Commit:** tag `v0.64` = `24c71d3f`
+- **Firmware:** `DN2mod_v0.64_HOLD_OS1.11.syx`, sha256 `b155e97db50a6e35a6871849beac3b67085a61073b9adead91bf42733acf52bf` (the published file's)
+- **USB upgrade buffer:** 2,096,861 of 2,097,152 bytes, 291 free
+- **What it brought:**
+  - keyboard HOLD: PTN + KEYBOARD sustains every track (held notes latch, MIDI in, arp)
+  - start-up animation at half rate
+- **Release note** (upstream's `releases/v0.64.md`): keyboard HOLD: hold PTN and press KEYBOARD
+- **For us:** HOLD taken (PTN + KEYBOARD). Added by us: a note held by HOLD (or a MIDI sustain pedal) is never taken by another track's note nor stolen by the VOICE BUDGET, the same rule as DRONE HOLD. The start-up animation change does nothing here (our builds are NOBOOT, stock's intro). Series v0.64.1 (branch main-next-64).
+
+## v0.63 · FLEXLEVEL
+
+- **Released:** 2026-11-19
+- **Commit:** tag `v0.63` = `0d6e5105`
+- **Firmware:** `DN2mod_v0.63_FLEXLEVEL_OS1.11.syx`, sha256 `b73f2179c137afbe67f0c0ce90b7f27141f19fa6b3c5575b4fc43851e3a7c83e` (the published file's)
+- **USB upgrade buffer:** 2,097,063 of 2,097,152 bytes, 89 free
+- **What it brought:**
+  - FLEX level: a FLEX take of a track plays at the level heard (+24 dB built in; GAIN 0 = old +24)
+  - a FLEX save never normalises
+- **Release note** (upstream's `releases/v0.63.md`): FLEX takes at the level you hear, and saving FLEX no longer blows the level up
+- **For us:** FLEX save never normalises: taken; a saved take carries our 18 dB headroom mark so its slot plays at the buffer's level. The FLEX level change (+24 dB) is not taken: ours stays as measured on the unit (GAIN 0 = the source's level). Series v0.64.1.
+
+## v0.62 · SLICE
+
+- **Released:** 2026-11-19
+- **Commit:** tag `v0.62` = `a0249fc5`
+- **Firmware:** `DN2mod_v0.62_SLICE_OS1.11.syx`, sha256 `33fba4ac03ca02befd2d5ace395bff4a7041577b5ac25745a210fd5c6cee3f1f` (the published file's)
+- **USB upgrade buffer:** 2,097,063 of 2,097,152 bytes, 89 free
+- **What it brought:**
+  - slice editor: edits play live, playing a slice selects it, zoom to 128 frames, FUNC + START/END snaps to zero crossings
+  - CREATE SLICE GRID FUNC + E jumps 2..64
+- **Release note** (upstream's `releases/v0.62.md`): the slice editor, thanks to impbox's requests (and one from Wolljamin)
+- **For us:** Taken whole, with v0.61, in series v0.62.1 (branch main-next-62); the 1.11 addresses ported with port_os112. Our v0.62.x test builds follow.
+
+## v0.61 · MICROTUNING
+
+- **Released:** 2026-11-19
+- **Commit:** tag `v0.61` = `63d14a87`
+- **Firmware:** `DN2mod_v0.61_MICROTUNING_OS1.11.syx`, sha256 `6c945a66b627e2bbbfcc29ed0bf4f42c41ef276a560baba2f2a2b924301fb4de` (the published file's)
+- **USB upgrade buffer:** 2,095,851 of 2,097,152 bytes, 1,301 free
+- **What it brought:**
+  - microtuning: KB SETUP's H is TUNE
+  - a tuning per project (11 factory, 8 USER), switched per track
+  - TUNING and EDIT pages
+- **Release note** (upstream's `releases/v0.61.md`): microtuning: a tuning per project, switched on per track
+- **For us:** Microtuning taken. Changed for this fork: the tunings' record sits at +Drive sectors 0x6E0600..0x6E06FF, because upstream's 0x6E0400 is where our inserts are saved. A PARA chord takes the first note's offset. Series v0.62.1.
+
+## v0.60 · FIXES
+
+- **Released:** 2026-11-18
+- **Commit:** tag `v0.60` = `cccdc1b1`
+- **Firmware:** `DN2mod_v0.60_FIXES_OS1.11.syx`, sha256 `e52b56157c89e4ef69d03610e390d06301a7d96679c6793f7108fa1e760eae53` (the published file's)
+- **USB upgrade buffer:** 2,092,316 of 2,097,152 bytes, 4,836 free
+- **What it brought:**
+  - fixes: FM+ pages (knobs on the right parameters, the frequency bars drawn)
+  - GRID ALLOCATE SLICE RANDOM keeps its locks on NO
+- **Release note** (upstream's `releases/v0.60.md`): two fixes: the FM+ pages, and RANDOM in GRID's ALLOCATE SLICE
+- **For us:** Taken in series v0.60.1 (branch main-next-60) with our ENV2 fixes; the screen shows 0.60.
+
+## v0.59 · FMPLUS
+
+- **Released:** 2026-11-18
+- **Commit:** tag `v0.59` = `1dd6c637`
+- **Firmware:** `DN2mod_v0.59_FMPLUS_OS1.11.syx`, sha256 `1c1c62d80910966aa365a995030fb50736ab4f2d2dfd75747999d8953763d594` (the published file's)
+- **USB upgrade buffer:** 2,092,013 of 2,097,152 bytes, 5,139 free
+- **What it brought:**
+  - the Monomachine's FM+ STAT / PAR / DYN machines
+  - MON on the RECORDER (hear the input while armed or recording)
+- **Release note** (upstream's `releases/v0.59.md`): the Monomachine's three FM+ machines, and MON on the RECORDER: hear your input while you record it
+- **For us:** FM+ takes machine numbers 18-20, so our six machines moved to the top of the type range: JUNO 50, ANALOG 2 51, DRONE 52, SOPHIE 53, TB-303 54, PLAITS 55 (no conversion of old projects: their tracks must be re-picked). MON on the RECORDER taken. v0.58 is not in it. Series v0.59.1 (our DSP-link and Overbridge CPU cuts came with it).
+
+## v0.58 · SCALES
+
+- **Released:** 2026-11-17
+- **Commit:** tag `v0.58` = `ca54f2cb`
+- **Firmware:** `DN2mod_v0.58_SCALES_OS1.11.syx`, sha256 `48923daf0c06b339501c77e1cba0d517578b9fd2b6c3f4aafc60a3b65f466d39` (the published file's)
+- **USB upgrade buffer:** 2,087,670 of 2,097,152 bytes, 9,482 free
+- **What it brought:**
+  - two microtonal scales in KB SETUP: Poole Rod12 and Poole12 Min after Locr. bb3 bb7, each note tuned by its cents above ROOT
+- **Release note** (upstream's `releases/v0.58.md`): two microtonal scales in KB SETUP: Poole Rod12 and Poole12 Min
+- **For us:** Not taken: upstream pulled it (its scales crashed the unit in a chord MODE). Kept on side branches (v58/*) only; our microtuning (from v0.61) replaces it.
+
+## v0.57 · FLEXMUTE
+
+- **Released:** 2026-11-16
+- **Commit:** tag `v0.57` = `59f91299`
+- **Firmware:** `DN2mod_v0.57_FLEXMUTE_OS1.11.syx`, sha256 `1da1cf2fe354464b83c90127bfb192d113d438f39600f79ddc065c5e2f75bcff` (the published file's)
+- **USB upgrade buffer:** 2,086,256 of 2,097,152 bytes, 10,896 free
+- **What it brought:**
+  - FLEX MUTE SRC mutes the source only while the FLEX track plays (no more stuck tracks)
+  - REC 1/2 names gone
+  - F bank letter for buffers
+- **Release note** (upstream's `releases/v0.57.md`): FLEX's MUTE SRC now follows the FLEX track: the source is muted only while the FLEX track is actually playing its take
+- **For us:** Taken (FLEXMUTE) in series v0.57.1 (branch claude/integ-v57) with upstream's PRs #2-#4 from us. The F letter on the recorder's small INTO box is not in it (our series removed that box). Our v0.57.x test builds (3-12) follow on main.
 
 ## v0.56 · DDRW
 
@@ -12,7 +170,7 @@ One section per upstream version, newest first: its date, tag or source commit, 
   - DDRW: TIME glides between waves (up to ~2 s), BR1/BR2 heard across the whole knob
   - the patcher builds test builds
 - **Release note** (`releases/v0.56.md`): DPRO DDRW's TIME and bit reduction now do something you can hear
-- **For us:** (not written yet: add it to FOR_US in autobuild/rebase/lib/history.py; UPSTREAM.md)
+- **For us:** (not written yet)
 
 ## v0.55 · FLEXPOOL
 
@@ -24,7 +182,7 @@ One section per upstream version, newest first: its date, tag or source commit, 
   - the 8 FLEX buffers in every sample machine: SAMP past 127 to B1..B8 (knob, list, p-locks), a track on Bn plays that buffer's take
   - MUTE SRC waits for the first take (no gap)
 - **Release note** (`releases/v0.55.md`): The eight FLEX buffers are now at the end of the sample list on every sample machine, so any ONESHOT, WERP, STRETCH, REPITCH, GRID or SLICE track can play a FLEX take. MUTE SRC also waits for the first take before muting
-- **For us:** (not written yet: add it to FOR_US in autobuild/rebase/lib/history.py; UPSTREAM.md)
+- **For us:** (not written yet)
 
 ## v0.54 · NAME
 
@@ -35,7 +193,7 @@ One section per upstream version, newest first: its date, tag or source commit, 
 - **What it brought:**
   - our names on the Digitone's own NAME screen: a recording's FILE NAME, the browser's RENAME and CREATE FOLDER open stock's naming screen (its keys, FUNC + ARROW edit grid, SETTINGS: RANDOM, copy/paste name)
 - **Release note** (`releases/v0.54.md`): Naming your recordings, samples and folders now uses the Digitone's own NAME screen, the same one patterns, sounds and projects use
-- **For us:** (not written yet: add it to FOR_US in autobuild/rebase/lib/history.py; UPSTREAM.md)
+- **For us:** (not written yet)
 
 ## v0.53 · PAGES
 
@@ -50,7 +208,7 @@ One section per upstream version, newest first: its date, tag or source commit, 
   - PLAY two detents a mode
   - FUNC + turn moves R.LEN a bar
 - **Release note** (`releases/v0.53.md`): FLEX polish: the page LEDs follow FLEX REC's page, a new FLEX track plays its whole take, BUF behaves like a choice and its locks play, PLAY turns quicker, R.LEN snaps to bars
-- **For us:** (not written yet: add it to FOR_US in autobuild/rebase/lib/history.py; UPSTREAM.md)
+- **For us:** (not written yet)
 
 ## v0.52 · MUTE
 
@@ -62,7 +220,7 @@ One section per upstream version, newest first: its date, tag or source commit, 
   - FLEX MUTE SRC: REC SETUP's knob H takes the SRC track out of the mix (its level and FX sends) while FLEX still records it
   - the RECORDER's R.LEN counts steps at the pattern's scale (impbox)
 - **Release note** (`releases/v0.52.md`): FLEX REC can take its source track out of the mix while it still records it, and the RECORDER's R.LEN now counts steps at the pattern's scale
-- **For us:** (not written yet: add it to FOR_US in autobuild/rebase/lib/history.py; UPSTREAM.md)
+- **For us:** (not written yet)
 
 ## v0.51 · LIGHTER
 
@@ -77,7 +235,7 @@ One section per upstream version, newest first: its date, tag or source commit, 
   - REC SETUP's state in the left column
   - sample TUNE plays its fine values and is drawn as WaveTone's ruler
 - **Release note** (`releases/v0.51.md`): Lighter Monomachine and Machinedrum machines (more voices before the DSP guard steps in), FLEX settings per track, CLEAR for a buffer, and sample TUNE that plays its fine values
-- **For us:** (not written yet: add it to FOR_US in autobuild/rebase/lib/history.py; UPSTREAM.md)
+- **For us:** (not written yet)
 
 ## v0.50 · LEVEL
 
@@ -92,7 +250,7 @@ One section per upstream version, newest first: its date, tag or source commit, 
   - impbox's fixes: TUNE rounds, SMP readable with TRK held, page-2 locks shown, E/F pushed clear SLD/SLEN
   - gate: SHARC step flexlevel, the link steps ~20x faster
 - **Release note** (`releases/v0.50.md`): FLEX takes at the source's level, a GAIN knob, and impbox's fixes
-- **For us:** (not written yet: add it to FOR_US in autobuild/rebase/lib/history.py; UPSTREAM.md)
+- **For us:** (not written yet)
 
 ## v0.49 · FLEX
 
@@ -108,7 +266,7 @@ One section per upstream version, newest first: its date, tag or source commit, 
   - the DSP guard gives sample voices their time first and stops a dropped one cleanly
   - STRT/LEN/LOOP turned mid-note no longer move the playhead
 - **Release note** (`releases/v0.49.md`): FLEX, the live-buffer machine that replaces BOUNCE, plus a fairer DSP guard and a steady playhead
-- **For us:** (not written yet: add it to FOR_US in autobuild/rebase/lib/history.py; UPSTREAM.md)
+- **For us:** (not written yet)
 
 ## v0.48 · FINE
 

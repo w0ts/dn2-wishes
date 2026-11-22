@@ -122,6 +122,7 @@ FILTER SEL: the stock filters and five analog models (ANALOG 2, from Optimist), 
 - Ours: [CHANGELOG.md](CHANGELOG.md).
 - Upstream's: the [dn2mk2 releases](https://github.com/De-Pattern/dn2mk2-firmware/releases) and
   [docs/upstream-history.md](docs/upstream-history.md).
+- What is being built, queued and still open: [TODO.md](TODO.md).
 
 ## Recovery
 
