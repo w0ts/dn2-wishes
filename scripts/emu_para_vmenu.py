@@ -7,13 +7,13 @@ not redraw after a turn), the VOICE key (panel code 49) on track 0:
 
 1. a stock machine's track (WaveTone, type 1): pushed turns of B and C leave the screen, the sound's MOD record and
    vm_sets as they were (stock's empty places stay stock's);
-2. an ANALOG 2 track (type 22), MOD 0: the screen differs from (1)'s only inside B's label row (x 33..73, y 27..34),
+2. an ANALOG 2 track (type 51; 22 until 2026-11-18), MOD 0: the screen differs from (1)'s only inside B's label row (x 33..73, y 27..34),
    where PARA OFF is drawn;
 3. one held push of B a step (the harness passes about one step a hold, stock's own knob E too; measured
    2026-11-15), four detents each. PARA is OFF / ON (2026-11-15, the User; ON stored as 0x0300, a chord of up to 8): right
    three times -> MOD 0x0300 0x0300 0x0300, the screen then differs from OFF's inside B's row only (PARA ON); left
    twice -> 0x0000 0x0000; vm_sets counts the one step up and the one down;
-4. a JUNO track (type 23, 2026-11-15), MOD 0: the screen the ANALOG 2 track's (PARA OFF in B's row); one held push
+4. a JUNO track (type 50; 23 2026-11-15..17), MOD 0: the screen the ANALOG 2 track's (PARA OFF in B's row); one held push
    of B right sets MOD 0x0300 and draws PARA ON as on the ANALOG 2 track; one left sets 0x0000, the screen as before;
 5. an older project's value (MOD 0x0100, 2 pitches then) on an ANALOG 2 track: the screen is a fresh PARA ON track's
    (MOD 0x0300), and one held push of B left sets MOD 0x0000.
@@ -35,7 +35,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 VOICE = (6, 0)                                                       # panel code 49
 ENC_B, ENC_C = 1, 2
 MOD_AT = 20 + 2 * 37                                                 # the sound's MOD (PARA) value
-WAVETONE, ANALOG2, JUNO = 1, 22, 23
+WAVETONE, ANALOG2, JUNO = 1, 51, 50
 B_ROW = (33, 27, 73, 34)                                             # B's label row (x0, y0, x1, y1), bottom-up
 STEPS_RIGHT = (0x0300, 0x0300, 0x0300)                              # OFF -> ON (stored 3), held at ON
 STEPS_LEFT = (0x0000, 0x0000)                                        # ON -> OFF, held at OFF

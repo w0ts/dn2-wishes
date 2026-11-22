@@ -318,3 +318,53 @@ def test_a_held_out_post_insert_comes_back_from_silence():
         if b >= back:
             assert not any(lo[0] + ro[0]), (b, "the ring of block 19 came back")
     assert m.get(G.INS_SKIPS) == G.INS_HOLD
+
+
+def _chor_fb(knob: int) -> float:
+    """CHOR's feedback gain at FDBK KNOB, as the reference computes it (postref.chor's first lines)"""
+    from dnfw.fdn8.ref import exp2
+    F = np.float32
+    p = F(knob) * F(1 / 127)
+    return float(F(D.CH_FB_C0) - exp2(p * F(D.CH_FB_LOG2)))
+
+
+def test_chor_fdbk_curve_reaches_the_top_finely_and_0_is_exact():
+    """2026-11-16 (the User: "as high as safe"): FDBK 0 exactly 0 (a project at 0 plays as before), the top 0.97, rising
+    with every step, and the decay time (1 / (1 - FDBK)) doubling every ~25 steps: fine-grained at the top"""
+    from dnfw.fdn8.ref import exp2
+    assert np.float32(D.CH_FB_C0) == exp2(np.float32(0.0))       # c0 is the DSP's exp2(0): FDBK 0 gives 0.0 exactly
+    g = [_chor_fb(k) for k in range(128)]
+    assert g[0] == 0.0 and np.signbit(np.float32(g[0])) == False
+    assert abs(g[127] - D.CH_FB_MAX) < 2e-6 and D.CH_FB_MAX == 0.97
+    assert all(b > a for a, b in zip(g, g[1:]))
+    assert g[127] - g[126] < 0.001 < g[1] - g[0]
+    steps = 127 / -D.CH_FB_LOG2
+    assert 24 < steps < 26
+    assert abs((1 - g[64]) / (1 - g[89]) - 2 ** (25 / steps)) < 0.01
+
+
+def test_chor_at_the_top_stays_bounded_and_decays():
+    """FDBK 127 on the sweep's worst corner (3 voices, WDTH 127, DPTH 0, DLY 127) fed a full-scale sine on the comb's
+    resonance: the output's peak stays under the bound (4/3 x 1 / (1 - top): the loop's gain is at most FDBK, a side
+    carries up to 4/3 of the ring with 3 voices) and falls once the input stops"""
+    F = np.float32
+    r = R.PostRef()
+    par = bytearray(8 * D.RECORDS)
+    par[0:8] = bytes([D.CHOR, 127, 0, 0, 127, 85, 127, 127])
+    dly = float(F(1.0) * F(D.CH_DLY_SPAN) + F(D.CH_DLY_MIN))
+    f = D.FS / (dly + 1)
+    peak, tail = 0.0, []
+    for b in range(1900):
+        on = b < 400
+        x = [F(np.sin(2 * np.pi * f * (32 * b + j) / D.FS)) if on else F(0.0) for j in range(D.BLOCK)]
+        L = [[F(0)] * D.BLOCK for _ in range(16)]
+        Rr = [[F(0)] * D.BLOCK for _ in range(16)]
+        L[0], Rr[0] = list(x), list(x)
+        r.block(bytes(par), L, Rr)
+        m = max(max(abs(float(v)) for v in L[0]), max(abs(float(v)) for v in Rr[0]))
+        if on:
+            peak = max(peak, m)
+        else:
+            tail.append(m)
+    assert np.isfinite(peak) and 10.0 < peak < 4 / 3 / (1 - D.CH_FB_MAX)
+    assert max(tail[-100:]) < 0.3 * max(tail[:100])       # 1 s after: -10 dB or more (the sweep's slowest: -15 dB/s)

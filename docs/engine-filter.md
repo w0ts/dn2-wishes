@@ -51,7 +51,7 @@ engines inside FILTER's list).
 | ENGINE | `<CLEAR>`, FM TONE … GRID; ticks drawn as stock's |
 | FILTER | stock's again: … FAV, MIDI, NO TAG |
 | ENGINE FM DRUM | PUNCHBASS, THE GRAND PIANO, THE CELLO … (the index's type 2; PUNCHBASS loads as FM DRUM) |
-| a SOPHIE track (type 20) saved to B:172, ENGINE SOPHIE | FRAGILE BEINGS alone |
+| a SOPHIE track (type 20 then, 53 since 2026-11-18) saved to B:172, ENGINE SOPHIE | FRAGILE BEINGS alone |
 | + FILTER EVOL | FRAGILE BEINGS (it has EVOL); SORTING shows `FILTER *` and `ENGINE *` |
 | + FILTER KICK | stock's NO MATCHES |
 | ENGINE FM DRUM + SOPHIE | the FM DRUM presets, then B:172 FRAGILE BEINGS |

@@ -30,6 +30,9 @@ dispatch, per-track chain), as Milestone 4 does. Steps, each PASS/FAIL
 4k. **trkbuf** (2026-11-15, `sharc_trkbuf_step.py`) -- after trackbuf.asm's first pass (entry_mark.asm, as the
    firmware runs it), every voice slot's buffer reaches its TRK bucket (0x259f68 + 0x100 k, FLEX's TRK sources) as on
    stock: 16 of 16, a marker per slot; a control with the old interleaved pointer table must be seen.
+4s. **sendfx** (2026-11-14, `sharc_sendfx_step.py`) -- real voices with their sends up through the chorus, delay and reverb
+   inside full blocks (the voices' stereo copied to where the sends read it, as the unit has it): with stock FX the
+   build is the stock image's, every block; with ours (FDN8, XDLY, JUNO) a reference build's; each wet sounds, finite.
 4t. **tableready** (2026-11-12, `sharc_table_ready.py`) -- the tables' READY with this build's checksum: another build's
    ready word waits, the same build's decodes at once, a cold DDR waits; JUNO plays after each (docs/mnm.md).
 5. **frame** (with --frame/--frame-be/--frames) -- a caller's frame(s), used verbatim
@@ -100,6 +103,7 @@ TUN1 = 25                       # WaveTone's Osc1 Tune (Milestone 6)
 TUN1_ZERO = 0x4000              # the frame word for 0 semitones: the sound's own (probe, 2026-09-30)
 FRAME_COPY = 0x25C48C           # where sw 0x1c2712 copies the frame image
 PERC_L = PL.layout()            # where the build puts PERC (dnfw.waverider.dsp)
+LAST_MODEL_MEM = None           # the model's memory at the last PERC entry, after its run (run_blocks; a diagnosis)
 SMP_L = SL.layout()             # and the sample machines (v0.13)
 SMP_RENDERED = tuple(SM.TYPE_OF[n] for n in SM.ENGINED)
 
@@ -233,6 +237,8 @@ def run_blocks(init, frames, blocks: int, extra_hooks=None):
             from dnfw.perc.dsl import Mem as _Mem, Prog as _Prog
             st0 = r.state
             filled = _Mem(lambda a, st0=st0: m2.word(st0, a) or 0)
+            global LAST_MODEL_MEM                     # 2026-11-16: the model's memory, for a step's diagnosis
+            LAST_MODEL_MEM = filled
             fp = _Prog("run", mem=filled)
             fp.spill = PERC_L.md.C["ash"]
             MDK.table_fill(fp, PERC_L.md)
@@ -357,6 +363,10 @@ def run_blocks(init, frames, blocks: int, extra_hooks=None):
                                 "state_mismatches": sum(1 for x, y in zip(model[t]["state"], got.get(t, {}).get("state", [])) if x != y)
                                 + (0 if t in got else PM.STATE_WORDS),
                                 "out": [V.bits_f32(x) for x in got.get(t, {}).get("out", [])],
+                                # 2026-11-16: where they differ, (sample, the model's word, the DSP's) (a diagnosis)
+                                "differ": [(k, x, y) for k, (x, y) in enumerate(zip(model[t]["out"],
+                                                                                   got.get(t, {}).get("out", [])))
+                                           if x != y][:8],
                                 "model_steps": model[t]["steps"]} for t in model})
         model, got = tap.get("smp_model", {}), tap.get("smp_dsp", {})
         out["smp"].append({t: {"type": model[t]["type"],
@@ -573,12 +583,15 @@ def main(argv=None):
     p.add_argument("--frame-be", help="a frame as the ColdFire holds it at 0x80005e60 (16-bit BE)")
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
-    p.add_argument("--steps", default="decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,flexlevel,mainrec,recwhole,pvmix,fdn8,xdly,jsend,inserts,insall,a2f,inspost,insbus,pitrack,mainmix,insorder,tdm,twin,stock,stockout,trkbuf,tableready,mnm,frame")   # v0.27: shft, gran removed; v0.45: ping removed   # voice: PERC
+    p.add_argument("--steps", default="decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,flexlevel,mainmark,mainrec,recwhole,pvmix,dacover,levels,clipinner,fdn8,xdly,jsend,sendfx,inserts,insall,a2f,inspost,insbus,pitrack,mainmix,insorder,tdm,twin,stock,stockout,trkbuf,tableready,mnm-ma,mnm-mb,mnm-drone,mnm-a2,mnm-para-a2,mnm-para-juno,mnm-plaits,drum,ghost-z,ghost-d,ghost-h,frame")   # 2026-11-16: mnm in its parts (MNM_PARTS); "mnm" runs it whole   # v0.27: shft, gran removed; v0.45: ping removed   # voice: PERC
     p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
         raise SystemExit("--seconds must be at least 2")
     steps = set(a.steps.split(","))
+    default_parts = [x for x in p.get_default("steps").split(",") if x.startswith("mnm-")]
+    if sorted(default_parts) != sorted(mnm_parts()) or not {x for x in steps if x.startswith("mnm-")} <= set(mnm_parts()):
+        raise SystemExit(f"--steps: the mnm parts are {', '.join(mnm_parts())} (the default must list them all)")
     OUT.mkdir(parents=True, exist_ok=True)
     t_start = time.perf_counter()
     dk = m1.Digikit(a.digikit)
@@ -748,6 +761,12 @@ def main(argv=None):
             show(results["3f_flexlevel"])
             show_flexlevel(results["3f_flexlevel"])
 
+        if "mainmark" in steps:
+            print("\nstep 3g: FLEX takes of MAIN and IN marked and made up on playback (v0.66)")
+            results["3g_mainmark"] = step_mainmark(init, sound, machines)
+            gc.collect()
+            show(results["3g_mainmark"])
+
         if "mainrec" in steps:
             print("\nstep 3m: MAIN recorded, previewed and played, in the instrument's order (v0.38)")
             results["3m_mainrec"] = step_mainrec(init, sound, machines, a.blocks)
@@ -765,6 +784,27 @@ def main(argv=None):
             results["3f_pvmix"] = step_pvmix(snap, m2mach, m5, stock_img)
             gc.collect()
             show(results["3f_pvmix"])
+
+        if "dacover" in steps:
+            print("\nstep 3f2: the analog outputs at and over full scale, stock and build (2026-11-20)")
+            dco_step = importlib.import_module("sharc_dacover_step")
+            results["3f2_dacover"] = dco_step.run(sys.modules[__name__], snap, m2mach, m5, stock_img)
+            gc.collect()
+            show(results["3f2_dacover"])
+
+        if "levels" in steps:
+            print("\nstep 3f3: the mixer meters' peaks and clip bits against the outputs (2026-11-20)")
+            lv_step = importlib.import_module("sharc_levels_step")
+            results["3f3_levels"] = lv_step.run(sys.modules[__name__], snap, m2mach, m5, stock_img, sound, machines)
+            gc.collect()
+            show(results["3f3_levels"])
+
+        if "clipinner" in steps:
+            print("\nstep 3f4: a voice's own clips and limiters to the ColdFire (2026-11-20, clip-inner)")
+            ci_step = importlib.import_module("sharc_clipinner_step")
+            results["3f4_clipinner"] = ci_step.run(sys.modules[__name__], snap, m2mach, m5, sound, machines)
+            gc.collect()
+            show(results["3f4_clipinner"])
 
         if "fdn8" in steps:
             print("\nstep 3g: FDN8 in the stock reverb's slot")
@@ -876,6 +916,22 @@ def main(argv=None):
             gc.collect()
             show(results["4k_trkbuf"])
 
+        for part in ("ghost-z", "ghost-d", "ghost-h"):   # 2026-11-20: the ghost audit (sharc_ghost_step, sharc:ghost)
+            if part in steps:
+                print(f"\nstep 4g ({part}): ghost delays: stale memory, a long idle after hits, the DSP write watch")
+                gh_step = importlib.import_module("sharc_ghost_step")
+                results[f"4g_{part}"] = gh_step.run(sys.modules[__name__], snap, m2mach, m5, stock_img, sound, machines,
+                                                    part=part)
+                gc.collect()
+                show(results[f"4g_{part}"])
+
+        if "sendfx" in steps:
+            print("\nstep 4s: real voices through the three send FX, stock's and ours (2026-11-14)")
+            sf_step = importlib.import_module("sharc_sendfx_step")
+            results["4s_sendfx"] = sf_step.run(sys.modules[__name__], snap, m2mach, m5, stock_img, sound, machines)
+            gc.collect()
+            show(results["4s_sendfx"])
+
         if "tableready" in steps:
             print("\nstep 4t: the tables' READY with this build's checksum (cases a, b, c; 2026-11-12)")
             tr_step = importlib.import_module("sharc_table_ready")
@@ -898,10 +954,23 @@ def main(argv=None):
             results["8p_para"] = step_para(warm(), sound, machines)
             show(results["8p_para"])
 
+        if "drum" in steps:
+            print("\nstep 8d: DRUM across its range (2026-11-20, scripts/sharc_drum_step.py)")
+            dr_step = importlib.import_module("sharc_drum_step")
+            results["8d_drum"] = dr_step.step(sys.modules[__name__], warm(), sound, machines)
+            gc.collect()
+            show(results["8d_drum"])
+
         if "mnm" in steps:
             print("\nstep 8: the Monomachine machines (v0.26)")
             results["8_mnm"] = step_mnm(warm(), sound, machines, a.blocks)
             show(results["8_mnm"])
+        for part, units in mnm_parts().items():   # 2026-11-16: its parts, each in a process of its own in the gate
+            if part in steps:
+                print(f"\nstep 8 ({part}): the Monomachine machines, units {', '.join(units)}", flush=True)
+                results[f"8_{part}"] = step_mnm(warm(), sound, machines, a.blocks, units=frozenset(units))
+                show(results[f"8_{part}"])
+                gc.collect()
 
         frames = load_frames(a)
         if frames and "frame" in steps:
@@ -1498,7 +1567,30 @@ def step_stress(init, sound, machines) -> dict:
         f.trigger(0)                            # track 0 again, every block
         return f.to_bytes()
     re_, se, ee, le = scenario("E", 16, e_frame)
-    rf, sf, ef, lf = scenario("F", 20, c_frame, memory_clock=True)   # v0.34: C's worst case on the memory clock
+    # v0.34: C's worst case on the memory clock. 2026-11-17 (v0.56.3, P-I's delay lines moved to L1): sixteen
+    # P-I voices alone no longer fill the frame on the memory clock (DDR 29,086 -> 25,006 accesses a block, no
+    # voice left out, ours done at 0.502 P), so F's odd tracks play sample machines (their reader's taps read DDR,
+    # as P-I's lines did) beside eight P-I, all sixteen sounding from block 1: the guard has to leave voices out
+    f_smp = [SM.TYPE_OF[n] for n in ("REPITCH", "WERP", "SLICE", "GRID")]
+
+    def f_frame(b):
+        odd = {t: f_smp[(t // 2) % len(f_smp)] for t in range(1, 16, 2)}
+        f = base_frame(sound, machines, overrides=perc_words(pi[0]), trigger=False,
+                       others={t: odd.get(t, 5) for t in range(1, 16)})
+        for t in range(16):
+            if t in odd:
+                for slot, w in smp_words({SM.SAMP_REC: 4}).items():
+                    f.param(t, slot, w)
+            else:
+                for slot, w in perc_words(pi[(t + b) % len(pi)], params=[rnd.random() for _ in range(8)],
+                                          fx=[rnd.random() for _ in range(7)]).items():
+                    f.param(t, slot, w)
+        if b == 1:                              # all sixteen sounding together, as on a full pattern
+            for t in range(16):
+                f.trigger(t)
+        f.trigger(b % 16)
+        return f.to_bytes()
+    rf, sf, ef, lf = scenario("F", 20, f_frame, memory_clock=True)
     # v0.49 (NiKo, v0.47: an ONESHOT kick crunchy beside SID and PERC at ~85 %): G, twelve P-I
     # voices (all controls moving) and a SID on tracks 0..12, an ONESHOT (SAMP 4) on track 15,
     # the last our loop renders, on the memory clock; G0 the ONESHOT alone. The guard holds
@@ -1506,8 +1598,14 @@ def step_stress(init, sound, machines) -> dict:
     sid = MMx.TYPES[MMx.NAMES.index("SID 6581")]
     one = SM.TYPE_OF["ONESHOT"]
 
+    # 2026-11-17 (v0.56.3, P-I's delay lines in L1: G done at 0.315 P, nothing left out): REPITCH and WERP on
+    # tracks 13 and 14 (DDR, as the ONESHOT), tracks 0..14 sounding from block 1, so the frame overflows on the
+    # memory clock again
+    g_more = {13: SM.TYPE_OF["REPITCH"], 14: SM.TYPE_OF["WERP"]}
+
     def g_frame(b, alone=False):
-        others = {15: one} if alone else {**{t: 5 for t in range(1, 12)}, 12: sid, 15: one}
+        others = {15: one} if alone else {**{t: 5 for t in range(1, 12)}, 12: sid,
+                                          **g_more, 15: one}
         f = base_frame(sound, machines, t0=0 if alone else 5, overrides=None if alone else perc_words(pi[0]),
                        trigger=False, others=others)
         if not alone:
@@ -1516,7 +1614,13 @@ def step_stress(init, sound, machines) -> dict:
                     f.param(t, slot, w)
             for slot, w in mnm_words(MMx.NAMES.index("SID 6581")).items():
                 f.param(12, slot, w)
-            f.trigger(b % 13)
+            for t in g_more:
+                for slot, w in smp_words({SM.SAMP_REC: 4}).items():
+                    f.param(t, slot, w)
+            if b == 1:                          # tracks 0..14 sounding together
+                for t in range(15):
+                    f.trigger(t)
+            f.trigger(b % 15)
         for slot, w in smp_words({SM.SAMP_REC: 4}).items():
             f.param(15, slot, w)
         if b == 1:
@@ -1524,6 +1628,54 @@ def step_stress(init, sound, machines) -> dict:
         return f.to_bytes()
     rg, sg, eg, lg = scenario("G", 16, g_frame, memory_clock=True)
     rg0, _, _, _ = scenario("G0", 16, lambda b: g_frame(b, alone=True), memory_clock=True)
+    # v0.69, the guardrail (dnfw.sampler.guardrail): kits just within its LIMIT must play without
+    # a voice left out, and one well past it must not (so the weights mean something). H: three
+    # VO-6 tracks at two voices each (6 voices, 277,260 of 320,000), every voice sounding, all
+    # controls moving; H2: seven PERC tracks (P-I, the heaviest family, 315,245); H3: eleven
+    # ONESHOTs (318,043); I: sixteen VO-6 voices (739,360). All on the memory clock (F's)
+    from dnfw.sampler import guardrail as GR
+    vo6 = MMx.NAMES.index("VO-6")
+
+    def vo_frame(n):
+        def fr(b):
+            f = base_frame(sound, machines, t0=MMx.TYPES[vo6], trigger=False,
+                           others={t: MMx.TYPES[vo6] for t in range(1, n)})
+            for t in range(n):
+                for slot, w in mnm_words(vo6, [rnd.randrange(128) for _ in range(8)]).items():
+                    f.param(t, slot, w)
+            if b == 1:
+                for t in range(n):
+                    f.trigger(t)
+            return f.to_bytes()
+        return fr
+    rh, sh, eh, _ = scenario("H", 16, vo_frame(6), memory_clock=True)
+
+    def h2_frame(b):
+        f = base_frame(sound, machines, overrides=perc_words(pi[0]), trigger=False,
+                       others={t: 5 for t in range(1, 7)})
+        for t in range(7):
+            for slot, w in perc_words(pi[t % len(pi)]).items():
+                f.param(t, slot, w)
+        if b == 1:
+            for t in range(7):
+                f.trigger(t)
+        return f.to_bytes()
+
+    def h3_frame(b):
+        f = base_frame(sound, machines, t0=one, trigger=False, others={t: one for t in range(1, 11)})
+        for t in range(11):
+            for slot, w in smp_words({SM.SAMP_REC: 4}).items():
+                f.param(t, slot, w)
+        if b == 1:
+            for t in range(11):
+                f.trigger(t)
+        return f.to_bytes()
+    rh2, sh2, eh2, _ = scenario("H2", 16, h2_frame, memory_clock=True)
+    rh3, sh3, eh3, _ = scenario("H3", 16, h3_frame, memory_clock=True)
+    ri, si, ei, _ = scenario("I", 16, vo_frame(16), memory_clock=True)
+    gr_h = 3 * GR.weight(MMx.TYPES[vo6])
+    gr_h2 = 7 * GR.weight(5)
+    gr_h3 = 11 * GR.weight(one)
     undo_counts()
 
     def smp_out(rr, t):
@@ -1557,6 +1709,10 @@ def step_stress(init, sound, machines) -> dict:
               "memory_clock_scale": MEM_SCALE})
     n.update({"G": {"skips": sg, "our_end_over_P": eg and round(eg / P, 3), "oneshot_same_as_alone": g_same,
                     "oneshot_blocks_heard": g_heard}})
+    n.update({"guardrail": {"limit": GR.LIMIT, "H": {"weight": gr_h, "skips": sh, "our_end_over_P": eh and round(eh / P, 3)},
+                            "H2": {"weight": gr_h2, "skips": sh2, "our_end_over_P": eh2 and round(eh2 / P, 3)},
+                            "H3": {"weight": gr_h3, "skips": sh3, "our_end_over_P": eh3 and round(eh3 / P, 3)},
+                            "I": {"skips": si, "our_end_over_P": ei and round(ei / P, 3)}}})
     fin_f = rf["ok"] and all(math.isfinite(x) for blk in rf["buffers"] for t in range(16) for x in blk[t])
     checks = {
         "every block of both returns": ra["ok"] and rb["ok"],
@@ -1569,12 +1725,17 @@ def step_stress(init, sound, machines) -> dict:
             all(x is not None and x <= 0.8 * P for x in (ec, ed, ee)),
         "v0.33: in C and D, with time short, voices are left out and counted": bool(sc) and bool(sd),
         "v0.33: every track buffer finite, no NaN, in C, D and E": fin_bufs,
-        "v0.34: F (C's case on the memory-cost clock): every block returns, our voices done by 0.8 of the "
+        "v0.34: F (eight P-I voices and eight sample machines, the memory-cost clock): every block returns, our voices done by 0.8 of the "
         "frame, voices left out and counted, every buffer finite":
             rf["ok"] and ef is not None and ef <= 0.8 * P and bool(sf) and fin_f,
-        "v0.49: G (12 P-I voices and a SID beside an ONESHOT on track 15, the memory clock): every block "
+        "v0.49: G (12 P-I voices, a SID, REPITCH and WERP beside an ONESHOT on track 15, the memory clock): every block "
         "returns, voices are left out (PERC's), and the ONESHOT's output is, block for block, its output alone "
         "(G0): never left out": rg["ok"] and rg0["ok"] and bool(sg) and g_same and g_heard >= 10,
+        "v0.69 (upstream's guardrail kits, kept here as checks of the frame guard: the guardrail itself is not in "
+        "our build): H (three VO-6 tracks, two voices each), H2 (seven P-I tracks) and H3 (eleven ONESHOTs) play "
+        "every block with no voice left out; I (sixteen VO-6 voices) does leave voices out":
+            rh["ok"] and rh2["ok"] and rh3["ok"] and ri["ok"] and max(gr_h, gr_h2, gr_h3) <= GR.LIMIT
+            and sh == 0 and sh2 == 0 and sh3 == 0 and bool(si),
         "with time short, voices are left out and counted (A)": bool(sa),
         "A: the newest note is heard in most blocks (newest first)": n["newest_heard_A"] >= 0.8,
         "nothing non-finite": fin,
@@ -2335,8 +2496,8 @@ def step_wipe(init, sound, machines) -> dict:
             done["blocks"] = done.get("blocks", 0) + 1
             if done["blocks"] == 5 and not done["poked"]:
                 done["poked"] = 1
-                base = dsp.MD_DELAY_DDR
-                for j in range(MDK.PI_DELAY_WORDS):
+                base = dsp.MD_DELAY_L1                   # (2026-11-16: slot 0's lines in L1 block 2)
+                for j in range(dsp.MD_DELAY_STRIDE // 4):
                     m2.poke(r.state, base + 4 * j, 0xFFC00000)
 
         def at_perc(r, done=done):
@@ -3060,6 +3221,9 @@ def step_rec(init, sound, machines, blocks) -> dict:
 # the unit 17.86; with TRK_UNITY from the unit the runner reads the difference. Its cause is NOT measured (the unit's
 # main-out RMS of a pulsing tom over seconds against the runner's amp out over 8 ms, or something after the amp)
 RUNNER_TO_UNIT_DB = 17.86 - 16.0
+# v0.65 (upstream, NiKo on v0.63 through Ableton, every level at 127): a track's take matched its source at
+# TRK_HW_DB 12; v0.68 (upstream's owner) raised TRK_HW_DB to 24, so that sound's take is 12 dB over its source
+LOUD_UNITY_HW_DB = 12.0
 
 
 def step_flexlevel(init, sound, machines) -> dict:
@@ -3159,11 +3323,18 @@ def step_flexlevel(init, sound, machines) -> dict:
     st_unity, st_saved = run(SM.GAIN_ZERO, play=STR), run(SM.GAIN_ZERO, saved=True, play=STR)
     head_db = 20 * _m.log10(8.0)                    # v0.54.3's requirement: stored x 1/8, played x 8 (SM.TAKE_HEAD)
     checks = {
-        f"2026-11-15: a FLEX take of a track (GAIN 0) at its source's level as the unit measures it: the take's "
-        f"render against the source's at {RUNNER_TO_UNIT_DB:+.2f} dB (the runner's offset to the unit), within 1 dB":
-            unity is not None and abs(unity["render_db"] - RUNNER_TO_UNIT_DB) <= 1.0,
-        f".. and out of the amp at {RUNNER_TO_UNIT_DB:+.2f} dB within 1 dB":
-            unity is not None and abs(unity["out_db"] - RUNNER_TO_UNIT_DB) <= 1.0,
+        # v0.65.1 (the User: upstream's level, SM.TRK_HW_DB; v0.68.1: 24 dB): the init sound's take sits
+        # SM.TRK_INIT_UNIT_DB (v0.68.1: +6.14) against its source on the unit, so RUNNER_TO_UNIT_DB + that on the runner
+        f"v0.65.1/v0.68.1: a FLEX take of a track (GAIN 0), the init sound: the take's render against the source's at "
+        f"{RUNNER_TO_UNIT_DB + SM.TRK_INIT_UNIT_DB:+.2f} dB (upstream's level; the runner's offset to the unit "
+        f"{RUNNER_TO_UNIT_DB:+.2f}), within 1 dB":
+            unity is not None and abs(unity["render_db"] - RUNNER_TO_UNIT_DB - SM.TRK_INIT_UNIT_DB) <= 1.0,
+        f".. and out of the amp at {RUNNER_TO_UNIT_DB + SM.TRK_INIT_UNIT_DB:+.2f} dB within 1 dB":
+            unity is not None and abs(unity["out_db"] - RUNNER_TO_UNIT_DB - SM.TRK_INIT_UNIT_DB) <= 1.0,
+        f"v0.65.1/v0.68.1: every level at 127 (upstream's v0.65 calibration, NiKo: its source's level at TRK_HW_DB "
+        f"{LOUD_UNITY_HW_DB:g}): the take out of the amp {SM.TRK_HW_DB - LOUD_UNITY_HW_DB:+g} dB over its source as "
+        f"the unit measures it ({RUNNER_TO_UNIT_DB + SM.TRK_HW_DB - LOUD_UNITY_HW_DB:+.2f} dB on the runner), within 1.5 dB":
+            loud is not None and abs(loud["out_db"] - RUNNER_TO_UNIT_DB - (SM.TRK_HW_DB - LOUD_UNITY_HW_DB)) <= 1.5,
         "v0.50 negative control: the RECORDER's command (no GAIN: v0.49's scaling) renders the same take "
         "over 4 dB under its source":
             recorder is not None and recorder["render_db"] < -4.0,
@@ -3207,6 +3378,143 @@ def show_flexlevel(step) -> None:
               f" peak {r['take_peak']:.4f}")
 
 
+def step_mainmark(init, sound, machines) -> dict:
+    """v0.66 (owner and Error Kit, 2026-11-20: a FLEX take of MAIN or IN far too quiet, and GAIN
+    raised to make up for it clipped). Such a take is recorded as it is and marked (bit 15 of its
+    buffer entry's steps word, MAIN_MARK); a voice playing a marked take adds MAIN_PLAY_DB. Each
+    run: RECORD NOW into buffer 0's half 0 (dest BUF_SLOT0), 16 steps, from a known 0.5 sine poked
+    where the recorder reads its source at every block's dispatch (MAIN_TAP for MAIN, IN_BUF for IN:
+    the runner never runs the master mix); STOP; then track 0 plays SAMP BUF_SAMP0 twice, the take
+    as recorded and the same take with the mark cleared, on ONESHOT (render) and STRETCH
+    (render_stretch). Checks: MAIN and IN FLEX takes are marked and their frames are the source's
+    (peak 0.5, not boosted: nothing reaches the int16 clamp); a marked take renders x 10^(12/20)
+    of its unmarked self within 0.1 % (RMS) on both readers; the steps still read 16 (the mark never
+    reaches the step maths). Negative controls: a TRK take (FLEX) and a plain recording of MAIN
+    (GAIN index 0, the RECORDER's) are not marked and render as their unmarked selves."""
+    import math as _m
+    ONE, STR = SM.TYPE_OF["ONESHOT"], SM.TYPE_OF["STRETCH"]
+    cmd_at = dsp.SMP_POOL_DDR + SM.CMD_OFFSET
+    bent = dsp.SMP_POOL_DDR + SM.BUF_DIR
+    n, play, steps, amp = 16, 10, 16, 0.5
+    sig = [amp * _m.sin(2 * _m.pi * 440 * k / 48000) for k in range(32 * (n + 2))]
+    want = 10.0 ** (SM.MAIN_PLAY_DB / 20.0)
+
+    def bits(x):
+        return struct.unpack("<I", struct.pack("<f", x))[0]
+
+    def command(r, seq, cmd, src=0, chan=0, dest=0, frames=SM.REC_FRAMES, place=0, thres=0):
+        for k, w in enumerate((seq, cmd, src, chan | place << 8, thres, (SM.REC_FIRST + dest) << 24 | frames)):
+            m2.poke(r.state, cmd_at + 4 * k, w)
+
+    def rms(x):
+        return _m.sqrt(sum(v * v for v in x) / max(1, len(x)))
+
+    def record(src, gidx):
+        cur = {"b": 0}
+
+        def at_dispatch(r):
+            b = cur["b"]
+            if b == 0:
+                command(r, 31, SM.CMD_NOW, src=src, chan=gidx << 24, dest=SM.BUF_SLOT0 - SM.REC_FIRST,
+                        place=0x5000, thres=steps << 16)
+            if b == n:
+                command(r, 32, SM.CMD_STOP)
+            for k in range(32):
+                x = bits(sig[32 * b + k] if b < n else 0.0)
+                # 2026-11-21 (v0.66.1 merge): and track 0's bucket, the TRK control's source (src 2): without it that
+                # take was silence (peak 0, no ratio) and the control failed whatever the firmware did
+                for at in (SM.IN_BUF, SM.MAIN_TAP, SM.TRK_BUF):
+                    m2.poke(r.state, at + 4 * k, x)
+                    m2.poke(r.state, at + 0x80 + 4 * k, x)
+            cur["b"] += 1
+
+        def fb(b):
+            f = base_frame(sound, machines, t0=ONE, trigger=False, overrides=smp_words({SM.SAMP_REC: 1}))
+            for t in range(16):
+                f.put(0xA5A + 2 * t, t)
+            return f.to_bytes()
+        r = run_blocks(init, fb, n + 2, extra_hooks={m3.DISPATCH: at_dispatch})
+        if not r["ok"]:
+            return None, None
+        st = r["state"]
+        ent = [m2.word(st.state, bent + 4 * k) or 0 for k in range(3)]
+        take = []
+        for k in range(ent[1] // 2):
+            w = m2.word(st.state, ent[0] + 4 * k) or 0
+            take += [((h ^ 0x8000) - 0x8000) / 32768.0 for h in (w & 0xFFFF, w >> 16)]
+        return st, {"entry": ent, "take_peak": max((abs(v) for v in take), default=0.0), "frames": ent[1]}
+
+    def playback(state, ty, clear):
+        if clear:
+            w = m2.word(state.state, bent + 8) or 0
+            m2.poke(state.state, bent + 8, w & ~SM.MAIN_MARK & 0xFFFFFFFF)   # (ours: a TRK take's TAKE_HEAD_BIT stays)
+
+        def fb(b):
+            f = base_frame(sound, machines, t0=ty, trigger=(b == 0), overrides=smp_words({SM.SAMP_REC: SM.BUF_SAMP0}))
+            f.put(SP.TEMPO_OFFSET, 120 * 120)
+            return f.to_bytes()
+        r = run_blocks(state, fb, play)
+        if not r["ok"]:
+            return None
+        return smp_series(r, 0)[2 * BLOCK: (play - 1) * BLOCK]
+
+    out, nums = {}, {}
+    for name, src, gidx in (("MAIN", 1, SM.GAIN_ZERO), ("IN", 0, SM.GAIN_ZERO), ("TRK", 2, SM.GAIN_ZERO),
+                            ("MAIN plain", 1, 0)):
+        st, info = record(src, gidx)               # (a run takes its state: the same take is
+        res = {"info": info}                       # recorded again for each playback; it is
+        if st is not None:                         # deterministic, its entry checked below)
+            for ty, tn in ((ONE, "ONESHOT"), (STR, "STRETCH")):
+                a_ = playback(st, ty, False)
+                st, again = record(src, gidx)
+                b_ = playback(st, ty, True) if st is not None and again == info else None
+                res[tn] = (rms(a_) / rms(b_)) if a_ and b_ and rms(b_) > 0 else None
+                res[tn + "_peak"] = max((abs(x) for x in a_ or []), default=0.0)
+                st, again = record(src, gidx)
+                if st is None or again != info:
+                    break
+        out[name] = res
+        nums[name] = {k: (round(v, 5) if isinstance(v, float) else v) for k, v in res.items() if k != "info"}
+        nums[name]["entry_steps_word"] = hex(info["entry"][2]) if info else None
+        nums[name]["take_peak"] = round(info["take_peak"], 4) if info else None
+
+    def marked(nm):
+        i = out[nm]["info"]
+        return bool(i) and bool(i["entry"][2] & SM.MAIN_MARK) and (i["entry"][2] & 0x7FFF) == steps
+
+    def unmarked(nm):
+        i = out[nm]["info"]
+        return bool(i) and not (i["entry"][2] & SM.MAIN_MARK) and (i["entry"][2] & 0x7FFF) == steps
+
+    def ratio(nm, k):
+        r = out[nm].get(k)
+        return r is not None and abs(r - want) <= 0.001 * want
+
+    def same(nm, k):
+        r = out[nm].get(k)
+        return r is not None and abs(r - 1.0) <= 0.001
+
+    def as_source(nm):
+        i = out[nm]["info"]
+        return bool(i) and abs(i["take_peak"] - amp) <= 0.01 * amp
+    checks = {
+        "v0.66: a FLEX take of MAIN is marked (MAIN_MARK) and its steps still read 16": marked("MAIN"),
+        "v0.66: .. its frames are the source's (peak 0.5 within 1 %: recorded as it is, never boosted before the clamp)":
+            as_source("MAIN"),
+        f"v0.66: .. and it plays {SM.MAIN_PLAY_DB} dB over the same take unmarked, within 0.1 %, on ONESHOT (render)":
+            ratio("MAIN", "ONESHOT"),
+        f"v0.66: .. and on STRETCH (render_stretch)": ratio("MAIN", "STRETCH"),
+        "v0.66: .. and its playback is not silence": out["MAIN"].get("ONESHOT_peak", 0) > 0.01,
+        "v0.66: a FLEX take of IN is marked, as it is, and plays the same make-up":
+            marked("IN") and as_source("IN") and ratio("IN", "ONESHOT") and ratio("IN", "STRETCH"),
+        "v0.66 negative control: a FLEX take of a track is not marked and plays as itself":
+            unmarked("TRK") and same("TRK", "ONESHOT") and same("TRK", "STRETCH"),
+        "v0.66 negative control: a plain recording of MAIN (GAIN index 0, the RECORDER's) is not marked":
+            unmarked("MAIN plain") and same("MAIN plain", "ONESHOT"),
+    }
+    return {"ok": all(checks.values()), "checks": checks, "numbers": nums}
+
+
 # -- step 3e: the fast link (v0.16, docs/sampler.md) -------------------------------------------------
 
 def step_pvmix(snap, m2mach, m5: Image, stock: Image) -> dict:
@@ -3241,8 +3549,22 @@ def step_pvmix(snap, m2mach, m5: Image, stock: Image) -> dict:
     tx_other = {SM.TDM_TX + 64 * f + 4 * s: 0x11110000 + 16 * f + s for f in range(32) for s in (0, 1, 2)}
     tx_other.update({tx_base + 64 * f + 8: 0x22220000 + f for f in range(32)})   # slot 2: a track's
 
-    def run(image, words_left, mix0=mix_in, loop=False, tx0=None):
+    # v0.59 MON: the input block, and (mon, rsrc, rst) as the recorder leaves them
+    in_blk = [struct.unpack("<I", struct.pack("<f", 0.003 * k - 0.07))[0] for k in range(64)]
+
+    def poke_mon(put, mon):
+        if mon is None:
+            return
+        on, src, st = mon
+        put(SM.REC_MON, on)
+        put(C["rsrc"], src)
+        put(C["rst"], st)
+        for k in range(64):
+            put(SM.IN_BUF + 4 * k, in_blk[k])
+
+    def run(image, words_left, mix0=mix_in, loop=False, tx0=None, mon=None):
         r = init_on(snap, m2mach, image).fresh_call(dsp.PVMIX_SITE_SW, regs=regs)
+        poke_mon(lambda a, v: m2.poke(r.state, a, v), mon)
         for k in range(64):
             m2.poke(r.state, SM.MIX_BUF + 4 * k, mix0[k])
         m2.poke(r.state, SM.TDM_PAGE, TX_PG)
@@ -3272,9 +3594,10 @@ def step_pvmix(snap, m2mach, m5: Image, stock: Image) -> dict:
     def mix(r):
         return [m2.word(r.state, SM.MIX_BUF + 4 * k) or 0 for k in range(64)]
 
-    def model(words_left, mix0, loop=False):
+    def model(words_left, mix0, loop=False, mon=None):
         from dnfw.perc.dsl import Mem
         mem = Mem(lambda a: 0)
+        poke_mon(mem.put, mon)
         for k in range(64):
             mem.put(SM.MIX_BUF + 4 * k, mix0[k])
         mem.put(SM.TDM_PAGE, TX_PG)
@@ -3317,13 +3640,30 @@ def step_pvmix(snap, m2mach, m5: Image, stock: Image) -> dict:
     own = {C[w] for w in ("pva", "pvn", "pvk", "pvs0", "pvs1", "pvs2", "pvs3", "pvs12", "pvs13", "pvsi", "pvsa",
                           "pvl0", "pvln")}
     own |= {SM.MAIN_TAP + 4 * k for k in range(64)}     # v0.37: the MAIN tap is the preview's too
+    own |= {SP.LK[w] for w in ("dpkl", "dpkr", "pvs4", "pvs5", "dobl", "dobr")}   # 2026-11-20: the DAC guard's peaks, R4 / R5 saved, Overbridge main's peaks (ob_peaks)
     own |= set(tx_in)                                    # Overbridge's main L / R: the preview's too
     out, checks = {}, {}
-    for name, left, loop in (("none", 0, False), ("full", 40, False), ("tail", 5, False), ("loop", 5, True)):
-        want, pva, pvn = model(left, mix_in, loop)
-        # stock, given the mix and the Overbridge main slots the preview makes
-        rs, hs, _ = run(stock, 0, want, tx0={a: model.tx[a] for a in tx_in})
-        rm, hm, _ = run(m5, left, loop=loop)
+    # v0.59 MON: on, IN, armed (1) / recording (2): the input added; off, MAIN (1), a track (2),
+    # idle (0) or done (3): nothing (each its own case, so a MON that ignored any of them fails)
+    MON_CASES = (("mon armed", 0, False, (1, 0, 1)), ("mon recording", 5, False, (1, 0, 2)),
+                 ("mon off", 0, False, (0, 0, 2)), ("mon MAIN", 0, False, (1, 1, 2)),
+                 ("mon TRK1", 0, False, (1, 2, 2)), ("mon idle", 0, False, (1, 0, 0)),
+                 ("mon done", 0, False, (1, 0, 3)))
+    from dnfw.perc.dsl import f32
+    added = [struct.unpack("<I", struct.pack("<f", f32(struct.unpack("<f", struct.pack("<I", a))[0]
+                                                            + struct.unpack("<f", struct.pack("<I", b))[0])))[0]
+             for a, b in zip(mix_in, in_blk)]
+    for name, left, loop, *mon in (("none", 0, False), ("full", 40, False), ("tail", 5, False), ("loop", 5, True),
+                                   *MON_CASES):
+        mon = mon[0] if mon else None
+        want, pva, pvn = model(left, mix_in, loop, mon)
+        if mon is not None and left == 0:
+            hears = mon[0] == 1 and mon[1] == 0 and mon[2] in (1, 2)
+            checks[f"{name}: the model's mix {'is the mix + the input' if hears else 'untouched'}"] = (
+                want == (added if hears else mix_in))
+        # stock, given the mix and the Overbridge main slots the preview makes (v0.59: MON's words too)
+        rs, hs, _ = run(stock, 0, want, tx0={a: model.tx[a] for a in tx_in}, mon=mon)
+        rm, hm, _ = run(m5, left, loop=loop, mon=mon)
         ok = hs[0] == "stop" and hm[0] == "stop"
         # ASTATX: wr_pvmix saves ASTAT on entry and restores it on exit (every bit, on the
         # instrument). The emulator keeps a partially known ASTATX as a PartialConst, saves it
@@ -3375,10 +3715,10 @@ def step_pvmix(snap, m2mach, m5: Image, stock: Image) -> dict:
                 txg[a] == tx_want[a] for a in tx_in)
         checks[f"{name}: the other TX slots and the other page untouched"] = ok and all(
             txg[a] == v for a, v in tx_other.items())
-        if left == 0:
-            checks["none: Overbridge main untouched"] = ok and all(txg[a] == v for a, v in tx_in.items())
+        if left == 0:                           # (v0.59: MON's cases too: MON adds to the mix only)
+            checks[f"{name}: Overbridge main untouched"] = ok and all(txg[a] == v for a, v in tx_in.items())
         out.setdefault("tx_changed", {})[name] = sum(1 for a in tx_in if txg[a] != tx_in[a])
-        if left == 0:
+        if left == 0 and mon is None:
             checks["none: the mix untouched"] = ok and got == mix_in
         if loop:                                # v0.30: at its end it starts again
             checks["loop: at its end the preview starts again (pva back at its start, pvn its length)"] = (
@@ -4180,319 +4520,75 @@ def _slim(run: dict) -> dict:
     return run
 
 
-A2_PARA_GUARD_FROM = 6                          # the PARA guard runs: the clock fed from this block
+def step_para(init, sound, machines) -> dict:
+    """2026-11-16 (PARA as one voice): PARA alone, each engine (step mnm runs the same, among every machine): the
+    runs bit-exact to the model and their checks (scripts/sharc_para_step.py). The slot chords' runs and checks above
+    (a2_para_*, para_checks, para_inserts: the pilot's members as slots) are no longer run: no slot is a member"""
+    return importlib.import_module("sharc_para_step").step(sys.modules[__name__], init, sound, machines)
 
 
-def a2_para_frames(sound, machines, para, engine="ANALOG2"):
-    """2026-11-15: PARA (dnfw.engines.analog2.para): slots 0..3 on ENGINE (ANALOG2, JUNO) at its defaults, all four
-    routed to track 0 (the frame's route words 0xa5a + 2 v), notes 60 64 67 71 on at block 1 and held; PARA (the
-    record MOD, slot 37: 3 is 4 pitches, 0 OFF)"""
+def mnm_units() -> tuple[str, ...]:
+    """step_mnm's units of work (2026-11-16, gate speed): each makes its own runs from the step's INIT"""
     from dnfw.mnm import machines as MM
-    types = dict(enumerate(MM.TYPES))
-    ak = MM.NAMES.index(engine)
-
-    def fb(b):
-        f = base_frame(sound, machines, t0=types[ak], overrides=mnm_words(ak), note=0x3C00,
-                       others={t: types[ak] for t in (1, 2, 3)})
-        for t, note in ((0, 60), (1, 64), (2, 67), (3, 71)):
-            if b == 1:                           # a held trig: note on and filter-env trig, no note-off (Frame.trigger
-                f.trigger(t, masks=(FR.TRIG_NOTE, 38))   # sets 36 too: the gate would end in its own block)
-            for slot, w in mnm_words(ak).items():
-                f.param(t, slot, w)
-            f.header(FR.NOTE, t, note << 8)
-            f.param(t, A2_PARA_SLOT, para << 8)
-            f.put(A2_ROUTE_FRAME + 2 * t, 0)
-        return f.to_bytes()
-    return fb
+    return (*(f"machine:{name}" for name in MM.NAMES), "silent", "drone-legato", "drone-oct", "a2-legato",
+            *(f"para:{t}" for _e, t in PARA_ENGINES),   # PARA as one voice: sharc_para_step's runs, each engine
+            "juno-env", "plaits-models", "plaits-walk", "mono-walk", "budget", "dynamic", "rest")
 
 
-A2_PARA8_BLOCKS, A2_PARA8_NINTH, A2_PARA8_TENTH = 100, 24, 60   # 2026-11-15 ("Up to 8", "Drop the oldest")
+# 2026-11-16 (gate speed): the step's parts, each a runner step of its own (the gate runs each in its own process,
+# in parallel). Together they are every unit of mnm_units() exactly once (mnm_parts() asserts it). Grouped by the
+# units' blocks and voices (the machines' runs about 70 s each on the farm), so no part is much longer than another;
+# measured times: scripts/gate_times.json. (v0.56.3: PARA as one voice, sharc_para_step: a para unit is that
+# engine's PV runs and guard run; the slot chords' parains units are gone with the code that ran them.)
+MNM_PARTS = {"mnm-ma": ("machines:0:6", "silent"),
+             "mnm-mb": ("machines:6:", "budget", "dynamic", "rest", "mono-walk"),
+             "mnm-drone": ("drone-legato", "drone-oct"),
+             "mnm-a2": ("a2-legato",),
+             "mnm-para-a2": ("para:a2",),
+             "mnm-para-juno": ("para:juno",),
+             "mnm-plaits": ("juno-env", "plaits-models", "plaits-walk")}
 
 
-def a2_para8_frames(sound, machines, engine="ANALOG2", at=None):
-    """2026-11-15 (the User: "Up to 8", "Drop the oldest"): slots 0..9 on ENGINE, track 0, PARA ON: notes 48 + 3 u, AT
-    (slot -> its note's block, held; default: slots 0..7 at block 1, a chord of 8 led by slot 7, slot 8 at
-    A2_PARA8_NINTH, slot 9 at A2_PARA8_TENTH)"""
-    from dnfw.engines.analog2 import para as PA
+def mnm_parts() -> dict[str, tuple[str, ...]]:
+    """MNM_PARTS with 'machines:A:B' as the machine units MM.NAMES[A:B]; every unit in exactly one part"""
     from dnfw.mnm import machines as MM
-    types = dict(enumerate(MM.TYPES))
-    ak = MM.NAMES.index(engine)
-    at = at or ({u: 1 for u in range(8)} | {8: A2_PARA8_NINTH, 9: A2_PARA8_TENTH})
-
-    def fb(b):
-        f = base_frame(sound, machines, t0=types[ak], overrides=mnm_words(ak), note=0x3C00,
-                       others={t: types[ak] for t in range(1, 10)})
-        for t in range(10):
-            if b == at.get(t):
-                f.trigger(t, masks=(FR.TRIG_NOTE, 38))
-            for slot, w in mnm_words(ak).items():
-                f.param(t, slot, w)
-            f.header(FR.NOTE, t, (48 + 3 * t) << 8)
-            f.param(t, A2_PARA_SLOT, PA.ON_VALUE << 8)
-            f.put(A2_ROUTE_FRAME + 2 * t, 0)
-        return f.to_bytes()
-    return fb
-
-
-def a2_para_runs(init, sound, machines) -> dict:
-    """for each PARA engine (PARA_ENGINES: tag): PARA_tag (PARA 4, held A2_PARA_HELD blocks, each slot's ROLE word and
-    quiet count recorded after PERC) and PARA_tag_off; the step's exactness check holds every slot to the model (which
-    runs the slots in the DSP's order on one memory, the PARA pass first)"""
-    from dnfw.engines.analog2 import para as PA
     out = {}
-    for engine, tag in PARA_ENGINES:
-        seen = []
-
-        def at_smp(r, seen=seen):                # after PERC: each slot's ROLE word and its quiet count (RESTS)
-            seen.append([(m2.word(r.state, PA.ROLE + 4 * u) or 0,
-                          m2.word(r.state, PERC_L.md.mnm.scratch + PP.RESTS_OFF + 4 * u) or 0) for u in range(4)])
-        held = _slim(run_blocks(init, a2_para_frames(sound, machines, 3, engine), A2_PARA_HELD,
-                                extra_hooks={dsp.SMP_SW: at_smp}))
-        held["roles_rests"] = seen
-        out[f"PARA_{tag}"] = held
-        out[f"PARA_{tag}_off"] = _slim(run_blocks(init, a2_para_frames(sound, machines, 0, engine), A2_PARA_BLOCKS))
-        roles8 = []
-
-        def at_smp8(r, roles8=roles8):           # after PERC (the voices ran): each slot's ROLE word
-            roles8.append([m2.word(r.state, PA.ROLE + 4 * u) or 0 for u in range(10)])
-        full = _slim(run_blocks(init, a2_para8_frames(sound, machines, engine), A2_PARA8_BLOCKS,
-                                extra_hooks={dsp.SMP_SW: at_smp8}))
-        full["roles"] = roles8
-        out[f"PARA8_{tag}"] = full
-        join_at = {u: 1 for u in range(7)} | {8: A2_PARA8_NINTH}    # the control: a note joining a chord of 7
-        out[f"PARA8_{tag}_join"] = _slim(run_blocks(init, a2_para8_frames(sound, machines, engine, join_at),
-                                                    A2_PARA8_NINTH + 10))
+    for part, units in MNM_PARTS.items():
+        got = []
+        for u in units:
+            if u.startswith("machines:"):
+                lo, hi = (u.split(":") + [""])[1:3]
+                got += [f"machine:{n}" for n in MM.NAMES[int(lo or 0):int(hi) if hi else None]]
+            else:
+                got.append(u)
+        out[part] = tuple(got)
+    flat = [u for us in out.values() for u in us]
+    assert sorted(flat) == sorted(mnm_units()) and len(flat) == len(set(flat)), \
+        ("MNM_PARTS must hold every unit of mnm_units() exactly once", sorted(set(mnm_units()) ^ set(flat)))
     return out
 
 
-def a2_para_guards(init, sound, machines) -> dict:
-    """a2_para_guard for each PARA engine: tag -> its runs"""
-    return {tag: a2_para_guard(init, a2_para_frames(sound, machines, 3, engine)) for engine, tag in PARA_ENGINES}
-
-
-def para_checks(runs, guards, n: dict) -> dict:
-    """each PARA engine's checks: its chord (the leader sounds, the members exact silence; OFF, each slot sounds), held
-    past the quiet test, and under the guard (a2_para_guard_checks)"""
-    checks = {}
-    for engine, tag in PARA_ENGINES:
-        if f"PARA_{tag}" not in runs:
-            continue
-        pr, po = runs[f"PARA_{tag}"], runs[f"PARA_{tag}_off"]
-        pok = pr["ok"] and po["ok"]
-        pp = {t: V.peak(perc_series(pr, t)) for t in range(4)} if pok else {}
-        po_ = {t: V.peak(perc_series(po, t)) for t in range(4)} if pok else {}
-        n[f"para_{tag}_peaks"] = {"para": {t: round(v, 4) for t, v in pp.items()},
-                                  "off": {t: round(v, 4) for t, v in po_.items()}}
-        checks[f"{engine} PARA: a 4-note chord on one track plays on its oldest slot (3: the highest of one block's "
-               "notes), its members (0, 1, 2) exact silence; PARA OFF, each slot plays its own note"] = (
-            pok and pp[3] > 0.05 and all(perc_series(pr, t) and all(x == 0.0 for x in perc_series(pr, t))
-                                         for t in (0, 1, 2))
-            and all(v > 0.05 for v in po_.values()))
-        checks.update(a2_para_held_check(pr, n, engine, tag))
-        if f"PARA8_{tag}" in runs:
-            checks.update(a2_para8_checks(runs[f"PARA8_{tag}"], pr, n, engine, tag, runs.get(f"PARA8_{tag}_join")))
-        if tag in guards:
-            checks.update(a2_para_guard_checks(pr, guards[tag], n, engine, tag))
-    return checks
-
-
-def a2_para8_checks(full, pr, n: dict, engine: str, tag: str, join=None) -> dict:
-    """PARA8_tag (a2_para8_frames) against PARA_tag (4 notes): the roles and fades (the 9th note: the leader's own
-    note fades out, it leads on; the 10th: the oldest member, slot 6, fades, then is DROPPED), the members silent,
-    the leader sounding every block with no step larger than the 8-note chord's own, and the level"""
-    from dnfw.engines.analog2 import para as PA
-    import math
-    ok = full["ok"] and pr["ok"]
-    rr = full.get("roles") or []
-
-    def role(b, u):
-        return (rr[b][u] >> PA.ROLE_SHIFT) & 3 if b < len(rr) else None
-
-    def fade(b, u):
-        return (rr[b][u] >> PA.FADE_SHIFT) & 7 if b < len(rr) else None
-    nb, nt = A2_PARA8_NINTH, A2_PARA8_TENTH
-    lead = perc_series(full, 7)
-    roles_ok = ok and len(rr) >= A2_PARA8_BLOCKS and (
-        role(nb - 1, 7) == PA.LEADER and fade(nb - 1, 7) == 0 and rr[nb - 1][7] & 0xFFFF == 0x7F
-        and all(role(nb - 1, u) == PA.MEMBER for u in range(7))
-        and role(nb + 8, 8) == PA.MEMBER and role(nb + 8, 7) == PA.LEADER and fade(nb + 8, 7) == PA.FADE_OUT
-        and role(nt + 8, 6) == PA.DROPPED and fade(nt + 8, 6) == PA.FADE_OUT and rr[nt + 8][7] & 0xFFFF == 0x33F
-        and all(role(nt + 8, u) == PA.MEMBER and fade(nt + 8, u) == 0 for u in (0, 1, 2, 3, 4, 5, 8, 9)))
-    silent = ok and all(all(x == 0.0 for x in perc_series(full, u)) for u in range(10) if u != 7)
-    blocks = [lead[32 * b:32 * b + 32] for b in range(len(lead) // 32)]
-    sounding = ok and len(blocks) >= A2_PARA8_BLOCKS - 2 and all(V.peak(x) > 0.005 for x in blocks[4:])
-    steps = [abs(lead[k] - lead[k - 1]) for k in range(1, len(lead))]
-
-    def most(b0, b1):
-        return max(steps[32 * b0:32 * b1]) if ok and len(steps) >= 32 * b1 - 1 else None
-    nend = len(steps) // 32
-    # each note joining the full chord (blocks e - 1 .. e + 8) against the chord's own steps before and after it
-    events = [(nb, most(nb - 1, nb + 8), most(8, nb - 1), most(nb + 9, nt - 1)),
-              (nt, most(nt - 1, nt + 8), most(nb + 9, nt - 1), most(nt + 9, nend))]
-    clean = ok and all(None not in ev and ev[1] <= 1.2 * max(ev[2], ev[3]) + 0.05 for ev in events)
-    jl = perc_series(join, 6) if join and join["ok"] else []   # the control's leader: slot 6 (a chord of 7, then 8)
-    plain = max(abs(jl[k] - jl[k - 1]) for k in range(32 * (nb - 1) + 1, min(len(jl), 32 * (nb + 8)))) if jl else None
-    four = perc_series(pr, 3)[32 * 8:]
-    eight = lead[32 * 8:32 * (nb - 1)]
-
-    def rms(x):
-        return math.sqrt(sum(v * v for v in x) / len(x)) if x else 0.0
-    n[f"para8_{tag}"] = {"fades_lead": [fade(b, 7) for b in range(nb - 1, nb + 6)] if ok else None,
-                         "fades_slot6": [fade(b, 6) for b in range(nt - 1, nt + 6)] if ok else None,
-                         "steps_event_around_before_after": events, "step_plain_join_ninth": plain,
-                         "level_4_notes": {"peak": round(V.peak(four), 4), "rms": round(rms(four), 4)} if ok else None,
-                         "level_8_notes": {"peak": round(V.peak(eight), 4), "rms": round(rms(eight), 4)} if ok else None}
-    return {f"{engine} PARA 8: a chord of 8 on slot 7; a 9th note joins and the leader's own note fades out (it leads on); "
-            "a 10th: the oldest member (slot 6) fades, then is DROPPED; the others play": roles_ok,
-            f"{engine} PARA 8: every slot but the leader exact silence, the leader sounds every block": silent and sounding,
-            f"{engine} PARA 8: no click: around the 9th and 10th notes (the oldest fading out) the leader's largest step "
-            "is no more than the chord's own before or after (x 1.2 + 0.05)": clean}
-
-
-def a2_para_held_check(pr, n: dict, engine: str = "ANALOG2", tag: str = "a2") -> dict:
-    """PARA_a2 held past the quiet test: at its last block each member (0, 1, 2) still rendered (RENDERED) and its
-    quiet count (RESTS) under QUIET_BLOCKS, as its leader's"""
-    from dnfw.engines.analog2 import para as PA
-    rr = pr.get("roles_rests") or []
-    last = rr[-1] if rr else []
-    n[f"para_{tag}_held_last"] = [[hex(w), q] for w, q in last]
-    return {f"{engine} PARA: the chord held 80 blocks (past the quiet test's 64): at its last block every member still "
-            "renders (RENDERED) and its quiet count stays under 64, as its leader's":
-            pr["ok"] and len(rr) >= A2_PARA_HELD and len(last) == 4
-            and all(last[u][0] & PA.RENDERED and last[u][1] < PP.MNM_QUIET_BLOCKS for u in (0, 1, 2))
-            and last[3][1] < PP.MNM_QUIET_BLOCKS}
-
-
-def step_para(init, sound, machines) -> dict:
-    """2026-11-15: PARA alone, each engine (step mnm runs the same, among every machine): the runs bit-exact to the
-    model, each chord's checks, and each chord under the frame guard (a2_para_guard)"""
-    runs = a2_para_runs(init, sound, machines)
-    guards = a2_para_guards(init, sound, machines)
-    exact = {k: perc_exact(r) for k, r in runs.items() if r["ok"]}
-    n = {"exact": exact}
-    checks = {"every slot of every PARA run (" + ", ".join(runs) + "), every block, bit-exact to the model":
-              all(r["ok"] for r in runs.values()) and all(v[0] > 0 and v[1:] == (0, 0) for v in exact.values())}
-    checks.update(para_checks(runs, guards, n))
-    para_inserts(init, sound, machines, checks, n)
-    return {"ok": all(checks.values()), "checks": checks, "numbers": n}
-
-
-def para_inserts(init, sound, machines, checks: dict, n: dict) -> None:
-    """2026-11-15 (main): each PARA engine's chord with a pre and a post insert on its track: the members' inserts
-    play as OFF, the leader's unchanged (scripts/sharc_parains_step.py); its checks and numbers into CHECKS, N"""
-    ins = importlib.import_module("sharc_parains_step").run(
-        sys.modules[__name__], init, lambda para, engine: a2_para_frames(sound, machines, para, engine), PARA_ENGINES)
-    checks.update(ins["checks"])
-    n.update(ins["numbers"])
-
-
-def a2_para_guard(init, fb) -> dict:
-    """2026-11-15 (main, for the User: "will the guard understand this?"): ANALOG 2's 4-note PARA chord (slots 0..2
-    members, 3 the leader, as PARA_a2) under the frame guard (dnfw.perc.guard.around, PARA.reserve). The runner's
-    clock does not move; from block A2_PARA_GUARD_FROM, at each voice's first clock read the clock is fed (R8 = MARK0
-    + X, X how far into the frame) and at its second given back (R8 = START: the voice cost 0, so every slot is
-    expected at FLOOR next).
-      member1:        X past the limit for slot 1 only (refused, then stolen), 0 for the others;
-      member1_poison: the same, slot 1's stream words (1 KB of its MD state) set to 1000.0 as the clock is first fed;
-      room:           X = LIMIT_PERC - 1.5 FLOOR for every slot: a voice fits, a voice and its leader's room do not.
-    Each: the slots' outputs and, after PERC, their ROLE words."""
-    from dnfw.perc import guard as G
-    from dnfw.engines.analog2 import para as PA
-    at = _after_emuclk("perc")
-    gf = A2_PARA_GUARD_FROM
-
-    def one(refuse, poison=False):
-        st = {"b": -1}
-        roles, lims = [], []
-
-        def at_perc(r):
-            st["b"] += 1
-            if poison and st["b"] == gf:
-                for k in range(256):
-                    m2.poke(r.state, PERC_L.md.state + 1024 + 4 * k, struct.unpack("<I", struct.pack("<f", 1000.0))[0])
-
-        def feed(r):
-            if st["b"] >= gf:
-                t = m2.word(r.state, PERC_L.C["t"]) or 0
-                x = refuse(t, m2.word(r.state, G.LIMIT_PERC) or 0)
-                mark0 = m2.word(r.state, G.MARK0) or 0
-                r.state.uregs[fx.UREG_CODES["R8"]] = fx.Const((mark0 + x) & 0xFFFFFFFF)
-
-        def given_back(r):
-            if st["b"] >= gf:
-                r.state.uregs[fx.UREG_CODES["R8"]] = fx.Const(m2.word(r.state, G.START) or 0)
-
-        def at_smp(r):
-            if len(roles) <= st["b"]:
-                roles.append([m2.word(r.state, PA.ROLE + 4 * u) or 0 for u in range(4)])
-                lims.append(m2.word(r.state, G.LIMIT_PERC) or 0)
-        rr = _slim(run_blocks(init, fb, A2_PARA_BLOCKS,
-                              extra_hooks={dsp.PERC_SW: at_perc, at[0]: feed, at[1]: given_back, dsp.SMP_SW: at_smp}))
-        rr["roles"], rr["limits"] = roles, lims
-        return rr
-    def member1(t: int, lim: int) -> int:
-        return lim + 1 if t == 1 else 0
-
-    def room(t: int, lim: int) -> int:
-        return max(lim - (G.FLOOR + G.FLOOR // 2), 0)
-    return {"member1": one(member1), "member1_poison": one(member1, True), "room": one(room), "emuclk_reads": len(at)}
-
-
-def a2_para_guard_checks(ctl, g: dict, n: dict, engine: str = "ANALOG2", tag: str = "a2") -> dict:
-    """the checks of a2_para_guard's runs against PARA_a2 (CTL, the clock still)"""
-    from dnfw.engines.analog2 import para as PA
-    gf = A2_PARA_GUARD_FROM
-    ok = all(g[k]["ok"] for k in ("member1", "member1_poison", "room")) and ctl["ok"]
-
-    def out(r, b, u):
-        return r["perc"][b][u]["out"] if u in r["perc"][b] else []
-
-    def rendered(r, b, u):
-        return bool(r["roles"][b][u] & PA.RENDERED)
-
-    def ctl_rendered(b, u):                      # the clock still (PARA_a2): a member renders in the blocks its
-        rr = ctl.get("roles_rests") or []        # stream is due a half (not every block: 44.1 kHz under 48 kHz)
-        return bool(rr[b][u][0] & PA.RENDERED) if b < len(rr) else None
-    blocks = range(gf, A2_PARA_BLOCKS)
-    m1, m1p, rm = g["member1"], g["member1_poison"], g["room"]
-    n[f"para_{tag}_guard"] = {
-        "member1_leader_peaks": [round(V.peak(out(m1, b, 3)), 4) for b in blocks] if ok else None,
-        "room_leader_peaks": [round(V.peak(out(rm, b, 3)), 4) for b in blocks] if ok else None,
-        "room_rendered": [[rendered(rm, b, u) for u in range(3)] for b in blocks] if ok else None,
-        "roles": [[hex(w) for w in rm["roles"][b]] for b in blocks] if ok else None,
-        "member1_roles": [[hex(w) for w in m1["roles"][b]] for b in blocks] if ok else None,
-        "member1_poison_roles": [[hex(w) for w in m1p["roles"][b]] for b in blocks] if ok else None,
-        "member1_same_as_poisoned": [out(m1, b, 3) == out(m1p, b, 3) for b in blocks] if ok else None,
-        "member1_differs_from_whole": [out(m1, b, 3) != out(ctl, b, 3) for b in blocks] if ok else None,
-        "member1_poison_leader_peaks": [round(V.peak(out(m1p, b, 3)), 4) for b in blocks] if ok else None,
-        "limits": {k: g[k]["limits"][gf:gf + 3] for k in ("member1", "room")} if ok else None,
-        "exact": {k: perc_exact(g[k]) for k in ("member1", "member1_poison", "room")} if ok else None}
-    return {
-        f"{engine} PARA under the guard: a refused member (slot 1) is left out of its leader's sum: the leader's output is "
-        "bit-identical whatever that member's stream words hold (1000.0 poured in), and differs from the whole chord's; "
-        "the other members render in the same blocks as with the clock still":
-            ok and all(out(m1, b, 3) == out(m1p, b, 3) for b in blocks)
-            and any(out(m1, b, 3) != out(ctl, b, 3) for b in blocks)
-            and all(not rendered(m1, b, 1) for b in blocks)
-            and all(rendered(m1, b, u) == ctl_rendered(b, u) for b in blocks for u in (0, 2))
-            and all(V.peak(out(m1, b, 3)) > 0.005 for b in blocks),
-        f"{engine} PARA under the guard: with room for one voice and a half, the members (0, 1, 2) are refused and the "
-        "leader keeps its room and plays (each block it sounds; the members never rendered)":
-            ok and all(V.peak(out(rm, b, 3)) > 0.005 for b in blocks)
-            and all(not rendered(rm, b, u) for b in blocks for u in range(3))
-            and all(out(rm, b, u) == [0.0] * len(out(rm, b, u)) for b in blocks for u in range(3)),
-        f"{engine} PARA under the guard: the guard reads the clock twice a voice": g["emuclk_reads"] == 2,
-    }
-
-
-def step_mnm(init, sound, machines, blocks) -> dict:
+def step_mnm(init, sound, machines, blocks, units=None) -> dict:
     """Each Monomachine machine (its own machine type, PERC's voice) on track 0, beside the
     next one on track 1, and with every knob up: every such track's buffer and state
     bit-exact to dnfw.perc.program run on the DSP's memory at PERC's entry, every block;
     audible and bounded; an untriggered track silent; the DSP budget in track order. (Their
-    pitch is test_perc_live's, on the same program in the model.)"""
+    pitch is test_perc_live's, on the same program in the model.)
+
+    UNITS (2026-11-16, gate speed): None runs every unit of work (mnm_units()), as before; a set
+    runs only those units, and each check is made on the runs this call made: a check over every
+    run (or every machine) holds over this call's runs, a check on named runs is made where those
+    runs are. Every run starts from INIT and reads nothing another unit made, so the parts of
+    mnm_parts() together make every run and every check of the whole step, each on the same runs:
+    the whole step's verdict on a check is the AND of the parts' verdicts on it."""
     from dnfw.mnm import machines as MM
     types = dict(enumerate(MM.TYPES))           # each voice's type (2026-11-11: MONOMACHINE's engines all its own)
+    if units is not None:
+        unknown = set(units) - set(mnm_units())
+        assert not unknown, f"step_mnm: no unit {sorted(unknown)}"
+
+    def want(unit):
+        return units is None or unit in units
 
     def frames(k, note=0x3C00, trig=(1,), knobs=None, other=None):
         def fb(b):
@@ -4509,11 +4605,14 @@ def step_mnm(init, sound, machines, blocks) -> dict:
     runs = {}
     para_guard: dict = {}                       # 2026-11-15: PARA under the frame guard (not held to the model)
     for k, name in enumerate(MM.NAMES):
+        if not want(f"machine:{name}"):
+            continue
         t0 = time.perf_counter()
         runs[f"{name}"] = _slim(run_blocks(init, frames(k, other=(k + 1) % len(MM.NAMES)), blocks))
         runs[f"{name}_tops"] = _slim(run_blocks(init, frames(k, knobs=[127] * 8), blocks))
         print(f"    {name}: {round(time.perf_counter() - t0)} s", flush=True)
-    runs["silent"] = _slim(run_blocks(init, frames(0, trig=()), blocks))
+    if want("silent"):
+        runs["silent"] = _slim(run_blocks(init, frames(0, trig=()), blocks))
     # 2026-11-10: DRONE's legato glide (GLID ~0.5): note 48 on at block 1, note 60 on at
     # block 12; "held": no note-off between (a held key, or HOLD's latch), "released": the voice's
     # note-off (frame +36, bit 0) at block 6. Bit-exact as above; after block 12 they must differ
@@ -4531,8 +4630,9 @@ def step_mnm(init, sound, machines, blocks) -> dict:
                 f.param(0, 26, 64 << 8)                  # q0 GLID (AMD, 0..120)
                 return f.to_bytes()
             return fb
-        runs["DRONE_held"] = _slim(run_blocks(init, drone_leg(False), 24))
-        runs["DRONE_released"] = _slim(run_blocks(init, drone_leg(True), 24))
+        if want("drone-legato"):
+            runs["DRONE_held"] = _slim(run_blocks(init, drone_leg(False), 24))
+            runs["DRONE_released"] = _slim(run_blocks(init, drone_leg(True), 24))
 
         # 2026-11-11: DRONE's OCT (q2, EQF 0..100: 50 is 0, 65 +1, 35 -1), note 72 on at block 1: octave
         # 0, +1, -1; a turn to +1 at block 12 with no trig (112 blocks: the generators' increments follow
@@ -4548,8 +4648,8 @@ def step_mnm(init, sound, machines, blocks) -> dict:
                     f.param(0, 26, 64 << 8)              # q0 GLID
                 return f.to_bytes()
             return fb
-        for name, args, nb in (("0", (50,), 24), ("+1", (65,), 24), ("-1", (35,), 24), ("turn", (50, 65), 112),
-                               ("glide", (50, 65, True), 24)):
+        for name, args, nb in ((("0", (50,), 24), ("+1", (65,), 24), ("-1", (35,), 24), ("turn", (50, 65), 112),
+                                ("glide", (50, 65, True), 24)) if want("drone-oct") else ()):
             runs[f"DRONE_oct{name}"] = _slim(run_blocks(init, drone_oct(*args), nb))
     # 2026-11-11: ANALOG 2's legato glide (page 3: GLID on LEV2 slot 36, GLTY on TYPE slot 46): note 72 on at
     # block 1, note 84 at block A2_NOTE2; "held" no note-off between, "released" its note-off at block 6. One saw
@@ -4570,12 +4670,14 @@ def step_mnm(init, sound, machines, blocks) -> dict:
                 f.param(0, 46, glty << 8)                # GLTY 0 OFF, 1 RATE, 2 TIME
                 return f.to_bytes()
             return fb
-        for glty, gn in ((0, "OFF"), (1, "RATE"), (2, "TIME")):
+        for glty, gn in (((0, "OFF"), (1, "RATE"), (2, "TIME")) if want("a2-legato") else ()):
             runs[f"A2_held_{gn}"] = _slim(run_blocks(init, a2_leg(False, glty), A2_BLOCKS))
             runs[f"A2_released_{gn}"] = _slim(run_blocks(init, a2_leg(True, glty), A2_BLOCKS))
 
-    runs.update(a2_para_runs(init, sound, machines))          # 2026-11-15: PARA, each engine (step para too)
-    para_guard.update(a2_para_guards(init, sound, machines))
+    pv = importlib.import_module("sharc_para_step")           # 2026-11-16: PARA as one voice (step para too)
+    para_engines = tuple((e, t) for e, t in PARA_ENGINES if want(f"para:{t}"))   # (2026-11-16, gate speed: UNITS)
+    runs.update(pv.runs(sys.modules[__name__], init, sound, machines, para_engines))
+    para_guard.update(pv.guards(sys.modules[__name__], init, sound, machines, para_engines))
     # 2026-11-12: JUNO's VCF envelope (page 2 q0 ENV up, its ADSR at MACHINE SEL's starts): a saw at CUT 30 RES 60,
     # note 60 on at block 1; "held" no note-off, "released" its note-off at block JUNO_OFF (the release closes the
     # filter: the DN2's AMP envelope, not in this buffer, shapes the level)
@@ -4592,14 +4694,15 @@ def step_mnm(init, sound, machines, blocks) -> dict:
                     f.put(36, 1)
                 return f.to_bytes()
             return fb
-        runs["JUNO_held"] = _slim(run_blocks(init, j_env(False), JUNO_BLOCKS))
-        runs["JUNO_released"] = _slim(run_blocks(init, j_env(True), JUNO_BLOCKS))
+        if want("juno-env"):
+            runs["JUNO_held"] = _slim(run_blocks(init, j_env(False), JUNO_BLOCKS))
+            runs["JUNO_released"] = _slim(run_blocks(init, j_env(True), JUNO_BLOCKS))
     # 2026-11-09: every PLAITS model (MODL's choices past WS, which the default runs), triggered at
     # block 1 and again at block 4, its HARM/TIMB/MORP off-centre; and a track whose MODL changes
     # every two blocks through the models (each entry runs the model's init), bit-exact as above
     from dnfw.engines.plaits import plaits as PLm
     pk = MM.NAMES.index("PLAITS")
-    for ix in range(1, PLm.N_MODELS):
+    for ix in (range(1, PLm.N_MODELS) if want("plaits-models") else ()):
         kn = [40, 90, 100, 0, 0, 0, 64, PLm.knob_of(ix)]                 # TUNE G, MODL H (2026-11-11)
         runs[f"PLAITS_{PLm.MODELS[ix]}"] = _slim(run_blocks(init, frames(pk, trig=(1, 4), knobs=kn), blocks))
 
@@ -4607,10 +4710,11 @@ def step_mnm(init, sound, machines, blocks) -> dict:
         kn = [70, 30, 60, 0, 0, 0, 64, PLm.knob_of((b // 2) % PLm.N_MODELS)]
         return base_frame(sound, machines, t0=types[pk], overrides=mnm_words(pk, kn),
                           trigger=b % 2 == 1).to_bytes()
-    runs["PLAITS_walk"] = _slim(run_blocks(init, plaits_walk, max(blocks, 2 * PLm.N_MODELS + 2)))
+    if want("plaits-walk"):
+        runs["PLAITS_walk"] = _slim(run_blocks(init, plaits_walk, max(blocks, 2 * PLm.N_MODELS + 2)))
     # 2026-11-11: MONOMACHINE (type 6) whose ENGN (page 1 H) turns to the next engine every three blocks, each at
     # its own knobs (a block with no trig after each turn: the old engine plays on until the note), bit-exact as above
-    if MM.MONO_ENGINES:
+    if MM.MONO_ENGINES and want("mono-walk"):
         n_eng = len(MM.MONO_ENGINES)
 
         def mono_walk(b):
@@ -4630,7 +4734,8 @@ def step_mnm(init, sound, machines, blocks) -> dict:
             for slot, w in mnm_words(sid).items():
                 f.param(t, slot, w)
         return f.to_bytes()
-    runs["budget"] = _slim(run_blocks(init, four, blocks))
+    if want("budget"):
+        runs["budget"] = _slim(run_blocks(init, four, blocks))
 
     # v0.29: dynamic voice allocation -- each new note on a new slot (0, 1, 2, 3 at blocks
     # 1, 3, 5, 7), the older voices still sounding: the newest always plays, and once more
@@ -4645,7 +4750,8 @@ def step_mnm(init, sound, machines, blocks) -> dict:
                 f.trigger(t)
         return f.to_bytes()
     dyn_blocks = max(blocks, 9)
-    runs["dynamic"] = _slim(run_blocks(init, dyn, dyn_blocks))
+    if want("dynamic"):
+        runs["dynamic"] = _slim(run_blocks(init, dyn, dyn_blocks))
 
     # v0.29: a voice whose sound has died away after the chain rests after
     # PP.MNM_QUIET_BLOCKS blocks -- no cost -- and its next note wakes it. The runner's AMP
@@ -4668,21 +4774,24 @@ def step_mnm(init, sound, machines, blocks) -> dict:
             buf = m2.word(r.state, PP.BUFFERS) or 0
             for k in range(BLOCK):
                 m2.poke(r.state, buf + 4 * k, 0)
-    rr = run_blocks(init, rest_frame, REST_AT + 3, extra_hooks={dsp.SMP_SW: rest_hook, AMP_RETURN: hush})
-    rest_peak_after = max(V.peak(rr["perc"][b][0]["out"]) for b in (REST_AT, REST_AT + 1, REST_AT + 2)) \
-        if rr["ok"] and all(0 in rr["perc"][b] for b in (REST_AT, REST_AT + 1, REST_AT + 2)) else 0.0
-    rest_ok = rr["ok"] and seen_cost.get(REST_AT - 2) == 0 and seen_cost.get(2, 0) > 0 and rest_peak_after > 0.01
-    rr.pop("state", None)
+    if want("rest"):
+        rr = run_blocks(init, rest_frame, REST_AT + 3, extra_hooks={dsp.SMP_SW: rest_hook, AMP_RETURN: hush})
+        rest_peak_after = max(V.peak(rr["perc"][b][0]["out"]) for b in (REST_AT, REST_AT + 1, REST_AT + 2)) \
+            if rr["ok"] and all(0 in rr["perc"][b] for b in (REST_AT, REST_AT + 1, REST_AT + 2)) else 0.0
+        rest_ok = rr["ok"] and seen_cost.get(REST_AT - 2) == 0 and seen_cost.get(2, 0) > 0 and rest_peak_after > 0.01
+        rr.pop("state", None)
     ok_runs = all(r["ok"] for r in runs.values())
     exact = {k: perc_exact(r) for k, r in runs.items() if r["ok"]}
-    peaks = {name: V.peak(perc_series(runs[name], 0)) if runs[name]["ok"] else None for name in MM.NAMES}
-    budget = [V.peak(perc_series(runs["budget"], t)) if runs["budget"]["ok"] else None for t in range(4)]
+    names = [name for name in MM.NAMES if name in runs]          # the machines this call ran (all, UNITS None)
+    peaks = {name: V.peak(perc_series(runs[name], 0)) if runs[name]["ok"] else None for name in names}
+    budget = [V.peak(perc_series(runs["budget"], t)) if runs["budget"]["ok"] else None for t in range(4)] \
+        if "budget" in runs else None
     # still sounding at the end (a voice that writes over its own words falls silent after
     # its first block, and its model with it: v0.26 WIP)
     late = {name: V.peak(perc_series(runs[name], 0)[-4 * BLOCK:]) if runs[name]["ok"] else None
-            for name in MM.NAMES}
-    other = {name: V.peak(perc_series(runs[name], 1)) if runs[name]["ok"] else None for name in MM.NAMES}
-    silent = perc_series(runs["silent"], 0)
+            for name in names}
+    other = {name: V.peak(perc_series(runs[name], 1)) if runs[name]["ok"] else None for name in names}
+    silent = perc_series(runs["silent"], 0) if "silent" in runs else None
     n = {"exact_voice_blocks_out_state_mismatches": exact, "peaks": peaks, "peaks_track1": other,
          "instructions_per_block": {k: round(r.get("instructions", 0) / max(blocks, 1))
                                     for k, r in runs.items() if r["ok"]},
@@ -4695,23 +4804,27 @@ def step_mnm(init, sound, machines, blocks) -> dict:
     # RES, ENV and ACC at their top, square, TUNE +24) peaks at 4.155 at 2x (3.771 at 4x) before it settles near
     # 1.45; that run alone may reach 4.3, every other run keeps 4.0.
     TOPS_LIMIT = {"TB303_tops": 4.3}
-    checks = {
-        "every run returns every block": ok_runs,
-        "every Monomachine track's buffer and state, every block of every run, are bit-exact to "
-        "dnfw.perc.program run on the DSP's memory at PERC's entry":
+    checks = {}                                  # (2026-11-16: each check where its runs are: UNITS)
+    if runs:
+        checks["every run returns every block"] = ok_runs
+        checks["every Monomachine track's buffer and state, every block of every run, are bit-exact to "
+               "dnfw.perc.program run on the DSP's memory at PERC's entry"] = (
             ok_runs and all(v[0] > 0 and v[1] == 0 and v[2] == 0 for k, v in exact.items() if k != "silent")
-            and exact.get("silent", (0, 1, 1))[1:] == (0, 0),
-        "each machine sounds on track 0 and beside it on track 1 (peak > 0.005; VO-6's onset is 0.009)":
-            all(v is not None and v > 0.005 for v in list(peaks.values()) + list(other.values())),
-        "each machine is still sounding in the run's last four blocks (peak > 0.005)":
-            all(v is not None and v > 0.005 for v in late.values()),
-        "nothing is non-finite or above 4.0 in any buffer (TB303_tops: 4.3)":
+            and ("silent" not in runs or exact.get("silent", (0, 1, 1))[1:] == (0, 0)))
+    if names:
+        checks["each machine sounds on track 0 and beside it on track 1 (peak > 0.005; VO-6's onset is 0.009)"] = (
+            all(v is not None and v > 0.005 for v in list(peaks.values()) + list(other.values())))
+        checks["each machine is still sounding in the run's last four blocks (peak > 0.005)"] = (
+            all(v is not None and v > 0.005 for v in late.values()))
+    if runs:
+        checks["nothing is non-finite or above 4.0 in any buffer (TB303_tops: 4.3)"] = (
             ok_runs and all(math.isfinite(x) and abs(x) <= TOPS_LIMIT.get(k, 4.0) for k, r in runs.items()
-                            for blk in r["perc"] for v in blk.values() for x in v["out"]),
-        "control: no trigger is silent (every sample 0)": bool(silent) and all(x == 0.0 for x in silent),
-        f"the budget: of four SID tracks the first {fits} play, the rest are silent":
-            None not in budget and all(v > 0.01 for v in budget[:fits]) and all(v == 0.0 for v in budget[fits:]),
-    }
+                            for blk in r["perc"] for v in blk.values() for x in v["out"]))
+    if silent is not None:
+        checks["control: no trigger is silent (every sample 0)"] = bool(silent) and all(x == 0.0 for x in silent)
+    if budget is not None:
+        checks[f"the budget: of four SID tracks the first {fits} play, the rest are silent"] = (
+            None not in budget and all(v > 0.01 for v in budget[:fits]) and all(v == 0.0 for v in budget[fits:]))
     if "DRONE" in runs:                          # 2026-11-10 (the User: DRONE crackles): a click detector, block boundaries
         ds = perc_series(runs["DRONE"], 0)       # (measured on 96 blocks: the largest boundary step 0.038, the note-on's one-off 0.42 at sample 70)
         steps = [abs(ds[b * BLOCK] - ds[b * BLOCK - 1]) for b in range(3, len(ds) // BLOCK)]
@@ -4759,8 +4872,7 @@ def step_mnm(init, sound, machines, blocks) -> dict:
             a2ok and a2["released_RATE"] == a2["released_OFF"] and a2["released_TIME"] == a2["released_OFF"])
         n["a2_glide_periods_between"] = between
         n["a2_glide_periods"] = {k: v[:24] for k, v in periods.items()}
-    checks.update(para_checks(runs, para_guard, n))   # 2026-11-15: PARA, each engine
-    para_inserts(init, sound, machines, checks, n)    # 2026-11-15: and its members' inserts skipped (the gate's mnm)
+    checks.update(pv.checks(sys.modules[__name__], runs, para_guard, n))   # 2026-11-16: PARA as one voice, each engine
     if "JUNO_held" in runs:                      # 2026-11-12: JUNO's VCF envelope
         jh, jr = perc_series(runs["JUNO_held"], 0), perc_series(runs["JUNO_released"], 0)
         jok = runs["JUNO_held"]["ok"] and runs["JUNO_released"]["ok"]
@@ -4774,23 +4886,28 @@ def step_mnm(init, sound, machines, blocks) -> dict:
                "filter (its last 8 blocks' RMS under 0.6 of the held one's)"] = (
             jok and jh[:cut] == jr[:cut] and rms(jh[tail:]) > 0.05 and rms(jr[tail:]) < 0.6 * rms(jh[tail:]))
         n["juno_env_tail_rms"] = {"held": rms(jh[tail:]), "released": rms(jr[tail:])} if jok else None
-    dynr = runs["dynamic"]
+    if "dynamic" in runs:
+        dynr = runs["dynamic"]
 
-    def dpk(b, t):
-        return V.peak(dynr["perc"][b][t]["out"]) if dynr["ok"] and t in dynr["perc"][b] else 0.0
-    newest = [max(dpk(1 + 2 * k, k), dpk(2 + 2 * k, k)) for k in range(4)]   # (a SID note's onset can fall in the next block)
-    last = [dpk(dyn_blocks - 1, t) for t in range(4)]
-    checks["v0.29, dynamic allocation: each new note sounds by the block after its own; at the end the newest " \
-           f"{fits} play and the oldest are silent"] = (
-        all(v > 0.01 for v in newest) and all(v > 0.01 for v in last[4 - fits:])
-        and all(v == 0.0 for v in last[:4 - fits]))
-    n["dynamic_newest_peaks"], n["dynamic_last_peaks"] = newest, last
-    checks["v0.29: a voice whose sound has died away rests (no cost) and its next note wakes it"] = rest_ok
-    n["rest_costs"] = {k: seen_cost.get(k) for k in (2, REST_AT - 2, REST_AT + 1)}
-    n["rest_peak_after"] = rest_peak_after
-    n["budget_peaks"] = budget
-    n["late_peaks"] = late
+        def dpk(b, t):
+            return V.peak(dynr["perc"][b][t]["out"]) if dynr["ok"] and t in dynr["perc"][b] else 0.0
+        newest = [max(dpk(1 + 2 * k, k), dpk(2 + 2 * k, k)) for k in range(4)]   # (a SID note's onset can fall in the next block)
+        last = [dpk(dyn_blocks - 1, t) for t in range(4)]
+        checks["v0.29, dynamic allocation: each new note sounds by the block after its own; at the end the newest " \
+               f"{fits} play and the oldest are silent"] = (
+            all(v > 0.01 for v in newest) and all(v > 0.01 for v in last[4 - fits:])
+            and all(v == 0.0 for v in last[:4 - fits]))
+        n["dynamic_newest_peaks"], n["dynamic_last_peaks"] = newest, last
+    if want("rest"):
+        checks["v0.29: a voice whose sound has died away rests (no cost) and its next note wakes it"] = rest_ok
+        n["rest_costs"] = {k: seen_cost.get(k) for k in (2, REST_AT - 2, REST_AT + 1)}
+        n["rest_peak_after"] = rest_peak_after
+    if budget is not None:
+        n["budget_peaks"] = budget
+    if names:
+        n["late_peaks"] = late
     return {"ok": all(checks.values()), "checks": checks, "numbers": n, "runs": runs}
+
 
 
 def step_filters_stock(snap, m2mach, m5: Image, stock: Image, sound, machines, blocks) -> dict:

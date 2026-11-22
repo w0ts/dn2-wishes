@@ -20,6 +20,14 @@ from ..perc.dsl import Mem, Prog, bits, flt
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 GOLDEN = pathlib.Path(os.environ.get("MNM_GOLDEN", str(ROOT.parent / "mnm132" / "research" / "golden")))
+# the machines with golden runs (GOLDEN / NAME.json; test/test_mnm.py MACHINES): a machine whose file is missing has
+# its golden cases not collected (dn2-wishes, the User 2026-11-11: "skip it, report it"; the unit step names them)
+GOLDEN_NAMES = ("WAVE", "SID", "DENS", "DDRW", "VO6", "FMSTAT", "FMPAR", "FMDYN")
+
+
+def golden_missing() -> list[str]:
+    """GOLDEN_NAMES whose golden runs are not here (all of them without the folder)"""
+    return [n for n in GOLDEN_NAMES if not (GOLDEN / f"{n}.json").is_file()]
 
 STATE = 0x00100000                       # the bench's slot words
 SCRATCH = 0x00200000

@@ -52,6 +52,11 @@ def ranges() -> list[tuple[int, int, str]]:
             out.append((sw, sw + len(obj[name]) // 2, f"{name}.asm"))
     if "a2f" in obj:                             # 2026-11-10: the A2 filter machines' pass
         out.append((dsp.A2F_SW, dsp.A2F_SW + len(obj["a2f"]) // 2, "a2f.asm"))
+    if "ampsw" in obj:                           # 2026-11-20: AMP ON/OFF's two hooks (dnfw.waverider.ampsw)
+        out.append((dsp.AMPSW_SW, dsp.AMPSW_SW + len(obj["ampsw"]) // 2, "ampsw.asm"))
+        out += [(sw - 48, sw + 48, f"round {what}") for what, sw in
+                (("AMP ON/OFF's hook A (before the AMP loop)", dsp.AMPSW_A_SW),
+                 ("AMP ON/OFF's hook B (after VOL's loop)", dsp.AMPSW_B_SW))]
     for name, sw in (("the entry JUMP", dsp.ENTRY_SW), ("the machine lookup's base", dsp.LOOKUP_SITE_SW),
                      ("the idle loop's back edge", dsp.IDLE_SITE_SW), ("the handler's call", dsp.CALL_SITE_SW),
                      ("the driver's call of the mix", dsp.PVMIX_SITE_SW),

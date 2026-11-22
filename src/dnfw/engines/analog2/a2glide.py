@@ -25,6 +25,7 @@ from __future__ import annotations
 import math
 
 from ...mnm import core as C
+from ..plaits.plaits_drumkit import EXP2_F15
 from ..tb303.tb303 import _exp2p
 from ...perc.dsl import Prog
 
@@ -109,7 +110,10 @@ def trig(p: Prog, L: C.Layout, W: Words) -> None:
 def _exp2(p: Prog, d: int, x: int) -> None:
     """Fd = 2^Fx, tb303's precise exp2 as one subroutine. Clobbers R0, R1, R12, R14, R15, I12."""
     p.fpass(15, x)
-    p.call("a2_exp2", lambda: (_exp2p(p, 14, 15), p.fpass(15, 14)))
+    # 2026-11-20 (CLAP and the cymbals' room): PLAITS' drum kit's copy (plaits_drumkit.EXP2_F15: the same text, F15 in,
+    # F14 out), F15 = F14 after it as before
+    p.call(EXP2_F15, lambda: _exp2p(p, 14, 15))
+    p.fpass(15, 14)
     p.fpass(d, 15)
 
 

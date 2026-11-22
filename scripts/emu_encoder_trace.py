@@ -101,6 +101,7 @@ def main() -> int:
             for va, b in differences(stock, open(a.snapshot + ".section_3_MAIN_OS.bin", "rb").read())
             if va + len(b) <= 0x40000400 + len(stock)]
     m.apply(back)
+    rec_base = 0x401F83A4                                       # stock's table base (record i at + 60 * i)
     if a.build:
         sys.path.insert(0, str(HERE.parent / "src"))
         from dnfw.cli.files import read_image                  # noqa: PLC0415
@@ -109,10 +110,15 @@ def main() -> int:
         from dnfw.sampler import machines as SMx               # noqa: PLC0415
         from unicorn import UC_PROT_ALL, UcError
         sec3 = load(read_image(pathlib.Path(a.build))).container.find(3).unpack()
+        from dnfw.patch import paramtable
+        rec_base = paramtable.live_base(stock, sec3, 0x40000400)   # lfo4 moves the table (0x468fffcc)
         m.apply(differences(stock, sec3))
         for va_, blob in platform.runtime(sec3):
             m.write(va_, blob)
-        for pg in range(SMx.MIRROR, SMx.MIRROR + 0x500000, 0x100000):   # the sample link's DDR window
+        from emulib import attkit
+        attkit.store_kit(m)  # (2026-11-21) a converted kit stored back: converted once
+        for pg in [*range(SMx.MIRROR, SMx.MIRROR + 0x500000, 0x100000),   # (v0.65: and the banks' RAM)
+            *range(SMx.BANK_RAM & ~0xFFFFF, SMx.BANK_RAM + SMx.BANK_RAM_BYTES + 0xFFFFF & ~0xFFFFF, 0x100000)]:   # the sample link's DDR window
             try:
                 m.uc.mem_map(pg, 0x100000, UC_PROT_ALL)
             except UcError:
@@ -196,7 +202,7 @@ def main() -> int:
     def records():
         out_ = {}
         for i in rec_ids:
-            r = struct.unpack(">15i", bytes(m.read(0x401F83A4 + 60 * i, 60)))
+            r = struct.unpack(">15i", bytes(m.read(rec_base + 60 * i, 60)))
             t = struct.unpack(">4I", bytes(m.read(0x4243425C + 68 * i + 4, 16)))
             out_[i] = {"range": r[3], "default": r[4], "flag": r[5], "fmt": hex(r[13] & 0xFFFFFFFF),
                        "type": [hex(x) for x in t]}
@@ -228,7 +234,7 @@ def main() -> int:
         for src in getattr(panel.timers, "sources", (panel.timers,)):
             if hasattr(src, "channels") and 2 in src.channels and type(src).__name__ == "Pits":
                 src.channels = tuple(c for c in src.channels if c != 2)
-    out = {"records_before": records(), "machine": struct.unpack(">b", bytes(m.read(snd + 0xDE, 1)))[0],
+    out = {"rec_base": hex(rec_base), "records_before": records(), "machine": struct.unpack(">b", bytes(m.read(snd + 0xDE, 1)))[0],
            "input": {"enc": a.enc, "slot": a.slot, "detents": plan, "gap": a.gap, "rest": a.rest,
                      "no_wheel": a.no_wheel},
            "start": {"tick": now(), "value": word(), "acc": m.long(ACC + 4 * a.enc),

@@ -82,6 +82,8 @@ keeps its records out of stock's per-track loops with a track tag in RAM.
 | **201** | `(0x51, track \| 0x20)` | **parameter slides: SLEN** (0..14, the length table) | `docs/slides.md` |
 | **202** | `(0x52, track \| 0x20)` | **a REC trig's buffer** (1, 2; v0.41) | `docs/rectrig.md` |
 | **203..208** | `(0x53..0x58, track \| 0x20)` | **ENV2's ATK DEC SUS REL MODE RSET** (0..127; MODE, RSET 0 / 1; 2026-11-12) | `docs/matrix.md` |
+| **209** | `(0x59, track \| 0x20)` | **ENV2's H, its attenuverter (DEP)** (0..127 = -64..+63; 2026-11-19) | `docs/matrix.md` |
+| **210** | `(0x5A, track \| 0x20)` | **ENV2's HOLD** (AHD; 0..127; 2026-11-20) | `docs/matrix.md` |
 
 Sound-level stored ids 4..28 hold the **wishes record's link** (2026-11-11, `docs/wishes-record.md`): `'W'` and
 its version, the record's hash, its length, a check. Id 32 stays 0 (a stock unit's sink). LFO4's old reservation of

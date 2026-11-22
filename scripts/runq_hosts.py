@@ -1,9 +1,9 @@
-"""The run queue's hosts (scripts/runq.py, docs/runq.md): the User's limits, the tree's snapshot,
-and starting, watching, stopping and collecting a job on the Mac or on the farm."""
+"""The run queue's hosts (scripts/runq.py, docs/runq.md): the limits, the tree's snapshot, and
+starting, watching, stopping and collecting a job on the Mac or on the farm. The farm's host, paths
+and CPU limits are this machine's own settings (scripts/hostcfg.py), never in the repository."""
 
 from __future__ import annotations
 
-import getpass
 import glob
 import hashlib
 import io
@@ -17,21 +17,21 @@ import subprocess
 import tarfile
 import time
 
-# the farm: an ssh host name (an alias in ~/.ssh/config, or set RUNQ_FARM_HOST), and the home directory
-# there (RUNQ_FARM_HOME; by default /home/ plus RUNQ_FARM_USER, else the local user name)
-FARM = os.environ.get("RUNQ_FARM_HOST", "farm")
-FARM_HOME = os.environ.get("RUNQ_FARM_HOME", "/home/" + os.environ.get("RUNQ_FARM_USER", getpass.getuser()))
-FARM_BENCH = FARM_HOME + "/dn2mk2-bench"
+import hostcfg
+
+_FARM_CFG = hostcfg.load()["farm"]
+FARM = os.environ.get("RUNQ_FARM_HOST", _FARM_CFG["host"])
+FARM_BENCH = os.environ.get("RUNQ_FARM_BENCH", _FARM_CFG["bench"])
 FARM_ROOT = FARM_BENCH + "/runq"                 # the job trees, and seed/ (the runner's engine snapshot)
-# the User's rule (2026-11-12): ours, all together, of the farm's 64 cores: 32 on weekdays 08:00-17:00 (local),
-# 50 otherwise. RUNQ_FARM_CPUS sets one cap at all times
-FARM_CPU_OFFICE, FARM_CPU_OFF_HOURS = 32.0, 50.0
+# our CPUs on the farm, all together: the settings' cap, or the window's cap on its days and hours (the Mac's local
+# time). RUNQ_FARM_CPUS sets one cap at all times
+FARM_CPU_DEFAULT = float(_FARM_CFG["cpus"])
+FARM_CPU_WINDOW = _FARM_CFG["window"]
 FARM_CPU_FIXED = os.environ.get("RUNQ_FARM_CPUS")
-FARM_LOAD_MAX = float(os.environ.get("RUNQ_FARM_LOAD", "60"))     # of its 64 cores: the colleagues' room
+FARM_LOAD_MAX = float(os.environ.get("RUNQ_FARM_LOAD", str(_FARM_CFG["load_max"])))   # room left for other users
 MAC_JOBS_MAX = int(os.environ.get("RUNQ_MAC_JOBS", "2"))
-# the User's rule (2026-11-13, ~/.claude/rules/common/check-system-before-running.md: the Mac is in use, always): a Mac
-# job starts only when its CPUs fit in half of the free cores (cores - load1, all our jobs' and everyone's work counted
-# in the load), runs at nice 19, and its numeric libraries get no more threads than its CPUs
+# the Mac is in use: a Mac job starts only when its CPUs fit in half of the free cores (cores - load1, all our jobs'
+# and everyone's work counted in the load), runs at nice 19, and its numeric libraries get no more threads than its CPUs
 MAC_CORES = int(os.environ.get("RUNQ_MAC_CORES", str(os.cpu_count() or 8)))
 MAC_THREAD_VARS = ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "VECLIB_MAXIMUM_THREADS",
                    "NUMBA_NUM_THREADS")
@@ -48,9 +48,7 @@ KINDS = {
     "cmd": (("mac", "farm"), 1, 7200),           # anything else
 }
 PLACEHOLDERS = {
-    "farm": {"{STOCK111}": FARM_BENCH + "/data112/stock112dist/Digitone_II_OS1.11.syx",
-             "{STOCK112}": FARM_BENCH + "/data112/os112dl/Digitone_II_OS1.12.syx",
-             "{DIGIKIT}": "/mnt/d/01_Code/Z_Personal/digikit-wt-sharcemu"},
+    "farm": {"{" + k + "}": v for k, v in _FARM_CFG["paths"].items()},     # {STOCK111}, {STOCK112}, {DIGIKIT}
     "mac": {},
 }
 GLOB_OK = re.compile(r"^[A-Za-z0-9_.*?\-/\[\]]+$")
@@ -179,12 +177,14 @@ def farm_cpu_max(now: float) -> float:
     """our CPU cap on the farm at NOW (epoch seconds, the Mac's local time)"""
     if FARM_CPU_FIXED is not None:
         return float(FARM_CPU_FIXED)
-    t = time.localtime(now)
-    return FARM_CPU_OFFICE if t.tm_wday < 5 and 8 <= t.tm_hour < 17 else FARM_CPU_OFF_HOURS
+    w, t = FARM_CPU_WINDOW, time.localtime(now)
+    if w and t.tm_wday in w["days"] and w["start"] <= t.tm_hour < w["end"]:
+        return w["cpus"]
+    return FARM_CPU_DEFAULT
 
 
 def can_start(job: dict, host: str, running: list[dict], usage, now: float) -> bool:
-    """the User's limits for starting JOB on HOST, given the queue's RUNNING jobs and the host's
+    """the limits for starting JOB on HOST, given the queue's RUNNING jobs and the host's
     USAGE (farm: (our CPUs, load1) or None; mac: load1). Pure, for the tests."""
     if host == "mac":
         mine = [j for j in running if j["host"] == "mac"]
@@ -244,7 +244,7 @@ def start(job: dict, work: pathlib.Path) -> dict:
     seed = (f"mkdir -p out/waverider && cp -n {FARM_ROOT}/seed/m2_init_* out/waverider/ 2>/dev/null; "
             if job["kind"] == "runner" else "")
     run = f"timeout {int(job['timeout'])} " + ("" if job["kind"] == "cmd" else f"{FARM_BENCH}/bench_ns112.sh . ")
-    # 2026-11-14 (main): nice 19 on the farm too, as on the Mac (17-19 jobs at a time ran at nice 0 until now)
+    # nice 19 on the farm too, as on the Mac
     sh = f"cd {root} && {seed}( nice -n 19 {run}env {_env(job)} {_shell(job, 'farm')} ) > runq.log 2>&1{tail}"
     r = ssh(f"nohup sh -c {shlex.quote(sh)} > /dev/null 2>&1 < /dev/null &", timeout=60)
     if r.returncode:

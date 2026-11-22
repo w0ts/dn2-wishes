@@ -38,13 +38,17 @@ from dataclasses import dataclass, field
 
 # The mods a shipped build applies, in order, to stock (the patcher's build, tools/patcher/dn2patch.py, and the
 # gate's rebuild, scripts/ship_gate.py). 2026-11-14 (the User: "Port both"): lfowaves joins on OS 1.12; lfo4
-# joins with DN2_LFO4 set at generation (docs/lfo-112-port.md), after lfowaves.
+# joins with DN2_LFO4 set at generation (docs/lfo-112-port.md), after lfowaves. 2026-11-16 (v0.56.2, the User: "now ..
+# we can add more feature"): DN2_LFO4 is ON unless set to 0 or empty. 2026-11-19 (the User: "lfo4 i think we can drop
+# behind a build flag", its CPU): OFF unless DN2_LFO4 is set (to anything but 0 or empty).
 def shipped(env=None) -> tuple[str, ...]:
-    """-> the shipped build's mods for ENV (default: this process's): lfo4 last with DN2_LFO4 set
-    (dnfw.waverider.pages.lfo4_on)"""
+    """-> the shipped build's mods for ENV (default: this process's): lfo4 last when DN2_LFO4 is set, not 0 or empty
+    (dnfw.waverider.pages.lfo4_on; on by default v0.56.2..v0.60.1, off since 2026-11-19)"""
     import os
     env = os.environ if env is None else env
-    return ("waverider", "lfowaves") + (("lfo4",) if env.get("DN2_LFO4", "") not in ("", "0") else ())
+    # 2026-11-21 (the User: SAFE MODE "IN THE COMBINED BUILD"): safemode last, after every mod that writes MAIN OS
+    return (("waverider", "lfowaves") + (("lfo4",) if env.get("DN2_LFO4", "0") not in ("", "0") else ())
+            + ("safemode",))
 
 
 SHIPPED = shipped()

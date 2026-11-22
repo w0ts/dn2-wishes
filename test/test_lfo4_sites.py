@@ -24,7 +24,9 @@ from dnfw.firmware.load import load
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "scripts"))
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-STOCK_111 = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip"
+# OS 1.12: build_lfo4_ui's sites are 1.12's since lfo4112 (2026-11-16, docs/lfo-112-port.md); the SLEW sites moved,
+# the DEST sites are at the same addresses in both
+STOCK_112 = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.12_dist.zip"
 MAIN_OS, BASE = 3, 0x40000400
 
 # LFO3's ten records are 94..103, so its entries are 95..104; LFO4's are 321
@@ -37,15 +39,15 @@ SPH, SLEW, DEST = 6, 5, 3                  # positions within a group of ten
 
 @pytest.fixture(scope="module")
 def stock():
-    if not STOCK_111.exists():
-        pytest.skip("Digitone II 1.11 is not in 00_Resources")
-    return load(read_image(STOCK_111)).container.find(MAIN_OS).unpack()
+    if not STOCK_112.exists():
+        pytest.skip("Digitone II 1.12 is not in 00_Resources")
+    return load(read_image(STOCK_112)).container.find(MAIN_OS).unpack()
 
 
 @pytest.fixture(scope="module")
 def ui():
-    if not STOCK_111.exists():
-        pytest.skip("Digitone II 1.11 is not in 00_Resources")
+    if not STOCK_112.exists():
+        pytest.skip("Digitone II 1.12 is not in 00_Resources")
     import build_lfo4_ui
     return build_lfo4_ui
 

@@ -7,17 +7,19 @@ import pytest
 from dnfw.mods import bootscreen, lfo4, lfowaves, matrix, moddest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-STOCK_111 = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip"
+# OS 1.12: lfo4 and lfowaves are 1.12 mods since their port (2026-11-14/16, docs/lfo-112-port.md); bootscreen and
+# moddest apply to it as well
+STOCK_112 = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.12_dist.zip"
 
 
 @pytest.fixture(scope="module")
 def found():
-    if not STOCK_111.exists():
-        pytest.skip("Digitone II 1.11 is not in 00_Resources")
+    if not STOCK_112.exists():
+        pytest.skip("Digitone II 1.12 is not in 00_Resources")
     from dnfw.cli.files import read_image
     from dnfw.cli.mods import _apply_default, _staged
     from dnfw.firmware.load import load
-    fw = load(read_image(STOCK_111))
+    fw = load(read_image(STOCK_112))
     registry = {m.ID: m for m in (bootscreen, lfo4, lfowaves, moddest)}
     pairs = matrix.pairs(fw, registry, lambda mod, f: _apply_default(mod, f, ROOT), _staged)
     return {(p.a, p.b): p for p in pairs}

@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""The presets' download: one zip with every set, the single files and a list, for the presets page.
+"""The presets' downloads: one zip with every set, one zip per set, the single files and a list, for the presets page.
 
     presets_zip.py OUTDIR [--src presets]
 
 OUTDIR gets:
   dn2-wishes-presets.zip           every set (dn2-wishes-presets/<SET>/<file>) and presets/README.md
+  dn2-wishes-presets-<SET>.zip     one set (dn2-wishes-presets-<SET>/<file>)
   <SET>/<file>.dn2pst              each preset, as it is in presets/
-  presets.json                     what presets.html lists: the zip's name, size, sha256 and each set's presets
+  presets.json                     what presets.html lists: each zip's name, size, sha256 and presets
 
 The same files give the same bytes, on any machine and any day: entries in sorted order, stored (the presets are
 zips already; no deflate, so no zlib version can change a byte), one fixed date (1980-01-01, ZIP's first), one set of
@@ -63,23 +64,32 @@ def sets_of(src: pathlib.Path) -> list[tuple[object, list[pathlib.Path]]]:
     return out
 
 
-def build(src: pathlib.Path, out: pathlib.Path) -> dict:
-    """write the one zip, the single files and presets.json into OUT; -> what presets.json holds"""
+def _entry(name: str, data: bytes, title: str, what: str, count: int, presets: list[dict]) -> dict:
+    return {"zip": name, "title": title, "what": what, "bytes": len(data),
+            "sha256": hashlib.sha256(data).hexdigest(), "count": count, "presets": presets}
+
+
+def build(src: pathlib.Path, out: pathlib.Path) -> list[dict]:
+    """write the zips, the single files and presets.json into OUT; -> the list"""
     sets = sets_of(src)
     out.mkdir(parents=True, exist_ok=True)
-    everything = [(f"{STEM}/README.md", (src / "README.md").read_bytes())]
-    rows = []
+    listing, everything = [], [(f"{STEM}/README.md", (src / "README.md").read_bytes())]
     for s, files in sets:
+        stem = f"{STEM}-{s.folder}"
+        entries = [(f"{stem}/{f.name}", f.read_bytes()) for f in files]
         everything += [(f"{STEM}/{s.folder}/{f.name}", f.read_bytes()) for f in files]
+        presets = [{"name": f.stem, "file": f"{s.folder}/{f.name}", "bytes": f.stat().st_size} for f in files]
+        data = zip_bytes(entries)
+        (out / f"{stem}.zip").write_bytes(data)
         (out / s.folder).mkdir(exist_ok=True)
         for f in files:
             shutil.copyfile(f, out / s.folder / f.name)
-        rows.append({"title": s.title, "what": s.what,
-                     "presets": [{"name": f.stem, "file": f"{s.folder}/{f.name}", "bytes": f.stat().st_size} for f in files]})
+        listing.append(_entry(f"{stem}.zip", data, s.title, s.what, len(presets), presets))
     data = zip_bytes(everything)
     (out / f"{STEM}.zip").write_bytes(data)
-    listing = {"zip": f"{STEM}.zip", "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest(),
-               "count": sum(len(r["presets"]) for r in rows), "sets": rows}
+    total = sum(e["count"] for e in listing)
+    listing.insert(0, _entry(f"{STEM}.zip", data, "Every set", "every set in its own folder, with the README",
+                                total, []))
     (out / "presets.json").write_text(json.dumps(listing, indent=1) + "\n", encoding="utf-8")
     return listing
 
@@ -89,8 +99,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("out", type=pathlib.Path)
     ap.add_argument("--src", type=pathlib.Path, default=ROOT / "presets")
     a = ap.parse_args(argv)
-    e = build(a.src, a.out)
-    print(f"{e['zip']:36} {e['bytes']:8} B  {e['count']:3} presets  {e['sha256']}")
+    for e in build(a.src, a.out):
+        print(f"{e['zip']:36} {e['bytes']:8} B  {e['count']:3} presets  {e['sha256']}")
     return 0
 
 

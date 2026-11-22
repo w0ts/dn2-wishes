@@ -13,12 +13,18 @@
  *   - an edit by the knobs: record 128 (the working copy, as stock's temp slot) written 2 s after the last;
  *   - power-on: record 128, the working copy stock's temp slot also is.
  *
- *   0x6E0400 + 2 p + c   record p (0..127 the projects, 128 the working copy), copy c (0, 1): one sector,
+ *   0x5FF000 + 2 p + c   record p (0..127 the projects, 128 the working copy), copy c (0, 1): one sector,
  *                        'DN2I', version, p, sequence, the 32 records (type, MIX, the type's K1..K6),
  *                        its check; written into the older copy, the newer whole copy is read
+ *   0x5FF102             the move's mark ('DN2M'): the records were copied from their old place
  *
- * Between the pools' lists (to 0x6E02FF) and the library's index (lib.c, 0x6F0000), in sectors nothing
- * else uses. A record names types by their number for good (dnfw.inserts.design), so a build that knows
+ * 2026-11-22 (v0.69.1, the User: "move our stuff"): until v0.68.1 the records were at 0x6E0400 + 2 p + c
+ * (0x6E0400..0x6E0501), sectors upstream gives its tunings (0x6E0400) and PERFORM (0x6E0500..0x6E05FF). They
+ * now sit past the bank lists (0x5F0000..0x5FE7FF), below the pool image (0x600000): sectors upstream never
+ * names (docs/memory-map.md, "+Drive"). The first time the +Drive is up without the mark, every whole old
+ * copy is copied, byte for byte, to the same copy of the same record here, then the mark is written; the old
+ * sectors are only read, never written, and never read again once the mark is there (ERASE MOD DATA erases
+ * the records, not the mark, so an erase does not bring the old ones back). A record names types by their number for good (dnfw.inserts.design), so a build that knows
  * fewer types reads an unknown one as OFF. Only this file's two buffers and the sectors above are written. */
 
 typedef unsigned int u32;
@@ -30,13 +36,16 @@ typedef unsigned char u8;
 #define BLK_READY (*(volatile u32 *)0x4461C68Cu)
 #define BLK_SECTORS (*(volatile u32 *)0x4461C6B0u)
 
-#define INS_BASE 0x6E0400u
+#define INS_BASE 0x5FF000u
 #define INS_N 129
 #define INS_WORK 128
 #define INS_END (INS_BASE + 2u * (u32)INS_N)
-_Static_assert(INS_BASE >= 0x6E0300u && INS_END <= 0x6F0000u,
-               "the records lie between the pools' lists and the library's index");
+#define INS_MARK INS_END                        /* the move's mark, outside ERASE MOD DATA's records */
+#define INS_OLD 0x6E0400u                       /* until v0.68.1: read once, for the move */
+_Static_assert(INS_BASE >= 0x5F0000u + 2u * 64u * 464u && INS_MARK < 0x600000u,
+               "past the bank lists (pools.c BL_END2), below the pool image (link.c STORE_SECTOR)");
 #define MAGIC 0x444E3249u                       /* 'DN2I' */
+#define MOVE_MAGIC 0x444E324Du                  /* 'DN2M' */
 #define VERSION 1u
 #define CHECK_XOR 0x494E5331u
 #define REC_WORDS 64u                           /* 32 records x 8 bytes */
@@ -68,13 +77,17 @@ static u32 fxp_check(const u32 *w)
 volatile u32 ins_wr_ring[8] D_;                 /* hooks.S: the slots stock wrote, newest at head - 1 */
 volatile u32 ins_wr_head D_ = 0;
 u32 ins_st_writes D_ = 0, ins_st_loads D_ = 0, ins_st_fails D_ = 0;    /* for the gate */
-static u32 sec[128] D_;                         /* one sector */
-static int booted D_ = 0;
+u32 ins_st_moved D_ = 0, ins_st_copied D_ = 0;  /* the move: 1 done (2: found done), the copies made */
+/* v0.69.2: the +Drive's DMA lands here, outside the C chunk (emulib/ramguard.py: no DMA into a chunk the build
+ * places): the unused tail of pools.c's bank list staging (BL_W ends at +0x3A000 of BANK_RAM + 0x80000, BL_H is at
+ * +0x40000), one 512-byte slot each: SAFE MODE's record +0x3F000, the DSP copy's header +0x3F200, the inserts +0x3F400 */
+#define sec ((u32 *)(BANK_RAM + 0x80000u + 0x3F400u))
+int ins_st_booted D_ = 0;                       /* (the gate's power cycle sets it to 0) */
 static u32 wr_tail D_ = 0, seen_loads D_ = 0, seen_news D_ = 0, edits_seen D_ = 0, edits_at D_ = 0;
 
 static int ok(void)
 {
-    return BLK_READY && BLK_SECTORS >= INS_END && !smp_er_lock;
+    return BLK_READY && BLK_SECTORS > INS_MARK && !smp_er_lock;
 }
 
 static u32 check(const u32 *w)
@@ -88,14 +101,49 @@ static u32 check(const u32 *w)
     return (b << 16 ^ a) ^ CHECK_XOR;
 }
 
-/* copy c of record p into sec: its sequence + 1, or 0 when it is not a whole record of p */
-static u32 read_copy(int p, int c)
+/* copy c of record p at BASE into sec: its sequence + 1, or 0 when it is not a whole record of p */
+static u32 read_at(u32 base, int p, int c)
 {
-    if (!ok() || BLK_READ(INS_BASE + 2u * (u32)p + (u32)c, 512u, sec) != 0)
+    if (!ok() || BLK_READ(base + 2u * (u32)p + (u32)c, 512u, sec) != 0)
         return 0;
     if (sec[0] != MAGIC || sec[1] != VERSION || sec[2] != (u32)p || sec[W_CHECK] != check(sec))
         return 0;
     return sec[3] + 1u;
+}
+
+static u32 read_copy(int p, int c)
+{
+    return read_at(INS_BASE, p, c);
+}
+
+/* the move (2026-11-22): once, the old place's whole copies to the new place, then the mark */
+static void move_once(void)
+{
+    if (ins_st_moved)
+        return;
+    if (BLK_READ(INS_MARK, 512u, sec) == 0 && sec[0] == MOVE_MAGIC && sec[1] == ~MOVE_MAGIC) {
+        ins_st_moved = 2;
+        return;
+    }
+    for (int p = 0; p < INS_N; p++)
+        for (int c = 0; c < 2; c++) {
+            if (!read_at(INS_OLD, p, c))
+                continue;                       /* (no whole record there: an upstream record, PERFORM's) */
+            if (BLK_WRITE(INS_BASE + 2u * (u32)p + (u32)c, 512u, sec) != 0) {
+                ins_st_fails++;
+                return;                         /* (no mark: the next power-on tries again) */
+            }
+            ins_st_copied++;
+        }
+    for (u32 k = 0; k < 128u; k++)
+        sec[k] = 0;
+    sec[0] = MOVE_MAGIC;
+    sec[1] = ~MOVE_MAGIC;
+    sec[2] = ins_st_copied;
+    if (BLK_WRITE(INS_MARK, 512u, sec) == 0)
+        ins_st_moved = 1;
+    else
+        ins_st_fails++;
 }
 
 /* record p into the inserts: 1, or 0 (none whole: nothing changed) */
@@ -147,13 +195,24 @@ static void save(int p)
         ins_st_fails++;
 }
 
+/* 2026-11-22 (dmove.c): the move asked for before the others (the tunings take its old sectors) -> 1 done */
+int ins_move_now(void)
+{
+    if (!ok())
+        return 0;
+    move_once();
+    return ins_st_moved != 0;
+}
+
 /* from link.c's UI pass, after the pools' poll (the +Drive up) */
 void ins_store_poll(void)
 {
     if (!ok())
         return;
-    if (!booted) {                              /* power-on: the working copy */
-        booted = 1;
+    if (!ins_st_booted) {                       /* power-on: the working copy */
+        ins_st_booted = 1;
+        ins_st_moved = 0;
+        move_once();                            /* 2026-11-22: the records' old place, once */
         load(INS_WORK);
         seen_loads = seen_news = 0;             /* a LOAD the OS did already: below */
         wr_tail = ins_wr_head;

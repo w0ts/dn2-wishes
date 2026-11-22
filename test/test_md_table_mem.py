@@ -36,3 +36,32 @@ def test_each_layout_gets_its_own_tables_whatever_was_built_first():
     finally:
         B._TABLE_MEM.clear()
         B._TABLE_MEM.update(saved)
+
+
+def test_layouts_without_l2_copies_still_get_their_own_tables():
+    # The harness's layout copies two tables to L2 (T_src), which alone told the two apart once the key became
+    # (tables, T_src). A harness without the copies (MDK.tables_in_l2 not applied) must still not share the
+    # bench's entry: the shipped part's base and the ready word are in the key (upstream PR fba522ed)
+    _need_rom()
+    import copy
+
+    from dnfw.perc import live as PL
+    bench_L = B.layout()
+    plain = copy.deepcopy(PL.layout().md)
+    plain.T.update(plain.T_src)                        # each moved table back at its decoded place
+    plain.T_src = {}
+    assert bench_L.tables == plain.tables and bench_L.T_src == plain.T_src
+    saved = dict(B._TABLE_MEM)
+    try:
+        B._TABLE_MEM.clear()
+        bench_alone = dict(B.table_mem(bench_L))
+        B._TABLE_MEM.clear()
+        plain_alone = dict(B.table_mem(plain))
+        assert bench_alone != plain_alone
+        B._TABLE_MEM.clear()
+        B.table_mem(plain)                             # the harness first
+        assert B.table_mem(bench_L) == bench_alone
+        assert B.table_mem(plain) == plain_alone
+    finally:
+        B._TABLE_MEM.clear()
+        B._TABLE_MEM.update(saved)

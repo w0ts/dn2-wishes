@@ -62,6 +62,7 @@ class Machine:
         # allocator, and the two must not share a name.
         self.m, self.ev, self.st, self.pc, self.inq, self.hook_at = built
         self.uc = self.m.uc
+        self._whole_ddr()
         self.ret = STACK + 0x800
         self.at = SCRATCH
         self.count = 0
@@ -73,6 +74,18 @@ class Machine:
         if os.environ.get("DNFW_CODEGUARD") == "1":   # remoteui-6: the C chunk's code stays (emulib/codeguard.py)
             from emulib import codeguard
             codeguard.install(self.uc)
+
+    def _whole_ddr(self):
+        """2026-11-19 (newproj, the wishes slab's page 0x47300000): a snapshot holds only the 1 MiB pages that had
+        been touched when it was saved, and digikit records the first access to any other page as a fault (then maps
+        a zero page). On the instrument the whole DDR, 0x40000000..0x47ffffff, is memory: every page the snapshot
+        lacks is mapped here first, zeros, as the boot runs map the whole DDR (emulib/quickboot.py). Accesses outside
+        the DDR are still faults; wild writes into our RAM are the RAM guard's and the wild-read trap's."""
+        ensure = getattr(self.m, "ensure", None)
+        if ensure is None:
+            raise RuntimeError("digikit's Machine has no ensure(): the DDR cannot be mapped")
+        for page in range(0x40000000, 0x48000000, 0x100000):
+            ensure(page)
 
     def _bitrev_shim(self):
         """v0.34 (docs/timing-model.md): BITREV Dn (0x00C0..0x00C7, ColdFire ISA_C) is not

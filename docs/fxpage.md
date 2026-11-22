@@ -15,6 +15,13 @@ With TYPE on STOCK there is no page 2, no tag, and stock's page is untouched.
 - The Delay's **TIME** is on both pages: on page 2 its place (A) is stock's own cell, left as stock drew it, its
   knob passed on to stock.
 - Leaving the page (another page, another overlay) closes page 2; the next visit starts on page 1.
+- **UP / DOWN** (2026-11-20, the User: "stays within the FUNC / no-FUNC pages: no mixing of groups, two different sets
+  of pages"). On page 1 they are stock's (measured on stock 1.12): DOWN Delay -> Reverb -> Chorus, UP back, stopping at
+  the ends. On a page 2 they step among the page 2s only: Delay 2 <-> Reverb 2 when the other page's TYPE has a page 2
+  (XDLY; FDN8 or LONG), else they do nothing; never to a page 1. The step itself is stock's (the item goes on, `fxp_pop`
+  `arrow`); `fxp_draw` opens page 2 of the page stock then draws (`want`). The TYPE of the page not on screen is the one
+  it last drew (`dlt_state`, `rvt_state`); a kit change since (rare) can make the step land on that page's page 1.
+  (The track FX pages, FX 1/3 .. 3/3 and the inserts' page 2s, step the same way: csrc/inserts/ins.c fx_arrow.)
 
 ## What is on page 2
 

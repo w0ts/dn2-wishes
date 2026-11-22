@@ -75,7 +75,7 @@ def harness(tmp_path_factory):
     (d / "stub.h").write_text("long host_stock(const unsigned char *src, unsigned char *dst);\n"
                               "unsigned long host_malloc(unsigned int n);\n")
     exe = d / "h"
-    r = subprocess.run([cc, "-O1", "-w", "-DDN7_STOCK_DEPACK=host_stock", "-DDN7_MALLOC=host_malloc", "-DDN7_FREE=free", "-include", "stdlib.h", "-include", str(d / "stub.h"),
+    r = subprocess.run([cc, "-O1", "-w", "-Dsection(x)=aligned(4)", "-DDN7_STOCK_DEPACK=host_stock", "-DDN7_MALLOC=host_malloc", "-DDN7_FREE=free", "-include", "stdlib.h", "-include", str(d / "stub.h"),
                         "-o", str(exe), str(d / "h.c"), str(ROOT / "csrc" / "waverider" / "lzma7.c")],
                        capture_output=True, text=True)
     assert r.returncode == 0, r.stderr

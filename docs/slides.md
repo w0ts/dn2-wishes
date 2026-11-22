@@ -38,8 +38,10 @@ and VFAD, are now **SLD** (encoder **E**) and **SLEN** (encoder **F**).
   (v0.40; "Copy and paste" below).
 
 **SLEN** (steps of the track, its own scale followed, at the current tempo):
-`1/8 1/4 1/2 3/4 1 1.5 2 3 4 6 8 12 16 32 64`; a SLIDE trig with no SLEN lock uses **1**.
-At 120 BPM and 1x, 1 step is 125 ms (187.5 audio frames).
+`NXT 1/8 1/4 1/2 3/4 1 1.5 2 3 4 6 8 12 16 32 64`. **NXT** (v0.66, the default: a SLIDE trig
+with no SLEN lock) lasts until the track's next trig, as on the Analog Four ("the slide is
+completed when the next trig is reached"); v0.41..v0.65 used **1** step there. At 120 BPM and
+1x, 1 step is 125 ms (187.5 audio frames).
 
 ## What slides
 
@@ -145,6 +147,29 @@ comparison is made both ways). See the gate step's record for the numbers; the f
   every SLEN value with LEN's box and its text centred as LEN's; the page's own places as
   drawn there (idle; trig held, locked); and the gate: the build's page 2, our two places
   aside, is stock 1.11's page pixel for pixel.
+- 2026-11-19: the held, locked page is read once the last turn's redraw has come. Since v0.59
+  (knob turns drawn together, `page.c` `turn_hold`) a turn's full redraw waits up to
+  TURN_STALE (10 panel ticks, 83 ms) after the last draw; the value is set at once and the
+  last one is always drawn. The check read the screen 5 M instructions after the last turn,
+  inside that wait, and saw the turn before ("2" for "3": one pixel at x 58 instead of 60).
+  It now waits TURN_STALE ticks after the turn, lets the UI compose, requires a draw after
+  the turn, and compares as before (`trig2_held_turning.png`: the screen inside the wait).
+  Found by bisecting with the step itself: 81980a3d (main-next before `claude/ui-turns`)
+  passes, 81699d2e (its merge) fails, the same with the turn hold switched off passes. The
+  wait moved the paste checks by 14 ticks, which showed a race in `emu_slides_paths.py`:
+  stock's lock setter tells the pattern's observers through another task, and one of them
+  clears the undo slot 4..6 ticks later; landing after the paste, it cleared the paste's own
+  undo. The paste checks now let their edits be told (20 M) before pasting.
+- 2026-11-20 (the User): the SLIDE-off comparison with stock declares one difference,
+  **half-rate LFOs** (`DN2_LFO_HALFRATE`, `csrc/modulation/cascade.c` `lh_args`): on a frame
+  that is not voice v's turn (`lh_selw[v]` 0, read after that frame), the OUT cells v's
+  LFO1..3 write (its row + DEST, from slots 4, 12, 20) may differ from stock's. Measured on
+  v0.62.5 (dabd3360): exactly those cells (DEST 44, 25, 35, every voice) on exactly those
+  frames, nothing in STATE. Everything else is compared word for word (`scripts/slides_stock.py`,
+  each frame's whole STATE and OUT in the report); a build without half-rate, exactly. The gate
+  runs a negative control each time: a STATE word, an OUT word no LFO writes, and an LFO cell
+  on its voice's turn, changed in stock's own frames, must each fail. A matrix route other
+  than an LFO's own DEST is not declared: a difference there fails.
 
 - v0.40, a user's report (`docs/user-reports.md` P1), in the same harness: a stock p-lock on
   ONESHOT's SAMP (and SLICE's SLCE), through the builder and applier and the real frame ISR
@@ -258,3 +283,29 @@ stock's lock jump), since sliding it would be silent or step through choices.
 
 Checked: `scripts/emu_slides.py` (ONESHOT: TUNE glides, SAMP and PLAY land; PERC on TRX-XT:
 PTCH and AMD glide, DTYP lands; PERC on TRX-CP: PTCH lands).
+
+## v0.66: NXT, until the next trig (the Analog Four's rule)
+
+The owner, 2026-11-20, after a Discord thread quoting the Analog Keys manual: "The speed of the
+slide is relative to the current tempo and the slide is completed when the next trig is
+reached." Until v0.65 a slide with no SLEN lock lasted one step.
+
+- **NXT** is SLEN's first choice and the value with no lock: the slide lasts from its trig to the
+  track's next trig, a note trig or a lock (trigless) trig alike (both set step flag bit 0: DNX, a
+  note `0x0381`, a lock trig `0x7801`), counted round the track's length (per pattern: the
+  pattern's, per track: the track's). No other trig on the track: the whole length (the trig
+  itself, next time round). Steps, at the track's scale and the tempo, as SLEN's lengths; micro
+  timing and conditions are not counted (a trig that will not play still ends the slide).
+- **Chained trigless trigs** (InductiveOne's "neuro bass" automation): each slides to the next.
+- **The explicit lengths stay** (1/8 .. 64; their stored values 0..14 unchanged), so a project's
+  SLEN locks play as they did. A project whose slides had no SLEN lock now slides to the next
+  trig instead of one step.
+- Stored: NXT locked explicitly is value 15; older firmware plays it as 1 step.
+- Code: `steps_to_next` in `slide.c`, read from the playing pattern (`0x42C5A9A0`): each track
+  1701 bytes from +0, its step flags a big-endian u16 at +2 step; the gate checks that stock's own
+  track objects hand exactly these pointers for all 16 tracks (vtable +40, what stock's step test
+  `0x4004e95a` reads) and that stock's test sees the trigs the slide counts.
+- Gate (`slides`, `emu_slides.py` part 10, after the v0.41 cases so they run as before): trigs on 4 and 7 (3 steps), round the length (4 -> 0, 12 of
+  16), no other trig (16), the next step (1), a 64-step pattern (36), an explicit SLEN (1/2 step)
+  still wins, an explicit NXT lock, per-track length (8); each exact per frame against the model.
+  The knob: NXT first (from no lock, the first choice right is 1/8).

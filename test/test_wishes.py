@@ -78,11 +78,18 @@ def test_the_ram_the_c_names_is_declared():
             assert not ext[0].overlaps(other), other
 
 
-def test_the_memcpy_stub_costs_two_instructions_while_nothing_is_tracked():
+def test_the_memcpy_stub_tests_the_size_first():
+    """2026-11-17 (DN2_LFO4): one stub carries ours and lfo4's, then copies; a copy smaller than a sound goes
+    straight to the copy (3 instructions); without lfo4, the stub as before (2 instructions on into stock's)"""
     at = LAYOUT["wish_memcpy_stub"]
-    n_at = LAYOUT["wish_n"]
-    assert code_at(at, 6) == bytes.fromhex("4ab9") + struct.pack(">I", n_at)    # tst.l wish_n
-    assert code_at(at + 6, 1) == b"\x67"                                         # beq.s on into stock's memcpy
+    if PG.lfo4_on():
+        assert code_at(at, 4) == bytes.fromhex("202f000c")                         # move.l 12(%sp),%d0: n
+        assert code_at(at + 4, 6) == bytes.fromhex("0c80") + struct.pack(">I", 1163)   # cmpi.l #SOUND_BYTES,%d0
+        assert code_at(at + 10, 1) == b"\x65"                                      # bcs.s to the copy
+    else:
+        n_at = LAYOUT["wish_n"]
+        assert code_at(at, 6) == bytes.fromhex("4ab9") + struct.pack(">I", n_at)    # tst.l wish_n
+        assert code_at(at + 6, 1) == b"\x67"                                       # beq.s on into stock's memcpy
 
 
 def test_memcpy_and_memset_stay_stock():
@@ -101,7 +108,24 @@ def test_every_reference_but_overbridges_names_the_stub():
 
 
 def test_each_stub_goes_on_into_the_stock_routine():
+    """... or, with DN2_LFO4, memset's into lfo4's stub (which replays the routine's first eight bytes and goes on at
+    entry + 8), and memcpy's carries lfo4's itself (ext_live, lfo4_on_memcpy) and copies (2026-11-17), reaching
+    neither stock's memcpy nor lfo4's stub"""
+    on = {CF.WISH_MEMCPY: "lfo4_memcpy_stub", CF.WISH_MEMSET: "lfo4_memset_stub"}
     for routine, stub in ROUTINES.items():
         at = LAYOUT[stub]
-        body = code_at(at, 64)
-        assert bytes.fromhex("4ef9") + struct.pack(">I", routine) in body, stub
+        body = code_at(at, 160 if routine == CF.WISH_MEMCPY else 64)
+        if PG.lfo4_on():
+            from dnfw.mods import lfo4
+            sy = lfo4.SPEC["symbols"]
+            assert bytes.fromhex("4ef9") + struct.pack(">I", routine) not in body, stub
+            if routine == CF.WISH_MEMCPY:
+                assert bytes.fromhex("4ef9") + struct.pack(">I", sy[on[routine]]) not in body, stub
+                assert bytes.fromhex("4ab9") + struct.pack(">I", sy["ext_live"]) in body       # tst.l ext_live
+                assert bytes.fromhex("4eb9") + struct.pack(">I", sy["lfo4_on_memcpy"]) in body  # jsr lfo4_on_memcpy
+                assert bytes.fromhex("4cd0") in body                                        # movem.l (%a0),...: blocks
+                continue
+            to = sy[on[routine]]
+        else:
+            to = routine
+        assert bytes.fromhex("4ef9") + struct.pack(">I", to) in body, stub

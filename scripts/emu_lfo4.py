@@ -17,6 +17,8 @@ lists       on WaveTone, LFO1's, LFO2's and LFO3's destination lists offer LFO4'
             MODE DEP: lfo4's records 321..329), never its DEST (324), nor SLEW (its slot is SPH's).
 stored      stock's own SAVE of a sound with LFO4 set and stock's own LOAD of it into another track, then the UI
             pass: LFO4's values arrive through the wishes record; a sound saved at LFO4's defaults loads them so.
+line        (2026-11-20; --snapshot booted on BUILD) LFO4's page draws the moving line: none at rest, LFO1 aimed at LFO4's
+            SPD moves SPD's line alone, gone once LFO1's depth is zero
 page        (stage 2f; --snapshot booted on BUILD) [MOD] walks four pages, LFO4's the fourth; its knobs A..H each
             move their own LFO4 value in lfo4's table (pushed turns: the emulator's way to move a value), LFO1..3's
             pages leave it alone; a value set there is drawn.
@@ -29,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import pathlib
 import struct
 import sys
@@ -279,15 +282,61 @@ def scenario_page(a, sym, rep):
     m.write(sym["smp_overlay_dirty"], struct.pack(">i", 1))
     panel.settle(20_000_000)
     check(f"a DEP set in lfo4's table ({dep:#06x}) shows on LFO4's page", page("lfo4_dep") != shot)
-    before = row()                                      # DEST last, its list closed with [NO] after: as on LFO1's
-    panel.push_and_turn(3, 1)                           # page, a DEST being chosen is dropped when another knob turns
+    # DEST last. 2026-11-18 (the User: "editing destination in modulation page is cpu. and we need to redo this
+    # popup"): D's push on an LFO page opens the DEST popup (csrc/matrix/dest_pop.c) in place of stock's DEST list,
+    # which is never made (its view 0x4010660c; stock makes it at the press). LFO4's popup holds its one route, its
+    # DEST and DEP in lfo4's table: YES on an unused row with DEST in use is refused (LFO4: 1 ROUTE); a long NO on its
+    # route deletes it (DEST 0, DEP its default); YES on a row then makes it (DEST that row, DEP +32), only DEST and
+    # DEP moved; NO on it says CAN'T MUTE (nothing moves); D pushed alone closes it. (The keys in full: the gate's
+    # destpop step, scripts/emu_destpop.py.)
+    from emulib.panel import DOWN, ENCODER_PUSH, YES
+    from unicorn import UC_HOOK_CODE
+    made = []
+    m.uc.hook_add(UC_HOOK_CODE, lambda *_: made.append(1), begin=0x4010660C, end=0x4010660C)
+    m.flush()
+
+    def popup():
+        up, lfo = struct.unpack(">ii", m.read(sym["ldp_p"], 8))
+        return up, lfo
+
+    def lit_row():
+        lit, n = struct.unpack(">I4xI", m.read(sym["ldp_p"] + 12, 12))
+        return struct.unpack(">H", m.read(sym["ldp_rows"] + 2 * lit, 2))[0], n
+
+    def frames_on(n):
+        m.write(M.FRAMES, struct.pack(">I", (m.long(M.FRAMES) + n) & 0xFFFFFFFF))
+        m.flush()
+    panel.tap(ENCODER_PUSH[3])
+    panel.settle(20_000_000)
+    check("LFO4's page: D's push opens the DEST popup (LFO4's), stock's DEST list never made",
+          popup() == (1, 3) and not made, f"popup {popup()}, stock's list made {len(made)}x")
+    before = row()
+    if before[3] >> 8:                                  # LFO4's route: a long NO deletes it
+        panel.hold(NO_KEY, 2_000_000)
+        frames_on(1000)
+        panel.settle(15_000_000)
+        panel.let_go(NO_KEY, 5_000_000)
+    deleted = row()
+    panel.tap(DOWN)
+    target, _ = lit_row()
+    panel.tap(YES)
     panel.settle(10_000_000)
     after = row()
-    moved["DEST"] = [n for n, x, y in zip(LFO4, before, after) if x != y]
-    check("LFO4's page: knob D moves LFO4's DEST only, its list open", moved["DEST"] == ["DEST"]
-          and page("lfo4_dest") != shot, f"moved {moved['DEST']}, {before[3]:#06x} -> {after[3]:#06x}")
-    panel.tap(NO_KEY)
-    panel.settle(20_000_000)
+    moved["DEST"] = [n for n, x, y in zip(LFO4, deleted, after) if x != y]
+    check("LFO4's popup: its route deleted (a long NO), YES on a row makes it there: DEST and DEP (+32) only",
+          deleted[3] == 0 and after[3] >> 8 == M.record(m, target)[1] and after[LFO4.index("DEP")] == 0x6000
+          and set(moved["DEST"]) <= {"DEST", "DEP"}, f"{before[3]:#06x} -> {deleted[3]:#06x} -> {after[3]:#06x}, "
+          f"moved {moved['DEST']}, row {target}")
+    kept = row()
+    panel.tap(DOWN)
+    panel.tap(YES)
+    panel.settle(10_000_000)
+    check("LFO4's popup: a second route is refused (its one DEST kept)", row() == kept, f"{kept[3]:#06x} -> {row()[3]:#06x}")
+    panel.tap(ENCODER_PUSH[3])
+    panel.settle(10_000_000)
+    check("LFO4's popup: D pushed alone closes it, kept", popup()[0] == 0 and row() == kept and not made,
+          f"popup {popup()}, {row()[3]:#06x}")
+    panel.screen("lfo4_dest_closed")
     page("lfo4_closed")
     rep["page"] = {"moved": moved, "stock_moved": stock_moved, "row": [f"{x:#06x}" for x in row()]}
 
@@ -296,6 +345,88 @@ def scenario_control(a, sym, rep):
     """(a build without lfo4, --build: the same setup moves nothing)"""
     out = run(a.build, a.snapshot, sym, a.frames, None)
     check("without lfo4, voice row 0's LFOs at depth 0: FREQ still", max(out) == min(out), f"{min(out):#06x}..{max(out):#06x}")
+
+
+def scenario_line(a, sym, rep):
+    """(2026-11-20, the User: LFO4's page gets lines too; csrc/modulation/moving.c, a snapshot booted on BUILD) LFO4's
+    page draws its seven controls through mv_knob (never DEST), no line at rest; voice 1's LFO1 aimed at LFO4's SPD
+    (slot 101) at full depth, the frame's path run (stock's smoother, the evaluator with the cascade): SPD's line moves
+    by itself, the others none; LFO1's depth back to zero: no line past the linger"""
+    from emulib.panel import Panel
+    from unicorn import UC_HOOK_CODE
+    from unicorn import m68k_const as K
+    booted_on(a.build, a.snapshot)
+    m, ext = lfo4_machine(a.build, a.snapshot)
+    panel = Panel(m, png_dir=str(pathlib.Path(a.json or "out/lfo4").with_suffix("")) + "_line_png")
+    knobs = []
+
+    def on_knob(uc, ad, sz, us):
+        knobs.append(struct.unpack(">7i", m.read(uc.reg_read(K.UC_M68K_REG_A7) + 4, 28))[1:])
+    m.uc.hook_add(UC_HOOK_CODE, on_knob, begin=sym["mv_knob"], end=sym["mv_knob"])
+    m.uc.hook_add(UC_HOOK_CODE, lambda *_: knobs.clear(), begin=sym["mv_begin"], end=sym["mv_begin"])
+    m.flush()
+    panel.settle(20_000_000)
+    t = m.read(M.UI_TRACK, 1)[0]
+    for _ in range(4):                                  # [MOD] four times: LFO4's page
+        panel.tap(MOD_KEY)
+        panel.settle(30_000_000)
+    ids = sorted({k[3] for k in knobs})
+    check("LFO4's page: its seven controls drawn through mv_knob", set(LFO4_OFFERED) <= set(ids), f"ids {ids}")
+    kn = {k[3]: k for k in knobs}
+    spd = kn.get(LFO4_IDS["SPD"])
+    if not spd:
+        return
+    m.write(sym["sl_lastv"] + t, b"\x00")              # the UI track last played voice 1, which plays it
+    m.write(M.OWNER, struct.pack(">I", t))
+    M.rest_on_sound(m, 0, t)
+    s = M.slot
+    for k_, val in {s(1, "SPD"): 0x5800, s(1, "MULT"): 4 << 8, s(1, "FADE"): 0x4000, s(1, "DEST"): 101 << 8,
+                    s(1, "WAVE"): 0, s(1, "SPH"): 0, s(1, "MODE"): 0, s(1, "DEP"): 0x4000,
+                    s(2, "DEP"): 0x4000, s(3, "DEP"): 0x4000}.items():
+        M.w16(m, M.SRC + 2 * M.idx(0, k_), val)
+        m.write(M.STATE + 4 * M.idx(0, k_), struct.pack(">I", val << 16))
+    frac = m.alloc(len(M.SET_FRAC))
+    m.write(frac, M.SET_FRAC)
+    m.flush()
+    M.guest(m, frac)
+    rate, o1, o2 = m.long(M.RATE), m.alloc(256), m.alloc(256)
+
+    def run(frames):
+        for _ in range(frames):
+            M.guest(m, M.SMOOTHER, M.SRC)
+            M.guest(m, sym["mod_eval"], M.OUT, rate, 1, 1, o1, o2, 0)
+        m.write(M.FRAMES, struct.pack(">I", (m.long(M.FRAMES) + frames) & 0xFFFFFFFF))
+        panel.settle(30_000_000)
+
+    def lit(k):
+        from emu import panel as P
+        x, y, w = k[0], k[1], k[2]
+        on = P.lit(M.glass(m))
+        return [j for j in range(w) if (x + j, 63 - y) in on]
+    run(10)
+    run(700)
+    rest = {i: lit(k) for i, k in kn.items() if lit(k)}
+    check("LFO4's page at rest (LFO1 at depth 0): no line", not rest, f"{rest}")
+
+    def depth(d):
+        M.w16(m, M.SRC + 2 * M.idx(0, s(1, "DEP")), d)
+        m.write(M.STATE + 4 * M.idx(0, s(1, "DEP")), struct.pack(">I", d << 16))
+    depth(0x7F00)
+    seen, others = [], set()
+    for k in range(6):
+        run(150)
+        px = lit(spd)
+        seen.append((min(px), max(px)) if px else None)
+        others |= {i for i, kk in kn.items() if i != LFO4_IDS["SPD"] and lit(kk)}
+        panel.screen(f"lfo4-line{k}")
+    check("LFO1 -> LFO4's SPD at full depth: SPD's line moves by itself", len({e for e in seen if e}) >= 3, f"{seen}")
+    check("... and no other LFO4 control shows a line", not others, f"{sorted(others)}")
+    depth(0x4000)
+    run(150)
+    run(700)
+    px = lit(spd)
+    check("LFO1's depth back to zero: no line on SPD past the linger", px == [], f"{px}")
+    rep["line"] = {"ids": ids, "spd_ends": seen}
 
 
 def main() -> int:
@@ -310,7 +441,8 @@ def main() -> int:
     rep: dict = {}
     for sc in a.scenario.split(","):
         {"modulating": scenario_modulating, "cascade": scenario_cascade, "control": scenario_control, "into4": scenario_into4,
-         "lists": scenario_lists, "stored": scenario_stored, "page": scenario_page}[sc](a, sym, rep)
+         "lists": scenario_lists, "stored": scenario_stored, "page": scenario_page,
+         "line": scenario_line}[sc](a, sym, rep)
     rep["checks"] = [{"what": w, "ok": o, "detail": d} for w, o, d in checks]
     if a.json:
         pathlib.Path(a.json).write_text(json.dumps(rep, indent=1))

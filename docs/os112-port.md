@@ -51,9 +51,20 @@ This agrees with every 1.11↔1.12 pair in `docs/overtone-map.md` §2 (e.g. `0x4
   operand: every absolute-long BSS operand in aligned 1.11 code reappears +0x1000 in 1.12
   (0 exceptions). So the layout inside BSS is unchanged, only shifted.
 - **Fast SRAM `0x80000000..0x80010000`: unchanged** (no aligned operand into it differs).
-- **Our own RAM is still clear.** The lowest address the shipping build uses is
-  `0x46700000` (lfo4's state; then `0x46708000`, `0x4670c000`, `0x46710000` runtime, `0x46ac0000`
-  (since 2026-11-12 `0x46a40000`), `0x46af0000`, `0x46b00000` mirror). 1.12's BSS ends at `0x466b84d0`, 300 KB below.
+- **Our own RAM is NOT all clear (corrected 2026-11-16).** This bullet said it was, from BSS alone.
+  1.12's BSS ends at `0x466b84d0`, but stock also writes above it through the uncached alias
+  (`0x4e...` = `0x46...` + `0x08000000`): its +Drive bounce buffer covers `0x466f9300..0x46709300`
+  (64 KiB, every read whose destination is not 16-aligned or whose length is not whole sectors,
+  read routine `0x4012c87a`), so the boot-screen stamp at `0x46708000` is overwritten at power-on
+  (EXCEPTION, Line-F, PC `0x46708000`: 2026-11-08, and the combined build 7f7e7d6c on 2026-11-16).
+  Measured from reset in the emulator (scripts/stock_ram_map.py, src/dnfw/mods/stock112_writes.json):
+  BSS `0x46600000..0x466b8500`, alias buffers at `0x466cb000`, `0x466e7000`, `0x466e8100..0x466e9100`,
+  the bounce buffer, the reset stack's top below `0x48000000`. `dnfw.mods.stockram` and the gate's
+  `rammap` step hold every chunk of ours out of all of it; the emulator's boot step now maps the
+  alias as the same memory and makes one 64 KiB unaligned read at power-on.
+  Our RAM on 1.12 now: `0x4670c000` (pages), `0x4670e000` (the stamp, moved there 2026-11-16),
+  `0x4670f800` (machines), `0x46710000` runtime, `0x46ac0000`, `0x46af0000`, `0x46b00000` mirror;
+  `test/test_ram_112.py` also keeps every chunk above stock's last uncached buffer and apart.
 
 ## 2. The mod's sites, classified
 
@@ -146,10 +157,9 @@ What the classification cannot see:
    1.12 (`scripts/gen_*_code.py`; m68k GCC 13.3 in docker, ~10 s). Their stock-bytes checks
    prove every edit's placement.
 4. `dnfw mods apply` on stock 1.12.
-5. The gate (owner's bench; not available to this work): `ship_gate.py` and its emulator
-   steps are built on 1.11 (snapshots, stock 1.11 references, preflight's stock comparison).
-   They must be rebuilt for 1.12 before any 1.12 build can be cleared. **This is the
-   largest remaining piece and needs the owner's bench.**
+5. The gate: `ship_gate.py` and its emulator steps run on 1.12 once their stock references
+   and UI snapshots are 1.12's (the snapshot is made per build from stock 1.12's `boot400M`
+   with the build installed, as for 1.11).
 
 Not in the shipping build and not ported: the standalone mods (`lfo4`, `arpplocks`,
 `arpmodes`, `midiarp`, `fxmod`, `lfowaves`, `usbprobe`) and their committed JSON, the
@@ -162,13 +172,13 @@ refuse 1.12, so they fail safely.
 |---|---|
 | steps 1–4 (sources, regeneration, a 1.12 build) | hours, mostly mechanical: the map covers every site |
 | emulator on 1.12: boot, the gate's UI and engine steps, BSS-dependent features (DIRECT JUMP, slides, sampler link, MACHINE SEL) | days: new snapshots, every 1.11 reference in the harness |
-| hardware test by the owner | after the gate clears it |
+| hardware test | after the gate clears it |
 
-Merging: the rewrite is a script, so it should be re-run after the 1.11 work in flight
-(SOPHIE, DSP-side) lands, instead of carrying a 700-line diff of address edits across
+Merging: the rewrite is a script, so it should be re-run after other 1.11 work in flight
+lands, instead of carrying a 700-line diff of address edits across
 branches.
 
-## 5. Status (2026-11-07): steps 1–4 done on branch `claude/os112-port-201bc1`
+## 5. Status (2026-11-07): steps 1–4 done
 
 - Step 1: `port_os112.py --write` rewrote the literals in 27 files; 0 refused.
 - Step 2 by hand: `area.AREA_VA` → `0x4030c980`; the generators read
@@ -194,7 +204,7 @@ Cross-checked independently of the generators:
   `ACTIVE_TRACK` (`0x42432a6c`, which happens to equal another 1.11 variable's address) and 1
   is the ported message-view vtable (`0x40207294`, `0x40206ddc` + 0x4b8, checked by hand).
 
-Python unit tests (the repo's `test/`, run on this Mac; `test_md.py` and `test_perc_live.py`
+Python unit tests (the repo's `test/`, run locally; `test_md.py` and `test_perc_live.py`
 excluded: they fail before the port too, for want of the Machinedrum reference here):
 - `test_slides.py`, `test_waverider_mod.py`, `test_safety.py` now read stock 1.12 (their
   own 1.11 addresses ported with `port_os112.py --only`): **40 passed**.
@@ -203,15 +213,13 @@ excluded: they fail before the port too, for want of the Machinedrum reference h
   `test_mods_platform`, `test_js_platform`, `test_js_lfo4`, `test_js_arpmodes`,
   `test_mods_ramcheck`): those mods are not ported, and the platform they share is now 1.12's.
   Porting them (or retiring them) is its own piece of work.
-- The operand audit and the alignment above were run with scratch tools
-  (`~/GitHub/dn2mk2-scratch/os112/tools/`, not committed); `port_os112.py` carries the map,
-  the BSS check and the literal classification.
+- The operand audit was run with a one-off tool, not committed; `port_os112.py` carries the
+  map, the BSS check and the literal classification.
 
 Not done:
-- **The gate.** `scripts/ship_gate.py`, its emulator steps and their snapshots are 1.11's;
-  no 1.12 build can be cleared until they are rebuilt (the owner's bench: the emulator,
-  digikit, is not on this Mac). Until then every 1.12 build is **UNGATED and must not be
-  flashed** (`CLAUDE.md`).
+- **The gate** (at the time of this status; since done, see the PR): `scripts/ship_gate.py`'s
+  emulator steps and their snapshots were 1.11's. Every 1.12 build is **UNGATED and must not be
+  flashed** until the full gate clears it (`CLAUDE.md`).
 - `ACTIVE_TRACK` on 1.12 (§2b).
 - `docs/` addresses, `dn2_111.h`'s file name, the standalone mods, `scripts/emu_*`.
 - The USB-upgrade and SHARC-upload limits in `dnfw.safety` were measured on 1.11 at BSS /
@@ -229,5 +237,38 @@ so `link.c` kept 1.11's TDM bases: every loader command and sample word went int
 1.12 SSI never sends, and the DSP never got a sample (since v0.20 there is no other link).
 The emulator passed because `emu_waverider_menu.py`'s fake DSP hard-coded the same 1.11 constants;
 it now reads the TX base from stock's `addi.l` operand at 0x4002608a and refuses a mismatch.
-The same move put the +Drive bounce buffer over the old boot-screen stamp (0x46708000), the 1.12
-boot crash. Any future port: scan the 0x4e alias too, and check no chunk overlaps a stock buffer.
+The same move put the +Drive bounce buffer over the boot-screen stamp (0x46708000), the 1.12
+boot crash: stock's read (`0x4012c59a` on 1.11) goes through the bounce buffer in 64 KiB pieces
+whenever its destination is unaligned, so the SD reads at power-on overwrite the stamp, and the
+intro's next call into it is an F-line exception (EXCEPTION, vector 0x0B, PC 0x46708000; on a unit,
+2026-11-08 and again 2026-11-16). The emulator's eSDHC never takes that path: from reset, the stamp
+is written only by the loader and is intact at the end (measured with a write watch on
+0x46708000..0x4670869c). The stamp is at 0x4670e000 since (`scripts/gen_bootscreen_code.py`), and
+`test/test_ram_112.py` holds every chunk above 0x4670b000. Any future port: scan the 0x4e alias
+too, and check no chunk overlaps a stock buffer.
+
+## v0.54's NAME screen on 1.12
+
+v0.54 opens the DN2's own NameView for FILE NAME, RENAME and CREATE FOLDER (`docs/name-screen.md`,
+measured on 1.11). Its addresses were moved with `port_os112.py`'s `Map` (every code and vtable
+address proven by its 12 bytes, the RAM ones by the BSS rule):
+
+| | 1.11 | 1.12 |
+|---|---|---|
+| operator new | `0x40120264` | `0x40120544` |
+| std::string(const char *, alloc) | `0x401CE69E` | `0x401CEAB8` |
+| ~std::string | `0x401CCBEE` | `0x401CD008` |
+| ~std::function | `0x40188086` | `0x40188366` |
+| NameView(...) | `0x40119156` | `0x40119436` |
+| View::open | `0x4011C8BE` | `0x4011CB9E` |
+| ~__shared_count | `0x401880CC` | `0x401883AC` |
+| `_Sp_counted_ptr_inplace<NameView>` vtable | `0x401E0BC8` | `0x401E0FD8` |
+| NameView vtable | `0x40206AC0` | `0x40206F78` |
+| MainScreenView's shared_ptr (BSS) | `0x44647980` | `0x44648980` |
+| the frame counter (BSS) | `0x4058E8D4` | `0x4058F8D4` |
+
+PATTERN NAME (`0x400795ba`, named in a comment only) is at the same address in both.
+
+v0.55's FLEX pool adds three more, moved the same way: the frame counter read in `fmt.c` and
+`smp_page.c` (`0x4058E8D4` → `0x4058F8D4`), and in the gate's FLEX pool step the live kit
+(`0x4210C08C` → `0x4210D08C`) and memcpy (`0x40134490` → `0x40134770`).

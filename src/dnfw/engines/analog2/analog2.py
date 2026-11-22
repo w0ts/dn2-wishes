@@ -6,8 +6,8 @@ Monomachine-style machine (THIRD-PARTY.md). The filters are dnfw.engines.analog2
 
 One voice a track at 44.1 kHz (PERC's stream, Optimist's own rate), Optimist's 32-sample block as
 the DN2's (its control in `pitch`, once a block; two 16-sample halves). A half: the swarm's copies
-of osc 1, osc 1, osc 2 (free, or hard-synced to osc 1), noise, drive, the filter, the soft knee
-(16000/32768) x 2. Levels as Optimist's "half scale": 1.0 is its 32768, so one oscillator at MIX 0
+of osc 1, osc 1, osc 2 (free, or hard-synced to osc 1), noise, drive, the filter, x 2 (Optimist's
+soft knee at 16000/32768 is gone since 2026-11-21: no limiter). Levels as Optimist's "half scale": 1.0 is its 32768, so one oscillator at MIX 0
 plays +-1.0 out (the square +-0.5, Optimist's).
 
 Parameters (page 1, knob / 128): WAVE (SAW SQR TRI SIN PWM: knob x 5 >> 7), DTN (osc 2's detune,
@@ -30,8 +30,8 @@ Against Optimist:
 - The poly-BLEPs as osc_saw's, in float (t = phase / increment); the square is two saws, so PWM
   is the square: its width came from ENV / LFO -> SHP, which the machine does not have (the DN2's
   LFOs move knobs). The sine: u (1 - u^2) Q(u^2), Q of degree 4 (3e-7; Optimist's 1024-point
-  table). tanh in the drive and the knee: x P(x^2) on 0..2, degree 8 (4.5e-6; Optimist's
-  TANH_Q15 interpolated, 6e-6), clamped at 2 as softclip.
+  table). tanh in the drive: x P(x^2) on 0..2, degree 4 (never above the degree-8 curve on 0..2, within 1.08e-3 under it; rising; 2026-11-21, the
+  User's pick for speed: degree 8 before, 4.5e-6; Optimist's TANH_Q15 interpolated, 6e-6), clamped at 2 as softclip.
 - Hard sync as a2_sync, sample by sample: a look-ahead puts the restart's pre-correction on the
   sample before the wrap (the C's segments do it on b[i - 1] or at the block's end), the restart
   and its post-correction on the next. A trig that restarts the phases restarts osc 2 there too
@@ -47,15 +47,17 @@ Against Optimist:
 
 WDTH (2026-11-11, the User: "a stereo spread of voices"): with copies and WDTH > 0, the copies go left (+1 -2 +3,
 SIDE_OF) and right (-1 +2 -3), osc 1 and 2 in the middle. The mid is the same sum as with WDTH 0 (to float rounding:
-the copies are summed right, then left); the side L - R of the copies runs through the same filter (its own states,
-S_Z2), x 2 WDTH (the knee's 2 x, not its curve; DRV not on the side), into the slot's side block (DRONE's BEAT's,
+the copies are summed right, then left); the side L - R of the copies runs through a linear SVF (2026-11-21, the
+User's pick for speed, _side12: one stage, two for LP24, the mode's SVF mix, this half's cutoff, RES's damping, the SVF's knees, the
+level of the chosen model's passband; its states S_Z2, S_Z2 + 1; before, a second copy of the chosen filter), x 2 WDTH (the output's 2 x; DRV not on the side), into the slot's side block (DRONE's BEAT's,
 dnfw.inserts.post.beat: added after the pan as L += g s, R -= g s, g the chain's gain on the mid). WDTH 0 or no copies
 writes nothing: output bit-identical to before. Cost (model steps a block, 6 copies, sync, DRV): +2.7k (SVF) .. +4.8k
 (MS20); on the runner's memory clock +4.0k .. +6.2k cycles.
 
 The filters' words and mix tables (`ctx`): the words in the render scratch's XB (SID's phases,
-free since 2026-11-08), the tables (`table_words`, not zeros) at TABLES_OFF in the Monomachine's
-L2 scratch, which the coordinator loads.
+free since 2026-11-08), the tables (`table_words`, not zeros) read from the A2 filter pass's own copy in L1
+(`tables_at`: dnfw.engines.analog2.filters.program.TABLES, the same floats; 2026-11-21, DSP room: the second copy
+the upload carried at TABLES_OFF in the Monomachine's L2 scratch is gone, -436 B of section 7).
 """
 
 from __future__ import annotations
@@ -94,24 +96,29 @@ MAX_COPIES = 6                                   # the swarm's cap (a constant: 
 # the filter models emitted (the SVF always); a FLT choice of a model left out plays the SVF in its
 # mode (Optimist's "a model not built: the SVF")
 FILTER_MODELS = M.MODELS
-TABLES_OFF = 0x3200                              # the mix tables in the Monomachine L2 scratch
+TABLES_OFF = 0x3200                              # (until 2026-11-21) the mix tables in the Monomachine L2 scratch:
+                                                 # +0x3200..+0x33A8 there is free now (tables_at)
 SR = 44100.0
 INC_K = 440.0 / SR * 2.0 ** 32                   # the increment of A4
 COPY_PH = (0x2B7E1516, 0x9E3779B9, 0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A)
 COPY_AT = (1, -1, 2, -2, 3, -3)
 GC = 80 * 258                                    # A2_SWARM_GC: the copies' level, Q15
 SDTN_K = 60 * 2367 * 16 / (127 * 3 * 1000)      # dinc's factor a SDTN unit
-KNEE = 16000.0 / 32768.0
 TOP15 = 32767.0 / 32768.0                        # softclip's and the sine's top
 NONE = -1.0                                      # no last cutoff (a fresh voice)
 HALF = 0x80000000
 # sin(pi u) / (u (1 - u^2)) in u^2 (fitted, 3e-7), with the sine's sign and TOP15 folded in
 SIN_Q = tuple(-c * TOP15 for c in (3.14159230309089, -2.0260895597297144, 0.5237673445980027,
                                    -0.07439094157966462, 0.005918106135584834))
-# tanh(x) / x in x^2 on 0..2 (fitted, 4.5e-6), TOP15 folded in
-TANH_P = tuple(c * TOP15 for c in (0.9999987523471627, -0.3332349530378557, 0.1325101073321532,
-                                   -0.05139980898798015, 0.01773782644437922, -0.004831303440849461,
-                                   0.0009141036195898637, -0.0001032153224941374, 5.152369914034383e-06))
+assert SIN_Q == M.A2_SIN_Q                        # (the two-sample kernel reads its copy in the filters' KC table)
+# tanh(x) / x in x^2 on 0..2, TOP15 folded in: one-sided, never above the degree-8 curve before it (TANH_P8, A's
+# sound) anywhere on 0..2 (a linear program: n <= o (1 - 1e-5), float32 rounding of both curves included, least max(o - n) = 1.08e-3), so the drive is never
+# louder than before at any input (no digital clipping, the User 2026-11-21); slope 0.9944 at 0 (-0.05 dB), rising
+TANH_P8 = (0.9999987523471627, -0.3332349530378557, 0.1325101073321532, -0.05139980898798015, 0.01773782644437922,
+           -0.004831303440849461, 0.0009141036195898637, -0.0001032153224941374, 5.152369914034383e-06)
+TANH_P = tuple(c * TOP15 for c in (0.994438468571122, -0.3077078377445752, 0.08908856172526249,
+                                   -0.01588368865468038, 0.0012091530231845907))
+assert TANH_P == M.A2_TANH_P                      # (the drive's two-sample loop reads its copy in the filters' KC table)
 N0 = (-1.0, -0.5, -1.0, 0.0)                     # a wave at phase 0 (SAW SQR TRI SIN)
 HN = (-2.0, -1.0, 0.0, 0.0)                      # its own BLEP's view of a restart (a2_sync's hn)
 
@@ -136,13 +143,22 @@ A_END = S_Z2 + 6
 assert A_END <= C.K.NS
 
 
+def tables_at(L: C.Layout | None = None) -> int:
+    """where the mix tables are: the A2 filter pass's own L1 copy (filters.program.TABLES, loaded with its state:
+    dnfw.waverider.dsp._a2f_state_span), the same floats (checked). 2026-11-21 (DSP room): read there, not from a
+    second copy in the Monomachine's L2 scratch (L1 is also the quicker read). L: unused, the address is the DSP's."""
+    from .filters import program as FP
+    assert FP.ctx().models == M.Ctx(0, 0, FILTER_MODELS).models, "the pass's tables must be ANALOG 2's"
+    return FP.TABLES
+
+
 def ctx(L: C.Layout) -> M.Ctx:
-    """the filters' words (render scratch XB) and mix tables (L2 scratch + TABLES_OFF)"""
-    return M.Ctx(L.XB, L.scratch + TABLES_OFF, FILTER_MODELS)
+    """the filters' words (render scratch XB) and mix tables (tables_at: the A2 filter pass's L1 copy)"""
+    return M.Ctx(L.XB, tables_at(L), FILTER_MODELS)
 
 
 def table_words() -> list[float]:
-    """the mix tables' floats, as the DSP must hold them at TABLES_OFF"""
+    """the mix tables' floats, as the DSP holds them at tables_at()"""
     return M.table_layout(FILTER_MODELS)[0]
 
 
@@ -252,10 +268,10 @@ def _inc(p: Prog) -> None:
 
 
 def _noise_step(p: Prog, x: int) -> None:
-    """Rx = xorshift32(Rx) (13, 17, 5). Clobbers R13, R14."""
+    """Rx = xorshift32(Rx) (13, 17, 5). Clobbers R13 (R14 no more: 2026-11-21, the native XOR)."""
     for n in (13, -17, 5):
         p.lsh(13, x, n)
-        p.xor(x, x, 13, 14)
+        p.xor1(x, x, 13)
 
 
 def _drift(p: Prog) -> None:
@@ -539,8 +555,20 @@ def _width(p: Prog, L: C.Layout) -> None:
         p.sti(32, 5, 2)
         p.fconst(2, 1.0)
         p.sti(33, 5, 2)
+    PARA.shadow_render(p, 4)                     # 2026-11-16: a PARA shadow (a chord's joined note) has no side:
+    p.ifz(4, "NE", lambda: p.iconst(1, 0))       # the side block is its leader slot's (the chord's spread its own)
     p.ifz(1, "NE", lambda: p.if_(0, "GT", 2, on))
     _sv(p, D_WID, 3)
+
+
+SIDE_TMP = 176                                   # 2026-11-21 (perf): the half's side, built and filtered in the render
+                                                 # scratch's YB row 176..191 (L1, anyone's between halves); _side_out
+                                                 # writes it to the slot's side block (L2) once, x 2 WDTH
+
+
+def _side_tmp(p: Prog, L: C.Layout, d: int) -> None:
+    """Rd = the half's side in L1 (SIDE_TMP)"""
+    p.iconst(d, L.YB + 4 * SIDE_TMP)
 
 
 def _side_at(p: Prog, L: C.Layout, i: int) -> None:
@@ -648,15 +676,17 @@ def _kernel(p: Prog, L: C.Layout) -> None:
     """b[0..15] += g x wave(phase): R8 the phase (+ 2^31), R9 the increment, F5 g, R4 the wave
     (0..3); b at W bv. Clobbers every register but R4, I0 (walks b), I12."""
     p.iconst(10, -32)
-    p.float_(15, 9, 10)
-    p.fconst(12, 0.5)
-    p.fop(7, 12, "-", 15)                        # thr = 1/2 - increment
-    M.recip(p)
-    p.fpass(6, 15)                               # 1 / increment
     p.ld(0, L.W[WN["bv"]])
     p.seti(0, 0)
     p.fconst(3, 1.0)
-    p.fconst(2, 0.5)
+
+    def blep_setup():                            # (2026-11-21: only the saw's and the square's: TRI and SIN read
+        p.float_(15, 9, 10)                      # neither F6 nor F7)
+        p.fconst(12, 0.5)
+        p.fop(7, 12, "-", 15)                    # thr = 1/2 - increment
+        M.recip(p)
+        p.fpass(6, 15)                           # 1 / increment
+        p.fconst(2, 0.5)
 
     def acc(v: int) -> None:
         p.ldi(13, 0, 0)
@@ -665,6 +695,8 @@ def _kernel(p: Prog, L: C.Layout) -> None:
         p.stpost(0, 13)
 
     def saw():
+        blep_setup()
+
         def one():
             p.float_(0, 8, 10)
             p.iop(8, 8, "+", 9)
@@ -673,20 +705,39 @@ def _kernel(p: Prog, L: C.Layout) -> None:
         p.loop_r(11, M.N, one)
 
     def sqr():
+        """(2026-11-21, the User's pick for speed) the square as sgn(x) (1 - b): the two saws' BLEPs are one BLEP of the doubled phase z
+        (both edges sit at z's wrap, at the same t), its sign the sign of x"""
+        blep_setup()
+        p.fop(7, 7, "+", 7)
+        p.fop(7, 7, "-", 2)                      # thr = 1/2 - 2 increments
+        p.fop(6, 6, "*", 2)                      # 1 / (2 increments)
         _k(p, 5, 5, "*", 0.5)
+        p.iop(4, 9, "+", 9)                      # the doubled phase's increment
         p.iconst(15, HALF)
+        p.iop(15, 15, "+", 8)
+        p.iop(15, 15, "+", 8)                    # z = 2 phase (+ 2^31)
 
         def one():
-            p.float_(0, 8, 10)
-            p.iop(4, 8, "+", 15)
-            p.float_(4, 4, 10)
+            p.float_(0, 15, 10)
+            p.iop(15, 15, "+", 4)
+            M.fabs(p, 1, 0)
+            p.fpass(13, 5)                       # (2026-11-21, filt-opt) 1.0 x g is g (g = F5, itself a product: a
+                                                 # finite or canonical word), so no BLEP: g with no multiply
+            p.ldi(14, 0, 0)                      # (rides on the pass)
+
+            def blep():
+                p.fop(1, 2, "-", 1)
+                p.fop(1, 1, "*", 6)
+                p.fop(1, 3, "-", 1)
+                p.fop(1, 1, "*", 1)
+                p.fop(13, 3, "-", 1)
+                p.fop(13, 13, "*", 5)
+            p.if_(1, "GT", 7, blep)
+            p.ifz(8, "LT", lambda: p.fop(14, 14, "-", 13), lambda: p.fop(14, 14, "+", 13))
             p.iop(8, 8, "+", 9)
-            _saw(p, 1, 0, 14, 7, 6, 2, 3)
-            _saw(p, 13, 4, 14, 7, 6, 2, 3)
-            p.fop(1, 1, "-", 13)
-            acc(1)
+            p.stpost(0, 14)
         p.loop_r(11, M.N, one)
-        p.iconst(4, 1)                           # (R4 the wave again)
+        p.iconst(4, 1)
 
     def tri():
         p.fconst(2, 4.0)
@@ -701,6 +752,8 @@ def _kernel(p: Prog, L: C.Layout) -> None:
         p.loop_r(11, M.N, one)
 
     def sin():
+        if SIN2:
+            return _sin2(p, L)
         q = (2, 4, 6, 7, 15)
         for r, c in zip(q, SIN_Q):
             p.fconst(r, c)
@@ -712,6 +765,57 @@ def _kernel(p: Prog, L: C.Layout) -> None:
             acc(1)
         p.loop_r(11, M.N, one)
     _dispatch(p, 4, (saw, sqr, tri, sin))
+
+
+SIN2 = True                                      # (perf, 2026-11-21) the sine kernel two samples at a time (_sin2)
+
+
+def _sin2(p: Prog, L: C.Layout) -> None:
+    """the sine kernel's 16 samples as 8 pairs: each sample's operations as _kernel's sin (_sin, acc), on its own
+    registers, in the same order (bit for bit); the two samples' chains side by side, so a multiply of one rides
+    with an add of the other (multifunction, dnfw.perc.mf's proven forms; dnfw.mnm.sched). Q's coefficients and 1.0
+    from the filters' KC table through I1. In: R8 the phase, R9 the increment, F5 g, I0 at b."""
+    from ...mnm.sched import Sched
+    kc = M._kc
+    X = ctx(L)
+    p.iconst(12, X.T["kc"][0])
+    p.seti(1, 12)
+    p.ipass(14, 9)                               # the increment
+    p.iconst(15, -32)
+    p.ldi(6, kc("k1"), 1)                        # 1.0
+    p.ipass(10, 8)                               # the phase (an integer add's first operand: R8..R15)
+
+    def pair():
+        s = Sched()
+        for u in (2, 3):                         # f = FLOAT the phase; the phase moves on
+            s.raw(lambda q, u=u: q.float_(u, 10, 15), (10, 15), (u,))
+            s.raw(lambda q: q.iop(10, 10, "+", 14), (10, 14), (10,))
+        lanes = ((0, 2, 4, 9, 12), (1, 3, 7, 8, 13))    # d, u, t, m, b (R10 the phase, R11 the count)
+        for d, u, t, m, b in lanes:
+            s.add(u, u, u)                       # u = 2 f
+            s.mul(t, u, u)                       # t = u^2
+        for d, u, t, m, b in lanes:
+            s.ld(b, kc("sq4"), 1)
+            s.mul(m, b, t)                       # q4 t (the PASS of q4, then its multiply)
+        for k in (3, 2, 1, 0):
+            for d, u, t, m, b in lanes:
+                s.ld(b, kc(f"sq{k}"), 1)
+                s.add(d, m, b)                   # + q_k
+                if k:
+                    s.mul(m, d, t)               # x t
+        for d, u, t, m, b in lanes:
+            s.sub(t, 6, t)                       # 1 - t
+            s.mul(t, t, u)                       # (1 - t) u
+            s.mul(d, d, t)
+            s.mul(m, d, 5)                       # x g (acc)
+        for lane, (d, u, t, m, b) in enumerate(lanes):
+            s.ld(b, lane, 0)
+            s.add(b, b, m)                       # b + g w
+        s.emit(p)
+        p.stpost(0, 12)
+        p.stpost(0, 13)
+    p.loop_r(11, M.N // 2, pair)
+    p.iconst(4, 3)                               # (R4 the wave again: the kernel keeps it)
 
 
 def _jobs(p: Prog, L: C.Layout) -> None:
@@ -763,25 +867,25 @@ def _jobs(p: Prog, L: C.Layout) -> None:
         def side():
             p.ld(2, W[WN["bv"]])
             p.ipass(3, 0)
-            _side_at(p, L, 5)
+            _side_tmp(p, L, 1)
+            p.seti(1, 1)                         # (I1: its moves ride on the computes)
             p.seti(0, 2)
 
             def neg():
                 p.ldpost(1, 0)
-                p.fconst(12, 0.0)
-                p.fop(1, 12, "-", 1)
-                p.stpost(5, 1)
+                p.fop(1, 13, "-", 1)
+                p.stpost(1, 1)
 
             def lr():
                 p.ldpost(1, 0)
-                p.ldi(2, 0, 5)
+                p.ldi(2, 0, 1)
                 p.fop(2, 2, "+", 2)
                 p.fop(2, 2, "+", 1)
-                p.stpost(5, 2)
+                p.stpost(1, 2)
             def second():
                 p.iconst(12, 1)
                 p.if_(3, "EQ", 12, lambda: p.loop_r(11, M.N, lr), kind="i")
-            p.ifz(3, "EQ", lambda: p.loop_r(11, M.N, neg), second)
+            p.ifz(3, "EQ", lambda: (p.fconst(13, 0.0), p.loop_r(11, M.N, neg)), second)
         p.if_(5, "NE", 12, side)
         p.ld(8, W[WN["pass"]])
         p.iconst(12, 1)
@@ -804,23 +908,26 @@ def _job(p: Prog, L: C.Layout) -> None:
         p.ipass(12, 0)
         p.iop(0, 12, "+", 1)
         p.seti(2, 0)
-        p.ldi(1, 0, 2)                           # a
-        p.ldi(2, K_C - K_A, 2)                   # c
-        _ld(p, 3, S_SPR)
-        p.mul_ssi(3, 3, 1)
-        _ld(p, 8, S_Q0)
-        p.iop(8, 8, "+", 3)
-        p.iop(8, 8, "+", 2)
-        _ld(p, 3, D_DINC)
-        p.mul_ssi(3, 3, 1)
-        _ld(p, 9, D_INC1)
-        p.iop(9, 9, "+", 3)
-        _ld(p, 5, D_GC)
-        _ld(p, 4, D_W1)
-        p.ldi(10, K_S - K_A, 2)                  # its side
-        _ld(p, 11, D_SEL)
+        p.ldi(10, K_S - K_A, 2)                  # its side (2026-11-21: tested first, a copy of the other side
+        _ld(p, 11, D_SEL)                        # skipped before its words are read)
         p.iconst(6, 1)
         p.ifz(11, "NE", lambda: p.if_(10, "NE", 11, lambda: p.iconst(6, 0), kind="i"))
+
+        def words():
+            p.ldi(1, 0, 2)                       # a
+            p.ldi(2, K_C - K_A, 2)               # c
+            _ld(p, 3, S_SPR)
+            p.mul_ssi(3, 3, 1)
+            _ld(p, 8, S_Q0)
+            p.iop(8, 8, "+", 3)
+            p.iop(8, 8, "+", 2)
+            _ld(p, 3, D_DINC)
+            p.mul_ssi(3, 3, 1)
+            _ld(p, 9, D_INC1)
+            p.iop(9, 9, "+", 3)
+            _ld(p, 5, D_GC)
+            _ld(p, 4, D_W1)
+        p.ifz(6, "NE", words)
 
     def osc1():
         _ld(p, 8, S_Q0)
@@ -983,22 +1090,6 @@ def _tanh(p: Prog) -> None:
     p.call("a2tp", body)
 
 
-# (perf, 2026-11-12) _out's knee: a2tp's polynomial inline, its eight lower coefficients held in these registers for
-# the half (the loop's free ones), the same operations; () = a2tp called as before
-KNEE_REGS = (0, 3, 4, 6, 7, 8, 9, 10)
-
-
-def _tanh_regs(p: Prog) -> None:
-    """_tanh's operations inline on F15, TANH_P[k] read from KNEE_REGS[k] (k < 8) where a2tp loads it into R12: the
-    same values. Clobbers F12-F14."""
-    _k(p, 15, 15, "MIN", 2.0)
-    _k(p, 15, 15, "MAX", -2.0)
-    p.fop(14, 15, "*", 15)
-    p.fconst(13, TANH_P[-1])
-    for k in range(len(TANH_P) - 2, -1, -1):
-        p.fop(13, 13, "*", 14)
-        p.fop(13, 13, "+", KNEE_REGS[k])
-    p.fop(15, 15, "*", 13)
 
 
 def _noise(p: Prog, L: C.Layout) -> None:
@@ -1011,12 +1102,12 @@ def _noise(p: Prog, L: C.Layout) -> None:
         p.iconst(10, -15)
         p.ld(0, L.W[WN["bv"]])
         p.seti(0, 0)
+        p.iconst(14, -16384)                     # (2026-11-21: once, not every sample; xor1 leaves R14 alone)
 
         def one():
             _noise_step(p, 8)
             p.lsh(13, 8, -17)
-            p.iconst(12, -16384)
-            p.iop(13, 12, "+", 13)
+            p.iop(13, 14, "+", 13)
             p.float_(1, 13, 10)
             p.fop(1, 1, "*", 5)
             p.ldi(2, 0, 0)
@@ -1038,6 +1129,8 @@ def _drive(p: Prog, L: C.Layout) -> None:
         p.seti(0, 0)
 
         if DRV2:
+            p.iconst(12, ctx(L).T["kc"][0])     # (2026-11-21, filt-opt) its constants from the filters' KC table
+            p.seti(1, 12)
             p.loop_r(11, M.N // 2, lambda: _drive2(p))
             return
 
@@ -1060,59 +1153,56 @@ DRV2 = True                                      # (perf, 2026-11-12) _drive2; F
 def _drive2(p: Prog) -> None:
     """two of _drive's samples (b at I0, I0 two words on): its operations on the same values (so bit for bit),
     a2tp's polynomial inlined and the two run side by side (dnfw.mnm.sched): each coefficient loaded once for
-    both, one's multiply with the other's add in one instruction. F5 drive, F6 dw kept; R11 the loop's."""
+    both, one's multiply with the other's add in one instruction. F5 drive, F6 dw kept; R11 the loop's.
+    (2026-11-21, filt-opt) the constants read from the filters' KC table through I1 (each load a move that rides on a
+    compute, not a constant load of its own) and the two samples stored by post-modify (I0 two words on, no pointer
+    arithmetic): the same values, the same words"""
     from ...mnm.sched import Sched
+    kc = M._kc
     s = Sched()
     for x, y, s2, am, aa in ((1, 10, 4, 0, 8), (2, 13, 7, 3, 9)):
         s.ld(x, x - 1, 0)
         s.mul(y, x, 5)
-        s.const(12, 2.0)
+        s.ld(12, kc("k2"), 1)
         s.fop(y, y, "MIN", 12)
-        s.const(12, -2.0)
+        s.ld(12, kc("km2"), 1)
         s.fop(y, y, "MAX", 12)
         s.mul(s2, y, y)
-    s.const(0, TANH_P[-1])
-    s.const(3, TANH_P[-1])
-    for c in TANH_P[-2::-1]:
+    n = len(TANH_P) - 1
+    s.ld(0, kc(f"tp{n}"), 1)
+    s.ld(3, kc(f"tp{n}"), 1)
+    for k in range(n - 1, -1, -1):
         s.mul(8, 0, 4)
         s.mul(9, 3, 7)
-        s.const(12, c)
+        s.ld(12, kc(f"tp{k}"), 1)
         s.add(0, 8, 12)
         s.add(3, 9, 12)
     for x, y, a, t in ((1, 10, 0, 15), (2, 13, 3, 14)):
         s.mul(t, y, a)                           # tanh's curve
-        s.const(12, 0.5)
+        s.ld(12, kc("khalf"), 1)
         s.mul(t, t, 12)
         s.sub(t, t, x)
         s.mul(t, t, 6)
         s.add(x, x, t)
-        s.st(x - 1, 0, x)
     s.emit(p)
-    p.geti(12, 0)
-    p.iconst(13, 8)
-    p.iop(12, 12, "+", 13)
-    p.seti(0, 12)
+    p.stpost(0, 1)
+    p.stpost(0, 2)
 
 
-def _filter(p: Prog, L: C.Layout, side: bool = False) -> None:
+def _filter(p: Prog, L: C.Layout) -> None:
     """the filter (dnfw.engines.analog2.filters.models) in place over b: its words from the block's, the states at
-    S_Z (cleared past 1e4 or NaN, as a2m_block); I3 kept round it (the models clobber it). SIDE (2026-11-11,
-    WDTH): the same filter over this half's side block, its own states at S_Z2, before b's (the ramp moves on
-    with b's)"""
+    S_Z (cleared past 1e4 or NaN, as a2m_block); I3 kept round it (the models clobber it). (The WDTH side: _side12.)"""
     X = ctx(L)
     W = L.W
-    z = S_Z2 if side else S_Z
+    z = S_Z
     for src, w in ((D_GS, "gs"), (D_GA, "ge"), (D_RES, "res"), (D_MODE, "mode"), (D_MODEL, "model")):
         _ld(p, 0, src)
         p.st(X.C[w], 0)
-    if side:
-        _side_at(p, L, 0)                        # (R0 its address)
-    else:
-        _ld(p, 0, D_GA)                          # the next half ramps on from here
-        _sv(p, D_GS, 0)
-        _ld(p, 0, D_GB)
-        _sv(p, D_GA, 0)
-        p.ld(0, W[WN["bv"]])
+    _ld(p, 0, D_GA)                              # the next half ramps on from here
+    _sv(p, D_GS, 0)
+    _ld(p, 0, D_GB)
+    _sv(p, D_GA, 0)
+    p.ld(0, W[WN["bv"]])
     p.st(X.C["buf"], 0)
     b3 = p.ibias.get(3)                          # the voice's I3 bias (shrink), put back with it below
     _ri(p, 0, "I3")
@@ -1138,38 +1228,216 @@ def _filter(p: Prog, L: C.Layout, side: bool = False) -> None:
     p.seti(3, 0, bias=b3)                        # the models point I3 at their own tables: the voice's biased one back
 
 
+SIDE12_KNEE = True                               # the knees on the side's states (the User's ask; on the peak grid they never
+                                                 # engage, and they cost 512 a block: False drops them)
+SIDE12_DBP = (0.15, 0.95)                        # DIOD BP's side level at RES 0 and 127 (linear between)
+SIDE12_KMIN = 0.1                                # the side's least damping: bounded at RES 127
+# LADR, OTA, DIOD at low RES: the side's level x min(1, LOW0 + LOWK RES) (1 from RES 25). Their filters are not the
+# side's SVF, so the side's phase against the mid differs; at RES 0 .. 15 that alone put B's stereo peak up to
+# +0.6 dB above A's (DIOD LP24 RES 5) though the side was not louder. The trims a CUT sweep needed (peak grid,
+# 2026-11-21): LADR 0.835 / 0.975 / 0.995 at RES 0 / 5 / 10, OTA 0.83 / 0.96 / 1, DIOD 0.91 / 0.88 / 0.905 / 0.97
+# at RES 0 / 5 / 10 / 15, 1 from RES 20; this line stays under all of them
+SIDE12_LOW0, SIDE12_LOWK = 0.80, 0.008
+# every model: the side at 0.97 of the level above (-0.26 dB). On the full peak grid (every model x mode x RES x DRV,
+# 2026-11-21) B's stereo peak still rose above A's by up to +0.035 dB (MS20 LP24), +0.005 (SVF): the side's filter runs
+# on the half's end cutoff, the model's on its ramp. The trims needed were 0.99 at the least; B's peak is convex in the
+# side's level and at level 0 is the mid's (never above A's), so any level under the needed trim keeps B under A
+SIDE12_LEVEL = 0.97
+# LADR, OTA, DIOD's LP24 DC gain against RES / 100 (0..1), degree 4, fitted on ref.py's models
+# (RES 0..100 by 5; within 0.21, 0.04, 0.44 dB); SVF and MS20 pass DC at 1
+SIDE12_DC = ((0.99007, -2.99361, 5.73099, -5.59232, 2.08664),
+             (0.99593, -1.40077, 2.58044, -2.46765, 0.91043),
+             (0.95682, -2.08525, 8.17025, -9.73937, 4.07121))
+
+
+def _side_knee(p: Prog, r: int, lim: float) -> None:
+    """Fr past +-lim (|Fr| in F15, lim in F12): lim + lim tanh((|Fr| - lim) / lim), its sign kept, as the SVF stage's
+    knee (filters.models _svf_stage over); squashed by 1 dB or more lights the voice's clip. Clobbers F10, F12-F15."""
+    p.fpass(10, 15)
+    p.fop(15, 15, "-", 12)
+    if lim != 1.0:
+        p.fconst(12, 1.0 / lim)
+        p.fop(15, 15, "*", 12)
+    p.fconst(12, 2.0)
+    p.fop(15, 15, "MIN", 12)
+    M.tanh(p)
+    if lim != 1.0:
+        p.fop(15, 15, "+", 15)
+    p.fconst(12, lim)
+    p.fop(15, 12, "+", 15)
+    p.fconst(12, 1.122)
+    p.fop(12, 15, "*", 12)
+    M._clip(p, 12, "LT", 10)
+    p.fconst(12, 0.0)
+    p.if_(r, "LT", 12, lambda: p.fop(r, 12, "-", 15), lambda: p.fpass(r, 15))
+
+
+def _side12(p: Prog, L: C.Layout) -> None:
+    """the WDTH side through one linear SVF stage (12 dB, any model; LP24 two), the mode's SVF mix, at this
+    half's end cutoff (no ramp), RES's damping (not under SIDE12_KMIN), the SVF stage's knees on its states, the chosen
+    model's passband level at RES (SIDE12_DC; LADR, OTA, DIOD trimmed at low RES, SIDE12_LOW0); LP24 adds the SVF's second stage (K2ND, 24 dB, as the SVF's own LP24):
+    its states S_Z2 .. S_Z2 + 3"""
+    X = ctx(L)
+    W = L.W
+    for src, w in ((D_GA, "ge"), (D_RES, "res"), (D_MODE, "mode")):
+        _ld(p, 0, src)
+        p.st(X.C[w], 0)
+    p.iconst(9, 0)
+    for k in range(4):
+        _ld(p, 0, S_Z2 + k)
+        p.iconst(12, 0x7FFFFFFF)
+        p.iop(0, 0, "AND", 12)
+        p.iconst(12, 0x461C4000)                 # 1e4 (or NaN): cleared, as _filter
+        p.if_(0, "GE", 12, lambda: p.iconst(9, 1), kind="i")
+    p.ifz(9, "NE", lambda: (p.iconst(0, 0), [_sv(p, S_Z2 + k, 0) for k in range(4)]))
+    _ld(p, 1, S_Z2)
+    _ld(p, 2, S_Z2 + 1)
+    p.st(X.C["t1"], 1)
+    p.st(X.C["t2"], 2)
+    _ld(p, 0, D_RES)                             # the model's LP passband (DC) gain at RES, so the side keeps its level
+    _k(p, 0, 0, "MIN", 100.0)                    # (past 100 the models self-oscillate: held at 100's)
+    _k(p, 0, 0, "*", 0.01)
+    _ld(p, 1, D_MODEL)
+    p.fconst(2, SIDE12_LEVEL)                    # SVF, MS20: 1 (x SIDE12_LEVEL)
+
+    def horner(c):
+        p.fconst(2, c[-1])
+        for ck in c[-2::-1]:
+            p.fop(2, 2, "*", 0)
+            _k(p, 2, 2, "+", ck)
+    for mi, c in ((M.LADR, SIDE12_DC[0]), (M.OTA, SIDE12_DC[1]), (M.DIOD, SIDE12_DC[2])):
+        c = tuple(SIDE12_LEVEL * ck for ck in c)
+        p.iconst(12, mi)
+        p.if_(1, "EQ", 12, lambda c=c: horner(c), kind="i")
+
+    def diod_bp():                               # DIOD's BP is far quieter than the SVF's (grid: +15 dB at RES 0, +2.4 at
+        _ld(p, 0, D_RES)                         # 127 with the LP gain): its own level, SIDE12_DBP at RES 0 .. 127
+        _k(p, 0, 0, "MIN", 127.0)
+        _k(p, 0, 0, "*", SIDE12_LEVEL * (SIDE12_DBP[1] - SIDE12_DBP[0]) / 127.0)
+        _k(p, 2, 0, "+", SIDE12_LEVEL * SIDE12_DBP[0])
+    _ld(p, 3, D_MODE)
+    p.iconst(12, 2)
+    p.if_(3, "EQ", 12, lambda: (p.iconst(12, M.DIOD), p.if_(1, "EQ", 12, diod_bp, kind="i")), kind="i")
+
+    def low():                                   # LADR, OTA, DIOD: x min(1, LOW0 + LOWK RES) (SIDE12_LOW0)
+        _ld(p, 0, D_RES)
+        _k(p, 0, 0, "*", SIDE12_LOWK)
+        _k(p, 0, 0, "+", SIDE12_LOW0)
+        _k(p, 0, 0, "MIN", 1.0)
+        p.fop(2, 2, "*", 0)
+    p.iconst(12, M.SVF)
+    p.if_(1, "NE", 12, lambda: (p.iconst(12, M.MS20), p.if_(1, "NE", 12, low, kind="i")), kind="i")
+    p.st(X.C["t0"], 2)
+    b3 = p.ibias.get(3)
+    _ri(p, 0, "I3")
+    p.st(W[WN["i3"]], 0)
+    M.svf_k(p, X, 9)
+    p.fconst(12, SIDE12_KMIN)
+    p.fop(9, 9, "MAX", 12)
+    M._svf_coef(p, X, "ge", 9)                   # F15 a1, F14 a2, F13 a3
+    p.fpass(3, 15)
+    p.fpass(4, 14)
+    p.fpass(5, 13)
+    M._rowi(p, X, "svf")
+    p.ldi(6, 0, 3)                               # cx
+    p.ldi(7, 1, 3)
+    p.fop(7, 7, "*", 9)
+    p.ldi(10, 2, 3)
+    p.fop(7, 7, "+", 10)                         # cb = cbk k + cb1
+    p.ldi(8, 3, 3)                               # cl
+    p.ld(10, X.C["t0"])
+    for r in (6, 7, 8):
+        p.fop(r, r, "*", 10)                     # the mix x the model's DC gain
+    p.ld(1, X.C["t1"])
+    p.ld(2, X.C["t2"])
+    _side_tmp(p, L, 0)
+    p.seti(0, 0)
+    p.fconst(9, 1.0)                             # (the band state's knee bound, _side_one)
+
+    p.loop_r(11, M.N, lambda: _side_one(p, True))
+    p.ld(0, W[WN["i3"]])
+    p.seti(3, 0, bias=b3)
+    _sv(p, S_Z2, 1)
+    _sv(p, S_Z2 + 1, 2)
+    _ld(p, 0, D_MODE)
+
+    def lp24():                                  # LP24: the SVF's second stage (K2ND, Q 0.707, low-pass), as its own
+        p.fconst(9, M.K2ND)
+        M._svf_coef(p, X, "ge", 9)
+        p.fpass(3, 15)
+        p.fpass(4, 14)
+        p.fpass(5, 13)
+        _ld(p, 1, S_Z2 + 2)
+        _ld(p, 2, S_Z2 + 3)
+        _side_tmp(p, L, 0)
+        p.seti(0, 0)
+        p.fconst(9, 1.0)
+        p.loop_r(11, M.N, lambda: _side_one(p, False))
+        _sv(p, S_Z2 + 2, 1)
+        _sv(p, S_Z2 + 3, 2)
+    p.iconst(12, 1)
+    p.if_(0, "EQ", 12, lp24, kind="i")
+
+
+def _side_one(p: Prog, mix: bool) -> None:
+    """one side sample (I0): the linear SVF (F1 ic1, F2 ic2, F3-F5 a1-a3), out = cx x + cb v1 + cl v2 (F6-F8) when MIX,
+    else the low-pass v2; then the SVF stage's knees on the states (band to 1, low-pass to 2; F9 holds 1.0).
+    (perf, 2026-11-21, filt-opt) the temporaries' registers chosen so two multiplies pair with adds (multifunction,
+    dnfw.mnm.sched): the same operations on the same values, in the same order for each value"""
+    from ...mnm.sched import Sched
+    s = Sched()
+    s.ld(0, 0, 0)
+    s.sub(15, 0, 2)                              # v3 = x - ic2
+    s.mul(10, 3, 1)
+    s.mul(12, 4, 15)
+    s.add(13, 10, 12)                            # v1
+    s.mul(14, 4, 1)
+    s.mul(10, 5, 15)
+    s.add(14, 14, 10)
+    s.add(14, 2, 14)                             # v2
+    s.add(15, 13, 13)
+    s.sub(1, 15, 1)
+    s.add(15, 14, 14)
+    s.sub(2, 15, 2)
+    if mix:
+        s.mul(12, 6, 0)
+        s.mul(13, 7, 13)
+        s.add(10, 12, 13)
+        s.mul(15, 8, 14)
+        s.add(10, 10, 15)                        # cx x + cb v1 + cl v2
+        s.emit(p)
+        p.stpost(0, 10)
+    else:
+        s.emit(p)
+        p.stpost(0, 14)
+    if not SIDE12_KNEE:
+        return
+    M.fabs(p, 15, 1)
+    p.if_(15, "GT", 9, lambda: (p.fconst(12, 1.0), _side_knee(p, 1, 1.0)))   # (the knee reads its bound in F12)
+    M.fabs(p, 15, 2)
+    p.fconst(12, 2.0)
+    p.if_(15, "GT", 12, lambda: _side_knee(p, 2, 2.0))
+
+
 def _out(p: Prog, L: C.Layout) -> None:
-    """b = 2 x soft_knee(b, 16000) (a2_out, before the amplitude)"""
+    """b = 2 b (a2_out, before the amplitude). 2026-11-21 (the User: "just make it quieter! not a limiter"): Optimist's
+    soft knee (16000/32768, a protection for its Q15 output) is gone; ANALOG 2's level (perc.program LEVEL_DB) keeps
+    its loudest setting clear of the outputs' full scale"""
     p.ld(0, L.W[WN["bv"]])
     p.seti(0, 0)
-    p.fconst(5, KNEE)
-    if KNEE_REGS:
-        for r, c in zip(KNEE_REGS, TANH_P):
-            p.fconst(r, c)
 
     def one():
         p.ldi(1, 0, 0)
-        M.fabs(p, 2, 1)
-
-        def knee():
-            p.fop(15, 2, "-", 5)
-            p.fop(15, 15, "+", 15)
-            if KNEE_REGS:
-                _tanh_regs(p)
-            else:
-                _tanh(p)
-            _k(p, 15, 15, "*", 0.5)
-            p.fop(2, 5, "+", 15)
-            p.ifz(1, "LT", lambda: (p.fconst(12, 0.0), p.fop(1, 12, "-", 2)), lambda: p.fpass(1, 2), kind="f")
-        p.if_(2, "GT", 5, knee)
         p.fop(1, 1, "+", 1)
         p.stpost(0, 1)
     p.loop_r(11, M.N, one)
 
 
 def _side_out(p: Prog, L: C.Layout) -> None:
-    """the side x 2 WDTH (b's 2 x after the knee; WDTH's own), the block's |b| sum into the side block's word 32"""
+    """the side x 2 WDTH (b's 2 x; WDTH's own), the block's |b| sum into the side block's word 32"""
     _side_at(p, L, 5)
+    _side_tmp(p, L, 0)
+    p.seti(1, 0)
     _ld(p, 6, D_WID)
     p.ld(0, L.W[WN["bv"]])
     p.seti(0, 0)
@@ -1179,7 +1447,7 @@ def _side_out(p: Prog, L: C.Layout) -> None:
         p.ldpost(1, 0)
         M.fabs(p, 2, 1)
         p.fop(7, 7, "+", 2)
-        p.ldi(3, 0, 5)
+        p.ldpost(3, 1)
         p.fop(3, 3, "*", 6)
         p.stpost(5, 3)
     p.loop_r(11, M.N, one)
@@ -1219,10 +1487,15 @@ def half(p: Prog, L: C.Layout) -> None:
         p.lsh(9, 9, 4)
         p.iop(8, 8, "+", 9)
         _sv(p, ph, 8)
+    X = ctx(L)
+    p.iconst(0, 0)
+    p.st(X.C["cv"], 0)                           # (2026-11-21) the coefficient words: not this half's yet
+
     def side_filter():
         _ld(p, 0, D_WID)
         p.fconst(12, 0.0)
-        p.if_(0, "NE", 12, lambda: _filter(p, L, side=True))
+
+        p.if_(0, "NE", 12, lambda: _side12(p, L))
     PARA.stage(p, L, side_filter)
     _noise(p, L)
     _drive(p, L)

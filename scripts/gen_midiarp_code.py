@@ -63,7 +63,7 @@ def main() -> int:
         i = j
 
     code = {
-        "os": "Digitone II 1.11",
+        "os": "Digitone II 1.12",
         "stock_length": n,
         "edits": edits,
         # Read, not written: whole instructions around each edit and the code

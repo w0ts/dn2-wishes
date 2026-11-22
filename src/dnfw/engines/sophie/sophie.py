@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import math
 
+from ...md import core as MK
 from ...mnm import core as C
 from ...perc.dsl import Prog
 
@@ -68,17 +69,45 @@ def _sv(p: Prog, k: int, s: int) -> None:
     C.sts(p, k, s)
 
 
+# 2026-11-21 (eng-simd): the sample loop's constants as words of an L1 row read through I2 (plk.KTab), so a constant's
+# load is a move on the compute before it, not an instruction of its own; the same values, bit for bit. A constant
+# not in the row is loaded as before. _KT[0] is the row while the sample loop is emitted (half), else None.
+_KT: list = [None]
+KT_VALUES = (MMUL, 0.000001, 1.0, 0.085, AMP_END, 0.0, 18.0 / SR, 18000.0 / SR, 1.4, -1.0, 2.0 / 16777215.0, ("i", 0xFFFFFF), ("i", -1),
+             ("i", 1), ("i", 2), ("i", 3), ("i", 4), ("i", 5), ("i", 6),
+             2.2, 1.0 / TAU, -0.08, 0.86, 0.08, 0.14, 128.0 / 127.0, 1.35 / TAU, 0.18 / TAU, 0.18, 0.035, 0.012)
+
+
+def _kt_has(v) -> bool:
+    from ...perc.dsl import bits, f32
+    kt = _KT[0]
+    if kt is None:
+        return False
+    w = (v[1] & 0xFFFFFFFF) if isinstance(v, tuple) else bits(f32(v))
+    return w in kt.words
+
+
 def _k(p: Prog, d: int, x: float) -> None:
-    p.fconst(d, x)
+    if _kt_has(x):
+        _KT[0].ld(p, d, x)
+    else:
+        p.fconst(d, x)
+
+
+def _ki(p: Prog, d: int, n: int) -> None:
+    if _kt_has(("i", n)):
+        _KT[0].ld(p, d, ("i", n))
+    else:
+        p.iconst(d, n)
 
 
 def _mulk(p: Prog, d: int, a: int, x: float, t: int = 12) -> None:
-    p.fconst(t, x)
+    _k(p, t, x)
     p.fop(d, a, "*", t)
 
 
 def _addk(p: Prog, d: int, a: int, x: float, t: int = 12) -> None:
-    p.fconst(t, x)
+    _k(p, t, x)
     p.fop(d, a, "+", t)
 
 
@@ -100,7 +129,7 @@ def frac(p: Prog, x: int) -> None:
 
 def softclip(p: Prog, d: int, x: int) -> None:
     """Fd = x / (1 + |x|). Clobbers R4, R5, R12-R15, I12; d, x not R4/R5/R15."""
-    p.fconst(4, 0.0)
+    _k(p, 4, 0.0)
     p.fop(4, 4, "-", x)
     p.fop(4, 4, "MAX", x)                        # |x|
     _addk(p, 15, 4, 1.0)                         # (perf, 2026-11-12: in and out through F15, no copies)
@@ -120,9 +149,9 @@ def noise(p: Prog, d: int) -> None:
     p.lsh(1, 0, 5)
     p.xor(0, 0, 1, 12)
     _sv(p, S_RNG, 0)
-    p.iconst(12, 0xFFFFFF)
+    _ki(p, 12, 0xFFFFFF)
     p.iop(0, 0, "AND", 12)
-    p.iconst(12, 0)
+    _ki(p, 12, 0)
     p.float_(d, 0, 12)
     _mulk(p, d, d, 2.0 / 16777215.0)
     _addk(p, d, d, -1.0)
@@ -134,16 +163,14 @@ def exact(A: int, F: int, knobs, pre: int = 0) -> dict:
 
 
 def init(p: Prog, L: C.Layout) -> None:
-    p.iconst(0, 0)
-    for k in range(S_BASE + 1):
-        _sv(p, k, 0)
+    MK.zero_words(p, 0, S_BASE + 1)
     p.iconst(0, SEED)
     _sv(p, S_RNG, 0)
 
 
 def trig(p: Prog, L: C.Layout) -> None:
-    """A hit: the phases restart (two modulators a little apart), the envelopes at full, the
-    amplitude envelope's rate from DCAY (Sophie's Hit mode: fixed for the hit)."""
+    """A hit: the phases restart (two modulators a little apart), the envelopes at full; the amplitude envelope's
+    rate from DCAY is `live_coefs`' (2026-11-20: run after the trig, and again on the voice's turn while it rings)."""
     p.fconst(0, 0.0)
     for k in (S_CAR, S_M1, S_ATK, S_FBZ, S_NZ, S_CH):
         _sv(p, k, 0)
@@ -158,6 +185,13 @@ def trig(p: Prog, L: C.Layout) -> None:
     noise(p, 2)
     _mulk(p, 2, 2, 0.08 / TAU)
     _sv(p, S_M3, 2)
+    p.iconst(0, 1)
+    _sv(p, S_ON, 0)
+
+
+def live_coefs(p: Prog, L: C.Layout) -> None:
+    """2026-11-20 (live knobs): the amplitude envelope's rate from DCAY, at a trig (after it, in the render) and on
+    the voice's turn (dnfw.md.voice.live_turn, ~94 Hz): DCAY follows modulation and p-locks while a hit rings."""
     # decay = 0.03 x 2^(DCAY log2(4 / 0.03)) s; the envelope falls to AMP_END in that time:
     # amul = 2^(log2(AMP_END) / (decay x SR)) = e^y, y = ln(AMP_END) / (decay x SR), small
     _unit(p, 4, 0)
@@ -174,8 +208,6 @@ def trig(p: Prog, L: C.Layout) -> None:
     p.fop(6, 6, "*", 5)
     _addk(p, 6, 6, 1.0)                          # 1 + y + y^2/2 + y^3/6
     _sv(p, S_AMUL, 6)
-    p.iconst(0, 1)
-    _sv(p, S_ON, 0)
 
 
 def pitch(p: Prog, L: C.Layout) -> None:
@@ -301,16 +333,16 @@ def _envelopes(p: Prog) -> None:
     _ld(p, 6, S_MEN)
     _mulk(p, 6, 6, MMUL)
     _k(p, 12, 0.000001)
-    p.if_(6, "LT", 12, lambda: p.fconst(6, 0.0))
+    p.if_(6, "LT", 12, lambda: _k(p, 6, 0.0))
     _sv(p, S_MEN, 6)
     _ld(p, 7, S_ATK)
-    p.fconst(8, 1.0)
+    _k(p, 8, 1.0)
     p.fop(8, 8, "-", 7)
     _mulk(p, 8, 8, 0.085)
     p.fop(7, 7, "+", 8)
     _sv(p, S_ATK, 7)
     _k(p, 12, AMP_END)
-    p.if_(4, "LT", 12, lambda: (p.iconst(0, 0), _sv(p, S_ON, 0)))
+    p.if_(4, "LT", 12, lambda: (_ki(p, 0, 0), _sv(p, S_ON, 0)))
 
 
 def _advance(p: Prog, L: C.Layout) -> None:
@@ -360,14 +392,14 @@ def _mods(p: Prog, L: C.Layout) -> None:
     # (perf, 2026-11-12) m3 is read by STAK and SPLT alone (this sample's T_M3): the others skip its sine (S_M3 still
     # moves on in _advance, so a model changed mid-note finds the same phase)
     _ld(p, 0, D_MOD)
-    p.iconst(1, STAK)
-    p.if_(0, "EQ", 1, m3, lambda: (p.iconst(1, SPLT), p.if_(0, "EQ", 1, m3, kind="i")), kind="i")
+    _ki(p, 1, STAK)
+    p.if_(0, "EQ", 1, m3, lambda: (_ki(p, 1, SPLT), p.if_(0, "EQ", 1, m3, kind="i")), kind="i")
     # b: the metal envelope for PIPE and BOOM (Sophie's shaped models), else the pitch one
     _ld(p, 4, S_PEN)
     _ld(p, 0, D_MOD)
-    p.iconst(1, PIPE)
+    _ki(p, 1, PIPE)
     p.if_(0, "GE", 1, lambda: _ld(p, 4, S_MEN), kind="i")
-    p.iconst(1, KICK)
+    _ki(p, 1, KICK)
     p.if_(0, "EQ", 1, lambda: _ld(p, 4, S_PEN), kind="i")
     _sv(p, T_B, 4)
     _ld(p, 5, D_IX1)
@@ -577,7 +609,7 @@ def _tree(p: Prog, L: C.Layout, arms) -> None:
         arms[0][1](p, L)
         return
     mid = len(arms) // 2
-    p.iconst(1, arms[mid][0])
+    _ki(p, 1, arms[mid][0])
     p.if_(0, "LT", 1, lambda: _tree(p, L, arms[:mid]), lambda: _tree(p, L, arms[mid:]), kind="i")
 
 
@@ -588,7 +620,7 @@ def _crush(p: Prog) -> None:
     p.ifz(0, "LE", lambda: (_sv(p, S_CH, 8), _sv(p, S_CC, 1)))
     _ld(p, 8, S_CH)
     _ld(p, 0, S_CC)
-    p.iconst(12, -1)
+    _ki(p, 12, -1)
     p.iop(0, 12, "+", 0)
     _sv(p, S_CC, 0)
     _ld(p, 9, D_LEV)
@@ -606,7 +638,7 @@ def _sample(p: Prog, L: C.Layout) -> None:
     _envelopes(p)
 
     def silent():
-        p.fconst(8, 0.0)
+        _k(p, 8, 0.0)
         p.stpost(4, 8)
 
     def sound():
@@ -641,5 +673,11 @@ def half(p: Prog, L: C.Layout) -> None:
             p.stpost(4, 8)
 
     def run():
-        p.loop(L.W["n4"], 16, lambda: _sample(p, L))
+        from ..plaits.plk import KTab
+        _KT[0] = KTab(L.XB, 2, KT_VALUES)       # (the render scratch's XB row: anyone's between halves)
+        _KT[0].write(p)
+        try:
+            p.loop(L.W["n4"], 16, lambda: _sample(p, L))
+        finally:
+            _KT[0] = None
     p.ifz(0, "EQ", zeros, run)

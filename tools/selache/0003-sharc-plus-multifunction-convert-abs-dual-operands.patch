@@ -1,0 +1,152 @@
+diff --git a/selas/src/asmparse.rs b/selas/src/asmparse.rs
+index 29e8e6f..2f41e97 100644
+--- a/selas/src/asmparse.rs
++++ b/selas/src/asmparse.rs
+@@ -2812,6 +2812,9 @@ fn try_parse_multifunction(text: &str, line: u32) -> Result<Option<ComputeOp>> {
+             let sub_part = text[commas[1] + 1..].trim();
+             match parse_mf_dual_addsub(first_part, add_part, sub_part, line) {
+                 Ok(op) => return Ok(Some(op)),
++                // (as below: two ALU halves after a multiply are a multifunction or an error, never
++                // another reading)
++                Err(e) if is_mf_alu_text(add_part) && is_mf_alu_text(sub_part) => return Err(e),
+                 Err(_) => return Ok(None),
+             }
+         }
+@@ -2867,7 +2870,15 @@ fn is_mf_alu_text(text: &str) -> bool {
+     let rhs = &text[eq + 1..];
+     let moves = ["DM(", "PM(", "MODIFY", "BITREV"];
+     !moves.iter().any(|m| text.contains(m))
+-        && (rhs.contains(" + ") || rhs.contains(" - ") || rhs.contains("MIN(") || rhs.contains("MAX("))
++        && (rhs.contains('+')
++            || rhs.contains('-')
++            || rhs.contains("MIN(")
++            || rhs.contains("MAX(")
++            || rhs.contains("FLOAT ")
++            || rhs.contains("FIX ")
++            || rhs.contains("ABS ")
++            || rhs.contains("/2")
++            || rhs.contains("/ 2"))
+ }
+ 
+ /// Parse the MUL part of a multifunction instruction.
+@@ -3018,6 +3029,38 @@ fn parse_mf_alu_part(text: &str, fp: bool, line: u32) -> Result<(u8, u16, u16, u
+         }
+     }
+ 
++    // Fa = FLOAT Rxa BY Rya (011010), Ra = FIX Fxa BY Rya (011011), Fa = ABS Fxa (011101): float only
++    // (before this, selas read these as the multiply alone and dropped the ALU half without a word)
++    for (name, sel) in [("FLOAT ", 5u8), ("FIX ", 6u8)] {
++        if let Some(args) = rhs.strip_prefix(name) {
++            if !fp {
++                return Err(Error::Parse {
++                    line,
++                    msg: format!("multifunction {name}.. BY .. is a float form: {text}"),
++                });
++            }
++            let (lhs_str, rhs_str) = split_at_str(args, " BY ").ok_or_else(|| Error::Parse {
++                line,
++                msg: format!("expected {name}Rx BY Ry: {text}"),
++            })?;
++            let rxa = parse_dreg(lhs_str.trim(), line)?;
++            let rya = parse_dreg(rhs_str.trim(), line)?;
++            let (rxa_2, rya_2) = check_mf_alu_regs(rxa, rya, fp, line)?;
++            return Ok((sel, ra, rxa_2, rya_2));
++        }
++    }
++    if let Some(arg) = rhs.strip_prefix("ABS ") {
++        if !fp {
++            return Err(Error::Parse {
++                line,
++                msg: format!("multifunction ABS is a float form: {text}"),
++            });
++        }
++        let rxa = parse_dreg(arg.trim(), line)?;
++        let (rxa_2, _) = check_mf_alu_regs(rxa, 12, fp, line)?;
++        return Ok((7, ra, rxa_2, 0));
++    }
++
+     // Ra = Rxa + Rya
+     if let Some((lhs_str, rhs_str)) = split_at_str(rhs, " + ") {
+         let rxa = parse_dreg(lhs_str.trim(), line)?;
+@@ -3105,6 +3148,21 @@ fn parse_mf_dual_addsub(
+         msg: format!("expected '=' in subtract part: {sub_text}"),
+     })?;
+     let rs = parse_dreg(sub_text[..sub_eq].trim(), line)?;
++    // patch 0003: the subtract reads the add's own operands (the word has one Rxa, one Rya); before, its
++    // operands were not read at all, so `Rs = Rxa - Rother` assembled as `Rs = Rxa - Rya` without a word
++    let sub_rhs = sub_text[sub_eq + 1..].trim();
++    let (sx, sy) = split_at_str(sub_rhs, " - ").ok_or_else(|| Error::Parse {
++        line,
++        msg: format!("dual add/sub: expected Rs = Rxa - Rya: {sub_text}"),
++    })?;
++    let sxa = parse_dreg(sx.trim(), line)?;
++    let sya = parse_dreg(sy.trim(), line)?;
++    if check_mf_alu_regs(sxa, sya, fp, line)? != (rxa, rya) {
++        return Err(Error::Parse {
++            line,
++            msg: format!("dual add/sub: the subtract must read the add's operands: {add_text}, {sub_text}"),
++        });
++    }
+     Ok(ComputeOp::Multi(MultiOp::MulDualAddSub {
+         fp,
+         rm,
+@@ -5286,6 +5344,12 @@ mod tests {
+             ("F12 = F0 * F7, F8 = MAX(F8, F12)", 0x5ec830),
+             ("F12 = F0 * F7, F8 = MIN(F8, F12)", 0x5fc830),
+             ("F13 = F1 * F5, F9 = F9 + F13", 0x58d955),
++            // patch 0003: the ALU halves selas used to drop (stock 1.12's own words, e.g. sw 0x1c101c
++            // `f7=f0*f7 , r7=fix f11 by r15` = 0x5b773f, sw 0x1c0cd0 `f6=f0*f7 , f8=abs f11` = 0x5d683e)
++            ("F12 = F0 * F7, F8 = FLOAT R8 BY R12", 0x5ac830),
++            ("F7 = F0 * F7, R7 = FIX F11 BY R15", 0x5b773f),
++            ("F6 = F0 * F7, F8 = ABS F11", 0x5d683c),
++            ("F12 = F0 * F7, F8 = (F8 + F12)/2", 0x5cc830),
+         ] {
+             let instr = parse_instruction(text).unwrap_or_else(|e| panic!("{text}: {e}"));
+             let bytes = encode::encode(&instr).unwrap();
+@@ -5307,6 +5371,13 @@ mod tests {
+             "F12 = F0 * F7, F8 = F8 + F9",
+             "F12 = F0 * F7, F8 = MIN(F8, F9)",
+             "R12 = R0 * R7 (SSF), R8 = MAX(R8, R12)",
++            // patch 0003
++            "F12 = F0 * F7, F8 = FLOAT R4 BY R12",
++            "F12 = F0 * F7, R8 = FIX F8 BY R1",
++            "F12 = F0 * F7, F8 = ABS F1",
++            "R12 = R0 * R7 (SSFR), R8 = ABS R8",
++            "F12 = F0 * F7, F8 = F8 + F12, F9 = F8 - F2",
++            "F12 = F0 * F7, F8 = F8 + F1, F9 = F8 - F1",
+         ] {
+             assert!(parse_instruction(text).is_err(), "{text} was accepted");
+         }
+diff --git a/selinstr/src/encode.rs b/selinstr/src/encode.rs
+index 0b0ac07..b860879 100644
+--- a/selinstr/src/encode.rs
++++ b/selinstr/src/encode.rs
+@@ -235,7 +235,8 @@ pub enum ShiftOp {
+ pub enum MultiOp {
+     /// MUL/ALU 32-bit fixed or 32/40-bit float.
+     /// mul_sel: 0=Rm=Rxm*Rym, 1=MRF+=Rxm*Rym, 2=Rm=MRF+Rxm*Rym, 3=MRF-=Rxm*Rym
+-    /// alu_sel: 0=Ra=Rxa+Rya, 1=Ra=Rxa-Rya, 2=Ra=(Rxa+Rya)/2, 3=Fa=MAX(Fxa,Fya), 4=Fa=MIN(Fxa,Fya) (float only)
++    /// alu_sel: 0=Ra=Rxa+Rya, 1=Ra=Rxa-Rya, 2=Ra=(Rxa+Rya)/2, 3=Fa=MAX(Fxa,Fya), 4=Fa=MIN(Fxa,Fya),
++    /// 5=Fa=FLOAT Rxa BY Rya, 6=Ra=FIX Fxa BY Rya, 7=Fa=ABS Fxa (3..7 float only)
+     MulAlu {
+         fp: bool,
+         mul_sel: u8,
+@@ -1164,7 +1165,7 @@ fn encode_multi(op: &MultiOp) -> Result<u32, EncodeError> {
+             //   32-bit fixed: 0b0_mmmm_aa, mmmm 0001 Rm = Rx*Ry (SSFR), 0010 MRF += .. (SSF),
+             //     0011 Rm = MRF + .. (SSFR), 0100 MRF -= .. (SSF); aa 00 +, 01 -, 10 (+)/2
+             //   32/40-bit float: 0b011_aaa, the multiply always Fm = Fx * Fy; aaa 000 +, 001 -,
+-            //     100 (+)/2, 110 MAX, 111 MIN
++            //     100 (+)/2, 110 MAX, 111 MIN, 010 FLOAT Rx BY Ry, 011 FIX Fx BY Ry, 101 ABS Fx
+             let mf_op = if fp {
+                 if mul_sel != 0 {
+                     return Err(EncodeError {
+@@ -1178,6 +1179,9 @@ fn encode_multi(op: &MultiOp) -> Result<u32, EncodeError> {
+                         2 => 0b100,
+                         3 => 0b110,
+                         4 => 0b111,
++                        5 => 0b010,
++                        6 => 0b011,
++                        7 => 0b101,
+                         _ => {
+                             return Err(EncodeError {
+                                 msg: format!("float multifunction ALU select {alu_sel}"),

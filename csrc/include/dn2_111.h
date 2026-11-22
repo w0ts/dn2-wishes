@@ -191,6 +191,11 @@ typedef unsigned char u8;
 #define DN2_DEST_MASK_AFTER 0x40039AF6   /* where all four branches converge */
 #define DN2_DEST_MASK4      0x0200       /* what a fourth LFO may target */
 #define DN2_DEST_FLAG_BIT   15           /* lfo4records.DEST_FLAGS = 0x8000 */
+#define DN2_LIST_MASK_AFTER 0x4006732E   /* the DEST list opener's cascade (0x400672FE): where its steps converge */
+#define DN2_HDR_MOD3        0x40106CF8   /* the DEST list's header: the 0x0600 case ("MOD3") */
+#define DN2_HDR_JOIN        0x40106D3E   /* where every header case pushes its group name and joins */
+#define DN2_HDR_OTHER       0x40106D2E   /* the header's last case: the list's own label (a2@(228)) */
+#define DN2_HDR_SEP         0x40294710   /* the separator string each case appends first */
 
 /* "Is this LFO's waveform `RND`?", asked twice and hard-coded both times.
  *

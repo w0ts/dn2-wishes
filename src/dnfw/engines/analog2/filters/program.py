@@ -611,6 +611,8 @@ def body(p: Prog, X: M.Ctx) -> None:
 
     def each():
         _slot(p, X)                              # (a slot's filters run only when picked and expected to end before the frame's deadline)
+        from ....perc import program as PP       # 2026-11-20 (clip-inner): a clip of the slot's filters: its track
+        PP.clip_note_track(p, C["tr"])
         p.ld(8, C["s"])
         p.iconst(9, 1)
         p.iop(8, 8, "+", 9)
@@ -636,7 +638,9 @@ def program(next_sw: int, models=None, prefix: str = "a2f") -> str:
     p.emit_subs()
     p.raw(".wr_a2f..end:")
     p.raw("      .type wr_a2f.,STT_FUNC;")
-    return p.text()
+    # 2026-11-20 (DRUM's room): the R12 loads nothing reads, folded (dnfw.perc.flow)
+    from ....perc import flow as _FLOW
+    return _FLOW.fold_text(p.text())
 
 
 def run(mem: Mem, models=None) -> Prog:

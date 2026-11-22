@@ -1,14 +1,17 @@
 """PING's reference model: bounded at any setting, in tune, RES is ring time."""
 
+import importlib.util
 import math
 import pathlib
-import sys
 
 import numpy as np
 import pytest
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "ping"))
-import model as M   # noqa: E402
+# ping/model.py by its path, under its own name: grains/, rings/, shft/ and cz/ each have a model.py too, and a bare
+# `import model` took whichever one an earlier test in the same worker had imported (test_grains_model's: no TYPES)
+_SPEC = importlib.util.spec_from_file_location("ping_model", pathlib.Path(__file__).resolve().parent.parent / "ping" / "model.py")
+M = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(M)
 
 N = 48000
 

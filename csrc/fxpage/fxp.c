@@ -36,6 +36,8 @@ typedef signed char s8;
 #endif
 #define IT_KEY    0
 #define IT_KNOB   1
+#define K_UP      11
+#define K_DOWN    14
 #define K_FUNC    17
 #define PAGE_DELAY  1                           /* fxp_seen's and fxp_up's page: the Delay page (XDLY), */
 #define PAGE_REVERB 2                           /* the Reverb page (FDN8 / LONG) */
@@ -68,6 +70,8 @@ u32 fxp_gen __attribute__((section(".data"))) = 0;      /* moves on every change
 int fxp_up __attribute__((section(".data"))) = 0;       /* page 2 up: 0 none, PAGE_DELAY or PAGE_REVERB */
 static int seen __attribute__((section(".data"))) = 0;  /* the page stock drew this time (0 none, or not ours) */
 static int armed __attribute__((section(".data"))) = 0; /* FUNC went down on one of our pages and nothing since */
+static int want __attribute__((section(".data"))) = 0;  /* UP / DOWN from a page 2: the page whose page 2 opens once
+                                                         * stock has drawn it (fxp_draw) */
 static int touched __attribute__((section(".data"))) = -1;
 static int inited __attribute__((section(".data"))) = 0;
 static int chr_seen __attribute__((section(".data"))) = 0;     /* stock drew the Chorus page this time */
@@ -314,6 +318,24 @@ static void turn(int k, int delta)
     }
 }
 
+/* UP / DOWN on a page 2 (2026-11-20, the User: "It already pages through Delay/Reverb etc. but stays within the FUNC /
+ * no-FUNC pages: no mixing of groups, two different sets of pages"). On page 1 the arrows stay stock's (Delay ->
+ * Reverb -> Chorus, stopping at the ends, measured on stock 1.12: scripts/emu_updown_pages.py). On a page 2 they step
+ * among the page 2s only: the next / previous send page's page 2 when its TYPE has one (XDLY; FDN8 or LONG), else
+ * nowhere (never a page 1). The step is stock's own (the item goes on); fxp_draw opens page 2 of the page it drew.
+ * FUNC held: stock's. -> 1 when the item is ours (dropped: no step) */
+static int arrow(u32 code)
+{
+    extern int dlt_state, rvt_state;            /* csrc/xdly/ui.c, csrc/fdn8/ui.c: the TYPE is ours (1) */
+    if (KEY_HELD(K_FUNC))
+        return 0;
+    int to = fxp_up + (code == K_DOWN ? 1 : -1);
+    if (!(to == PAGE_DELAY ? dlt_state == 1 : to == PAGE_REVERB ? rvt_state == 1 : 0))
+        return 1;
+    want = to;
+    return 0;
+}
+
 /* rec.c smp_ui_pop, after ins_pop: 1 when the item is ours (it is dropped) */
 int fxp_pop(u8 *it)
 {
@@ -328,7 +350,9 @@ int fxp_pop(u8 *it)
                 armed = seen != 0 || fxp_visible();     /* FUNC went down on one of our pages */
             } else if (armed) {
                 armed = 0;                      /* the tap: FUNC up with nothing between */
-                if (seen) {
+                extern u32 mtr_func_ended;      /* (2026-11-19: not the release that ends the system meter, a FUNC
+                                                 * held after a tap: csrc/meter/meter.c) */
+                if (seen && !mtr_func_ended) {
                     fxp_up = fxp_up == seen ? 0 : seen;
                     touched = -1;
                     smp_overlay_dirty = 1;
@@ -337,6 +361,10 @@ int fxp_pop(u8 *it)
             return 0;                           /* FUNC goes on to stock, as ever */
         }
         armed = 0;                              /* any other key: FUNC is a modifier now */
+        if (down)
+            want = 0;                           /* (another press before stock drew the step: no page 2 opened) */
+        if (down && (code == K_UP || code == K_DOWN) && fxp_visible())
+            return arrow(code);                 /* (a repeat too, as stock's pages step on it) */
         return 0;
     }
     if (it[0] == IT_KNOB) {
@@ -359,9 +387,8 @@ int fxp_pop(u8 *it)
 
 static void fill(void *c, int x0, int y0, int x1, int y1, int on)
 {
-    for (int x = x0; x <= x1; x++)
-        for (int y = y0; y <= y1; y++)
-            SET_PIXEL(c, x, y, on);
+    extern void cv_fill(void *cv, int x0, int y0, int x1, int y1, int on);
+    cv_fill(c, x0, y0, x1, y1, on);             /* (2026-11-17) the same pixels a column word at a time: page.c */
 }
 
 #define TAG_X0 103                              /* the title bar's right end (stock's bar is y 54..63) */
@@ -415,6 +442,12 @@ void fxp_draw(void *c)
     init();
     if (chr_seen)
         chorus_draw(c);
+    if (want && seen != fxp_up) {               /* stock stepped its page on UP / DOWN from a page 2: */
+        if (seen == want)                       /* that page's page 2 (else: its TYPE was not ours after all) */
+            fxp_up = seen;
+        want = 0;
+        touched = -1;
+    }
     if (fxp_up && fxp_up != seen)
         fxp_up = 0;                             /* stock moved to another page (or the TYPE is stock's) */
     if (!seen)

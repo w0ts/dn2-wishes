@@ -23,6 +23,7 @@ sys.path.insert(0, str(HERE.parent / "src"))
 
 from emulib.image import differences                           # noqa: E402
 from emulib.machine import Machine                             # noqa: E402
+from emulib.cpu import kept                                       # noqa: E402
 
 ISR, ISR_RTE = 0x40025E36, 0x40027BC6
 SRC, STATE = 0x80003AF0, 0x8000DE60
@@ -76,6 +77,8 @@ def main() -> int:
     from dnfw.sampler import machines as SM                    # noqa: PLC0415
     for va, blob in platform.runtime(image):
         machine.write(va, blob)
+    from emulib import attkit
+    attkit.store_kit(machine)  # (2026-11-21) a converted kit stored back: converted once
     for page in range(SM.MIRROR, SM.MIRROR + SM.MIRROR_BYTES, 0x100000):
         try:
             uc.mem_map(page, 0x100000, UC_PROT_ALL)
@@ -83,26 +86,23 @@ def main() -> int:
             pass
     machine.flush()
     lay = json.loads(pathlib.Path(a.layout).read_text())["layout"]
-    regs = [getattr(K, f"UC_M68K_REG_{r}{i}") for r in "DA" for i in range(8)]
 
     def call(fn, *args, until=None, limit=50_000_000):
-        saved = [uc.reg_read(r) for r in regs]
-        sp = STACK_TOP - 0x200
-        machine.write(sp, struct.pack(">I", SENTINEL) + b"".join(struct.pack(">I", x & 0xFFFFFFFF) for x in args))
-        machine.write(SENTINEL, bytes.fromhex("4e714e71"))
-        uc.reg_write(K.UC_M68K_REG_A7, sp)
-        stepper = getattr(machine.m, "_fast_stepper_obj", None)
-        if stepper is not None:
-            stepper.left = 1 << 40
-        try:
-            uc.emu_start(fn, until if until is not None else SENTINEL, count=limit)
-        finally:
+        with kept(uc):                          # D0-A7, PC and SR put back (emulib/cpu.py: PC left at SENTINEL crashed rectext)
+            sp = STACK_TOP - 0x200
+            machine.write(sp, struct.pack(">I", SENTINEL) + b"".join(struct.pack(">I", x & 0xFFFFFFFF) for x in args))
+            machine.write(SENTINEL, bytes.fromhex("4e714e71"))
+            uc.reg_write(K.UC_M68K_REG_A7, sp)
+            stepper = getattr(machine.m, "_fast_stepper_obj", None)
             if stepper is not None:
-                stepper.left = 0
-        d0 = uc.reg_read(K.UC_M68K_REG_D0)
-        pc = uc.reg_read(K.UC_M68K_REG_PC)
-        for r, v in zip(regs, saved):
-            uc.reg_write(r, v)
+                stepper.left = 1 << 40
+            try:
+                uc.emu_start(fn, until if until is not None else SENTINEL, count=limit)
+            finally:
+                if stepper is not None:
+                    stepper.left = 0
+            d0 = uc.reg_read(K.UC_M68K_REG_D0)
+            pc = uc.reg_read(K.UC_M68K_REG_PC)
         return d0, pc
 
     def L(name):
@@ -386,9 +386,9 @@ def main() -> int:
               all(v == stock_t or v in units for v in texts.values()) and stock_t not in units,
               ", ".join(f"{k} {v:#x}" + (" (unit)" if v in units else "") for k, v in texts.items())
               + f"; stock {stock_t:#x}")
-        snd = SENTINEL + 0x200                               # a sound: type SOPHIE (20), its TUNE in tune
+        snd = SENTINEL + 0x200                               # a sound: type SOPHIE (53 since 2026-11-18), its TUNE in tune
         machine.write(snd, bytes(0x100))
-        machine.write(snd + 0xDE, bytes([20]))
+        machine.write(snd + 0xDE, bytes([53]))
         # TUNE's place follows SOPHIE's TUNE_K (2026-11-11: TUNE on G, the engine MODL on H): its PERC record and slot
         import re as _re                                    # noqa: PLC0415
         from dnfw.perc.machines import PARAMS as _PP       # noqa: PLC0415

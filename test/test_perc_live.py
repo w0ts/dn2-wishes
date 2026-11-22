@@ -303,11 +303,18 @@ def test_v026_the_monomachine_machines_play_the_dn2s_note():
              "TB303": (127, 0, 0, 64, 0, 0, 0, 64),    # the filter open, no resonance or env mod: the saw
              # 2026-11-14 (the 1.12 gate: three engines had no case, so the loop stopped at DRONE's KeyError and
              # never measured them): their own defaults, DRONE's drift, beat and detune 0 (one clear pitch)
-             "DRONE": (0, 12, 0, 18, 0, 76, 0, 0), "ANALOG2": A2.DEFAULTS, "JUNO": J.DEFAULTS}
+             "DRONE": (0, 12, 0, 18, 0, 76, 0, 0), "ANALOG2": A2.DEFAULTS, "JUNO": J.DEFAULTS,
+             # v0.59 FM+ (upstream): the carrier alone (every operator's level 0)
+             "FM+STAT": (0, 64, 0, 0, 0, 0, 64, 64), "FM+PAR": (0, 0, 0, 0, 0, 0, 64, 64),
+             "FM+DYN": (0, 64, 0, 64, 0, 0, 0, 64),
+             # 2026-11-20: DRUM's KICK held, no sweep, click or drive; TUNE +29 st (knob 112): 50 x 2^(29/12) = 266.9 Hz
+             # for C4 (a kick is tuned about 50 Hz; +2 % here), TYPE KICK
+             "DRUM": (112, 127, 0, 0, 0, 0, 0, 12)}
     # and their page 2 at its start (0..127): DRONE's OCT 0 (q2 0.5: the note itself, dnfw.engines.drone.drone._target),
     # ANALOG2's SEMI 0, JUNO's RNGE 8'
     knobs2 = {"DRONE": tuple(round(127 * q) for q in DR.DEFAULTS2) + (0,), "ANALOG2": A2.DEFAULTS2,
-              "JUNO": J.DEFAULTS2 + (0,)}
+              "JUNO": J.DEFAULTS2 + (0,),
+              "DRUM": (0, 127, 0, 64, 0, 64)}         # DRUM: SHAP 0, HOLD 127 (250 ms), SIGH 0, NOIS 0
     for k, name in enumerate(MNM.NAMES):    # each voice (2026-11-11: MONOMACHINE's engines by ENGN)
         f = []
         for note in (60, 72):
@@ -315,7 +322,7 @@ def test_v026_the_monomachine_machines_play_the_dn2s_note():
             h.words.update(dpro.bench_words(h.L.md.mnm))
             h.words[h.L.md.C["fill"]] = MDK.Z_N
             for j, v in enumerate(A2.table_words()):      # the coordinator loads the A2 filters' mix tables
-                h.words[h.L.md.mnm.scratch + A2.TABLES_OFF + 4 * j] = PL.bits(v)
+                h.words[A2.tables_at() + 4 * j] = PL.bits(v)
             h.set_mnm_voice(k, knobs[name])
             for (_r, slot, lo, top), x in zip(PM.FX_PARAMS, knobs2.get(name, ())):
                 h._half(PM.frame_offset(slot), PL.knob_word(x, top, lo))
@@ -323,7 +330,8 @@ def test_v026_the_monomachine_machines_play_the_dn2s_note():
             for b in range(48):
                 out += h.block(note=float(note), trig=b == 0)
             f.append(_f0(out[32 * 16:], PM.RATE))
-        assert abs(f[0] / 261.63 - 1) < 0.03, (name, f)
+        want = 50.0 * 2.0 ** (29.0 / 12.0) if name == "DRUM" else 261.63   # DRUM: its kick's own C4 (TUNE +29)
+        assert abs(f[0] / want - 1) < 0.03, (name, f)
         assert abs(f[1] / f[0] / 2 - 1) < 0.03, (name, f)
 
 
@@ -349,10 +357,10 @@ def test_v034_the_output_guard_really_wipes_a_poisoned_voice(name, where):
     for b in range(6):
         first += h.block(60.0, b == 0)
     assert _peak(first) > 0.01 and all(math.isfinite(v) for v in first)
-    # the poison: a NaN in its delay lines (slot t's: delay + 8 KB t), or in the voice's
+    # the poison: a NaN in its delay lines (slot t's: delay + its stride x t), or in the voice's
     # own state words (the effects', zeroed by the wipe)
     L = h.L.md
-    delay = L.delay + MDK.PI_DELAY_STRIDE * t
+    delay = L.delay + L.delay_stride * t
     state = h.L.state + 128 * t
     if where == "delay":
         at, idx = delay + 4 * 7, 7 | G.WHERE_DELAY
@@ -376,7 +384,7 @@ def test_v034_the_output_guard_really_wipes_a_poisoned_voice(name, where):
     assert all(h.mem.get(state + 4 * j) == 0 for j in range(32)), "the voice's state is zeros"
     # the next block resets it (its words and delay lines cleared), and a new note sounds
     h.block(60.0, False)
-    assert all(h.mem.get(delay + 4 * j) == 0 for j in range(MDK.PI_DELAY_WORDS))
+    assert all(h.mem.get(delay + 4 * j) == 0 for j in range(L.delay_words))
     again = []
     for b in range(6):
         again += h.block(60.0, b == 0)

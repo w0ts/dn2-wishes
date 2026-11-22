@@ -30,8 +30,11 @@ export const SECTION = 3;
 const BASE = 0x40000400;
 
 // dnfw.patch.paramtable: the stock table, and the biased bases its accessors carry.
+// (2026-11-17, as paramtable._os: the table and the image's end of the OS the image is, 1.12's or 1.11's)
+const TABLE_112 = 0x401f83d8, STOCK_END_112 = 0x4030c980;
 const TABLE = 0x401f7fc8, RECORD = 60;
 const STOCK_END = 0x4030b980;
+const osOf = (content) => (content.length >= STOCK_END_112 - BASE ? [STOCK_END_112, TABLE_112] : [STOCK_END, TABLE]);
 const EXPECTED_BASES = [[8, 53], [16, 1], [40, 2]];
 
 export class ModError extends Error {}
@@ -54,9 +57,10 @@ export function extents() {
  * table's biased base: the same count `paramtable.base_sites` asserts.
  */
 export function tableInPlace(content) {
-  const end = Math.max(0, Math.min(content.length, STOCK_END - BASE));
+  const [stockEnd, table] = osOf(content);
+  const end = Math.max(0, Math.min(content.length, stockEnd - BASE));
   for (const [bias, expected] of EXPECTED_BASES) {
-    const literal = (TABLE - RECORD + bias) >>> 0;
+    const literal = (table - RECORD + bias) >>> 0;
     const want = [literal >>> 24, (literal >>> 16) & 0xff, (literal >>> 8) & 0xff, literal & 0xff];
     let found = 0;
     for (let i = 0; i + 4 <= end; i += 2) {

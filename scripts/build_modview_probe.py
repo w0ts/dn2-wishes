@@ -54,7 +54,7 @@ def spec_for(build: int) -> tuple[dict, int]:
     seen: dict[str, int] = {}
 
     def compile_c(header: str, *, base: int):
-        image, symbols, bss = cpage.compile_page(defines + header, base=base)
+        image, symbols, bss, _abs32 = cpage.compile_page(defines + header, base=base)
         seen.update(symbols)
         return image, symbols, bss
 

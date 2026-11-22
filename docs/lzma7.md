@@ -89,7 +89,7 @@ The uploader takes no arguments, and the routine never uses its answer. So the u
 
 | sectors | what |
 |---|---|
-| `0x6E8000` | the header: `DN7C`, version, length, CRC-32 of the program, the id (the stored section 7's first 24 bytes: its length, its byte sum, the `DN7Z` header), the CRC-32 of those 40 bytes |
+| `0x5FF200` (v0.69.2; `0x6E8000` before, moved once at the first boot: `docs/memory-map.md`) | the header: `DN7C`, version, length, CRC-32 of the program, the id (the stored section 7's first 24 bytes: its length, its byte sum, the `DN7Z` header), the CRC-32 of those 40 bytes |
 | `0x6E8001` .. `0x6E8800` | the program (up to 1 MiB; 1,005,956 B today: 1,965 sectors) |
 
 **The id is not a sha256.** Computing one at power-on over 528 KB would cost part of what the cache saves. The id
@@ -113,7 +113,7 @@ shipped CRC-32 before it is used, so a stale copy is as safe as a decode: both p
 |---|---|
 | `test/test_lzma7cache.py` (host build, the driver played) | 18 pass: written with the header last; read byte for byte without a write; magic, id, length, header check, body and last byte damaged: decoded and rewritten; another build's copy and another stream of the same program: refreshed; a write failing at the header, the first, the fourth or the seventh call: decoded, and no wrong program on any later boot; a failed read; no +Drive; an erased copy (0x00 and 0xFF); the largest program |
 | `test/test_lzma7.py` | 15 pass (unchanged) |
-| `scripts/emu_lzma7_cache.py`, boots from reset (the build's syx as flash, farm) | **PASS**, 5 boots on one played +Drive: **first** decoded and written (18 writes, header first and last); **second** read from the copy, no write, no decode; **corrupt** (a program byte) decoded (`why` 5) and rewritten; **newid** (another build's header) decoded (`why` 2) and refreshed; **writefail** decoded, state 4, the boot ran to 800 M instructions with no fault. In every boot: the SHARC got `0x03` + section 7 exactly, one upload, entered after the eMMC's set-up (`0x4012be52` at 27,121,726, the uploader at 27,123,044) |
+| `scripts/emu_lzma7_cache.py`, boots from reset (the build's syx as flash, the farm) | **PASS**, 5 boots on one played +Drive: **first** decoded and written (18 writes, header first and last); **second** read from the copy, no write, no decode; **corrupt** (a program byte) decoded (`why` 5) and rewritten; **newid** (another build's header) decoded (`why` 2) and refreshed; **writefail** decoded, state 4, the boot ran to 800 M instructions with no fault. In every boot: the SHARC got `0x03` + section 7 exactly, one upload, entered after the eMMC's set-up (`0x4012be52` at 27,121,726, the uploader at 27,123,044) |
 | ship gate `--only erase` (the farm, the build's own UI snapshot) | PASS: 20,461 TRIMs only in the mod's regions, the copy's range with them and covered exactly, headers first; every region verified; 9 power-ons after cuts; 49 checks (a partial run, not a gate) |
 | the emulated driver at the new upload point | ready 1, 48,340,992 sectors (digikit's eSDHC model) |
 | the upload, the uploader's entry to its return (instructions) | decode **292.6 M**, copy **35.5 M** |

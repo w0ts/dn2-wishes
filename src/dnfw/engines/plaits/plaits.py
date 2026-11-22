@@ -24,6 +24,7 @@ machine with engines, as MACHINEDRUM's TYPE; MODL and TUNE swapped places, old p
 
 from __future__ import annotations
 
+from ...md import core as MK
 from ...mnm import core as C
 from . import plk as K
 from . import plaits_va, plaits_fm, plaits_add, plaits_swarm, plaits_noise, plaits_part, plaits_string, plaits_modal, plaits_bd, plaits_sd, plaits_hh
@@ -147,9 +148,7 @@ def exact(A: int, F: int, knobs, pre: int = 0) -> dict:
 def init(p: Prog, L: C.Layout) -> None:
     """Every engine as Plaits' Init: the slope oscillator at phase 0.5, its frequency 0.001,
     its pulse width 0.5; the rest at 0."""
-    p.iconst(0, 0)
-    for k in range(S_BASE + 1):
-        _sv(p, k, 0)
+    MK.zero_words(p, 0, S_BASE + 1)
     p.fconst(0, 0.5)
     _sv(p, S_WPH, 0)
     _sv(p, S_WPW, 0)
@@ -550,6 +549,27 @@ def _limiter_init(p: Prog) -> None:
     C.vws(p, "i1", 0)
 
 
+LIMIT_FLAG = 1.122                              # 2026-11-20 (clip-inner): the Limiter's peak at which it takes 1 dB
+
+
+def _limit_flag(p: Prog) -> None:
+    """2026-11-20 (clip-inner; the User: "NO DIGITAL CLIPPING ... if it does, i want the alert"): the Limiter's peak
+    (F7, over 1 here) past LIMIT_FLAG: the voice's clip (perc.program.clip_flag). Clobbers F12."""
+    from ...perc import program as PP
+    p.fconst(12, LIMIT_FLAG)
+    PP.clip_flag(p, 7, "GT", 12, 7)
+
+
+def _clip16_flag(p: Prog) -> None:
+    """2026-11-20 (clip-inner): a word of the half past Clip16's +-1 (F0 its largest, F1 its smallest): the voice's
+    clip. Clobbers F12."""
+    from ...perc import program as PP
+    p.fconst(12, 1.0)
+    PP.clip_flag(p, 0, "GT", 12, 12)
+    p.fconst(12, -1.0)
+    PP.clip_flag(p, 1, "LT", 12, 12)
+
+
 def _post(p: Prog, L: C.Layout) -> None:
     """Plaits' OUT stage on the half just rendered (the 16 words before I4), the model's out_gain.
     Clobbers R0-R15, I1."""
@@ -577,6 +597,8 @@ def _post(p: Prog, L: C.Layout) -> None:
         p.fconst(10, 1.0)
         p.fconst(11, -1.0)
         p.fconst(3, 0.8)
+        p.fconst(0, 0.0)                         # 2026-11-20 (clip-inner): the half's largest and smallest word into
+        p.fconst(1, 0.0)                         # Clip16 (F0, F1)
 
         def one():
             p.ldpost(4, 1)
@@ -587,24 +609,33 @@ def _post(p: Prog, L: C.Layout) -> None:
             p.fop_if("GT", 8, 9, "PASS")
             p.fop(6, 8, "*", 6)
             p.fop(7, 7, "+", 6)
-            p.if_(7, "GT", 10, lambda: (C.vws(p, "i1", 7), recip(p, 14, 7), p.fop(4, 4, "*", 14), C.vw(p, 7, "i1")))
+            p.if_(7, "GT", 10, lambda: (_limit_flag(p), C.vws(p, "i1", 7), recip(p, 14, 7), p.fop(4, 4, "*", 14),
+                                         C.vw(p, 7, "i1")))
             p.fop(4, 4, "*", 3)
+            p.fop(0, 0, "MAX", 4)
+            p.fop(1, 1, "MIN", 4)
             p.fop(4, 4, "MAX", 11)
             p.fop(4, 4, "MIN", 10)               # Clip16, as every OUT (the limiter's attack lets a jump through)
             p.sti(-1, 1, 4)
         p.loop_r(2, HALF, one)                   # (recip clobbers R12-R15)
         C.vws(p, "i1", 7)
+        _clip16_flag(p)
 
     def fixed():                                 # the gain, Clip16's +-1
         p.fconst(11, -1.0)
         p.fconst(10, 1.0)
+        p.fconst(0, 0.0)                         # 2026-11-20 (clip-inner): the half's largest and smallest word into
+        p.fconst(1, 0.0)                         # Clip16 (F0, F1)
 
         def four():
             for k in range(4):
                 p.ldpost(4, 1)
                 p.fop(4, 4, "*", 5)
+                p.fop(0, 0, "MAX", 4)
+                p.fop(1, 1, "MIN", 4)
                 p.fop(4, 4, "MAX", 11)
                 p.fop(4, 4, "MIN", 10)
                 p.sti(-1, 1, 4)
         p.loop_r(15, HALF // 4, four)
+        _clip16_flag(p)
     p.if_(5, "LT", 12, limit, fixed)

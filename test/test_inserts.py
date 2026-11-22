@@ -267,8 +267,9 @@ def test_a_refused_insert_stays_out_and_switches_without_a_step():
 def test_silent_slots_skip_their_insert_bit_identically():
     # 2026-11-12 (opt-host's measure on A09: T9 owns slots 2..15, so its DIST ran 14 times a block, sounding or not):
     # a slot whose input is all zeros and whose insert last left zeros and its state at rest skips it. Every block is
-    # still the reference's, word for word; once the silent slots are at rest (DIST's gate smoothing reaches its
-    # fixed point ~250 blocks into silence) the pass runs far fewer steps
+    # still the reference's, word for word; once the silent slots are at rest the pass runs far fewer steps (2026-11-21,
+    # dist-onset: DIST has no gate fade-in any more, so they rest after block 1, not ~250 blocks into silence: the
+    # first block, where they all run, is the one to compare with)
     import math
     route = [0, 1] + [9] * 14
     rows = {9: [D.DIST, 127, 90, 90, 20, 64, 64, 0], 1: [D.FOLD, 127, 80, 64, 0, 100, 100, 0]}
@@ -292,7 +293,8 @@ def test_silent_slots_skip_their_insert_bit_identically():
         steps.append(p.steps)
         got = [[m.get(BUF + 0x80 * t + 4 * j) for j in range(D.BLOCK)] for t in range(D.TRACKS)]
         assert got == [[fbits(x) for x in w] for w in want], f"block {b}"
-    assert max(steps[400:]) < 0.5 * min(steps[1:20]), (steps[1:20], steps[400:])
+    assert max(steps[400:]) < 0.5 * steps[0], (steps[0], steps[400:])
+    assert max(steps[2:20]) < 0.5 * steps[0], (steps[0], steps[2:20])   # (marked after block 1: skipped from 2)
     assert all(m.get(D.QUIET_L2 + 4 * (2 * s)) for s in (3, 4, 8, 9, 15)), "silent slots, +0.0 and -0.0, marked"
 
 
@@ -405,3 +407,45 @@ def test_a_held_out_pre_insert_comes_back_from_silence():
         if b >= back:
             assert not any(got[0]), (b, "the state of block 19 came back")
     assert m.get(G.INS_SKIPS) == G.INS_HOLD
+
+
+def _hat(n: int, peak: float, seed: int) -> list[float]:
+    """a hi-hat: noise under an 8 ms decay, its largest |x| PEAK"""
+    import math
+    rnd = random.Random(seed)
+    x = [rnd.uniform(-1, 1) * math.exp(-j / (0.008 * D.FS)) for j in range(n)]
+    top = max(abs(v) for v in x)
+    return [float(np.float32(v * peak / top)) for v in x]
+
+
+def test_dist_onset_is_the_steady_level():
+    # 2026-11-21 (dist-onset; main: "a hat peaking at 0.92 comes out at 6.15"): DIST's drive and level came from its
+    # peak follower alone, which lagged a block: a hit on a fresh instance was driven from the follower's floor (0.1)
+    # at 0.1 / 0.92 of its level, the gate smoothing faded it in from 0, and AUTO, from its powers, made all that up
+    # (6.68 here before the fix; 26.0 at LEV 127; AUTO off, the first hat at half the fourth's peak). Now the block's
+    # own samples are in the peak (program.fz_peak), DIST has no fade-in, and with AUTO on the wet no longer carries
+    # LEV x 2 that AUTO's T applies again. AUTO off: the first hat on a fresh instance peaks as the fourth (one every
+    # 100 ms, the instance warm); AUTO on: no hat past AUTO's own target (T x the dry) by more than a hat's crest
+    # (x 1.25). The program word for word the reference
+    hat = _hat(48 * 40, 0.92, 11)
+    sig = (hat + [0.0] * (48 * 60)) * 4
+    n = len(sig) // 4
+    for knobs in ([127, 64, 127, 64, 0, 64, 127], [127, 64, 127, 64, 0, 64, 0], [127, 127, 127, 64, 0, 127, 127],
+                  [127, 127, 0, 0, 0, 127, 0], [127, 0, 64, 0, 127, 127, 0]):
+        rows = {0: [D.DIST] + knobs}
+        m, r = mem0(), R.Ref()
+        out = []
+        for b in range(len(sig) // D.BLOCK):
+            bufs = [[0.0] * D.BLOCK for _ in range(D.TRACKS)]
+            bufs[0] = sig[D.BLOCK * b:D.BLOCK * (b + 1)]
+            want = [[np.float32(x) for x in buf] for buf in bufs]
+            r.block(par_of(rows), want)
+            got = call(m, par_of(rows), bufs)
+            assert got[0] == [fbits(x) for x in want[0]], (knobs, b)
+            out += [abs(float(x)) for x in want[0]]
+        first, fourth = max(out[:n]), max(out[3 * n:])
+        if knobs[6] < 64:
+            assert abs(first - fourth) <= 1e-3 * fourth, (knobs, first, fourth)
+        else:
+            t = knobs[5] / 127 * D.DS_LEV_MAX
+            assert first <= 1.25 * t * 0.92, (knobs, first, fourth)

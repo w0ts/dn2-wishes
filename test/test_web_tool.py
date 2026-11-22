@@ -64,6 +64,22 @@ def test_the_image_is_pool_bytes_byte_for_byte():
     assert got == want
 
 
+def test_the_ram_check_words_read_as_dn2samples():
+    """HELLO's RAM check word (csrc/sampler/link.c smp_ram): 3, the DSP never answered, is not a failed check"""
+    import dn2samples as D
+    got = _node("console.log(JSON.stringify([0, 1, 2, 3, 7, null].map(DN2.ramCheck)))")
+    assert got[0] == ["RAM check not run yet", "warn"]
+    assert got[1] == ["RAM check passed: all 400 MB load", "ok"]
+    assert got[2] == ["RAM check FAILED: only the first 128 MB load", "bad"]
+    assert got[3] == ["RAM check not answered: only the first 128 MB load", "warn"]
+    assert got[4] == ["RAM check: 7", ""] and got[5] == ["", ""]
+    assert set(D.RAM_CHECK_TEXT) == {0, 1, 2, 3}
+    assert D.RAM_CHECK_TEXT[2].startswith("FAILED") and D.RAM_CHECK_TEXT[3].startswith("not answered")
+    assert "FAILED" not in D.RAM_CHECK_TEXT[3]
+    link = (ROOT / "csrc/sampler/link.c").read_text()
+    assert "1 passed, 2 failed, 3 no answer" in link
+
+
 def test_the_sysex_is_dn2samples():
     import dn2samples as D
     got = _node("console.log(JSON.stringify([Array.from(DN2.request(0x301,1)),"

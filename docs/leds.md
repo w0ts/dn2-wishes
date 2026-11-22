@@ -96,3 +96,27 @@ stock's green stayed on its own page (NiKo's photos: RECORD lit, the screen 1/4 
 on page 4 throughout). From v0.53 `bn_led_walk` claims 42..49 while FLEX REC is up, in the same
 scheme: `bn_page` green, the pattern's other pages dim red, the rest near-off. Closed, they are
 stock's again. Gate: `flexcore` (64 steps, PAGE twice: page 3 green).
+
+## The VOICE key's LED and PARA (2026-11-19, OS 1.12)
+
+The User: "if the current track is paraphonic ... we should colour the button pink"; magenta 91 chosen (as bright as
+stock's UNISON teal), stock's white kept while the VOICE menu is open.
+
+**Stock 1.12** [D, M]:
+- The firmware's LED name table (0x401f393c, a `char *` per logical id): 1 TRACK, 2 KEYBOARD, 3 FUNCTION, 4 PATTERN,
+  5 SONG, 6 PRESET MENU, 7 GLOBAL, **8 VOICE**, 9 TEMPO, 10 RECORD, 11 PLAY, 12 STOP, 13 YES, 14 NO, 15..18 UP DOWN
+  LEFT RIGHT, 19 PAGE, 20..25 the parameter page keys, 26..41 the [TRIG] keys, 42..49 PAGE1..8, 50 ARP, 51 PLUS,
+  52 STACK, 53 MINUS. Physical = logical − 1 (0x401f3a14): VOICE is phys 7.
+- 1.12's addresses: LED_SET 0x4002c318 (it calls the driver 0x40132428 at once: `[0xB9, phys, value]` when the value
+  changed, the last one per phys at 0x466b8420), the compose 0x4002c854, LED_DIRTY 0x4011d5f4, the palette upload
+  0x40132388 (`[0xB5, idx, r, g, b]`, 6-bit RGB, entries 2..135 from 0x4020905c + 402 per LED INTENSITY set).
+- MainScreenView (0x40060842) lights VOICE teal (2, 131) when the active track's UNISON is on
+  (`0x40029126(x, t)`), unless a view above claimed VOICE (its claimed mask's bit 8); otherwise the compose gives it
+  the backlight (1, 1). VoiceMenuView (0x40028990) lights it white (2, 113) while the menu is up. Never blinking.
+- 131 is 8/28/28 (teal) at LED INTENSITY's middle. The palette has no pink; magenta is 82..97 (R = B, G = 0).
+
+**The build** (`csrc/para/led.c`, coldfire.py VOICE_LED_SITE 0x40060d6e): MainScreenView's `jsr 0x40029126` becomes
+`jsr pu_voice_led`. On a PARA ON track (ANALOG 2 or JUNO, MOD not 0) it lights VOICE (2, 91) itself and answers
+"UNISON off"; elsewhere it answers stock's test. So magenta replaces the teal and the backlight on the main screen
+only; the VOICE menu's white and any view above that claims VOICE stay stock's. `pu_led_poll` (rt_poll, every UI
+pass) asks for a compose when the active track's PARA state changes. Gate: `voiceled` (scripts/emu_voiceled.py).

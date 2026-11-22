@@ -34,10 +34,20 @@ def default_steps() -> list[str]:
 # chords 16, smp 17, mnm/frame 20, decode..guard 35, link..tdm 46), so a failing part shows
 # early (v0.45: ping dropped with PING; the part is stock alone); ship_gate stops at the first part that fails. Each part runs in its own process, so
 # the order changes nothing a part checks.
-GROUPS = (("wipe",), ("fdn8",), ("xdly",), ("jsend",), ("inserts",), ("inspost",), ("stock",), ("stockout",), ("trkbuf",), ("tableready",), ("garbage",), ("stress",), ("chords",), ("smp",),
-          ("mnm", "frame"), ("decode", "map", "voice", "guard"), ("link", "rec", "mainrec", "pvmix", "tdm"),
+GROUPS = (("wipe",), ("fdn8",), ("xdly",), ("jsend",), ("sendfx",), ("inserts",), ("inspost",), ("stock",), ("stockout",), ("trkbuf",), ("tableready",), ("garbage",), ("stress",), ("chords",), ("smp",),
+          ("mnm-ma", "frame"), ("mnm-mb",), ("mnm-drone",), ("mnm-a2",), ("mnm-para-a2",), ("mnm-para-juno",),
+          ("mnm-plaits",), ("drum",),   # 2026-11-20: DRUM (sharc_drum_step)
+          ("ghost-z",), ("ghost-d",), ("ghost-h",),   # 2026-11-20: the ghost audit (sharc_ghost_step: stale memory, the write watch)
+          # (2026-11-16: mnm in its parts (sharc_waverider_m5.MNM_PARTS), each a process
+          ("decode", "map", "voice", "guard"), ("link", "rec", "mainrec", "pvmix", "tdm"),
           ("flexlevel",),         # v0.50: a FLEX take's level, unity and GAIN
-          ("recwhole",))          # v0.39: whole takes with the link at work (about 70 min)
+          ("mainmark",),          # v0.66: FLEX takes of MAIN and IN marked, made up on playback
+          ("recwhole",),          # v0.39: whole takes with the link at work (about 70 min)
+          # 2026-11-16 (gate speed): the insert steps, each its own part (together they took 75 min in one process
+          # on the farm, v0.54.2); each builds its own start from the snapshot, so a process of its own checks the same
+          ("insall",), ("a2f",), ("insbus",), ("pitrack",), ("mainmix",), ("insorder",), ("twin",),
+          ("dacover", "levels"),   # 2026-11-20: the analog outputs' overs, the mixer meters' peaks and clip bits
+          ("clipinner",))          # 2026-11-20 (clip-inner): a voice's own clips and limiters
 
 
 def parts() -> list[list[str]]:

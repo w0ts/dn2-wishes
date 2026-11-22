@@ -5,7 +5,8 @@
  * at the same places with the same fonts and sprites, here at their DN2 1.12 addresses (the
  * widget library is one SDK on both: DT2 0x40112380.. = DN2 + 0x1c54, checked byte for byte;
  * the fonts and sprite bitmaps are in DN2 1.12's image unchanged). The values are ours
- * (rec.c): SRC, CHAN, THRES, INTO (in the DT2's MON place), R.LEN, R.STRT, ARM.
+ * (rec.c): SRC, CHAN, THRES, INTO (in the DT2's MON place), R.LEN, R.STRT, ARM; v0.59 upstream's MON on C (shown
+ * as "MON" over THRES while on).
  *
  * Canvas 128 x 64, y counting up from the bottom. Colours: 1 lit, 0 dark, -1 inverted.
  */
@@ -174,6 +175,11 @@ static void main_page(void *c, int heard)
     rec_box(c, heard);
     D_TEXT(c, F_VAL, 112, 39, 2, "%ddB", thres_db(rec_thres));
     D_TEXT(c, F_LBL, 112, 27, 2, "%s", "THRES");
+    {                                           /* v0.59 (upstream): C MON, when on: "MON" between the meter and THRES */
+        extern int rec_mon;
+        if (rec_mon)
+            D_TEXT(c, F_LBL, 127, 47, 4, "%s", "MON");
+    }
     if (rec_dest >= 0) {                        /* E: INTO, the slot the take goes into (the DT2's MON place) */
         D_TEXT(c, F_VAL, 15, 15, 2, "%s", "SAMP");
         D_TEXT(c, F_VAL, 15, 9, 2, "%d", rec_dest + 1);

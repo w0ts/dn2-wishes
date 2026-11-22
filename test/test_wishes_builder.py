@@ -133,13 +133,11 @@ def test_the_site_check_publishes_only_cleared_files(WB, tmp_path):
     assert WB.check_site(tmp_path / "none") == 1
 
 
-def test_the_site_check_allows_an_empty_list_and_refuses_the_old_preset_rows(WB, tmp_path):
+def test_the_site_check_refuses_no_release_and_the_old_preset_rows(WB, tmp_path):
     empty = tmp_path / "empty"
     empty.mkdir()
     (empty / "wishes.json").write_text("[]")
-    assert WB.check_site(empty) == 0                                 # nothing listed yet: the builder says so
-    (empty / "wishes.json").write_text("{}")
-    assert WB.check_site(empty) == 1                                 # not a list
+    assert WB.check_site(empty) == 1                                 # nothing to publish
     old = _site(tmp_path / "old", gate=True)
     row = json.loads((old / "wishes.json").read_text())[0]
     preset = {k: row[k] for k in ("file", "sha256", "zip", "zip_sha256", "inputs", "gate")}
@@ -193,16 +191,16 @@ def test_the_page_builds_the_release_with_no_choices():
     with more than one release; no release published: a plain note, not an error"""
     page = (WEB / "builder.html").read_text()
     heads = re.findall(r"<h2>(.*?)</h2>", page)
-    assert heads == ["1 · Your stock files", "2 · Build", "3 · Flash"]
-    body = re.sub(r'<nav class="site".*?</nav>', "", page, flags=re.S)      # the tabs name the presets page
+    assert heads == ["1 · Your stock files", "2 · Build", "3 · Save and flash", "4 · Flash from this page (optional)", "5 · Licences and source"]
+    body = re.sub(r'<nav class="top".*?</nav>', "", page, flags=re.S)      # the tabs name the presets page
     for gone in ("preset", "What goes in", "details class=\"parts\"", "chips"):
         assert gone not in body, gone
     assert '$("#verRow").hidden = releases.length < 2;' in page
     assert "el.hidden = !need.includes(el.dataset.k)" in page and "release ? release.inputs : KEYS" in page
     assert '`<p class="note">No release published yet.</p>`' in page          # neutral, not .bad
     assert "if (e.status === 404) rows = [];" in page                           # a missing wishes.json is no error
-    assert 'msg err">Could not load the builder\'s data' in page               # a real load error stays red
-    assert "Elektron Transfer" in page and "stock OS 1.12" in page     # the risks tooltip and the back-to-stock flash option
+    assert 'note bad">Could not load the builder\'s data' in page               # a real load error stays red
+    assert "Elektron Transfer" in page and "Back to stock 1.12" in page
 
 
 def test_the_page_wires_save_to_the_verdict_only():
@@ -211,7 +209,7 @@ def test_the_page_wires_save_to_the_verdict_only():
     assert page.count("$(\"#save\").disabled = false") == 0           # never enabled outside the verdict
     assert "$(\"#save\").disabled = !v.save;" in page
     assert "if (!v.save) { $(\"#save\").disabled = true; return; }" in page   # checked again at Save
-    assert '<link rel="stylesheet" href="https://w0ts.github.io/site-style/common.css">\n<link rel="stylesheet" href="wishes.css">' in page and (WEB / "wishes.css").is_file()
+    assert '<link rel="stylesheet" href="wishes.css">' in page and (WEB / "wishes.css").is_file()
     worker = (WEB / "builder-worker.js").read_text()
     assert "pyodide/v0.27.7" in worker and 'loadPackage(["numpy", "lzma"])' in worker
     assert "fetchChecked(d.zip, d.zipSha" in worker and "noboot=True" in worker and "DN2SHA" in worker

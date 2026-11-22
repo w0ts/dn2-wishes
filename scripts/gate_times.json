@@ -1,0 +1,456 @@
+{
+ "note": "each step alone (ship_gate.py --only) on the farm; expect_s the measured seconds, mem_gb the measured peak of the step's processes (GB); limit_s, if not given, max(limit_min_s, limit_factor x expect_s): past it gate_parallel.py kills the step (a failed step). Read by ship_gate.py --list and gate_parallel.py only (no step's verdict).; sharc:ghost-z/-d/-h estimated from the 2026-11-20 audit runs (4.6 s a block on the farm, 1.9 GB seen)",
+ "source": "modulation and lfowaves mem_gb measured 2026-11-18 on the farm (each step alone in its own systemd scope, the scope's MemoryPeak, page cache included, build 20f0f0f9 of claude/cpu-cuts): 13.2 and 15.6 GB; four steps sharing one 30 GB scope had both killed by the OOM killer; v0.54.2 rr gate on the farm (32 jobs at once); mnm parts and the split insert steps estimated (2026-11-16); flexplay taken as long as flex (not measured on v0.54.2); coupled steps 6.5 GB (seen 3-6 GB on the farm); v0.56.3 candidate: rammap, paravoice and flexpool estimated (not measured on the farm: rammap 600 s, the ColdFire emulator steps paravoice and flexpool 1800 s, 4.5 GB as the other emulator steps), mnm-para-a2/juno kept at the slot-chord estimate (PARA as one voice runs fewer blocks); sharc:sendfx estimated 2026-11-21 (272 runner blocks at about 4.6 s a block, not measured on the farm)",
+ "limit_min_s": 1800,
+ "limit_factor": 2.5,
+ "default": {
+  "expect_s": 600,
+  "mem_gb": 4.0
+ },
+ "steps": {
+  "lfo4": {
+   "expect_s": 12,
+   "mem_gb": 4.5
+  },
+  "modulation": {
+   "expect_s": 191,
+   "mem_gb": 13.2
+  },
+  "link16-dead": {
+   "expect_s": 190,
+   "mem_gb": 4.5
+  },
+  "machines": {
+   "expect_s": 220,
+   "mem_gb": 4.5
+  },
+  "fineknob": {
+   "expect_s": 226,
+   "mem_gb": 4.5
+  },
+  "lfowaves": {
+   "expect_s": 263,
+   "mem_gb": 15.6
+  },
+  "erase": {
+   "expect_s": 263,
+   "mem_gb": 4.5
+  },
+  "link16": {
+   "expect_s": 272,
+   "mem_gb": 4.5
+  },
+  "slice": {
+   "expect_s": 95,
+   "mem_gb": 4.5
+  },
+  "drivenav": {
+   "expect_s": 96,
+   "mem_gb": 4.5
+  },
+  "sharc:drum": {
+   "expect_s": 5978,
+   "mem_gb": 4.0
+  },
+  "sharc:trkbuf": {
+   "expect_s": 148,
+   "mem_gb": 4.5
+  },
+  "matrix": {
+   "expect_s": 145,
+   "mem_gb": 4.5
+  },
+  "sharc:wipe": {
+   "expect_s": 183,
+   "mem_gb": 4.5
+  },
+  "pools": {
+   "expect_s": 180,
+   "mem_gb": 4.5
+  },
+  "drive": {
+   "expect_s": 134,
+   "mem_gb": 4.5
+  },
+  "msel": {
+   "expect_s": 49,
+   "mem_gb": 4.5
+  },
+  "samplist": {
+   "expect_s": 46,
+   "mem_gb": 4.5
+  },
+  "question": {
+   "expect_s": 59,
+   "mem_gb": 4.5
+  },
+  "rebuild": {
+   "expect_s": 73,
+   "mem_gb": 4.5
+  },
+  "slides": {
+   "expect_s": 66,
+   "mem_gb": 4.5
+  },
+  "paravmenu": {
+   "expect_s": 60,
+   "mem_gb": 4.5
+  },
+  "boot": {
+   "expect_s": 44,
+   "mem_gb": 4.5
+  },
+  "colsw": {
+   "expect_s": 33,
+   "mem_gb": 4.5
+  },
+  "multisel": {
+   "expect_s": 32,
+   "mem_gb": 4.5
+  },
+  "stockname": {
+   "expect_s": 28,
+   "mem_gb": 4.5
+  },
+  "rectext": {
+   "expect_s": 32,
+   "mem_gb": 4.5
+  },
+  "alloc": {
+   "expect_s": 27,
+   "mem_gb": 4.5
+  },
+  "engine": {
+   "expect_s": 29,
+   "mem_gb": 4.5
+  },
+  "flexcore": {
+   "expect_s": 25,
+   "mem_gb": 4.5
+  },
+  "recorder": {
+   "expect_s": 24,
+   "mem_gb": 4.5
+  },
+  "hooks": {
+   "expect_s": 23,
+   "mem_gb": 4.5
+  },
+  "fineswap": {
+   "expect_s": 23,
+   "mem_gb": 4.5
+  },
+  "recflow": {
+   "expect_s": 23,
+   "mem_gb": 4.5
+  },
+  "livesel": {
+   "expect_s": 25,
+   "mem_gb": 4.5
+  },
+  "drumamp": {
+   "expect_s": 600,
+   "mem_gb": 4.5
+  },
+  "code-fresh": {
+   "expect_s": 23,
+   "mem_gb": 4.5
+  },
+  "mnmpages": {
+   "expect_s": 23,
+   "mem_gb": 4.5
+  },
+  "mnmdefaults": {
+   "expect_s": 23,
+   "mem_gb": 4.5
+  },
+  "kbrec": {
+   "expect_s": 21,
+   "mem_gb": 4.5
+  },
+  "unused": {
+   "expect_s": 19,
+   "mem_gb": 4.5
+  },
+  "meter": {
+   "expect_s": 20,
+   "mem_gb": 4.5
+  },
+  "keepsamp": {
+   "expect_s": 20,
+   "mem_gb": 4.5
+  },
+  "functurn": {
+   "expect_s": 18,
+   "mem_gb": 4.5
+  },
+  "playdet": {
+   "expect_s": 18,
+   "mem_gb": 4.5
+  },
+  "wishes": {
+   "expect_s": 18,
+   "mem_gb": 4.5
+  },
+  "coldfire": {
+   "expect_s": 15,
+   "mem_gb": 4.5
+  },
+  "hwrules": {
+   "expect_s": 16,
+   "mem_gb": 4.5
+  },
+  "symbols": {
+   "expect_s": 13,
+   "mem_gb": 4.5
+  },
+  "preflight": {
+   "expect_s": 18,
+   "mem_gb": 4.5
+  },
+  "overbridge": {
+   "expect_s": 18,
+   "mem_gb": 4.5
+  },
+  "linkfast": {
+   "expect_s": 80,
+   "mem_gb": 2.0
+  },
+  "wishitems": {
+   "expect_s": 18,
+   "mem_gb": 4.5
+  },
+  "dsp-identity": {
+   "expect_s": 11,
+   "mem_gb": 4.5
+  },
+  "aniz": {
+   "expect_s": 11,
+   "mem_gb": 4.5
+  },
+  "sharc:stock": {
+   "expect_s": 631,
+   "mem_gb": 4.5
+  },
+  "sharc:jsend": {
+   "expect_s": 644,
+   "mem_gb": 4.5
+  },
+  "sharc:sendfx": {
+   "expect_s": 1300,
+   "mem_gb": 4.5
+  },
+  "thres": {
+   "expect_s": 729,
+   "mem_gb": 6.5
+  },
+  "sharc:inspost": {
+   "expect_s": 792,
+   "mem_gb": 4.5
+  },
+  "stocknote": {
+   "expect_s": 902,
+   "mem_gb": 6.5
+  },
+  "sharc:smp": {
+   "expect_s": 979,
+   "mem_gb": 4.5
+  },
+  "sharc:stress": {
+   "expect_s": 1066,
+   "mem_gb": 4.5
+  },
+  "sharc:flexlevel": {
+   "expect_s": 1099,
+   "mem_gb": 4.5
+  },
+  "sharc:garbage": {
+   "expect_s": 1099,
+   "mem_gb": 4.5
+  },
+  "fuzz": {
+   "expect_s": 1158,
+   "mem_gb": 4.5
+  },
+  "sharc:fdn8": {
+   "expect_s": 1312,
+   "mem_gb": 4.5
+  },
+  "unit": {
+   "expect_s": 1484,
+   "mem_gb": 4.5
+  },
+  "sharc:stockout": {
+   "expect_s": 1727,
+   "mem_gb": 4.5
+  },
+  "sharc:decode+map+voice+guard": {
+   "expect_s": 1846,
+   "mem_gb": 4.5
+  },
+  "envclone": {
+   "expect_s": 2054,
+   "mem_gb": 6.5
+  },
+  "ampdsp": {
+   "expect_s": 1500,
+   "mem_gb": 6.5
+  },
+  "sharc:link+rec+mainrec+pvmix+tdm": {
+   "expect_s": 2106,
+   "mem_gb": 4.5
+  },
+  "sharc:tableready": {
+   "expect_s": 2149,
+   "mem_gb": 4.5
+  },
+  "sharc:chords": {
+   "expect_s": 2221,
+   "mem_gb": 4.5
+  },
+  "sharc:recwhole": {
+   "expect_s": 2435,
+   "mem_gb": 4.5
+  },
+  "sharc:xdly": {
+   "expect_s": 2479,
+   "mem_gb": 4.5
+  },
+  "sharc:inserts": {
+   "expect_s": 2633,
+   "mem_gb": 4.5
+  },
+  "ournote": {
+   "expect_s": 3232,
+   "mem_gb": 6.5
+  },
+  "paralive": {
+   "expect_s": 300,
+   "mem_gb": 4.5
+  },
+  "parachord": {
+   "expect_s": 3200,
+   "mem_gb": 6.5
+  },
+  "mute": {
+   "expect_s": 3545,
+   "mem_gb": 6.5
+  },
+  "flex": {
+   "expect_s": 5994,
+   "mem_gb": 6.5
+  },
+  "jump": {
+   "expect_s": 1597,
+   "mem_gb": 46.0
+  },
+  "sharc:mnm-ma+frame": {
+   "expect_s": 600,
+   "mem_gb": 4.0
+  },
+  "sharc:mnm-mb": {
+   "expect_s": 900,
+   "mem_gb": 4.0
+  },
+  "sharc:mnm-drone": {
+   "expect_s": 1300,
+   "mem_gb": 4.0
+  },
+  "sharc:mnm-a2": {
+   "expect_s": 1300,
+   "mem_gb": 4.0
+  },
+  "sharc:mnm-para-a2": {
+   "expect_s": 2000,
+   "mem_gb": 4.0
+  },
+  "sharc:mnm-para-juno": {
+   "expect_s": 2000,
+   "mem_gb": 4.0
+  },
+  "sharc:mnm-plaits": {
+   "expect_s": 1300,
+   "mem_gb": 4.0
+  },
+  "sharc:insall": {
+   "expect_s": 1200,
+   "mem_gb": 4.0
+  },
+  "sharc:a2f": {
+   "expect_s": 900,
+   "mem_gb": 4.0
+  },
+  "sharc:insbus": {
+   "expect_s": 900,
+   "mem_gb": 4.0
+  },
+  "sharc:pitrack": {
+   "expect_s": 600,
+   "mem_gb": 4.0
+  },
+  "sharc:mainmix": {
+   "expect_s": 600,
+   "mem_gb": 4.0
+  },
+  "sharc:insorder": {
+   "expect_s": 900,
+   "mem_gb": 4.0
+  },
+  "sharc:twin": {
+   "expect_s": 300,
+   "mem_gb": 4.0
+  },
+  "flexplay": {
+   "expect_s": 5994,
+   "mem_gb": 6.5
+  },
+  "rammap": {
+   "expect_s": 600,
+   "mem_gb": 4.0
+  },
+  "paravoice": {
+   "expect_s": 1800,
+   "mem_gb": 4.5
+  },
+  "dronehold": {
+   "expect_s": 600,
+   "mem_gb": 4.5
+  },
+  "flexpool": {
+   "expect_s": 1800,
+   "mem_gb": 4.5
+  },
+  "destpop": {
+   "expect_s": 250,
+   "mem_gb": 6.5
+  },
+  "setuprows": {
+   "expect_s": 300,
+   "mem_gb": 6.5
+  },
+  "knobnotch": {
+   "expect_s": 400,
+   "mem_gb": 6.5
+  },
+  "sharc:ghost-z": {
+   "expect_s": 2100,
+   "mem_gb": 4.0
+  },
+  "sharc:ghost-d": {
+   "expect_s": 2100,
+   "mem_gb": 4.0
+  },
+  "sharc:ghost-h": {
+   "expect_s": 2900,
+   "mem_gb": 4.0
+  },
+  "safeboot-table": {
+   "expect_s": 20,
+   "mem_gb": 1.0
+  },
+  "safeboot": {
+   "expect_s": 5900,
+   "mem_gb": 4.0
+  }
+ }
+}

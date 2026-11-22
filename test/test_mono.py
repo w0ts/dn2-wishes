@@ -21,7 +21,7 @@ pytestmark = pytest.mark.skipif(len(MM.MONO_ENGINES) != 5, reason="a build witho
 def test_one_machine_on_type_6_the_others_reserved():
     assert MM.MONO_ENGINES == ("SID 6581", "DPRO-WAVE", "DPRO-DDRW", "DPRO-DENS", "VO-6")
     assert [t for t in CF.LIST_NEW if t in (6, 7, 14, 15, 16)] == [6]
-    assert msel.machine_names()[6] == "MONOMACHINE" and msel.machine_icons()[6] == msel.OUR_ICONS["MONOMACHINE"]
+    assert msel.machine_names()[6] == "MONOMACHINE" and msel.machine_icons()[6] == msel.OWNER_ICONS["SID"]   # v0.68.1: the owner's SID icon
     assert all(t in MM.RESERVED and CF.MACHINE_NAMES[t] == MM.REMOVED_NAMES for t in (7, 14, 15, 16))
     assert [MM.TYPES[MM.NAMES.index(n)] for n in MM.MONO_ENGINES] == [6] * 5
     assert PP.MNM_TYPES[6] == MM.MONO_FIRST and not {7, 14, 15, 16} & set(PP.MNM_TYPES)

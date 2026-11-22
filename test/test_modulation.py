@@ -57,6 +57,15 @@ def _chunk(va: int, n: int) -> bytes:
     return code[va - c["load"]:va - c["load"] + n]
 
 
+def _halfrate_args() -> bytes:
+    """DN2_LFO_HALFRATE (2026-11-19): mod_eval hands the evaluator's argument copies to lh_args first (pea (%sp) ;
+    jsr lh_args ; addq.l #4,%sp); without it, nothing"""
+    from dnfw.waverider import pages
+    if not pages.lfo_halfrate_on():
+        return b""
+    return (bytes.fromhex("48574eb9") + struct.pack(">I", _spec()["c_text_symbols"]["lh_args"]) + bytes.fromhex("588f"))
+
+
 def test_the_frames_evaluator_call_goes_through_the_pre_pass_into_stocks_then_the_matrix():
     from dnfw.waverider import coldfire as CF
     e = _edit(CF.MOD_EVAL_SITE)
@@ -68,10 +77,31 @@ def test_the_frames_evaluator_call_goes_through_the_pre_pass_into_stocks_then_th
             + bytes.fromhex("4fefffe4")                                # lea -28(%sp),%sp
             + bytes.fromhex("2eaf0020")                                # move.l 32(%sp),(%sp): the first argument again
             + b"".join(bytes.fromhex("2f6f") + struct.pack(">HH", 32 + 4 * k, 4 * k) for k in range(1, 7))
+            + _halfrate_args()                                         # (DN2_LFO_HALFRATE: lh_args on the copies)
             + bytes.fromhex("4eb940137a06")                            # stock's evaluator, the seven arguments in place
             + bytes.fromhex("4eb9") + struct.pack(">I", lay["mx_eval"])   # then the matrix (csrc/matrix), B still first
+            + bytes.fromhex("4eb9") + struct.pack(">I", lay["smp_lfo_fix"])   # v0.65.1: each sample voice's SAMP keeps its bank
             + bytes.fromhex("4fef001c4e75"))                           # lea 28(%sp),%sp ; rts
     assert _chunk(lay["mod_eval"], len(want)) == want
+
+
+# hooks.S mod_wb with DN2_LFO4 (2026-11-14, docs/lfo-112-port.md 4.4): DEST 101..108 (LFO4's controls) go to
+# mod_wb_cell, past 108 to stock's write, 100 or under on as before. 14 bytes after the first instruction:
+LFO4_WB = bytes.fromhex("7264"        # moveq #100,%d1
+                        "b287"        # cmp.l %d7,%d1
+                        "6408"        # bcc.s 2f: 100 or under, as without lfo4 (+8 = offset 18, the 9..24 test)
+                        "726c"        # moveq #108,%d1
+                        "b287"        # cmp.l %d7,%d1
+                        "6538"        # bcs.s 1f: past 108, stock's write (+0x38 = offset 72, the replayed pair)
+                        "6018")       # bra.s 3f: 101..108, mod_wb_cell (+0x18 = offset 42, its argument pushes)
+
+
+def _lfo4_in_spec() -> bool:
+    """the generated waverider spec carries DN2_LFO4's side: the evaluator's DEST bound raised to 108"""
+    from dnfw.waverider import coldfire as CF
+    hit = [e for e in _spec()["edits"] if e["va"] == CF.EVAL_DEST_BOUND]
+    assert len(hit) <= 1
+    return bool(hit) and bytes.fromhex(hit[0]["new"]) == bytes.fromhex("726c")
 
 
 def test_the_evaluators_write_keeps_its_two_instructions():
@@ -80,10 +110,25 @@ def test_the_evaluators_write_keeps_its_two_instructions():
     assert bytes.fromhex(e["stock"]) == CF.MOD_WB_STOCK == bytes.fromhex("206f0034736c0052")
     lay = _spec()["layout"]
     assert bytes.fromhex(e["new"]) == bytes.fromhex("4eb9") + struct.pack(">I", lay["mod_wb"]) + bytes.fromhex("4e71")
-    stub = _chunk(lay["mod_wb"], 64)
-    assert stub[:4] == bytes.fromhex("206f0038")                   # movea.l 56(%sp),%a0: stock's 52(%sp) under our return
-    assert bytes.fromhex("736c00524e75") in stub                   # mvs.w 82(%a4),%d1 ; rts: the other one, replayed
+    stub = _chunk(lay["mod_wb"], 80)
+    # 2026-11-17: the DEST's kind from a table (csrc/modulation/hooks.S): past 127 stock's write, else one read
+    assert stub[:8] == bytes.fromhex("0c870000007f6200")[:7] + stub[7:8]   # cmpi.l #127,%d7 ; bhi.s past the table
+    assert stub[8:10] == bytes.fromhex("41f9")                              # lea mod_wb_kind,%a0
+    assert stub[14:18] == bytes.fromhex("12307800")                         # move.b (%a0,%d7.l),%d1
+    assert stub[18:22] == bytes.fromhex("206f0038")                         # movea.l 56(%sp),%a0: stock's 52(%sp)
+    assert bytes.fromhex("736c00524e75") in stub                            # mvs.w 82(%a4),%d1 ; rts: replayed
     assert bytes.fromhex("4eb9") + struct.pack(">I", lay["mod_wb_cell"]) in stub
+
+
+def test_the_dest_kinds_are_the_old_tests():
+    """the table gives every DEST 0..127 the path the five compares gave it: 9..24 an LFO's control (-1), 101..108
+    LFO4's (1, DN2_LFO4), every other one stock's write (0)"""
+    lay = _spec()["layout"]
+    stub = _chunk(lay["mod_wb"], 16)
+    table = _chunk(struct.unpack(">I", stub[10:14])[0], 128)
+    lfo4 = _lfo4_in_spec()
+    want = [(-1 if 9 <= d <= 24 else 1 if lfo4 and 101 <= d <= 108 else 0) & 0xFF for d in range(128)]
+    assert list(table) == want
 
 
 def test_the_cascade_state_lives_in_its_own_ram_block():
@@ -133,7 +178,7 @@ def test_the_page_draw_keeps_the_cells_and_the_poll_asks_for_redraws():
     page = PAGE.read_text()
     screen = page[page.index("void wr_screen("):page.index("int wr_poll(")]
     assert screen.index("mv_begin();") < screen.index("SCREEN_DRAW(screen, canvas);")
-    poll = page[page.index("int wr_poll("):page.index("return IS_DIRTY(screen);")]
+    poll = page[page.index("int wr_poll("):page.index("return (int)mix_dirty(dirty);")]   # (2026-11-18: the turns' hold before it; 2026-11-20: the MIXER's held redraws last)
     assert "mv_poll(screen);" in poll
     cell = page[page.index("void wr_cell("):]
     cell = cell[:cell.index("\n}\n")]
@@ -147,3 +192,14 @@ def test_heard_and_set_are_read_where_the_frame_writes_them():
         assert re.search(rf"#define {name}\s+\(\(volatile u(16|32) \*\){va}\)", mv), name
         assert va in slides                                   # the same arrays slides moves
     assert "17u + 101u * (u32)(v) + (u32)(s)" in mv and "17u + 101u * (u32)(v) + (u32)(s)" in slides
+
+
+def test_dn2_lfo_halfrate_is_on_unless_turned_off(monkeypatch):
+    # 2026-11-19 (the User ran the half-rate build on the DN2 and kept it): on by default, DN2_LFO_HALFRATE=0 turns it off
+    from dnfw.waverider import pages
+    monkeypatch.delenv("DN2_LFO_HALFRATE", raising=False)
+    assert pages.lfo_halfrate_on()
+    monkeypatch.setenv("DN2_LFO_HALFRATE", "0")
+    assert not pages.lfo_halfrate_on()
+    cpage = (ROOT / "src/dnfw/waverider/cpage.py").read_text()
+    assert 'if PG.lfo_halfrate_on():\n            defines["DN2_LFO_HALFRATE"] = 1' in cpage

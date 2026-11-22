@@ -94,9 +94,10 @@ def extents(firmware, blob_length: int | None = None) -> list[Extent]:
 
 def ram(blob_length: int | None = None) -> list[Extent]:
     length = len(SPEC["blob"]) // 2 if blob_length is None else blob_length
-    return [Extent(RAM, RUNTIME_VA, length, "the waves' code, names, tables and wavetables"),
-            Extent(RAM, NOISE_RAM, NOISE_BYTES, "NOIS per-LFO state"),
-            Extent(RAM, TILE_RAM, TILE_BYTES, "the rendered glyph tiles")]
+    # owner: waverider declares the runtime too (its pages read the names and tables); one owner, no conflict
+    return [Extent(RAM, RUNTIME_VA, length, "the waves' code, names, tables and wavetables", owner=ID),
+            Extent(RAM, NOISE_RAM, NOISE_BYTES, "NOIS per-LFO state", owner=ID),
+            Extent(RAM, TILE_RAM, TILE_BYTES, "the rendered glyph tiles", owner=ID)]
 
 
 def default_tables() -> list[bytes]:

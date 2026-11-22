@@ -69,6 +69,19 @@ ISR_SHARE_STOPPED = 0.56
 AUDIO_HZ = 1500
 TICK = 0x466768B0                       # the panel task's 60 Hz tick (the timer wheel's, every PIT2)
 IDLE_SPIN = 0x400CF246                  # the idle task's bra.s * (docs/coldfire-tasks.md)
+# (2026-11-20) the playing kit and the parameter smoother (1.12; emu_coupled_stocknote.py): Coupled._store_kit
+KIT_PTR, SOUND_STRIDE, VSOUND = 0x800052A0, 1163, 0x800052A8
+SM_STATE, SM_SRC, SM_OUT = 0x8000DE60, 0x80003AF0, 0x800068E4
+# struct mx_state (csrc/matrix/matrix.c, OS 1.12's m68k layout): kit +8, sound[16] +28, live[16] +92; the tables'
+# offsets and env_out's from its magic (emulib/mxlayout.py: DN2_ROUTE8 and DN2_LFO4 change them; env_out checked against
+# mx_kof before use)
+MX_KIT, MX_SOUND, MX_LIVE = 8, 28, 92
+
+
+def _compat(depth: int, a: int) -> int:
+    """atten.c mxa_compat: the DEP a stock unit plays (C) for a first route of DEPTH under the attenuverter A"""
+    q = 16384 if a >= 0x7F00 else a - 0x4000
+    return max(0, min(0x7FFE, 0x4000 + (((depth - 0x4000) * q) >> 14)))
 
 
 def _bits(x: float) -> int:
@@ -163,13 +176,20 @@ class Coupled:
         self.machine, self.uc = m, m.uc
         snap_image = pathlib.Path(snapshot + ".section_3_MAIN_OS.bin")
         stock = self.stock3
+        own = False
+        self.kit_stored = None                  # (2026-11-20) _store_kit's report, on the build's own snapshot
         if snap_image.exists():
+            snap3 = snap_image.read_bytes()
+            own = snap3 == self.sec3
             back = [(va, stock[va - 0x40000400:va - 0x40000400 + len(b)]) for va, b in
-                    differences(stock, snap_image.read_bytes()) if va + len(b) <= 0x40000400 + len(stock)]
+                    differences(stock, snap3) if va + len(b) <= 0x40000400 + len(stock)]
             m.apply(back)
         m.apply(differences(stock, self.sec3))
+        # the build's runtime (code, .data, zeroed BSS) as the loader leaves it at boot: our state starts afresh
         for va, blob in platform.runtime(self.sec3):
             m.write(va, blob)
+        if own:
+            self.kit_stored = self._store_kit(m)
         for page in range(SM.MIRROR, SM.MIRROR + SM.MIRROR_BYTES, 0x100000):
             try:
                 self.uc.mem_map(page, 0x100000, UC_PROT_ALL)
@@ -180,6 +200,67 @@ class Coupled:
         from emulib.panel import Panel                         # noqa: PLC0415
         self.panel = Panel(m, png_dir=png_dir or "out/coupled")
         self.faults0 = len(getattr(m.m, "faults", []))
+
+    def _store_kit(self, m) -> dict | None:
+        """(2026-11-20) the build's own snapshot was made by this build: its UI pass converted the playing kit (the DEP
+        attenuverter, csrc/matrix/atten.c: an old sound's DEP moved into its LFOs' first routes' depths D, DEP set to
+        100 %). The runtime written over the snapshot starts our code as at boot (.data, BSS: no wishes, nothing converted; the
+        wishes' table is not in the snapshot either), while stock's kit stays converted: a state no unit reaches (at
+        boot stock loads the kit stored, DEP = C), and the next UI pass converts again, D = 100 %: every LFO at full
+        depth (parachord's PARA OFF voices smeared, v0.62.2 .. v0.62.5). So each converted kit sound is stored first,
+        as the saver stores it (atten.c mxa_save: DEP = mxa_compat(D, A)), in the sound, the rows of the voices
+        playing it and the parameter smoother (settled): what a boot has. D is read where the snapshot keeps it, the
+        matrix's tables (MX_RAM, struct mx_state: each track's table's first-route words nx1 = -2 x (D - 0x4000)).
+        Called after the runtime is written (mx_kof read from it; MX_RAM, the kit and the smoother are not in it).
+        -> {"sounds": n, "deps": [[t, l, A, D, C], ...]}, {"skipped": why}, or None (no attenuverter in this build)"""
+        try:
+            import json                                         # noqa: PLC0415
+            lay = json.loads((ROOT / "src/dnfw/mods/waverider_code.json").read_text())["layout"]
+            from dnfw.waverider import pages as PG              # noqa: PLC0415
+        except (OSError, ValueError, KeyError, ImportError) as e:
+            return {"skipped": f"no layout ({e})"}
+        if "mx_kof" not in lay:
+            return None
+        lfo_live = PG.lfo4_moved()["LFO_LIVE"]
+        env_out = (m.long(lay["mx_kof"]) + lfo_live + 4 - 92) & 0xFFFFFFFF   # matrix.c mx_kof
+        from emulib import mxlayout                             # noqa: PLC0415
+        try:
+            L = mxlayout.of_magic(m.long(PG.MX_RAM))
+        except ValueError as e:
+            return {"skipped": f"struct mx_state not as this harness reads it ({e})"}
+        if env_out != PG.MX_RAM + L.env_out:
+            return {"skipped": f"struct mx_state not as this harness reads it (env_out {env_out:#x}, magic "
+                               f"{m.long(PG.MX_RAM):#x})"}
+        kit = m.long(KIT_PTR)
+        if m.long(PG.MX_RAM + MX_KIT) != kit:
+            return {"skipped": "the matrix's tables were laid out for another kit"}
+        out = {"sounds": 0, "deps": []}
+        for t in range(16):
+            snd = kit + 52 + SOUND_STRIDE * t
+            if m.long(PG.MX_RAM + MX_SOUND + 4 * t) != snd:
+                continue
+            tab = PG.MX_RAM + L.tab + L.tab_b * (2 * t + (m.long(PG.MX_RAM + MX_LIVE + 4 * t) & 1))
+            stored = 0
+            for lfo in range(3):
+                x1 = struct.unpack(">i", bytes(m.read(tab + L.nx1 + 4 * lfo, 4)))[0]
+                if x1 & 1:                                      # MX_PASS: not converted, DEP is the depth already
+                    continue
+                slot = 8 + 8 * lfo                              # LFO1-3 DEP (atten.c mxr_dep_rec)
+                a = struct.unpack(">H", bytes(m.read(snd + 20 + 2 * slot, 2)))[0]
+                d = 0x4000 - x1 // 2
+                c = _compat(d, a)
+                m.write(snd + 20 + 2 * slot, struct.pack(">H", c))
+                for v in range(16):
+                    if m.long(VSOUND + 4 * v) != snd:
+                        continue
+                    i = 17 + 101 * v + slot                     # the voice row's cell, as the smoother indexes it
+                    m.write(SM_SRC + 2 * i, struct.pack(">H", c))
+                    m.write(SM_STATE + 4 * i, struct.pack(">i", c << 16))
+                    m.write(SM_OUT + 2 * i, struct.pack(">H", c))
+                out["deps"].append([t, lfo + 1, a, d, c])
+                stored = 1
+            out["sounds"] += stored
+        return out
 
     def call(self, fn, *args, until=None, limit=50_000_000):
         """FN(ARGS) on the ColdFire, its registers kept -> (d0, the pc it stopped at)"""

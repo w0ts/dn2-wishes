@@ -240,13 +240,18 @@ def xround(p: Prog, d: int, ah: int, al: int, b: int) -> None:
     xround_i(p, d, 1, b)
 
 
-def xround_i(p: Prog, d: int, a: int, b: int, cr: tuple[int, int, int] | None = None) -> None:
+def xround_i(p: Prog, d: int, a: int, b: int, cr: tuple[int, int, int] | None = None, a7: int | None = None) -> None:
     """xround with A = 2a an integer in Ra (0 <= A < 2^25), not halves (perf, 2026-11-10: where the
     integer is at hand, or kept as one). CR: registers the caller holds M24, 1 and 0x7FFFFF in
-    (opt-md, 2026-11-12: three constant loads fewer). Clobbers R2, R3, R12, R13."""
-    assert a not in (2, 3, 12, 13) and b not in (2, 3, 12, 13)
-    p.lsh(2, b, 7)                             # Rb 2^7: |.| < 2^30
-    p.mul_ssf(3, a, 2)                         # q = floor(A Rb / 2^24)
+    (opt-md, 2026-11-12: three constant loads fewer). A7 (2026-11-21, filt-opt): a register the caller holds A 2^7 in
+    (A < 2^24): q from A 2^7 x Rb, the same integer product as A x Rb 2^7, so no shift here. Clobbers R2, R3, R12,
+    R13."""
+    assert a not in (2, 3, 12, 13) and b not in (2, 3, 12, 13) and a7 not in (3, 12, 13)
+    if a7 is not None:
+        p.mul_ssf(3, a7, b)                    # q = floor(A 2^7 Rb / 2^31)
+    else:
+        p.lsh(2, b, 7)                         # Rb 2^7: |.| < 2^30
+        p.mul_ssf(3, a, 2)                     # q = floor(A Rb / 2^24)
     p.mul_ssi(13, a, b)
     if cr is not None:
         m24, one, half = cr
@@ -492,12 +497,16 @@ def scale_i(p: Prog, d: int, k: int, mul: int, sh: int, add: int = 0) -> None:
 
 
 def decay_w(p: Prog, L: K.Layout, word: int, k: int, mul: int, sh: int, add: int) -> None:
-    """W[word] = tblD[(input k * mul >> sh) + add] (an integer word)."""
+    """W[word] = tblD[(input k * mul >> sh) + add] (an integer word). The lookup is one subroutine (efm_hostd, in the
+    host bodies' span: 2026-11-20, CLAP and the cymbals' room). Clobbers R1, R4, R12, R13, I1, I12."""
     scale_i(p, 1, k, mul, sh, add)
-    K.table_f(p, L, 4, "hostD", 1, 12)
-    p.fconst(12, 2.0 ** 23)
-    p.fop(4, 4, "*", 12)
-    p.trunc(4, 4)
+
+    def lookup():
+        K.table_f(p, L, 4, "hostD", 1, 12)
+        p.fconst(12, 2.0 ** 23)
+        p.fop(4, 4, "*", 12)
+        p.trunc(4, 4)
+    p.call("efm_hostd", lookup)
     ws(p, word, 4)
 
 
@@ -1264,6 +1273,8 @@ class EFMCY:
             w(p, 1, k)
             p.lsh(1, 1, 1)
             ss(p, kk, 1)
+            p.lsh(1, 1, 7)                     # (2026-11-21, filt-opt) and 2w 2^7 in the word after (2w < 2^17, so
+            ss(p, kk + 1, 1)                   # 2w 2^7 < 2^24), for xround_i's A7
         split_w(p, 11, o["mdec"])
         split_w(p, 5, o["dec"])
         hp_coefs(p, 13, o["hpe"], o["hpd"])
@@ -1303,9 +1314,9 @@ class EFMCY:
             stw(o["mph"] + j, 13)
             sine(2)
             ldw(5, o["w10"])
-            xround_i(p, 7, 5, 7, cr)           # round(MOD * sine)
+            xround_i(p, 7, 5, 7, cr, a7=6)     # round(MOD * sine)
             ldw(5, o["env2"])
-            xround_i(p, 7, 5, 7, cr)           # * the mod env (rounded)
+            xround_i(p, 7, 5, 7, cr, a7=1)     # * the mod env (rounded)
             ldw(13, o["fb"] + j)
             p.iop(7, 13, "+", 7)               # b = fb + mod
             ldw(13, o["cph"] + j)
@@ -1315,9 +1326,10 @@ class EFMCY:
             p.iop(13, 13, "+", 3)              # phase + inc
             stw(o["cph"] + j, 13)
             sine(2)
+            ldw(2, o["w12"] + 1)               # FB 2^7 (rides on sine's TRUNC)
             p.iop(11, 11, "+", 7)              # the sum (R11)
             ldw(5, o["w12"])
-            xround_i(p, 7, 5, 7, cr)           # fb = round(FB * sine)
+            xround_i(p, 7, 5, 7, cr, a7=2)     # fb = round(FB * sine)
             stw(o["fb"] + j, 7)
 
         p.geti(13, 3)                          # (opt-md, 2026-11-14: once a block, nothing in the loop moves I0)
@@ -1332,6 +1344,9 @@ class EFMCY:
             s(p, 11, o["menv"])
             p.lsh(11, 11, 1)
             ss(p, o["env2"], 11)
+            p.lsh(1, 11, 7)                    # (2026-11-21, filt-opt) R1 env2 2^7 (env2 < 2^24), R6 MOD 2^7, held
+            ldw6 = o["w10"] + 1 - 16           # through the four operators (xround_i's A7)
+            p.ldi(6, ldw6, 0)
             p.iconst(11, 0)                    # the sum, in R11 through the four operators
             for j in range(4):
                 op(j)

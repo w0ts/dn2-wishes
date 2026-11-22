@@ -32,6 +32,13 @@ int main(void)
 """
 
 
+def _rec_base() -> str:
+    """-D for where our C reads stock's parameter records: the build's own value (dnfw.waverider.cpage passes
+    dnfw.waverider.pages.lfo4_moved(); lfo4 moves the table, 2026-11-16 lfo4112)"""
+    from dnfw.waverider import pages
+    return f"-DREC_BASE={pages.lfo4_moved()['REC_BASE']:#x}u"
+
+
 @pytest.fixture(scope="module")
 def table(tmp_path_factory):
     cc = shutil.which("cc") or shutil.which("clang") or shutil.which("gcc")
@@ -40,7 +47,7 @@ def table(tmp_path_factory):
     d = tmp_path_factory.mktemp("fxt")
     (d / "h.c").write_text(HARNESS)
     out = d / "h"
-    r = subprocess.run([cc, "-O1", "-w", "-Dsection(x)=aligned(4)", "-o", str(out), str(d / "h.c"),
+    r = subprocess.run([cc, "-O1", "-w", "-Dsection(x)=aligned(4)", _rec_base(), "-o", str(out), str(d / "h.c"),
                         str(ROOT / "csrc" / "fdn8" / "ui.c"), str(ROOT / "csrc" / "xdly" / "ui.c")],
                        capture_output=True, text=True)
     if r.returncode:
@@ -118,7 +125,7 @@ def _quant_exe(tmp_path):
     prog = prog.replace("int id, old, d, knob", "int value_in, id, old, d, knob").replace("typedef unsigned char u8;", "typedef unsigned char u8; typedef unsigned short u16;")
     (tmp_path / "q.c").write_text(prog)
     out = tmp_path / "q"
-    r = subprocess.run([cc, "-O1", "-w", "-Dsection(x)=aligned(4)", "-o", str(out), str(tmp_path / "q.c"), str(ROOT / "csrc" / "fdn8" / "ui.c"),
+    r = subprocess.run([cc, "-O1", "-w", "-Dsection(x)=aligned(4)", _rec_base(), "-o", str(out), str(tmp_path / "q.c"), str(ROOT / "csrc" / "fdn8" / "ui.c"),
                         str(ROOT / "csrc" / "xdly" / "ui.c")], capture_output=True, text=True)
     if r.returncode:
         pytest.fail(r.stderr[-2000:])

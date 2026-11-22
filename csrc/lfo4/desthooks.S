@@ -66,3 +66,64 @@ lfo4_dest_mask:
     clr.l   %d0
 lfo4_dest_mask_done:
     jmp     DN2_DEST_MASK_AFTER
+
+/* The DEST list opener's own cascade, with the same fourth step (2026-11-17).
+ *
+ * Measured (emu_dest_probe, build 49df7194): of stock's eight 18/17/16 cascades only the one at 0x400672FE runs
+ * when the DEST list opens, with the record's flags in %d0 (LFO1 0x40000, LFO4 0x8000). lfo4 relocated its table
+ * read but left the cascade three steps long, so LFO4's 0x8000 set no mask: the list opened unfiltered, with no
+ * MODn header and its highlight not on the value (the User's DN2, v0.57.1). Its forty-eight bytes are replaced
+ * and every branch converges on DN2_LIST_MASK_AFTER. The three steps are stock's, register for register (%a1,
+ * %d0, %a0 written as stock writes them); the fourth is the staircase's next: bit 15 -> 0x0200 into -28(%fp),
+ * through %a0 as the 0x0600 step does (%a0 is dead there: the next call clobbers it).
+ */
+    .globl  lfo4_list_mask
+lfo4_list_mask:
+    btst    #18,%d0
+    beq.s   1f
+    movea.w #0x1e00,%a1
+    move.l  %a1,-28(%fp)
+    jmp     DN2_LIST_MASK_AFTER
+1:  btst    #17,%d0
+    beq.s   2f
+    move.l  #0x0e00,%d0
+    move.l  %d0,-28(%fp)
+    jmp     DN2_LIST_MASK_AFTER
+2:  btst    #16,%d0
+    beq.s   3f
+    movea.w #0x0600,%a0
+    move.l  %a0,-28(%fp)
+    jmp     DN2_LIST_MASK_AFTER
+3:  btst    #DN2_DEST_FLAG_BIT,%d0
+    beq.s   4f
+    movea.w #DN2_DEST_MASK4,%a0
+    move.l  %a0,-28(%fp)
+4:  jmp     DN2_LIST_MASK_AFTER
+
+/* The DEST list's header, with a fourth group name (2026-11-18).
+ *
+ * The header (0x40106CDC..) names the list's group from its mask (a2@(224)): 0x1e00 "MOD1", 0x0e00 "MOD2", 0x0600
+ * "MOD3", anything else its own label (a2@(228)). With lfo4_list_mask LFO4's list carries 0x0200, so this adds
+ * "MOD4". It replaces `cmpil #0x600,%d0 ; bne` (8 bytes at 0x40106CF0): 0x0600 goes on to stock's MOD3 case, 0x0200
+ * does what that case does with "MOD4" (the separator appended through %a4, then the name pushed for the join),
+ * anything else goes to stock's last case. %d0 holds the mask; the registers are stock's on every exit.
+ */
+    .globl  lfo4_hdr_stub
+lfo4_hdr_stub:
+    cmp.l   #0x0600,%d0
+    bne.s   1f
+    jmp     DN2_HDR_MOD3
+1:  cmp.l   #DN2_DEST_MASK4,%d0
+    bne.s   2f
+    pea     DN2_HDR_SEP
+    move.l  %d3,-(%sp)
+    jsr     %a4@
+    pea     lfo4_mod4_name
+    jmp     DN2_HDR_JOIN
+2:  jmp     DN2_HDR_OTHER
+
+    .section .rodata
+    .globl  lfo4_mod4_name
+lfo4_mod4_name:
+    .asciz  "MOD4"
+    .text

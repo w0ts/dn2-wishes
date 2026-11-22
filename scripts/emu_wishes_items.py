@@ -50,7 +50,7 @@ WI_KIT, WI_PATTERN, WI_SONG, WI_PROJECT = 2, 3, 4, 5
 FRAMES = 0x4058F8D4
 SCRATCH = 0x47740000                    # our buffers: four stored patterns' room, above the matrix's MX_RAM
 WISH_RAM, WISH_MAP = 0x47280000, 0x500000
-CELL0, CELLS = 0x6F0800, 59392
+CELL0, CELLS = 0x5D8000, 92160   # v0.69.2 (csrc/include/dmove.h)
 TAG = 0x0100
 
 failures: list[str] = []
@@ -96,6 +96,8 @@ def main() -> int:
     def call(fn, *args):
         return guest_call(machine, fn, *args)
 
+    if "dm_bits" in lay:                        # v0.69.2: a unit whose +Drive moves are done (dmove.c: the record waits for them)
+        uc.mem_write(lay["dm_bits"], struct.pack(">I", 0x3F))
     MEMCPY, MEMSET = lay["wish_memcpy_stub"], lay["wish_memset_stub"]
     val, out = SCRATCH, SCRATCH + 0x400
     bufs = [SCRATCH + 0x1000 + 0x16000 * k for k in range(4)]   # 4 x 90,112 B: room for a stored pattern each

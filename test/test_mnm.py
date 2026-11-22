@@ -9,18 +9,35 @@ from __future__ import annotations
 
 import pytest
 
-from dnfw.mnm import bench, ddrw, dens, rom, sid, vo6, wave
+from dnfw.mnm import bench, ddrw, dens, fm, rom, sid, vo6, wave
 from dnfw.mnm import core as C
 
-MACHINES = {"WAVE": wave, "SID": sid, "DENS": dens, "DDRW": ddrw, "VO6": vo6}
+MACHINES = {"WAVE": wave, "SID": sid, "DENS": dens, "DDRW": ddrw, "VO6": vo6,
+            "FMSTAT": fm.Stat, "FMPAR": fm.Par, "FMDYN": fm.Dyn}       # v0.59: FM+
 pytestmark = pytest.mark.skipif(not (rom.available() and bench.GOLDEN.is_dir()),
                                 reason="needs the owner's Monomachine OS and the golden runs")
+
+
+assert tuple(MACHINES) == bench.GOLDEN_NAMES
+
+
+def test_golden_names_are_the_gates():
+    """the unit step's list of machines with golden runs (ship_gate MNM_GOLDEN_NAMES) is this module's"""
+    import pathlib, re
+    src = (pathlib.Path(__file__).resolve().parents[1] / "scripts" / "ship_gate.py").read_text()
+    m = re.search(r"^MNM_GOLDEN_NAMES = \((.*)\)$", src, re.M)
+    assert m and tuple(re.findall(r'"([A-Z0-9]+)"', m.group(1))) == bench.GOLDEN_NAMES
+
+
+def _has(name) -> bool:
+    """NAME's golden runs are here: its golden tests are collected (else not: reported by the unit step)"""
+    return (bench.GOLDEN / f"{name}.json").exists()
 
 
 def _cases():
     out = []
     for name in MACHINES:
-        if (bench.GOLDEN / f"{name}.json").exists():
+        if _has(name):
             out += [(name, c["name"]) for c in bench.golden(name)["cases"]]
     return out
 
@@ -48,8 +65,9 @@ def _trimmed(M) -> bool:
 
 
 @pytest.mark.parametrize("name,case", _cases())
-def test_against_the_monomachine(name, case):
+def test_against_the_monomachine(name, case, monkeypatch):
     M = MACHINES[name]
+    monkeypatch.setattr(ddrw, "MIX_GAIN", ddrw.MNM_MIX_GAIN)   # 2026-11-21: the DN2's own MIX gain is lower
     g = _golden(name)[case]
     ours, theirs = bench.run_case(M, g)
     if _trimmed(M):
@@ -59,13 +77,43 @@ def test_against_the_monomachine(name, case):
         assert r["ok"], {k: v for k, v in r.items() if k != "ok"}
         return
     r = bench.compare(ours, theirs)
+    if _chaotic(M, g):
+        # v0.59: FM+'s self feedback at 32 and above (dnfw.mnm.fm): within 60 dB, or held by its
+        # level and spectrum as the trimmed machines are
+        assert r["snr_db"] >= 60.0 or bench.likeness(ours, theirs)["ok"], r
+        return
     assert r["snr_db"] >= 60.0 or r["rms_err"] < 2.0 ** -20, r
 
 
+def _chaotic(M, g) -> bool:
+    k = getattr(M, "FB_KNOB", None)
+    return k is not None and any(e[1] and e[1][k] >= 32 for e in g["events"])
+
+
+# (dn2-wishes, the v0.59 merge: collected per machine whose golden runs are here, as _cases(); upstream's one test
+# read all three files)
+@pytest.mark.parametrize("name", [n for n in ("FMSTAT", "FMPAR", "FMDYN") if _has(n)])
+def test_fm_chaotic_cases_are_only_the_self_feedback_ones(name):
+    """the negative control for the FM+ rule: the likeness test refuses a chaotic case 6 dB
+    down, and a case without self feedback (FM+ PAR's all; STAT's, DYN's at FB 0) is held to
+    60 dB"""
+    M = MACHINES[name]
+    cases = bench.golden(name)["cases"]
+    if M is fm.Par:
+        assert not any(_chaotic(fm.Par, c) for c in cases)
+        return
+    hot = [c for c in cases if _chaotic(M, c)]
+    cold = [c for c in cases if not _chaotic(M, c)]
+    assert hot and cold
+    ours, theirs = bench.run_case(M, hot[-1])
+    assert not bench.likeness([v * 0.5 for v in ours], theirs)["ok"]
+
+
 @pytest.mark.parametrize("name", [n for n, M in MACHINES.items() if _trimmed(M)])
-def test_trimmed_likeness_fails_a_wrong_level(name):
+def test_trimmed_likeness_fails_a_wrong_level(name, monkeypatch):
     """the negative control: the likeness test refuses the same output 6 dB down (a trimmed
     machine's decimator shift one bit off: v0.51's first measurement of SID at 4x)"""
+    monkeypatch.setattr(ddrw, "MIX_GAIN", ddrw.MNM_MIX_GAIN)   # the golden runs are played at the Monomachine's gain
     g = bench.golden(name)["cases"][0]
     ours, theirs = bench.run_case(MACHINES[name], g)
     assert bench.likeness(ours, theirs)["ok"]

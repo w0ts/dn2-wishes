@@ -1,0 +1,20 @@
+# An example of this machine's farm settings for scripts/runq.py (read by scripts/hostcfg.py).
+# Copy it to ~/.config/dn2-wishes/hosts.toml (or point DN2_HOSTS_FILE at it) and fill it in.
+# It stays out of the repository: host names, paths and limits are this machine's own.
+[farm]
+host = "farm"                 # the ssh host (an alias in ~/.ssh/config)
+bench = "~/bench"      # the bench directory on the farm: bench_ns112.sh, runq/
+load_max = 12                 # a job starts only while the farm's load1 + its CPUs stay under this
+cpus = 8                      # our CPUs on the farm at most, all our processes counted
+
+# optional: another cap on some weekdays (0 = Monday) between two hours (local time)
+# [farm.window]
+# days = [0, 1, 2, 3, 4]
+# start = 8
+# end = 17
+# cpus = 4
+
+[farm.paths]                  # {NAME} in a farm command -> the farm's path, absolute (it is quoted: no ~)
+STOCK111 = "/srv/bench/data112/stock112dist/Digitone_II_OS1.11.syx"
+STOCK112 = "/srv/bench/data112/os112dl/Digitone_II_OS1.12.syx"
+DIGIKIT = "/srv/digikit"

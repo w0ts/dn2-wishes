@@ -84,8 +84,28 @@ def _store_hook(e: dict) -> bool:
     return any(va < hi and lo < va + n for va, n in STORE_SITES)
 
 
+# 2026-11-16 (v0.56.2, ship_gate `overbridge`): stock's memcpy and memset stay stock on our series. memcpy is on
+# Overbridge's audio path (scripts/gate_overbridge.py reaches it from the audio interrupt), so lfo4's two entry hooks
+# there (csrc/lfo4/hooks.S, `jmp lfo4_memcpy_stub` / `jmp lfo4_memset_stub`) are left out, as the store hooks are.
+# lfo4's carry is reached through the callers instead: every reference to memcpy / memset outside Overbridge's own
+# code already names the wishes record's stub (dnfw.waverider.coldfire WISH_KEEP), and with DN2_LFO4 that stub goes on
+# into lfo4's (csrc/wishes/hooks.S), which tests, carries, replays the two displaced instructions and continues at
+# entry + 8 exactly as before. Only Overbridge's own references (WISH_KEEP, WISH_HOOKED) no longer reach lfo4.
+MEMORY_SITES = ((0x40134770, 8), (0x401347B8, 8))    # 1.12: memcpy, memset
+
+
+def _memory_hook(e: dict) -> bool:
+    lo, hi = e["va"], e["va"] + len(e["new"]) // 2
+    return any(va < hi and lo < va + n for va, n in MEMORY_SITES)
+
+
+def series_hook(e: dict) -> bool:
+    """An lfo4 edit our series leaves out: the stored-sound hooks and the memcpy / memset entries."""
+    return _store_hook(e) or _memory_hook(e)
+
+
 def _edits() -> list[dict]:
-    return [e for e in _spec()["edits"] if not _platform_owned(e) and not _store_hook(e)]
+    return [e for e in _spec()["edits"] if not _platform_owned(e) and not series_hook(e)]
 
 
 def _chunks(blob: bytes) -> list[tuple[bytes, bytes]]:
@@ -104,16 +124,19 @@ def extents(firmware=None) -> list[Extent]:
 # declared: on 2026-09-30 the boot screen's stamp was placed at 0x46700000
 # because this list held only the chunks, and the instrument raised V04 at
 # 0x46700000 once the evaluator had written its state over the stamp.
-STATE_RAM = ((0x46700000, 2560, "LFO state LIVE"), (0x46701000, 2560, "LFO state SECOND"),
-             (0x46702000, 2560, "LFO state BACKUP"))
+# 2026-11-17: moved from 0x46700000.. (inside stock 1.12's +Drive bounce buffer, which stock
+# overwrites on an unaligned read) to 0x46808000..; waverider.ram() now carries these, so the
+# gate's rammap step and RAM guard check them.
+STATE_RAM = ((0x46808000, 2560, "LFO state LIVE"), (0x46809000, 2560, "LFO state SECOND"),
+             (0x4680A000, 2560, "LFO state BACKUP"))
 
 
 def ram() -> list[Extent]:
-    out = [Extent(platform.RAM, va, n, what) for va, n, what in STATE_RAM]
+    out = [Extent(platform.RAM, va, n, what, owner=ID) for va, n, what in STATE_RAM]
     for _, data in _chunks(bytes.fromhex(_spec()["blob"])):
         code = platform.area.CodeChunk.unpack(data)
         out.append(Extent(platform.RAM, code.load, len(code.image) + code.bss,
-                          "LFO4's C and its BSS" if code.bss else "the relocated parameter table"))
+                          "LFO4's C and its BSS" if code.bss else "the relocated parameter table", owner=ID))
     return out
 
 

@@ -209,8 +209,7 @@ class PIML:
         p.iconst(0, 0)
         ws(p, 3, 0)                                     # HARD = 0 (the firmware's quirk)
         ss(p, M.LP, 0)
-        for k in range(16):
-            ss(p, M.RES + k, 0)
+        K.zero_words(p, M.RES, 16)                      # (2026-11-20: a loop, perc2b's room)
 
     @staticmethod
     def trig(p: Prog, L: K.Layout) -> None:

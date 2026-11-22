@@ -65,6 +65,8 @@ def extents(firmware=None, area_length: int = 0) -> list[Extent]:
     out = [Extent(MAIN_OS, e["va"] - BASE, len(e["new"]) // 2, e["what"]) for e in SPEC["edits"]]
     from . import bootscreen as B
     out.append(Extent(MAIN_OS, B.SPEC["intro_va"] - BASE, 8, "v0.37: the intro hook (the start-up animation)"))
+    from . import midiarp as MA                 # v0.67: the arp on MIDI tracks
+    out += [Extent(MAIN_OS, x.start, x.length, "v0.67 midiarp: " + x.what) for x in MA.extents()]
     out += platform.extents(area_length)
     size = None
     if firmware is not None:
@@ -106,7 +108,7 @@ def _tables() -> tuple[int, bytes, str]:
     from ..md import core as md_core
     from ..sampler import machines as SM
     data = md_core.tables_bytes()
-    if len(data) > SM.TABLE_ROOM - 512:
+    if len(data) > SM.TABLE_ROOM - 512 or 8 + len(data) > SM.TABLE_RAM_MAX:   # v0.65.1: the banks' RAM follows
         raise ModError(f"the tables ({len(data):,} B) do not fit the DSP's table area")
     return (SM.TABLE_LOAD, struct.pack("<II", SM.TABLE_MAGIC, len(data)) + data,
             "the Machinedrum's and Monomachine's tables, sent to the DSP at power-on (v0.26)")
@@ -132,6 +134,8 @@ def ram() -> list[Extent]:
             + B.ram()
             + [Extent(RAM, SM.MIRROR, SM.MIRROR_BYTES,
                       "the sample link's mirror of the pool (csrc/sampler/link.c, v0.14)")]
+            + [Extent(RAM, SM.BANK_RAM, SM.BANK_RAM_BYTES,
+                      "PROJECT RAM banks B..D: their pages, their slots' RAM, the bank lists (v0.65)")]
             + [Extent(RAM, PG.METER_RAM, PG.METER_BYTES,
                       "the system meter's state: its counters and figures (csrc/meter)")]
             + [Extent(RAM, PG.WISH_RAM, PG.WISH_BYTES,
@@ -141,7 +145,39 @@ def ram() -> list[Extent]:
             + [Extent(RAM, PG.MOD_RAM, PG.MOD_BYTES,
                       "modulation's state: the LFO cascade's shadow cells, the moving controls (csrc/modulation)")]
             + [Extent(RAM, PG.PROF_RAM, PG.PROF_BYTES,
-                      "the CPU profiler's state and samples (csrc/devtest/prof.c), while PROFILE runs")])
+                      "the CPU profiler's state and samples (csrc/devtest/prof.c), while PROFILE runs")]
+            + _shared_ram())
+
+
+# Bytes that only look like RAM above BSS (`dnfw.mods.ramcheck`), as arpplocks and lfowaves list theirs: at 0x400285c4,
+# the PARA VOICE-menu hook `jsr <our C>` at 0x400285c0 (4e b9 46 a6 46 80 on the 2026-11-18 batch) and stock's next
+# instruction `clr.l -(%sp)` (42 a7) straddle into 0x468042a7: the jsr target's low half and an opcode, never an address
+# (a known false alarm: the User approved this entry 2026-11-18)
+NOT_RAM = (0x400285C4,)
+
+
+def word_spans() -> list[tuple[int, int, str]]:
+    """For ramcheck (`not_addresses`, 2026-11-17): our C's text is code (gcc's, read by disassembly); the DSP's
+    tables chunk (0x47000000, the Machinedrum's and Monomachine's) is opaque: sent to the DSP, no ColdFire pointer"""
+    lay = SPEC.get("layout", {})
+    out = [(lay["c_load"], lay["c_text_end"], "code")] if "c_text_end" in lay else []
+    out += [(lo, hi, "opaque") for lo, hi in lay.get("c_number_tables", ())]      # the header's number tables
+    out += [(p, p + 4, "pointer") for p in lay.get("c_pointer_sites", ())]      # ... and its relocated pointers
+    return out + [(load, load + len(code), "opaque") for load, code, what in _chunks()
+                  if "sent to the DSP" in what]
+
+
+def _shared_ram() -> list[Extent]:
+    """RAM other mods place and our code names (2026-11-17, test_mods_ramcheck): lfowaves' runtime (our pages read
+    its names and tables: lea 0x467804b4 ..), and with DN2_LFO4 lfo4's LFO state arrays and chunks (our modulation,
+    matrix and wishes code read and write them). Declared here too, so what this build names is what it declares"""
+    from ..waverider import pages as PG
+    from . import lfo4, lfowaves
+    # each keeps its mod as owner: the same range declared twice by design, never a conflict between the two
+    out = [Extent(RAM, e.start, e.length, f"lfowaves': {e.what}", owner=e.owner) for e in lfowaves.ram()[:1]]
+    if PG.lfo4_on():
+        out += [Extent(RAM, e.start, e.length, f"lfo4's: {e.what}", owner=e.owner) for e in lfo4.ram()]
+    return out
 
 
 def _main_os(original: bytes) -> bytes:
@@ -188,6 +224,11 @@ def apply(firmware) -> Result:
         raise ModError(f"0x{bspec['intro_va']:08x} (the intro routine) is not stock; this mod is "
                        "for unmodified Digitone II 1.12")
     base_os[at:at + 8] = b"\x4e\xf9" + struct.pack(">I", bspec["stamp"]) + b"\x4e\x71"
+    # v0.67 (owner, 2026-11-20: "just arp on midi tracks"): the midiarp mod (upstream's, Angel Linares's
+    # dn2_firmware_explore; tested on his unit 2026-09-17 as arp-midi-play4), its sites checked stock in this image first
+    from . import midiarp as MA
+    MA.check(bytes(base_os))
+    MA.write(base_os, main_os)
     codes += [(platform.area.CODE, platform.area.CodeChunk(bspec["load"], bytes.fromhex(bspec["code"])).pack()),
               (bspec["aniz_chunk"].encode(), aniz), _label()]
     content = platform.join(bytes(base_os), others + codes)

@@ -19,9 +19,49 @@ print no instruction number for the stop.
 """
 from __future__ import annotations
 
+import os
+
 import unicorn
 
 from emu import dspboot
+
+
+DDR, DDR_BYTES = 0x40000000, 0x08000000          # the ColdFire's DDR, 128 MiB
+_KEEP: list = []
+UNCACHED = 0x48000000                            # its uncached alias (MCF5441x ACRs): 0x4e6f9300 is 0x466f9300
+
+
+def _alias_ddr():
+    """2026-11-16: map 0x48000000..0x4fffffff onto the same host memory as 0x40000000..0x47ffffff, as on
+    the instrument. Without it the emulator kept two separate memories, and stock 1.12's +Drive bounce
+    buffer (0x4e6f9300, eDMA) never reached what lies under 0x466f9300 (the 7f7e7d6c crash: the
+    stamp at 0x46708000 overwritten at power-on). -> (restore, keepalive)."""
+    import ctypes
+    import mmap
+
+    mem = mmap.mmap(-1, DDR_BYTES)               # anonymous: zeros, committed only where used
+    _KEEP.append(mem)                            # never freed before Unicorn: it is the machine's RAM
+    base = ctypes.addressof(ctypes.c_char.from_buffer(mem))
+    orig = unicorn.Uc.mem_map
+
+    done = set()
+
+    def mem_map(self, address, size, perms=unicorn.UC_PROT_ALL):
+        if getattr(self, "_arch", None) != unicorn.UC_ARCH_M68K or not DDR <= address < DDR + 2 * DDR_BYTES:
+            return orig(self, address, size, perms)
+        if address + size > DDR + 2 * DDR_BYTES:
+            raise ValueError(f"a mapping {address:#x}+{size:#x} runs past the DDR's alias")
+        if id(self) not in done:                 # the whole DDR, both views, once: every page exists
+            self.mem_map_ptr(DDR, DDR_BYTES, unicorn.UC_PROT_ALL, base)   # (the eSDHC's eDMA maps only
+            self.mem_map_ptr(UNCACHED, DDR_BYTES, unicorn.UC_PROT_ALL, base)   # its first page itself)
+            done.add(id(self))
+        return None                              # already mapped: the same host memory
+
+    unicorn.Uc.mem_map = mem_map
+
+    def restore():
+        unicorn.Uc.mem_map = orig
+    return restore, mem
 
 
 def run(syx_path, main_img, limit, **kw):
@@ -39,10 +79,18 @@ def run(syx_path, main_img, limit, **kw):
         return orig(self, htype, callback, user_data, begin, end, *a, **k)
 
     unicorn.Uc.hook_add = hook_add
+    alias = _alias_ddr() if os.environ.get("DNFW_DDR_ALIAS") == "1" else None
+    if os.environ.get("DNFW_CARD_IMAGE") and "card_image" not in kw:   # a +Drive image (scripts/drive_card.py)
+        kw["card_image"] = os.environ["DNFW_CARD_IMAGE"]
     try:
         m, st, stop = dspboot.run(syx_path, main_img, limit=limit, fast=True, **kw)
     finally:
         unicorn.Uc.hook_add = orig
+        if alias is not None:
+            alias[0]()
+            m_keep = alias[1]                     # the host memory lives as long as the machine
+    if alias is not None:
+        m.ddr_alias = m_keep
     if not left_out:
         # digikit changed: the hook ran as before, so the run is the old (slower) one, still correct
         print("  (quickboot: dspboot's cover hook not found; ran with it)")

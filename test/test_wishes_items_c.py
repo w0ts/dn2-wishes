@@ -21,7 +21,7 @@ KIT0, KIT_BYTES, KIT_STORED, KIT_LANE = 0x4210D08C, 23921, 10752, 10416
 PAT0, PAT_BYTES, PAT_STORED, LOCKS, RECS, REC = 0x4121998C, 122478, 89088, 68148, 80, 258
 SOUND = 1163
 TAG = 0x0100                                   # a kit-level field (any tag: item.c is tag-blind)
-CELL0, CELLS = 0x6F0800, 59392
+CELL0, CELLS = 0x5D8000, 92160   # v0.69.2 (csrc/include/dmove.h)
 
 
 @pytest.fixture(scope="module")

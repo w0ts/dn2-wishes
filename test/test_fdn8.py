@@ -181,3 +181,28 @@ def test_second_page_defaults_are_todays_bits():
             assert got == tuple(np.float32(x) for x in want)
         else:
             assert got != (np.float32(1.0), np.float32(0.0), np.float32(1.0), np.float32(0.0))
+
+
+def test_size_map():
+    """SIZE's knob travel (design.SIZE_MAP, 2026-11-16): identity up to the knee, bit for bit (saved SIZE 0..90
+    sound as before); the ends where they were; rising; the old 98..99 % (optimist's 124..126) over 20 steps"""
+    for k in range(0, 9001):
+        s = np.float32(k / 100.0)
+        assert fbits(R.size_map(s)) == fbits(s)
+    for knob, want in D.SIZE_MAP:
+        assert float(R.size_map(np.float32(knob))) == want
+    xs = [float(R.size_map(np.float32(k / 10.0))) for k in range(1271)]
+    assert all(b > a for a, b in zip(xs, xs[1:]))
+    assert [round(float(R.size_map(np.float32(k))), 4) for k in (102, 112, 122)] == [124.0, 125.0, 126.0]
+
+
+def test_model_is_the_reference_mapped_size():
+    """the DSP's map is the reference's: SIZE across the remapped travel (90..127), knob by knob"""
+    m, r = mem0(), R.Ref()
+    rnd = random.Random(9)
+    for b in range(120):
+        tw = 0x100 if b < 2 else 0
+        inl = [rnd.uniform(-0.5, 0.5) if 40 <= b < 44 else 0.0 for _ in range(32)]
+        size = (88 + (b % 40)) / 127.0 if b >= 44 else 0.5
+        par = [np.float32(x) for x in (0.0, min(size, 1.0), 0.3, 0.5, 0.0, 1.0)]
+        assert call(m, tw, inl, list(inl), par) == as_bits(r.block(tw, inl, list(inl), par)), f"block {b}"

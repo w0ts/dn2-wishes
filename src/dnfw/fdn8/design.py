@@ -49,6 +49,26 @@ DBL_PER_STEP = 10.0 / 110.0                      # doublings of the decay time p
 FRZ = 18.0 / 8.0                                 # SIZE 127: this many more doublings (a near-freeze)
 KG = 31.0 / 32.0                                 # the loop gains' share of the decay
 KT_SCALE = 22050.0 / 48000.0                     # optimist's decay per 22.05 kHz sample -> per 48 kHz sample
+# SIZE's knob travel (2026-11-16, the User: "more resolution towards 98/99% the sweet spot", then the User's choice B: the old
+# 98..99 % alone over about 20 steps): the knob's s (0..127) goes through a piecewise-linear map to optimist's SIZE
+# before the curve above, held to 127 at the top. Up to the knee nothing changes (bit for bit), and 127 neither;
+# knob 90..102 covers optimist's 90..124 (1.6 -> 13.7 s), 102..122 its 124..126 (13.7 -> 15.6 s, the old 98..99 %,
+# 20 steps), 122..127 its 126..127 (the near-freeze, 15.6 -> 79 s over five steps, x 1.38 each). The insert and the
+# send run the same code (dnfw.inserts.bus), so both follow. Saved projects keep their knob value, so a saved SIZE
+# 91..126 decays longer than before (the User: "dont bother about saved projects"). Knots (knob, optimist's SIZE):
+SIZE_MAP = ((90.0, 90.0), (102.0, 124.0), (122.0, 126.0), (127.0, 127.0))
+
+
+def _size_hinges(knots) -> tuple[tuple[float, float], ...]:
+    """the map as hinges (p, c): s' = s + sum(c x max(s - p, 0)), slope 1 below the first knot"""
+    slopes = [1.0] + [(b[1] - a[1]) / (b[0] - a[0]) for a, b in zip(knots, knots[1:])]
+    return tuple((knots[k][0], slopes[k + 1] - slopes[k]) for k in range(len(knots) - 1))
+
+
+SIZE_HINGES = _size_hinges(SIZE_MAP)
+assert all(a == b for a, b in SIZE_MAP[:1]) and SIZE_MAP[-1] == (127.0, 127.0)
+
+
 # DAMP: optimist's rv_damp cubic for FDN8 (32779, 15872, 28161, -150), Q15
 DAMP_C = (32779.0, 15872.0, 28161.0, -150.0)
 A_MAX = 31000.0 / 32768.0                        # rv_lpc's clamp of the mean line's coefficient
@@ -111,14 +131,83 @@ RING_MASK = RING_WORDS - 1
 assert max(RB_END, RB_ENDL) <= RING_WORDS
 
 
+# the constants the parameters use (ref.Ref.params; the DSP reads them from the active table, so FDN8 / LONG and HALF
+# share the code): the decay per sample's scale, 1 / K at the tank's rate, the modulation's depths, the pre-delay's
+# length, the input one-poles' w; at 48 kHz exactly the values the code loaded as constants until 2026-11-22
+K_KT = KT_SCALE * KG / 2 ** 24
+W_HPF = -2 * math.pi * HPF_LO / FS / math.log(2)
+W_LPF = -2 * math.pi * LPF_LO / FS / math.log(2)
+DEP_GROW = (EXC48 - FEXC48) / (127 - KNEE)
+
+# -- HALF (TYPE 3 internally, 2026-11-22, the User: the bus FDN8's tank at 24 kHz with two input diffusers): the bus
+# inserts' FDN8 (MODE 1) runs its tank at half the rate, 16 samples a block, between a half-band decimator and two
+# half-band interpolators (dnfw.fdn8.lite): the same eight lines and delay TIMES (each optimist's length x 24000 /
+# 22050, the nearest unused prime), the decay time (the decay per 22.05 kHz sample x 22050 / 24000), Jot's damping
+# solved at 24 kHz, the modulation's depth in milliseconds; diffusers 0 and 2 only (one of each gain pair). The send
+# keeps FDN8 / LONG at 48 kHz.
+FS2 = 24000
+S2 = FS2 / 22050
+HALF_DIFF = (0, 2)                               # the input allpasses HALF runs
+
+
+def _unused_primes(xs) -> tuple[int, ...]:
+    def isp(n):
+        return n > 1 and all(n % d for d in range(2, int(n ** 0.5) + 1))
+    used: set[int] = set()
+    out = []
+    for x in xs:
+        c = round(x)
+        v = next(v for k in range(200) for v in (c - k, c + k) if isp(v) and v not in used)
+        used.add(v)
+        out.append(v)
+    return tuple(out)
+
+
+_h = _unused_primes([x * S2 for x in L22 + A22])
+L24, A24 = _h[:8], _h[8:]
+FEXC24, EXC24 = 4 * S2, 8 * S2
+CM24 = math.ceil(EXC24 * MOD_MAX) + 2           # 20: the read centre past the length (> the depth 17.4 + 1)
+SP24 = 2 * CM24 + 2
+PD24 = PD_MAX // 2
+K24 = 2 - 2 * math.cos(2 * math.pi * 4000 / FS2)
+K_KT24 = (22050.0 / FS2) * KG / 2 ** 24
+W_HPF24 = -2 * math.pi * HPF_LO / FS2 / math.log(2)
+W_LPF24 = -2 * math.pi * LPF_LO / FS2 / math.log(2)
+DEP_GROW24 = (EXC24 - FEXC24) / (127 - KNEE)
+
+
+def _layout_half():
+    """HALF's ring: the pre-delay (PD24), the two diffusers, the eight lines (each its length + SP24)"""
+    ra = [0, 0, 0, 0]
+    b = PD24 + 1
+    for k in HALF_DIFF:
+        ra[k] = b
+        b += A24[k] + 1
+    rl = []
+    for ln in L24:
+        rl.append(b)
+        b += ln + SP24
+    return tuple(ra), tuple(rl), b
+
+
+RB_AH, RB_LH, RB_ENDH = _layout_half()
+assert RB_ENDH <= RING_WORDS and min(A24[k] for k in HALF_DIFF) > 15   # (stages.py's order proof at 16 a block)
+
+
 def variant(v: int) -> dict:
-    """FDN8 (v 1) or LONG (v 2): what differs, as the DSP's active table holds it"""
+    """FDN8 (v 1), LONG (v 2) or HALF (v 3, the bus inserts): what differs, as the DSP's active table holds it"""
+    if v == 3:
+        return {"L": L24, "A": tuple(A24[k] if k in HALF_DIFF else 0 for k in range(4)), "RA": RB_AH, "RL": RB_LH,
+                "ktv": 1.0, "sl": tuple(float(x) for x in L22), "cm": CM24, "kkt": K_KT24, "kinv": 1 / K24,
+                "fexc": FEXC24, "dgrow": DEP_GROW24, "pd": PD24, "whp": W_HPF24, "wlp": W_LPF24}
     ls, as_, ra, rl = (L48, A48, RB_A, RB_L) if v == 1 else (L48L, A48L, RB_AL, RB_LL)
     long_ = v == 2
     return {"L": ls, "A": as_, "RA": ra, "RL": rl,
             "ktv": 1.0 / LONG_DECAY if long_ else 1.0,
             # optimist's line length in its damping (rv_lpc's L / LREF), scaled with the line
-            "sl": tuple(L22[k] * (ls[k] / L48[k]) * (LONG_DARK if long_ else 1.0) for k in range(8))}
+            "sl": tuple(L22[k] * (ls[k] / L48[k]) * (LONG_DARK if long_ else 1.0) for k in range(8)),
+            "cm": CM, "kkt": K_KT, "kinv": 1 / K48, "fexc": FEXC48, "dgrow": DEP_GROW, "pd": PD_MAX,
+            "whp": W_HPF, "wlp": W_LPF}
 
 
 def primes48() -> tuple[tuple[int, ...], tuple[int, ...]]:

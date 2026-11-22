@@ -130,11 +130,17 @@ def init(p: Prog, L: C.Layout) -> None:
 
 def trig(p: Prog, L: C.Layout) -> None:
     """A note: the gate opens and the envelope attacks from where it is (the Juno's); the phases and the ladder go
-    on. With every wave off and RES past 80 a still ladder is set ringing (fm-106's pure resonance patch)."""
+    on. The ring-start test is `live_coefs`' (after the trig, in the render, and on the voice's turn)."""
     p.iconst(0, 1)
     _sv(p, S_GATE, 0)
     p.iconst(0, ATTACK)
     _sv(p, S_STG, 0)
+
+
+def live_coefs(p: Prog, L: C.Layout) -> None:
+    """With every wave off and RES past 80 a still ladder is set ringing (fm-106's pure resonance patch). 2026-11-20
+    (live knobs): at a trig (after it, in the render) and on the voice's turn (dnfw.md.voice.live_turn, ~94 Hz), so
+    WAVE/SUB/NOIS off or RES turned up while a note rings starts the ring too."""
     C.knob(p, 0, 0)
     p.lsh(0, 0, -5)                              # WAVE's choice (0: OFF)
     C.knob(p, 1, 2)
@@ -371,7 +377,7 @@ def _osc(p: Prog, L: C.Layout) -> None:
         _ld(p, 4, S_NS)
         for n in (13, -17, 5):
             p.lsh(5, 4, n)
-            p.xor(4, 4, 5, 12)
+            p.xor1(4, 4, 5)                      # (2026-11-21: the native XOR, one instruction)
         _sv(p, S_NS, 4)
         p.iconst(12, -31)
         p.float_(4, 4, 12)

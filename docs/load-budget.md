@@ -47,6 +47,15 @@ and SOPHIE model, each MONOMACHINE engine, each of ANALOG 2's 25 FLT2 filters; t
 instance. The ColdFire reads each track's machine, choice, filter and inserts from the kit (`load_poll`, once a UI
 loop) with the DSP's own formulas for the choices.
 
+**One cost a place (2026-11-21).** `load_mnm` has one cost for each place of `dnfw.mnm.machines.CF_ALL` (55 today:
+the types' places, then MONOMACHINE's engines 2-5 and DRUM's types). Until then the table was last generated on
+2026-11-16 with 15 places; the places were renumbered and added since, and VOICE BUDGET read `load_mnm` past its end
+for JUNO, DRONE, TB303, DRUM and MONOMACHINE's engines 2-5 (JUNO read MACHINEDRUM's machine 22: 4,531 for a voice
+the table now prices at 8,623). Now `c_header()` refuses a table whose places are not the firmware's, `wr_gen.h`
+refuses to compile when `LOAD_MNM_N` is not `MNM_N`, `load.c mnm_cost()` gives a place outside the table the dearest
+place's cost, and `test_load_budget.py` checks every place has its cost. A DRUM type costs the dearer of its start
+and its dearest setting. PARA's rows: below (2026-11-21).
+
 ## Checked
 
 `scripts/emu_load_budget.py` (inside the bench), the build's ColdFire over a stock 1.12 UI snapshot, stock's own
@@ -113,3 +122,53 @@ insert-block skips, r3 (no fix) 14 / 368 with no steal; budgetfix 7 / 39 with 11
 kept free (`room_asked`) 1 / 1 with 14 stolen. Stock-only notes: no check, the same slots and load as without the fix.
 The last skip came from a JUNO tail (~8,500) dipping under `LOAD_TAIL` (8,000): now 2,000 (idle slots 1,100..1,500,
 releases 2,300 and up).
+
+**2026-11-16, PARA as one voice** (`docs/paraphonic-onevoice.md`): a note joining a held PARA chord takes no slot and
+never reaches `load_pre` (`csrc/para/one.c` pv_pre returns first); the chord's slot costs what the DSP measures of it
+(its shadows render inside its voice), so the budget sees a chord's notes through the leader's measured cost, a few
+blocks late. The join pricing above (`para_join_cost`) is left for the corner where a PARA note reaches the allocator
+while an older chord of its track still holds notes.
+
+**2026-11-19, DRONE HOLD's latches** (the User, v0.62.4: "one kick kills the drone held voice", a sparse project).
+HOLD (csrc/hold/hold.c) keeps a DRONE voice gated by taking its bit out of the frame's note-off words, but stock's
+own voice state is released at the key-up: to stock's allocator the latched slot was a free slot, and it gives a note
+the free candidate released longest ago (0x4002aa6e), so once the other slots had been used, the next note on any
+track took the drone's slot. Now, for each note-on, `pv_pre` hides the slots latched by other tracks from the live
+masks for that call (hold.c `hold_locked`, as a held PARA chord's slot); a note whose candidates are all latched gets
+no slot (the ISR's no-slot path, as a muted track's note: `hold_nosl` counts them); the budget's steal (`load_pre`:
+held and tails) and its further releases (`load_post`) never pick a latch. The drone's own track still sees its own
+latch (DRONE's rules: another key plays and lets the others go). With no latch every path is the one before.
+Checked: `scripts/emu_drone_hold.py` (gate step `dronehold`), 13 of 13 on the fix, 6 of 13 on 398e0d04 (the kick,
+sixteen kicks, a full pool, all candidates latched, both budget paths fail there). The DSP's frame guard is unchanged:
+it refuses a voice only when the frame has no room left, whatever its machine.
+
+**2026-11-21, PARA's costs as one voice.** `scripts/para_cost.py` still measured the two-voice design (N slots,
+members and a leader): with one-voice PARA its ON runs had no roles and matched PARA OFF block for block, so the table
+kept the 2026-11-16 member rows (ANALOG 2 member 4,817 / add 1,086, JUNO 3,581 / 720), and `slot_cost` priced a whole
+chord's slot as one member. Now `para_cost.py` measures the chord's one slot (`test/test_a2_para.py`'s harness: the
+row in the voice's frame words, the shadows in the L2 pool) with 1..8 notes against PARA OFF, the voice and the PARA
+pass together, the dearer of the note blocks (every note joining at once: the pass zeroes their pool blocks) and the
+steady mean; ANALOG 2 at its defaults and at its dearest FLT2 (OL12), JUNO at its defaults (dsp_cost's method,
+without the 530 a slot):
+
+| notes on the slot | 0 (OFF) | 1 | 2 | 4 | 8 |
+|---|---|---|---|---|---|
+| ANALOG 2 (defaults) | 6,483 | 8,047 | 15,089 | 26,545 | 50,056 |
+| ANALOG 2 (OL12) | 8,155 | 9,719 | 16,761 | 28,217 | 51,113 |
+| JUNO | 7,203 | 8,767 | 14,212 | 22,478 | 39,028 |
+
+A joined note costs ~5,700..7,000 (ANALOG 2) and ~4,100..5,400 (JUNO) in its join block, the first the dearest (the
+shadow loop's start). The table (x 1.15): `para` / `para_juno` = `base` (PARA ON's one note less OFF: the pass watching
+the slot, 1,799 both) and `add[N]` (a chord of N less a chord of one, the dearest setting's: ANALOG 2 8,098 / 21,273 /
+48,310 for 2 / 4 / 8, JUNO 6,262 / 15,768 / 34,800); a chord's slot is priced `load_voice + LOAD_PARA_BASE +
+load_para_add[N]`. The generator stops if a chord of 2 or more does not lead its shadows (`ParaNotEngaged`).
+
+`load.c`: `slot_cost` prices a PARA track's slot by its chord's sounding notes (`para_notes`: `pv_ch[v]`'s PV_SOUND
+places, one at least), so the joined notes, which never pass `load_pre`, count at the next note-on on any track,
+not only through the DSP's measure a few blocks later; a PARA note that reaches `load_pre` starts a chord and costs
+one note (`para_chord(t, 1)`; `para_join_cost` and the member costs are gone). The track's table voice is used, not
+`load_meas` (for a PARA track that is its chords' measure); the slot's own DSP measure still wins when dearer.
+`emu_load_budget.py` 18 of 18 (13: 1 / 4 / 8 notes priced voice + BASE + ADD[N]; 14: a note that fits beside a
+chord of 1 steals beside a chord of 4; 15: a PARA note reaching the budget costs one note; 16: releases skip PARA's
+voices; 17: JUNO's own costs). Not covered: a joined note itself is never refused or made room for by the budget (it
+takes no slot); the frame guard remains the net for it.

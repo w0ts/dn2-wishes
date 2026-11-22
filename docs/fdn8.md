@@ -27,6 +27,14 @@ with the same structure and curves (`src/dnfw/fdn8/ref.py` spells out every oper
 | HPF / LPF | one-pole input filters, 20 Hz .. 2 kHz / 200 Hz .. 20 kHz | the stock knobs' roles |
 | VOL | the bus's, as for the stock reverb | stock |
 
+**SIZE's knob travel (2026-11-16, the User: more resolution at 98..99 %, the User's choice B).** The knob goes through a
+piecewise-linear map before the curve (design.SIZE_MAP, knob -> optimist's SIZE), held to 127: (90, 90) (102, 124)
+(122, 126) (127, 127). 0..90 and 127 are unchanged bit for bit; 90..102 covers 1.6 -> 13.7 s (~24 % a step);
+102..122 the old 98..99 % (13.7 -> 15.6 s, 0.6 % a step instead of 6.5 %); 122..127 the near-freeze (15.6 -> 79 s,
+x 1.38 a step instead of one jump at 127). Loop RT60 at DC, LONG 1.5 x. The insert and the send run the same code.
+A saved SIZE 91..126 plays longer than before (saved 100: 3.0 -> 9.6 s; 120: 10.7 -> 15.4 s; 125: 14.6 -> 41 s);
+the SIZE values below are the knob's before the map.
+
 RT60 of the reference (DAMP 30, MOD 64; an impulse, T30 x 2): SIZE 0 0.43 s, 45 0.69 s, 90
 1.34 s, 120 9.17 s, 126 13.4 s. Optimist's own (22.05 kHz, DAMP 30): 0.5 .. 1.5 s at 0..90,
 9.2 s at 120, 13.0 s at 126.
@@ -94,6 +102,15 @@ register it uses, then:
   sample buffers (pre-delay, diffusers, the two tank sets: Digiwerk T3.4 §3.3, checked by the
   runner), 22 blocks (15 ms). So an old tail never comes back (the stock init, 30
   instructions, clears no buffer);
+  2026-11-21 (fx-fast, `ref.WINDOW_CLEAR`): FDN8 and LONG clear only the ring's window a fresh engine reads before
+  it writes. Every access is at p + off with 0 <= off < RB_END, and p counts down, so a word enters the window at
+  offset 0, where it is written first, unless it already lay in [p, p + RB_END) at the start. The same 32 silent
+  blocks (the same output, bit for bit), each clearing 1,264 words (FDN8, 40,153 needed) or 2,352 (LONG, 74,899)
+  from p rounded down to 16 words, a 16-word group at a time with its address masked, so it wraps round the ring's
+  end. The ring's other words keep what they held; they are never read before being written. Clearing block
+  4,096 -> 1,264 / 2,352 DDR stores (bus instance 0's first block 54,965 -> 23,680 on the shared scale). Proof:
+  `test/test_fdn8_window.py`, the model with the ring NaN-poisoned against the whole-ring reference through
+  stock / FDN8 / LONG switches whose window wraps;
 - TYPE 0: one block of FDN8 into the bus's output pair (the wet only).
 
 | where | what | size |
@@ -123,6 +140,37 @@ MODE 1 and enters `wr_fdn8` as a leaf call, which runs one block of that instanc
 ring's base is a word now
 (each instance has its own DDR). Its runner step holds the send path to stock and to the reference as
 before.
+
+## HALF: the bus inserts' tank at 24 kHz (2026-11-22, the User's pick)
+
+The bus inserts' FDN8 (MODE 1, every instance) runs **HALF** (`design.variant(3)`, reference `dnfw.fdn8.lite.BusRef`,
+the A/B in `scratch/fdn8-bus-ab/`): the tank at 24 kHz, 16 samples a block, input diffusers 0 and 2 only, between a
+19-tap half-band decimator (the 32 sums L x G_IN + R x G_IN, 17 kept a block) and two half-band interpolators (the
+lines' L / R sums, 9 kept; the even outputs the tank's samples x GOUT, the odd ones the side taps x 2 GOUT). The same
+eight lines and delay times (optimist's lengths x 24000 / 22050, the nearest unused primes 1481 .. 2803), the same
+decay time (+2 %), Jot's damping solved at 24 kHz, the modulation's depth in milliseconds. The wet's top is ~9 kHz
+(-0.1 dB at 8 kHz, -6 dB at 12 kHz). **The send (MODE 0) is unchanged**: its output and ring bit for bit as before
+(the runner's `fdn8` step); the parameters' constants now come from the active table (`kkt kinv fexc dgrow pdf pdi
+whp wlp`, the same float32 values the code loaded), and so do the block's sizes (`nb nb2 nb4 xtop lbuf dn dk4`), so
+the send and HALF run the same stage code (`stages.tank`: the decimator and `_input_h` or `_input`, then the
+diffusers / lines / writes, then `_interp` or `_output`).
+
+Memory: an instance keeps only its persistent words (`program._PERSIST`, 97 with the resamplers' kept samples), the
+bus pass swaps those and no table (VT3 goes into ACT once a pass, the send's ACT is set aside and put back); the
+stores are 8 x 388 B from 0x2E4050, FDN8's block buffers (X S F) moved after them (`program.BUF_L1`, 0x2E4C70), the
+state took their old room (VT3, the larger table). FDN8's code grew (the resamplers, 14 KB span from 0x200AA000):
+XDLY moved to A2F's unused tail (0x200B3E00, sw 0xbd9f00). HALF's ring window clears 672 words a block.
+
+Cost, one bus instance's whole pass (test_inserts_bus's measure, instructions + 4 L2 + 10 DDR): steady 17,843 ->
+12,440; clearing 24,069 -> 16,678.
+
+**On the DN2** (test file 0cd88167, the ladder: INSERT FDN8 MIX 100 on T1..T8, chords waking the stock voices, the
+system meter's D per rung; `scratch/unit-now/fdn8cheap/runs/lite0cd8.json`): one playing bus FDN8 costs **~17.8-18.4k
+cycles a block** (was ~22-24k before HALF); 4 were admitted at once (was 2-3), D 84.4 % from the 4th rung on. The
+model's scale (12,585 the dearest block) is under the unit's: the unit pays more for a DDR access than the model's 10.
+So the guard's charge `COST[FDN8]` is set from the unit, not the model: **18,500** (the ~17.9k measured plus a small
+margin; 15,200 = 1.2 x the model's dearest until then). `FDN8_STEADY_MAX` stays the model's figure, and the bound
+still holds `COST[FDN8] >= 1.2 x FDN8_STEADY_MAX`.
 
 ## Checked, and not
 

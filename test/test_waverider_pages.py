@@ -192,7 +192,7 @@ def test_flex_has_its_one_syn_page_not_a_monomachine_count():
     pages for it: stock clamped the SYN page to -1, the empty page, and every knob of a FLEX track's SYN page
     turned record 0 (BUF never moved). FLEX is told apart first and has its one page, as before those tables"""
     from dnfw.sampler import machines as SMM                    # noqa: PLC0415
-    src = pages.source(0, 0)
+    src = pages.source(0, 0, 0)
     body = src[src.index("wr_count:"):]
     body = body[:body.index("\n1:  move.l  %sp@(8),%d0")]
     flex = body.index(f"moveq   #{SMM.BOUNCE_TYPE - 5},%d1")

@@ -19,15 +19,22 @@ from dnfw.waverider import dsp
 ALIAS = 0x28000000
 L1 = (dsp.REGION[0], dsp.DM_CACHE_16K)            # our L1 room: REGION and the gap below the DM cache
 L2 = (dsp.L2_IMAGE_END, dsp.L2_NOCACHE)           # L2 above the stock image, below the non-cacheable window
+L1B2 = (0x300000, 0x31C000)                       # 2026-11-16: L1 block 2 below its PM cache (nothing stock's loaded)
 
 # (name, lo, hi, owners, spans): owners are module names (any constant of theirs may lie inside) or, for
 # dnfw.waverider.dsp, "dnfw.waverider.dsp.NAME" (that constant only); spans: dsp.py may load a span starting here
 CLAIMS = [
+    # L1 block 2 (2026-11-16; 0x300000..0x301A80 is the SHARC runner harness's frame, never in a build)
+    ("the P-I delay lines (and VO-6's ring), 16 slots x 6 KB", 0x302000, 0x31A000,
+     ("dnfw.waverider.dsp.MD_DELAY_L1", "dnfw.waverider.dsp.MD_DELAY_L1_END"), False),
     # L1 block 1, REGION
     ("a2f state", 0x2DD600, 0x2DDE00, ("dnfw.engines.analog2.filters.program", "dnfw.waverider.dsp.A2F_STATE_DM"), True),
     ("save area, PERC scratch, guard, idle", 0x2DDE00, 0x2DE180,
      ("dnfw.perc.program", "dnfw.perc.guard", "dnfw.waverider.dsp.STATE_DM", "dnfw.waverider.dsp.PERC_SCRATCH_DM",
-      "dnfw.waverider.dsp.IDLE_STATE_DM", "dnfw.waverider.dsp.TWIN_FLAG_DM"), True),
+      "dnfw.waverider.dsp.IDLE_STATE_DM", "dnfw.waverider.dsp.TWIN_FLAG_DM",
+      # 2026-11-21: block_count.asm's block count (its own word, 0x2de118, written there each block); the MD voices
+      # read it (dnfw.md.voice, live note-start knobs 7155f643)
+      "dnfw.md.core.BLOCKS_WORD"), True),
     ("PERC state", 0x2DE180, 0x2DEA00, ("dnfw.waverider.dsp.PERC_STATE_DM",), True),
     ("idle_load code", 0x2DEA00, 0x2DEC00, ("dnfw.waverider.dsp.IDLE_DM",), True),
     ("block_count code", 0x2DEC00, 0x2DED00, ("dnfw.waverider.dsp.COUNT_DM",), True),
@@ -46,7 +53,8 @@ CLAIMS = [
     ("SLICE / GRID relatch", 0x2E0100, 0x2E0200, ("dnfw.sampler.program", "dnfw.waverider.dsp.W2_RND_DM"), False),
     ("ping code (the shared tail) + its 128 B", 0x2E0500, 0x2E0640, ("dnfw.waverider.dsp.PING_CODE_DM",), True),
     ("F1: opt-synths' PERC exp2 copy", 0x2E0640, 0x2E0E44, ("dnfw.waverider.dsp.PERC_EXP2_DM",), True),
-    ("F1: ANALOG 2's PARA chords (plaits16; main, the arbiter, 2026-11-15)", 0x2E0E44, 0x2E0F08,
+    ("F1: ANALOG 2's PARA chords (plaits16; main, the arbiter, 2026-11-15; one voice, F1's tail, 2026-11-16)",
+     0x2E0E44, 0x2E1000,
      ("dnfw.engines.analog2.para", "dnfw.waverider.dsp.PARA_DM"), False),
     ("trackbuf code + its 128 B", 0x2E1000, 0x2E1200, ("dnfw.waverider.dsp.TRACKBUF_CODE_DM",), True),
     ("F2: opt-mnm's DPRO interp table", 0x2E1200, 0x2E1700, ("dnfw.mnm", "dnfw.waverider.dsp"), True),
@@ -54,6 +62,11 @@ CLAIMS = [
      ("dnfw.perc.guard", "dnfw.waverider.dsp.INS_TSKIP_DM"), True),
     ("F2: the bus XDLY instances' stores (opt-inserts, lever 5, 2026-11-13)", 0x2E1750, 0x2E1980,
      ("dnfw.inserts.bus",), True),
+    ("F2: PERC's constant pool, I6 at its middle while PERC runs (dsp-room, 2026-11-21; 112 words at the combined-67 merge)", 0x2E1980, 0x2E1B40,
+     ("dnfw.perc.cpool", "dnfw.waverider.dsp.PERC_POOL_DM"), True),
+    # 2026-11-20 (claude/drum-ampsw; F2's tail, unclaimed until then): AMP ON/OFF's words, scratch buffer, kept pointers
+    ("F2: AMP ON/OFF's data (dnfw.waverider.ampsw)", 0x2E1B40, 0x2E1C00,
+     ("dnfw.waverider.ampsw", "dnfw.waverider.dsp.AMPSW_DATA_DM"), False),
     ("the stock track buffers in L1", 0x2E1C00, 0x2E2500,
      ("dnfw.waverider.dsp.TRACKAUX_DM", "dnfw.waverider.dsp.TRACKBUF_DM"), True),
     ("F4: SIMD voice pairs' words and snapshots (the arbiter, 2026-11-12)", 0x2E2500, 0x2E3000,
@@ -61,16 +74,16 @@ CLAIMS = [
     ("the inserts' state", 0x2E3000, 0x2E3A40, ("dnfw.inserts.program", "dnfw.inserts.design",
                                                  "dnfw.waverider.dsp.INS_STATE_DM"), True),
     ("the stereo inserts' state", 0x2E3A40, 0x2E4050, ("dnfw.inserts.post", "dnfw.waverider.dsp.POST_STATE_DM"), True),
-    ("the bus FDN8 instances' stores (run time)", 0x2E4050, 0x2E53D0, ("dnfw.inserts.bus",), False),
+    ("the bus FDN8 instances' stores (run time)", 0x2E4050, 0x2E4C70, ("dnfw.inserts.bus",), False),
+    # 2026-11-22 (HALF): TRANSIENT, FDN8's block only, written before read (dnfw.fdn8.stages: X S F, program.BUF_L1;
+    # XDLY's x / xb, xdly.program._xx, borrow them while XDLY runs; HALF's decimator sums and output in F / S)
+    ("FDN8's block buffers (transient)", 0x2E4C70, 0x2E5170, ("dnfw.fdn8", "dnfw.xdly"), False),
     ("the Monomachine render scratch (opt-inserts: IN transient in the post pass)", 0x2E5400, 0x2E6100,
      ("dnfw.waverider.dsp.MNM_RENDER_DM", "dnfw.inserts.post", "dnfw.inserts.bus", "dnfw.sampler.program"), False),   # post.LINE, bus.UNIT_L1, the circular-buffer probe's PROBE_BUF (read only)
     ("TB303's constants table KTAB (opt-synths, 2026-11-12)", 0x2E6100, 0x2E6300,
      ("dnfw.engines.tb303.tb303_sched", "dnfw.waverider.dsp.TB303_KTAB_DM"), True),
-    ("FDN8 state", 0x2E6400, 0x2E68EC, ("dnfw.fdn8.program", "dnfw.waverider.dsp.FDN8_STATE_DM"), True),
-    # 2026-11-14 (insfx; main, the arbiter): TRANSIENT, FDN8's block only, written before read (dnfw.fdn8.stages: X S F;
-    # XDLY's x / xb, xdly.program._xx, borrow them while XDLY runs)
-    ("FDN8's block buffers (transient)", 0x2E68EC, 0x2E6DEC, ("dnfw.fdn8", "dnfw.xdly"), False),
-    ("FDN8 state (spare)", 0x2E6DEC, 0x2E6E00, ("dnfw.fdn8.program",), False),
+    ("FDN8 state", 0x2E6400, 0x2E6B2C, ("dnfw.fdn8.program", "dnfw.waverider.dsp.FDN8_STATE_DM"), True),
+    ("FDN8 state (spare)", 0x2E6B2C, 0x2E6E00, ("dnfw.fdn8.program",), False),
     ("XDLY state", 0x2E6E00, 0x2E6F00, ("dnfw.xdly.program", "dnfw.waverider.dsp.XDLY_STATE_DM"), True),
     ("FDN8's L / R sums (transient, FDN8's block only; XDLY's unused tail)", 0x2E6F00, 0x2E7000, ("dnfw.fdn8",), False),
     ("Machinedrum / Monomachine voice slots", 0x2E7000, 0x2EB000, ("dnfw.waverider.dsp.MD_STATE_DM",), True),
@@ -95,14 +108,17 @@ CLAIMS = [
     ("the main mix's tap", 0x200A9000, 0x200A9200, ("dnfw.sampler.machines", "dnfw.waverider.dsp.MAIN_TAP_L2"), True),
     ("opt-md: PI-RS's strike table (copied at power-on)", 0x200A9200, 0x200A9C88,
      ("dnfw.waverider.dsp.PIRS_TAB_L2",), False),
-    ("fdn8.asm", 0x200AA000, 0x200AC400, ("dnfw.waverider.dsp.FDN8_L2_LOAD",), True),
-    ("xdly.asm", 0x200AC400, 0x200ADA00, ("dnfw.waverider.dsp.XDLY_L2_LOAD",), True),
-    ("inserts.asm", 0x200ADA00, 0x200AFC00, ("dnfw.waverider.dsp.INS_L2_LOAD",), True),
-    ("inspost.asm", 0x200AFC00, 0x200B1800, ("dnfw.waverider.dsp.POST_L2_LOAD",), True),
+    # 2026-11-20 (claude/drum-ampsw): the gap after PI-RS's table (unclaimed until then)
+    ("ampsw.asm (AMP ON/OFF's hooks)", 0x200A9C90, 0x200AA000,
+     ("dnfw.waverider.ampsw", "dnfw.waverider.dsp.AMPSW_L2_LOAD"), True),
+    ("fdn8.asm", 0x200AA000, 0x200AD800, ("dnfw.waverider.dsp.FDN8_L2_LOAD",), True),   # (2026-11-22: + XDLY's old span)
+    ("inserts.asm", 0x200AD800, 0x200AFD00, ("dnfw.waverider.dsp.INS_L2_LOAD",), True),
+    ("inspost.asm", 0x200AFD00, 0x200B1B00, ("dnfw.waverider.dsp.POST_L2_LOAD",), True),
     # DRONE's BEAT and ANALOG 2's WDTH write the slot's side block (one machine a slot at a time)
-    ("the side blocks (DRONE's BEAT, ANALOG 2's WDTH)", 0x200B1800, 0x200B2100,
+    ("the side blocks (DRONE's BEAT, ANALOG 2's WDTH)", 0x200B1B00, 0x200B2400,
      ("dnfw.inserts.post", "dnfw.engines.drone.drone", "dnfw.engines.analog2.analog2"), True),
-    ("a2f.asm", 0x200B2400, 0x200B5800, ("dnfw.engines.analog2.filters.program", "dnfw.waverider.dsp.A2F_L2_LOAD"), True),
+    ("a2f.asm", 0x200B2400, 0x200B3E00, ("dnfw.engines.analog2.filters.program", "dnfw.waverider.dsp.A2F_L2_LOAD"), True),
+    ("xdly.asm (2026-11-22: A2F's free tail)", 0x200B3E00, 0x200B5800, ("dnfw.waverider.dsp.XDLY_L2_LOAD",), True),
     ("opt-md: the P-I modes' curve table (copied at power-on)", 0x200B5800, 0x200B6000,
      ("dnfw.waverider.dsp.PI_CURVE_L2",), False),
     ("smp.asm and pvmix", 0x200B6000, 0x200BC000,
@@ -110,10 +126,18 @@ CLAIMS = [
     ("insbus.asm", 0x200BC000, 0x200BD180, ("dnfw.waverider.dsp.INSBUS_L2_LOAD",), True),
     ("the bus inserts' state", 0x200BD180, 0x200BE100, ("dnfw.inserts", "dnfw.waverider.dsp.INSBUS_STATE_L2"), True),
     ("perc.asm", dsp.PERC_L2_LOAD, dsp.PERC_L2_LOAD + dsp.PERC_L2_SPAN, ("dnfw.waverider.dsp.PERC_L2_LOAD",), True),
+    # 2026-11-16 (the User's Q5: "16 KB pool in L2 (Recommended)"): PARA as one voice's shadow pool, from the User's 64 KB reserve
+    ("PARA as one voice: the shadow pool (the User's reserve above PERC)", 0x200EA000, 0x200EE000,
+     ("dnfw.engines.analog2.para", "dnfw.waverider.dsp.PARA_POOL_L2"), False),
+    # 2026-11-21 (fx-fast; the User: 28 KB of the reserve, 20 KB of it left free): the bus FDN8 instances 1..7's
+    # diffusers, persistent delay state, 4 KB each (zeroed by the engine's switch when an instance starts)
+    ("fx-fast: the bus FDN8 instances 1..7's diffusers (the User's reserve)", 0x200EE000, 0x200F5000,
+     ("dnfw.fdn8.program",), False),
 ]
 
 # constants that are bounds, retired names or harness layouts, not areas (with why)
 NOT_AREAS = {
+    "dnfw.fdn8.program.BUF_L1_END": "a bound: the room for FDN8's block buffers ends where the Monomachine render scratch starts",
     "dnfw.waverider.dsp.L2_IMAGE_END": "a bound: the stock image's end",
     "dnfw.perc.guard.INS_TEL_END": "a bound: the inserts' telemetry's end (the XDLY stores, lever 5, start there)",
     "dnfw.waverider.dsp.L2_NOCACHE": "a bound: the non-cacheable window",
@@ -126,6 +150,14 @@ NOT_AREAS = {
     "dnfw.waverider.dsp.PING_STATE_DM": "PING: removed v0.45 (its name kept)",
     "dnfw.waverider.dsp.PING_T_DM": "PING: removed v0.45",
     "dnfw.inserts.design.BUS_STATE_END": "a bound",
+    "dnfw.waverider.ampsw.END": "a bound: AMP ON/OFF's data's end (the track buffers start there)",
+    "dnfw.waverider.dsp.AMPSW_DATA_END": "a bound: AMP ON/OFF's data's end",
+    # 2026-11-16: numbers that fall in L1 block 2's range (L1B2), not DSP areas
+    "dnfw.perc.live.BUF": "the model harness's slot buffer (the runner's frame area, 0x300000; never in a build)",
+    "dnfw.sampler.live.BUF": "the model harness's slot buffer (as perc.live's)",
+    "dnfw.sampler.machines.REC_FRAMES": "a count: 66 s of frames",
+    "dnfw.mods.platform.STOCK_LENGTH": "a length: MAIN OS's bytes",
+    "dnfw.safemode.STOCK_LEN": "a length: stock 1.12's MAIN OS bytes (SAFE MODE's restore table), a ColdFire size",
 }
 HARNESS = ("dnfw.md.bench", "dnfw.mnm.bench")      # the model's bench layouts, not the DSP's
 
@@ -146,7 +178,7 @@ def _constants():
         for n, v in vars(mod).items():
             if isinstance(v, int) and not isinstance(v, bool):
                 a = v - ALIAS if L1[0] <= v - ALIAS < L1[1] else v
-                if L1[0] <= a < L1[1] or L2[0] <= a < L2[1]:
+                if L1[0] <= a < L1[1] or L2[0] <= a < L2[1] or L1B2[0] <= a < L1B2[1]:
                     out.add((a, getattr(mod, "__name__", m.name), n))
     return sorted(out)
 
@@ -161,7 +193,8 @@ def test_claims_are_disjoint():
     for a, b in zip(s, s[1:]):
         assert a[2] <= b[1], f"{a[0]} ({a[1]:#x}..{a[2]:#x}) overlaps {b[0]} ({b[1]:#x}..{b[2]:#x})"
     for c in s:
-        assert c[1] < c[2] and (L1[0] <= c[1] and c[2] <= L1[1] or L2[0] <= c[1] and c[2] <= L2[1]), c[0]
+        assert c[1] < c[2] and (L1[0] <= c[1] and c[2] <= L1[1] or L2[0] <= c[1] and c[2] <= L2[1]
+                                or L1B2[0] <= c[1] and c[2] <= L1B2[1]), c[0]
 
 
 def test_real_extents_fit_their_claims():
@@ -170,16 +203,18 @@ def test_real_extents_fit_their_claims():
     obj = dsp.objects()
     assert dsp.PING_CODE_DM + len(obj["ping"]) + dsp.L2_TAIL <= 0x2E0640
     assert dsp.TRACKBUF_CODE_DM + len(obj["trackbuf"]) + dsp.L2_TAIL <= 0x2E1200
-    assert bus.FD_L1 + design.FDN8_INSTANCES * bus.FD_L1_BYTES <= 0x2E53D0
+    assert bus.FD_L1 + design.FDN8_INSTANCES * bus.FD_L1_BYTES <= 0x2E4C70
     assert post.SCRATCH + post.SCRATCH_BYTES <= 0x2E4050
     assert dsp.SMP_DEC_DM + 16 * 48 <= 0x2E0080
     assert dsp.MD_STATE_DM + 16 * 1024 <= 0x2EB000
+    from dnfw.md import core as MDK                   # 2026-11-16: the P-I lines in L1 block 2
+    assert dsp.MD_DELAY_STRIDE == MDK.PI_LINES_STRIDE and dsp.MD_DELAY_L1 + 16 * dsp.MD_DELAY_STRIDE <= 0x31A000
     assert dsp.MNM_RENDER_DM + dsp.MNM_RENDER_BYTES <= 0x2E6100   # (TB303's KTAB from 0x2E6100)
     from dnfw.fdn8 import program as fp, stages      # 2026-11-14: FDN8's transient block buffers
     from dnfw.xdly import program as xp
     x, _s, _f = stages.bufs()
     lo, hi = stages.lr_bufs()
-    assert fp.VT2 + 4 * fp.NV <= x == 0x2E68EC and x + stages.BUF_BYTES <= 0x2E6DEC
+    assert fp.VT3 + 4 * fp.NV <= 0x2E6B2C and x == fp.BUF_L1 == 0x2E4C70 and x + stages.BUF_BYTES <= 0x2E5170
     assert xp.STATE + 4 * len(xp._NAMES) <= 0x2E6F00 <= lo and hi + 4 * 32 <= 0x2E7000
     if hasattr(dsp, "FX_DM"):                      # opt-stock's block (dnfw.waverider.stockfx)
         assert 0x20098400 <= dsp.FX_DM and dsp.FX_DM + dsp.FX_BYTES <= 0x2009B400
@@ -224,3 +259,9 @@ def test_paras_words_load_as_zeros_every_time_the_dsp_loads():
             assert part == bytes(len(part)), "PARA's words are not zeros in the upload"
             covered += len(part)
     assert covered == dsp.PARA_BYTES
+
+
+def test_paras_pool_is_its_claim():
+    """2026-11-16 (the User's Q5): the pool the DSP code uses is the claimed one, whole"""
+    from dnfw.engines.analog2 import para
+    assert (para.POOL, para.POOL_N * para.BLOCK) == (dsp.PARA_POOL_L2, dsp.PARA_POOL_BYTES)

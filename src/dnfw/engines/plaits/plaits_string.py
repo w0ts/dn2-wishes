@@ -625,14 +625,25 @@ def _hermite(p: Prog) -> None:
     p.fop(9, 10, "+", 7)                         # s
 
 
+# 2026-11-21 (eng-simd): _hermite and _stretched inline again (they were subroutines for PERC's code room, which the
+# constant pool gave back): a call and its return cost 3 instructions and two jumps a string sample. The same code.
+INLINE = True
+
+
 def _hermite_call(p: Prog) -> None:
-    """_hermite as a subroutine (one copy for both loops: PERC's code room). Clobbers I12 too."""
-    p.call("strg_hermite", lambda: _hermite(p))
+    """_hermite, inline (or as a subroutine, one copy for both loops, when not INLINE: then it clobbers I12 too)."""
+    if INLINE:
+        _hermite(p)
+    else:
+        p.call("strg_hermite", lambda: _hermite(p))
 
 
 def _stretched_call(p: Prog) -> None:
-    """_stretched as a subroutine (likewise). Clobbers I12 too."""
-    p.call("strg_stretched", lambda: _stretched(p))
+    """_stretched, likewise."""
+    if INLINE:
+        _stretched(p)
+    else:
+        p.call("strg_stretched", lambda: _stretched(p))
 
 
 def _curve(p: Prog) -> None:

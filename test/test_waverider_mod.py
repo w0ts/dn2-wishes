@@ -27,7 +27,7 @@ BASE = waverider.BASE
 @pytest.fixture(scope="module")
 def dn2_111():
     if not STOCK_111.exists():
-        pytest.skip("Digitone II 1.11 is not in 00_Resources")
+        pytest.skip("Digitone II 1.12 is not in 00_Resources")
     from dnfw.cli.files import read_image
     from dnfw.firmware.load import load
     return load(read_image(STOCK_111))
@@ -142,8 +142,8 @@ def test_rows_5_to_12_of_the_name_table(applied):
     # MONOMACHINE, on 6 (its engine on page 1 H); 7, 14, 15, 16 reserved
     assert CF.MACHINE_NAMES[6] == ("Monomachine", "MNM") and CF.MACHINE_NAMES[7] == MM_.REMOVED_NAMES
     assert all(CF.MACHINE_NAMES[t] == MM_.REMOVED_NAMES for t in (7, 14, 15, 16))
-    # ours in MACHINE SEL (the Monomachine's 6, 7, 14..16, SOPHIE 20, PLAITS 18, TB303 19, DRONE 21,
-    # ANALOG2 22); BOUNCE (17) as upstream lists it (v0.47: hidden)
+    # ours in MACHINE SEL (MONOMACHINE 6; since 2026-11-18 JUNO 50, ANALOG2 51, DRONE 52, SOPHIE 53, TB303 54, PLAITS
+    # 55; upstream's FM+ 18..20, v0.59); BOUNCE (17) as upstream lists it (v0.47: hidden); 21..49 reserved (Removed)
     from dnfw.mnm import machines as MM
     assert all(t in CF.LIST_NEW for t in MM.TYPES) and not any(t in CF.LIST_NEW for t in MM.RESERVED)
     assert (SMB.BOUNCE_TYPE in CF.LIST_NEW) == SMB.BOUNCE_LISTED
@@ -319,7 +319,7 @@ def test_the_recorder_screen_hooks_replace_exactly_the_stock_calls():
         assert new[:2] == bytes.fromhex("4eb9") and len(new) == 6
         target = struct.unpack(">I", new[2:])[0]
         assert lo <= target < hi
-        assert struct.pack(">I", called) in _chunked(target, 128)
+        assert struct.pack(">I", called) in _chunked(target, 192)   # (2026-11-18: wr_screen's calls before it: 128 B was just short)
     e = _edit(CF.REC_COMBO_SITE)
     assert bytes.fromhex(e["stock"]) == CF.REC_COMBO_STOCK
     new = bytes.fromhex(e["new"])
@@ -362,20 +362,30 @@ def test_v023_keyboard_notes_ask_slc_keynotes_which_asks_stock():
 
 
 def test_v039_the_startup_animation_chunk_is_his_frames():
-    """dnfw.bootanim: the ANIZ chunk decodes (as the stamp walks it) to s!Rwa²'s 38 frames
-    bit for bit (v0.39: his own 44 PBM frames, 37..43 one picture kept once); its table maps
-    the 175 intro frames onto them in order, every frame shown, the last held; the timing is
-    the owner's (160 ms, then 80 ms each, the last held); it is small (the 2 MiB USB limit)"""
+    """dnfw.bootanim: s!Rwa²'s 38 frames read bit for bit (v0.39: his own 44 PBM frames, 37..43
+    one picture kept once) at his timing (160 ms, then 80 ms each, the last held). v0.64 (the
+    image was full; room for the keyboard HOLD): every other one of his 37 moving frames ships
+    (0, 2, .. 36) at 160 ms each, then his last, held: each shipped frame is his, bit for bit,
+    and the last starts when his did (the same length). The ANIZ chunk decodes (as the stamp
+    walks it) to the shipped frames; its table maps the 175 intro frames onto them in order,
+    every one shown, the last held; it is small (the 2 MiB USB limit)"""
     import json
     from dnfw import bootanim as A
+    from dnfw.mods import bootscreen as B
+    his = A.frames_pixels()
+    assert len(his) == 38
+    assert A.SOURCE_DURATIONS_MS == (160,) + (80,) * 36 + (560,) and sum(A.SOURCE_DURATIONS_MS) == 3600
+    assert A.SHIPPED == tuple(range(0, 37, 2)) + (37,)
+    n = len(A.SHIPPED)
+    assert n == 20 and A.DURATIONS_MS == (160,) * (n - 1) + (560,)
+    assert sum(A.DURATIONS_MS[:-1]) == sum(A.SOURCE_DURATIONS_MS[:-1])     # his last frame on time
     c = A.chunk()
     ims = A.images()
-    assert len(ims) == 38
-    assert A.DURATIONS_MS == (160,) + (80,) * 36 + (560,) and sum(A.DURATIONS_MS) == 3600
+    assert ims == [B.image_from_pixels({(x, A.H - 1 - y) for x, y in his[k]}) for k in A.SHIPPED]
     assert A.decode(c) == ims
     t = A.table()
     assert len(t) == A.INTRO_FRAMES
-    assert list(t) == sorted(t) and set(t) == set(range(38)) and t[-1] == 37
+    assert list(t) == sorted(t) and set(t) == set(range(n)) and t[-1] == n - 1
     assert len(c) < 8192
     doc = json.loads(A.SOURCE.read_text())
     assert doc["by"] == "s!Rwa²" and doc["frames"] == 38
@@ -387,20 +397,26 @@ def test_v037_the_build_hooks_the_intro_once_with_the_stamp():
     import struct
     from dnfw.mods import bootscreen as B, waverider as W
     spec, aniz = W._boot()
-    assert spec is B.SPEC and aniz.startswith(struct.pack(">I", 38))
+    from dnfw import bootanim as A
+    assert spec is B.SPEC and aniz.startswith(struct.pack(">I", len(A.SHIPPED)))
     assert spec["aniz_chunk"] == "ANIZ"
     ext = [e for e in W.extents() if "intro hook" in e.what]
     assert len(ext) == 1 and ext[0].length == 8
 
 
 def test_v039_the_mod_version_comes_from_VERSION_and_fails_when_bad(tmp_path, monkeypatch):
-    """dnfw.modversion: VERSION (one line, DIGITS.DIGITS) read at compose time; a missing or
+    """dnfw.modversion: VERSION (one line, DIGITS.DIGITS[.DIGITS]) read at compose time; a missing or
     malformed file stops the build; the C renderer gets it as MOD_VERSION"""
     import pytest
     from dnfw import modversion as M
     v = M.mod_version()
     assert v == (M.FILE.read_text().strip()) and M.c_define() == f'#define MOD_VERSION "{v}"\n'
-    for bad in ("", "v0.39", "0.39 beta", "0.39\n\n", "1"):
+    for good in ("0.39", "0.62.5\n"):                  # 2026-11-19: a release on an upstream base, X.Y.Z
+        f = tmp_path / "VERSION"
+        f.write_text(good)
+        monkeypatch.setattr(M, "FILE", f)
+        assert M.mod_version() == good.strip()
+    for bad in ("", "v0.39", "0.39 beta", "0.39\n\n", "1", "0.62.5.1", "0.62."):
         f = tmp_path / "VERSION"
         f.write_text(bad)
         monkeypatch.setattr(M, "FILE", f)

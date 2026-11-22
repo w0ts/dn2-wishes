@@ -31,7 +31,7 @@ def layout(state=None, scratch=None, tables=None, sin=None) -> M.Layout:
         sin = dsp.SHFT_TABLES_DDR + at["sin"]
     return M.Layout(state=state, scratch=scratch, tables=tables, sin=sin,
                     md_state=dsp.MD_STATE_DM, md_tables=dsp.MD_TABLES_DDR,
-                    md_delay=dsp.MD_DELAY_DDR, mnm_scratch=dsp.MNM_SCRATCH_L2,
+                    md_delay=dsp.MD_DELAY_L1, md_delay_stride=dsp.MD_DELAY_STRIDE, mnm_scratch=dsp.MNM_SCRATCH_L2,
                     mnm_tables=dsp.MD_TABLES_DDR + MDC.TABLE_LAYOUT["mnm"][0],
                     mnm_dt=dsp.MNM_DT_L2, mnm_render=dsp.MNM_RENDER_DM, mnm_interp=dsp.MNM_INTERP_DM,
                     md_shipped=dsp.SMP_POOL_DDR + SM.TABLE_AREA,
@@ -45,6 +45,12 @@ def table_words(L: M.Layout) -> dict[int, int]:
     from ..waverider import dsp
     out = {}
     data = M.stream_tables() if L.shipped else M.tables_bytes()[0]
+    # 2026-11-20 (DRUM's room): with exp2 read from its L1 copy and tan shipped, nothing reads PERC's DDR tables
+    # (the stream's copy of exp2 is gone, dnfw.waverider.dsp.ddr_spans): the model holds no words there either, so a
+    # read of them would differ from the DSP's
+    if L.shipped and getattr(L, "l1_exp2", None) is not None:
+        assert len(data) == 4 * M.EXP2_N, "PERC's stream tables are exp2 alone"
+        data = b""
     for k in range(len(data) // 4):
         out[L.tables + 4 * k] = struct.unpack_from("<I", data, 4 * k)[0]
     if not L.shipped and getattr(L, "sin_at", None) is None:   # else shipped (MDB.table_mem) / stock's (below)
@@ -160,6 +166,8 @@ class Harness:
         for k in range(32):
             self.mem.put(BUF + 4 * k, bits(0.0))
         self.mem.put(self.L.C["mcost"], 0)          # v0.26: as the program sets it each block
+        from ..md import core as MDK                # 2026-11-20 (live knobs): block_count.asm's count, every block
+        self.mem.put(MDK.BLOCKS_WORD, (self.mem.get(MDK.BLOCKS_WORD) + 1) & 0xFFFFFFFF)
         p, _ = P.run_voice(self.L, None, t, mem=self.mem)
         self.steps += p.steps
         return [flt(self.mem.get(BUF + 4 * k)) for k in range(32)]

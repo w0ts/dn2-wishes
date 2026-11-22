@@ -75,7 +75,13 @@ INS_DEADLINE = GUARD + 0xE8
 INS_ACC = GUARD + 0xEC
 INS_T0 = GUARD + 0xF0
 INS_SKIPS = GUARD + 0xF4
-END = GUARD + 0xF8
+# 2026-11-20 (clip-inner; the User: "NO DIGITAL CLIPPING ... if it does, i want the alert"): a voice's own clip or
+# limiter. CLIP_HIT: any word but 0 when a stage of the voice now running clipped this block (the stage stores
+# its own nonzero constant; out_guard reads and clears it, a voice at a time); CLIPMASK: bit t, slot t clipped since
+# the ColdFire last heard (sent in the clip packet, then cleared; dnfw.sampler.program tdm_tx)
+CLIP_HIT = GUARD + 0xF8
+CLIPMASK = GUARD + 0xFC
+END = GUARD + 0x100
 assert END <= 0x2DE100
 # v0.52 merge: v0.49's four words filled the block, so the later insert words lie in the free words
 # just below it, after PERC's scratch (90 words from 0x2dde80, to 0x2ddfe8; test_waverider_dsp checks)
@@ -86,6 +92,11 @@ REST_OUT = INS_LO + 0x08         # 2026-11-11: the stock's time after the bus pa
 INS_TESTCLK = INS_LO + 0x0C      # 2026-11-12: the model's stand-in for EMUCLK in ins_gate (the DSP never reads it)
 INS_LO_END = INS_LO + 0x10
 assert INS_LO_END <= GUARD
+# 2026-11-20 (clip-inner): a clip of a stage that runs per track or per send, not inside a voice (the inserts, the
+# A2 filter machines' pass by slot goes to CLIPMASK): bit t track t, bits 16..18 the send returns (DEL, REV, CHR);
+# sent beside CLIPMASK in the clip packet, then cleared. In the two free words after PERC's scratch (0x2ddfe8)
+CLIPTRK = INS_LO - 0x08
+CLIPTRK_RET = 16                 # bit 16 + r: send return r (0 the delay)
 INS_HOLD = 64                    # 2026-11-12 (ins_gate): blocks an instance, once refused, must fit in a row to come back
 
 

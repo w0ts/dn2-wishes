@@ -12,6 +12,7 @@
  *               names, and put back otherwise.
  */
 #include "wr_gen.h"
+#include "../knobs/knob.h"
 
 typedef unsigned int u32;
 typedef unsigned short u16;
@@ -62,7 +63,7 @@ static int mnm_kn(int j, int v)
 
 static int mnm_ch(int n, int k)
 {
-    return n == MNM_PCH ? mnm_pch_idx[k > 127 ? 127 : k] : (k * n) >> 7;
+    return mnm_choice(n, k);                    /* v0.60: wr_gen.h's (PCH, FM+'s listed) */
 }
 
 static int mnm_rep(int j, int n, int c)        /* the value (coarse) in the middle of choice C */
@@ -114,6 +115,38 @@ static int mnm_tune_step(int old, int dir)
     return v < 0 ? old : v << 8;                /* at the end already: as it is */
 }
 
+/* v0.66 (owner, 2026-11-20: "i would like it to jump when func is held"): FUNC + turn on FM+
+ * DYN's continuous frequencies jumps to the next whole ratio the knob's way, as TUNE jumps a
+ * semitone; a plain turn stays continuous (the Monomachine's: "set continuously"). The ratio
+ * is the page's (mnm_cont_text): 1FRQ (LIN2) 2 k / 128, 2FRQ (SQR4) 4 (k / 128)^2, so the
+ * whole ratios sit at knob 0, 64, 127 (LIN2) and 0, 64, 91, 111, 127 (SQR4: 2.02 and 3.00,
+ * the nearest the knob's 128 steps reach). */
+static const unsigned char frq_lin2[] = {0, 64, 127};
+static const unsigned char frq_sqr4[] = {0, 64, 91, 111, 127};
+int mnm_frq_target(int n, int k, int dir)       /* the whole ratio's knob past K, or K */
+{
+    const unsigned char *w = n == MNM_LIN2 ? frq_lin2 : frq_sqr4;
+    int c = n == MNM_LIN2 ? (int)sizeof frq_lin2 : (int)sizeof frq_sqr4;
+    if (dir > 0) {
+        for (int i = 0; i < c; i++)
+            if (w[i] > k)
+                return w[i];
+    } else
+        for (int i = c - 1; i >= 0; i--)
+            if (w[i] < k)
+                return w[i];
+    return k;
+}
+
+static int mnm_frq_step(int j, int n, int old, int dir)
+{
+    int k = mnm_kn(j, old >> 8), t = mnm_frq_target(n, k, dir);
+    if (t == k)
+        return old;                             /* at the end already: as it is */
+    int v = mnm_val_for(j, k, t, dir);
+    return v < 0 ? old : v << 8;
+}
+
 static int fq_click __attribute__((section(".data"))) = 0;      /* v0.32: a FUNC click (+1/-1), else 0 */
 
 static int mnm_quant(int mi, int slot, int old, int value)
@@ -121,9 +154,9 @@ static int mnm_quant(int mi, int slot, int old, int value)
     int j = 0;
     while (j < MNM_J && mnm_slot[j] != slot)
         j++;
-    if (j == MNM_J || !mnm_choices[mi][j])
-        return value;                           /* not one of the eight, or a knob */
-    int n = mnm_choices[mi][j], count = n == MNM_PCH ? mnm_pch_idx[127] + 1 : n;
+    if (j == MNM_J || !mnm_choices[mi][j] || mnm_cont(mnm_choices[mi][j]))
+        return value;                           /* not one of the eight, or a knob (v0.60: DYN's FRQs too) */
+    int n = mnm_choices[mi][j], count = mnm_count(n);
     int oc = old >> 8, nc = (value >> 8) & 0xFF, d = nc - oc;
     if (nc == oc)
         return value;
@@ -171,7 +204,7 @@ extern int smp_func_held;
 extern int smp_knob_d;
 extern u32 smp_knob_at;
 #define KNOB_FRESH 150u                         /* 100 ms: the turn this write comes from */
-enum { F_OFF, F_KEEP, F_CHOICE, F_NONE, F_TUNE };
+enum { F_OFF, F_KEEP, F_CHOICE, F_NONE, F_TUNE, F_FRQ };
 #define OWN_REC_FIRST 238u                      /* our records (dnfw.perc / dnfw.sampler machines) */
 #define OWN_REC_LAST 260u
 
@@ -191,12 +224,14 @@ static int func_kind(u8 *s, int slot, u32 id)
         return slot == PERC_PTCH_SLOT || slot == PERC_TYPE_SLOT ? F_KEEP : F_NONE;
     int mi = mnm_index(ty - 4);
     if (mi >= 0) {
-        mi = mnm_live(mi, *(volatile u16 *)(s + SOUND_VALUES + 2 * mnm_slot[MNM_MONO_J]));   /* 2026-11-11: MONOMACHINE's
-                                                                                               * engine's controls */
+        mi = mnm_live(mi, *(volatile u16 *)(s + SOUND_VALUES + 2 * mnm_slot[mnm_sel_j(mi)]));   /* 2026-11-11: MONOMACHINE's
+                                                                * engine's controls; 2026-11-20: a host's place (DRUM's type) */
         for (int j = 0; j < MNM_J; j++)
             if (mnm_slot[j] == slot) {
                 if (MNM_TUNE_MONO && j == MNM_TUNE_J && mnm_labels[mi][j][0] == 'T' && mnm_labels[mi][j][1] == 'U')
                     return F_TUNE;              /* v0.47: by semitones (the owner) */
+                if (mnm_choices[mi][j] && mnm_cont(mnm_choices[mi][j]))
+                    return F_FRQ;               /* v0.66: FM+ DYN's 1FRQ / 2FRQ by whole ratios */
                 return mnm_choices[mi][j] ? F_CHOICE : F_NONE;
             }
         return F_NONE;
@@ -218,14 +253,37 @@ static int func_kind(u8 *s, int slot, u32 id)
 /* from the setter's write (hooks.S, smp_quant_hook): S = the sound, SLOT, VALUE the
  * value about to be written (coarse << 8 | fine), ID its record -> the value to write */
 int smp_samp_direct __attribute__((section(".data"))) = 0;   /* v0.55: smp_set_samp's own write */
+static int quant_core(u8 *s, int slot, int value, u32 id);
+
+/* (2026-11-19, the User: virtual notches, csrc/knobs) a knob-driven write of a bipolar value that crosses its 0 lands
+ * on it (and is held there a little): stock's records by kn_centre; on our machines, whose records 238..260 mean
+ * their own controls, the sample machines' TUNE alone (its record's centre) */
 int smp_quant(u8 *s, int slot, int value, u32 id)
+{
+    int old = *(volatile u16 *)(s + SOUND_VALUES + 2 * slot);
+    int v = quant_core(s, slot, value, id);
+    if (!kn_cur)
+        return v;
+    int ty = (signed char)s[SOUND_TYPE];
+    s32 n;
+    if (id >= OWN_REC_FIRST && id <= OWN_REC_LAST && (ty == 5 || mnm_index(ty - 4) >= 0 || SMP_IDX(ty - 4) >= 0)) {
+        const int *rw = (const int *)(REC_BASE + 60u * id);
+        n = SMP_IDX(ty - 4) >= 0 && slot == SMP_TUNE_SLOT ? (rw[2] + rw[3]) / 2 : -1;
+    } else
+        n = kn_centre(id);
+    return (int)kn_value(id, old, v, n) & 0xFFFF;
+}
+
+static int quant_core(u8 *s, int slot, int value, u32 id)
 {
     if (smp_samp_direct && slot == SMP_SAMP_SLOT) {     /* v0.55: smp_set_samp's own write */
         extern u32 smp_samp_turned;
         smp_samp_turned = *(volatile u32 *)0x4058F8D4u;    /* (as below, for every SAMP write) */
+        if (smp_samp_direct & 0x10000)                     /* v0.65: a whole word (its bank) */
+            return smp_samp_direct & 0xFFFF;
         return smp_samp_direct > 0 ? smp_samp_direct << 8 : value;
     }
-    extern int mono_raw;                        /* 2026-11-11: rec.c mono_poll writing an engine's start: as it is */
+    extern int mono_raw;                        /* 2026-11-11: rec.c mono_poll writing a place's start: as it is */
     if (mono_raw)
         return value;
     int fk = func_kind(s, slot, id);
@@ -234,6 +292,14 @@ int smp_quant(u8 *s, int slot, int value, u32 id)
         return old0;
     if (fk == F_TUNE)
         return mnm_tune_step(old0, smp_knob_d > 0 ? 1 : -1);
+    if (fk == F_FRQ) {                          /* v0.66: FM+ DYN's 1FRQ / 2FRQ */
+        int mi = mnm_index((signed char)s[SOUND_TYPE] - 4), j = 0;
+        while (j < 8 && mnm_slot[j] != slot)
+            j++;
+        if (mi < 0 || j == 8)
+            return old0;
+        return mnm_frq_step(j, mnm_choices[mi][j], old0, smp_knob_d > 0 ? 1 : -1);
+    }
     if (fk == F_CHOICE) {                       /* one choice a click, the knob's way: a */
         fq_click = smp_click ? smp_click : smp_knob_d > 0 ? 1 : -1;     /* detent's worth past the old value, */
         int oc0 = old0 >> 8;                    /* each table's own step below */
@@ -280,14 +346,16 @@ int smp_quant(u8 *s, int slot, int value, u32 id)
     int mi = mnm_index((signed char)s[SOUND_TYPE] - 4);     /* v0.27: is_wr's kind */
     if (mi >= 0) {
         /* 2026-11-11: MONOMACHINE: its engine's controls (ENGN, page 1 H); ENGN turned to another engine: that
-         * engine's start (rec.c mono_poll, after this write, outside the setter), as MACHINE SEL sets a machine's */
+         * engine's start (rec.c mono_poll, after this write, outside the setter), as MACHINE SEL sets a machine's.
+         * 2026-11-20: every host (dnfw.mnm.machines HOSTS): DRUM's TYPE the same */
+        int sj = mnm_slot[mnm_sel_j(mi)], h = mnm_host(mi);
         int w0 = *(volatile u16 *)(s + SOUND_VALUES + 2 * slot);
-        int ew = *(volatile u16 *)(s + SOUND_VALUES + 2 * mnm_slot[MNM_MONO_J]);
+        int ew = *(volatile u16 *)(s + SOUND_VALUES + 2 * sj);
         int r = mnm_quant(mnm_live(mi, ew), slot, w0, value);
-        if (MNM_MONO >= 0 && mi == MNM_MONO && slot == mnm_slot[MNM_MONO_J]
-            && mnm_mono_engine((r >> 8) & 0xFF) != mnm_mono_engine((w0 >> 8) & 0xFF)) {
-            extern void mono_engine_set(u8 *s, int e);
-            mono_engine_set(s, mnm_mono_engine((r >> 8) & 0xFF));
+        if (h >= 0 && slot == sj
+            && mnm_host_choice(h, (r >> 8) & 0xFF) != mnm_host_choice(h, (w0 >> 8) & 0xFF)) {
+            extern void mono_engine_set(u8 *s, int h, int e);
+            mono_engine_set(s, h, mnm_host_choice(h, (r >> 8) & 0xFF));
         }
         return r;
     }
@@ -300,20 +368,17 @@ int smp_quant(u8 *s, int slot, int value, u32 id)
     }
     if (slot == SMP_SAMP_SLOT && type < SMP_N0 && smp_knob_d
         && *(volatile u32 *)0x4058F8D4u - smp_knob_at <= KNOB_FRESH) {
-        /* v0.55: past SAMP 127 the list goes on to the eight FLEX buffers (rows 128..135, each
-         * the buffer's code: rt_buf_code), turned by the knob's own steps */
-        extern int rt_samp_buf(unsigned int samp);
-        extern unsigned int rt_buf_code(unsigned int b);
+        /* v0.55: past SAMP 127 the list goes on to the eight FLEX buffers, turned by the knob's
+         * own steps. v0.65 (docs/banks.md): one run of rows, OFF, A001..A127, B001.., C.., D..,
+         * then the FLEX buffers (smp_page.c smp_row_step: banks not in use skipped); the word
+         * written carries the row's bank in its low byte */
+        extern int smp_word_row(unsigned int w), smp_row_step(int r, int d);
+        extern unsigned int smp_row_word(int r);
         int old = *(volatile u16 *)(s + SOUND_VALUES + 2 * slot);
-        int oc = old >> 8, nc = (value >> 8) & 0xFF;
-        int ob = rt_samp_buf((unsigned int)oc);
-        int row = ob >= 0 ? 128 + ob : oc;
-        if (ob >= 0 || nc > 127 || (smp_knob_d > 0 && row + smp_knob_d > 127)) {
-            int r = row + smp_knob_d;
-            r = r < 0 ? 0 : r > 135 ? 135 : r;
-            return (r >= 128 ? (int)rt_buf_code((unsigned int)(r - 128)) : r) << 8;
-        }
+        return (int)smp_row_word(smp_row_step(smp_word_row((unsigned int)old), smp_knob_d));
     }
+    /* (v0.65: any other write -- a MIDI CC, a sound or kit loaded -- is written as it comes: a CC
+     * names a slot of bank A, as before; a loaded sound keeps the bank it was saved with) */
     int old = *(volatile u16 *)(s + SOUND_VALUES + 2 * slot);
     int oc = old >> 8, nc = (value >> 8) & 0xFF, d = nc - oc;
     for (int k = 0; k < SMP_NQ; k++) {
@@ -388,6 +453,16 @@ int fx_type_quant(u8 *base, int slot, int value, u32 id)
         return id == 131u ? rvt_step(old0, smp_knob_d) : dlt_step(old0, smp_knob_d);
     }
     return value;
+}
+
+/* (2026-11-19, the User: virtual notches, csrc/knobs) the kit setter's write (hooks.S fx_type_hook): the TYPE lists'
+ * order above, then the kit's bipolar values (delay WID, SCF, ext-in BAL, LPAN, RPAN): a knob-driven write that
+ * crosses the centre lands on it */
+int fx_type_knob(u8 *base, int slot, int value, u32 id)
+{
+    int old = *(volatile u16 *)(base + 2 * slot);
+    int v = fx_type_quant(base, slot, value, id);
+    return kn_cur ? (int)kn_value(id, old, v, kn_centre(id)) & 0xFFFF : v;
 }
 
 /* -- the header's text -------------------------------------------------------------------- */
@@ -601,7 +676,7 @@ void smp_formats(int kind)
         RECORD_FMT(fmt_ids[k]) = f;
     }
     {
-        extern int wr_mnm_mi(int kind);             /* page.c: MONOMACHINE's engine's (2026-11-11) */
+        extern int wr_mnm_mi(int kind);             /* page.c: a host's place (MONOMACHINE's engine's, 2026-11-11) */
         int mi = wr_mnm_mi(kind);                   /* the Monomachine-style machines' controls in their units */
         if (!mnm_saved) {
             for (int j = 0; j < MNM_J; j++)

@@ -32,6 +32,7 @@ enum { SMALL, SYM, BIG };
 /* csrc/modulation/moving.c: a modulated control's line, as on stock's pages (2026-11-12) */
 extern void mv_cell(void *canvas, int x0, int y0, u32 id);
 extern void mv_cell_span(void *canvas, int x0, int y0, u32 id, int lo, int hi);
+extern void mxp_note(u32 id);
 
 static int ok(void)
 {
@@ -47,9 +48,9 @@ static void put(void *c, int x, int y, int on)
 
 static void fill(void *c, int x0, int y0, int x1, int y1, int on)
 {
-    for (int y = y0; y <= y1; y++)
-        for (int x = x0; x <= x1; x++)
-            put(c, x, y, on);
+    extern void cv_fill(void *cv, int x0, int y0, int x1, int y1, int on);
+    cv_fill(c, x0, y0, x1 > 127 ? 127 : x1, y1 > 63 ? 63 : y1, on);   /* put's 128 x 64 clip, then SET_PIXEL's:
+                                                         * the same pixels a column word at a time (2026-11-17) */
 }
 
 static const u8 *glyph(int font, int ch)
@@ -225,6 +226,8 @@ int md_page_draw(void *view, void *c, int page, int type)
             wg_knob(c, s, knob(view, id));              /* 2026-11-09: stock's knob */
         }
         mv_cell(c, x0, base, id);                       /* 2026-11-12: the heard value's line (csrc/modulation) */
+        if (id == PERC_TYPE_ID)                         /* (2026-11-20) a machine swap: read at the note's start only */
+            mxp_note(id);                               /* (the routes popup says PER NOTE, csrc/matrix/routes_pop.c) */
         if (locked(view, id))                           /* v0.27: p-locked, as stock lights it */
             wg_lit(c, s);
     }
@@ -258,7 +261,7 @@ static int mnm_k(void *view, int j)             /* knob 0..127, as the DSP and p
 static int mnm_k_shown(void *view, int mi, int j)
 {
     int k = mnm_k(view, j), n = mnm_choices[mi][j];
-    if (j >= 8 && n && n != MNM_PCH) {
+    if (j >= 8 && n && n != MNM_PCH && n != MNM_FLIST && !mnm_cont(n)) {   /* (v0.60: a ROM table or a number: as is) */
         u8 fl;
         int v = (GET_VALUE(view, mnm_rid[j], &fl) >> 8) - mnm_lo[j], top = mnm_top[j];
         v = v < 0 ? 0 : v > top ? top : v;
@@ -311,6 +314,18 @@ static const char *unit_text_of(int kind, int curve, int k)
         return juno3[(k * 3) >> 7];
     if (kind == MU_ONOFF)                           /* 2026-11-12: the inserts' AUTO (design.AUTO_ON) */
         return k < 64 ? "OFF" : "ON";
+    if (kind == MU_BAL) {                           /* 2026-11-20: DRUM's balance knobs, -64 .. +63; C at the centre
+                                                       (both parts 100 %), as stock's pan reads its centre */
+        int d = k - 64, n = 0;
+        if (!d) {
+            ub[0] = 'C'; ub[1] = 0;
+            return ub;
+        }
+        ub[n++] = d < 0 ? '-' : '+';
+        n = ucat(ub, n, d < 0 ? -d : d);
+        ub[n] = 0;
+        return ub;
+    }
     if (kind == MU_VOIC) {                          /* CHOR's voices: 1 + trunc(3.99 p) */
         int vv = 1 + (k * 399 / 127) / 100;
         ub[0] = 'V'; ub[1] = (char)('0' + (vv > 4 ? 4 : vv)); ub[2] = 0;
@@ -525,14 +540,14 @@ void *stu_stock_of(int id)
 }
 #endif
 
-static int mnm_choice_count(int n)
+static int mnm_choice_count(int n)              /* v0.60: wr_gen.h's, one for every reader */
 {
-    return n == MNM_PCH ? mnm_pch_idx[127] + 1 : n;
+    return mnm_count(n);
 }
 
 static int mnm_choice_of(int n, int k)
 {
-    return n == MNM_PCH ? mnm_pch_idx[k > 127 ? 127 : k] : (k * n) >> 7;
+    return mnm_choice(n, k);
 }
 
 static const char *mnm_value_text(int mi, int j, int c)
@@ -551,6 +566,8 @@ static const char *mnm_value_text(int mi, int j, int c)
     }
     static char num[6] __attribute__((section(".data")));
     int n = mnm_choices[mi][j];
+    if (mnm_cont(n))                            /* v0.60: DYN's 1FRQ / 2FRQ: the value, x.x / x.xx */
+        return mnm_cont_text(n, c, num);
     if (n == MNM_WAVES || n == 2 * MNM_WAVES) {
         int w = (c & (MNM_WAVES - 1)) + 1;
         num[0] = 'S'; num[1] = (char)('0' + w / 10); num[2] = (char)('0' + w % 10); num[3] = 0;
@@ -571,7 +588,7 @@ static int mnm_listed(int mi, int j)
 {
     int w = mnm_widget[mi][j], n = mnm_choices[mi][j];
     return n && w != MW_KNOB && w != MW_EMPTY && w != MW_SEMIS && w != MW_CENTS
-           && n != MNM_WAVES && n != 2 * MNM_WAVES;
+           && n != MNM_WAVES && n != 2 * MNM_WAVES && !mnm_cont(n);   /* v0.60: DYN's FRQs a knob, not a list */
 }
 
 static int mnm_retired_at(int mi, int j)        /* the retired choice, or -1 */
@@ -711,6 +728,8 @@ int mnm_page_draw(void *view, void *c, int mi, int page)
         }
         mv_cell_span(c, wg_x(s), wg_y(s), mnm_rid[j],   /* 2026-11-12: the heard value's line, across */
                      mnm_lo[j] << 8, (mnm_lo[j] + mnm_top[j]) << 8);   /* the knob's part of the record */
+        if (mnm_per_note[mi] >> j & 1u)         /* (2026-11-20) read at the note's start only (pages.py MNM_PER_NOTE): */
+            mxp_note(mnm_rid[j]);               /* the routes popup says PER NOTE (csrc/matrix/routes_pop.c) */
         if (locked(view, mnm_rid[j]))   /* p-locked, as stock lights it */
             wg_lit(c, s);
     }

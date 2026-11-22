@@ -71,8 +71,11 @@ eqtest.py (old and new helpers, register for register, 20,000 random, edge and t
   instructions a sample) and 1,220 DDR accesses (its rings: 512 KB, DDR by need). The DAG's
   circular buffers would remove the address arithmetic; this code has never set B/L registers on
   the unit (MODE1 / CBUFEN risk), so not without a unit test.
-- **The resampler** (1,120 a voice): scalar, near its floor; multifunction (multiply || add) is
-  refused while selmap and digikit decode it differently.
+- **The resampler** (1,120 a voice): scalar, near its floor. 2026-11-21 (claude/multifunction): two multifunction
+  pairs (4c || 2a - 5b; b x level || + (c - a); level and step swapped F4/F15), 31 -> 29 instructions a sample,
+  -64 a voice-block (-1,024 a block at 16 voices); md_identity VOICE 34/34 output hashes identical, SHARC runner
+  decode/map/voice/guard PASS (bit-exact to the model), test_perc_live/test_md/test_clipinner pass
+  (docs/selas-encoding.md for what makes multifunction safe now).
 - **EFM**: the remaining halves in state (mfb, mod, mdec, rdec, Ph, mfrq, f2) could be integers too
   (~5 instructions a product); TRX `_clamp` and the P-I `sat` elsewhere could hold their bounds in
   registers.
@@ -163,7 +166,7 @@ TAPE 11,788 -> 11,794, FOLD 9,801 -> 9,807, HARM 8,812 -> 8,817 (+6, the flag te
 
 ## Next hot spots (planned, none started; ranked by the worst-case budget table)
 
-Source: `~/GitHub/dn2mk2-scratch/combined/budget-table.md` (SHARC runner, farm, combined build WITHOUT this
+Source: `~/GitHub/dn2mk2-scratch/combined/budget-table.md` (SHARC runner, the farm, combined build WITHOUT this
 branch's changes, cycles on the runner clock, frame 666,667). Its worst case (16 x PI-SD + DIOD + CHOR/TAPE +
 FDN8/XDLY) is 1,987k = 298 %: 16 voices 710k, A2 filter 241k, inserts 685k, idle floor 352k. This branch took
 from it: PI-SD/PI-RS ~-46 % per voice (DDR 2.1k -> 0.26k a block), the idle CHOR/WIDE and bus passes (13k + 12k
@@ -345,6 +348,11 @@ the end of this section. Not run: the full ship_gate, boot step. No build here i
 
 ### Note: what blocks multifunction instructions and hardware loops (2026-11-11, read from the repo; nothing built or run for this)
 
+**Status 2026-11-13:** multifunction is in use (`dsl.Prog.par`, float + and -, checked by `dnfw.perc.mf.verify`;
+the Monomachine engines' decimators and DPRO's interpolator), and selache patch 0002 makes selmap read it as
+written and selas encode every float category as Analog Devices' table does (docs/selas-encoding.md). The
+paragraphs below are the 2026-11-11 reading.
+
 **Multifunction (`Fm = Fx * Fy, Fa = Fx + Fy`, Type 1a, 48-bit).** `dsl.Prog.par` can already model and emit it (multiplier operands
 F0-F3 x F4-F7, ALU F8-F15, one DM move); it is switched off by an assert (`multifunction computes are refused`). Why, per the
 comments and docs/plaits.md: (a) **selas** (the assembler/encoder) "does NOT check these: it encodes garbage" for illegal
@@ -449,7 +457,7 @@ free; the python models run natively on the Mac with `MD_OS_BIN/MNM_OS/DT2_*` fr
 
 ## PLAITS PART / STRG at 16 voices (2026-11-11, plaits16, branch claude/plaits16-a61ad4 on main 65edf070)
 
-Runner poly16 step (`DNFW_POLY16_ONLY=PART,STRG`, farm): **PASS for both** (PART 16/16 sounding from block 2,
+Runner poly16 step (`DNFW_POLY16_ONLY=PART,STRG`, the farm): **PASS for both** (PART 16/16 sounding from block 2,
 STRG from block 4, no guard skip from block 4). Main's: PART sounds from block 10, STRG from block 6 (the
 deferred clear with CLEAR_SPREAD), so both FAILed there whatever the speed. Two parts:
 
@@ -513,7 +521,7 @@ memory frees up (the PERC constant pool, a layout change):
 1. **DSP2's sine table in L2, 128 KB** (32,768 words; no exact smaller form: the recursion leaves no half-wave or
    mirror symmetry, ~16,380 words break each). EFM-CY reads it 256 times a block: -1,536 a voice (14,857 -> ~13,300);
    every EFM machine and TRX-CB / TRX-S2 read it too, a few hundred to ~1k each.
-2. **The P-I delay lines in L2, 96 KB** (three 512-word lines a slot, 16 slots). PI-SD / PI-RS read three and
+2. **(Done 2026-11-16 in L1 block 2, claude/pi-lines-l1: PI-SD 12,698, PI-RS 11,814, PI-BD 11,051, PI-MT 10,940, bit-exact; 16 x 6 KB at 0x302000, docs/memory-map.md.)** The P-I delay lines in L2, 96 KB (three 512-word lines a slot, 16 slots). PI-SD / PI-RS read three and
    write three words a sample (192 DDR accesses a block): -1,152 a voice (PI-SD 14,570 -> ~13,420); PI-BD /
    PI-MT (three lines each) about the same.
 3. **PI-SD's strike table in L2, 5,124 B** (read two words a sample): -~520 a voice (PI-SD 14,570 -> ~14,050),
@@ -605,3 +613,262 @@ final size), so no loop can grow. WIDE's second pass (23 a sample) keeps its per
 load, + 4): with ten live registers there is no room to pair, and a span copy would not fit the code. The DDR
 traffic (each ring's 32 writes a block, each span's ~39 reads) is now most of what is left, and needs memory, not
 code. Once a block, whenever any post insert is set, the pass walks all 32 slots (~1,800).
+
+## FM TONE's operator loop (stock code): measured plan, parked (2026-11-13)
+
+The stock FM TONE operator loop, read with digikit on the 1.12 image: `LCNTR = 0x40, DO .. UNTIL LCE` at sw 0x1c3997,
+body sw 0x1c399a..0x1c39db, **25 instructions an iteration**, 64 iterations a call (32 calls a block at 16 voices).
+Per iteration: a = DM(I4++), b = DM(I1++); F6 = F1 a, F3 = F0 b, F6 = F3 + F6; P' = FEXT(P + R7, 0:24) (P in R12);
+F1 += F11, F0 += F10; R6 = TRUNC F6; ph = FEXT(P + R6, 0:24); M4 = ph >> 16, F3 = FLOAT FEXT(ph, 0:16), F5 = F3 F13;
+I0 = I2 + M4 (MODIFY NW); t0 = DM(I0, M5), t1 = DM(M6, I0); F6 = (t1 - t0) F5 + t0, R12 = P'; DM(I5++) = F6;
+DM(I3++) = F2 (-F6); F2 += F9. Live after the loop: R8 (P), R4, R14, R15 (stored), M4; R3, R5, R6 and the I registers are
+restored or reloaded; F0, F1, F2, R12 are not kept.
+
+**What multifunction buys here: less than estimated.** Each operator coefficient (F0, F1, F2) is both a multiplier
+operand (F0-F7) and the ALU operand of its own ramp (F8-F15), so the ramps cannot pair with a multiply; the phase
+work is integer and shifter, which no multifunction form takes. A bit-exact repack (registers renamed, the products
+paired where the groups allow, the loads on the computes, the DAG use of M4 kept one instruction from its write):
+**about 19-20 instructions an iteration**, about -10..-13k cycles a block at 16 FM TONE voices (1.5-2 % of the frame).
+
+**What it would take.** A stock-code patch, of optstock's risk class (stock's own code path, which the runner did not
+show silencing round 14): the `DO` at sw 0x1c3997 replaced by a JUMP to our loop (about 150 B of code in a span from
+the memory arbiter), which returns to sw 0x1c39dc; the stock bytes checked before patching, as `stockfx` does; DSP
+identity and hwrules taught the patch. Its proof: an equivalence harness in the runner, the stock loop and ours on the
+same random registers, coefficients, inputs and table (NaN, denormals, +-0 among them), every stored word and every
+live-out (R8, R4, R14, R15, M4) equal; then stockout; then one check on the unit before it ships.
+
+**Parked** (main, 2026-11-13): not worth a stock-code patch today.
+
+## 2026-11-21: ANALOG 2, JUNO and the A2 filters at their worst case, bit-exact (session a2-juno-fast, branch `claude/a2-juno-fast` on `claude/up-v066` 163d7349)
+
+**The measure**: `scripts/dsp_cost.py`'s cost (instructions + 4 L2 + 10 DDR, one voice-block, host included) at the
+dearest setting, with the A2 mix tables loaded (the harness leaves them at zero otherwise). ANALOG 2's worst: SWRM 6,
+WDTH on, SYNC, DTN, NOIS, DRV, RES 120, glide TIME, DRFT, LP24, and the waves: at the start SIN on both
+oscillators, now SQR copies with a synced SIN osc 2. JUNO's: BOTH, SUB, NOIS, PWM ENV, RES 120, BOOST.
+
+| | start | now |
+|---|---:|---:|
+| ANALOG 2 SVF LP24 | 20,870 | 18,510 |
+| ANALOG 2 LADR LP24 | 20,986 | 18,114 |
+| ANALOG 2 OTA LP24 | 21,322 | 18,318 |
+| ANALOG 2 DIOD LP24 | 21,174 | 18,538 |
+| ANALOG 2 MS20 LP24 | 20,634 | 17,700 |
+| JUNO | 9,254 | 8,566 |
+
+**What was done** (each its own commit, each bit-identical in the model: outputs and every memory word but the
+render scratch, over general, WDTH-ladder and SIN/TRI oscillator cases):
+- WDTH's side built and filtered in L1 (the render scratch's YB row 176..191), written to its L2 side block once
+  (-900).
+- The ladder core (LADR, OTA, JUNO): the model chosen outside the loop, the words read as moves that ride on the
+  computes, the straight runs scheduled (dnfw.mnm.sched, `pairs=False`) (-944, JUNO -472). DIOD, MS20 and the SVF
+  the same way (-392, -896, -460).
+- The noise's xorshift with the native XOR (`dsl.xor1`; stock 1.12 has 69 of them) (-198, JUNO -192).
+- The loops' constants in a persistent table (models.KC, the first words of the A2 tables, through I1): code, not
+  speed.
+- The side's filter and b's share one set of coefficients a half (models._once: LADR -116, DIOD -308, MS20 -102).
+- A copy of the other side's pass skipped before its words are read (-90).
+- The sine kernel two samples at a time, one's multiply with the other's add (multifunction, the proven forms), and
+  the BLEP's setup for SAW and SQR only (SIN/SIN -1,666).
+- The noise's -16384 loaded once a half, not every sample (-30).
+
+**Room**: PERC +502 B against the base (557 B were free on integ-65 / up-v066). Anything more needs the constant pool
+(`claude/const-pool`).
+
+**Not done, measured**:
+- SIMD mid + side for the ladders (branch `claude/a2-juno-simd`, 91c3b8e8, on an earlier head): OTA -1,720, bit-exact
+  in the model; +584 instructions; SIMD has not run on the unit (a DN2 A/B first).
+- Multifunction in the filter loops: with today's registers they form no pair; the bound with the operand groups
+  ignored is -100 (OTA) .. -700 (SVF) a block; a register re-allocation of each loop would be needed.
+- The SQR kernel two samples at a time (its BLEP branches stay): about -400.
+- An L1 arena for these engines: they already run in L1 (slot words, render scratch, the A2 tables); after the side
+  change their L2/DDR traffic is ~32 L2 writes and ~10 DDR reads a block (under 250 cost units).
+
+## 2026-11-21: our FX at the worst-case frame (session fx-fast, branch `claude/fx-fast` on `claude/up-v066` 163d7349)
+
+Measured first (the model, dsp_cost.py's scale: instructions + 4 L2 + 10 DDR; 16 voice slots on the effect, 10-14 knob
+settings each, the dearest kept; scratch `prof_fx.py`). Each unit's worst block before this session:
+
+| per voice slot (pre: L1 buffers, the unit's map) | | per instance | |
+|---|---|---|---|
+| CHOR | 6,022 | FDN8 bus, clearing block | 47,121 (95 % its 4,096 DDR stores) |
+| JUNO | 4,408 | FDN8 bus, steady | 15,980 |
+| TAPE | 4,365 | FDN8 send, clearing / steady | 46,496 / 16,692 |
+| FOLD | 3,244 | XDLY (loud input, FDBK max: the knee's tanh on both lines) | 13,669 (9.6k at -6 dBFS) |
+| DIST / FUZZ | 2,934 / 2,859 | JUNO send | 4,405 |
+| RING / WIDE / HARM / SUB / GATER | 2,345 / 2,308 / 2,262 / 2,197 / 2,034 | | |
+
+The pre inserts' sample loops (FUZZ/DIST 48 instructions a sample), FDN8's lines (about 9.7 instructions a line-sample
+for 9 float operations) and TAPE's stages run at one operation an instruction: what is left there needs multiply || add
+pairs (claude/multifunction; not used here).
+
+| change | before -> after |
+|---|---|
+| **FDN8 / LONG clear only the window a fresh engine reads before it writes** (`fdn8.ref.WINDOW_CLEAR`, docs/fdn8.md): the same 32 silent blocks, 1,264 / 2,352 DDR stores a block instead of 4,096 | bus instance 0's first clearing block 54,965 -> 23,680, the others about 18.5k; fdn8.asm 8,346 -> 8,440 B |
+| **CHOR / JUNO span copy four words a pass** (`post._span`, each run's count rounded up by at most 3 words, read inside the ring's stride, written to LINE past the run) | 16 CHOR slots, dearest block over 64 blocks 97,159 -> 95,143; JUNO 71,031 -> 70,551; the JUNO send 4,405 -> 4,375; inspost.asm 7,030 -> 7,098 B |
+| **XDLY: the two times' smoothing interleaved** (`xdly.program.core`: B's loads and A's store ride on computes) | dearest block 13,669 -> 13,573; xdly.asm unchanged |
+| **The bus FDN8 instances 1..7's diffusers in L2** (`fdn8.program.DIFF_BUSK_L2`, 28 KB of the User's reserve at 0x200EE000, as lever 5 did for the send and instance 0) | bus instance 1..7 steady 19,362 -> 17,911 (-1,451 each, about -10.2k with 8 FDN8); their first clearing block 24,069 (the 1,024-word L2 ring zeroed); fdn8.asm 8,440 -> 8,470 B |
+| **WIDE's second pass reads its ring through I4 post-modified** (TIME is the block's: two runs split at the ring's end, no per-sample masked address) | 16 WIDE slots 37,143 -> 35,463 (-105 a slot); inspost.asm 7,098 -> 7,144 B |
+
+Kept on purpose (the User, 2026-11-21): the inserts' quiet skip (`program.quiet`, it keeps sounding voices' inserts
+from refusals on patterns whose track owns many silent slots, A09) and FDN8's QUIET_GATE; XDLY's silent_in costs a
+compare a block at the worst case. Dropped: TAPE's span copy (a WOW knob jump makes the span up to ~105 words, more DDR
+than today's 64 reads at the worst case, and inserts.asm has 124 B left).
+
+## 2026-11-21: ANALOG 2, three sound changes the User picked (branch `claude/a2-sound-pick` on `claude/a2-juno-fast` 15bedd37)
+
+The User listened to the proposals (`scratch/a2-sound/`) and picked three; the swarm options (copies without BLEP, at
+most 4 copies) wait for the User's review. Each changes the sound (a new model identity reference), JUNO is untouched
+(its identity cases unchanged, its worst still 8,566).
+
+- **SQR from one BLEP.** The square was two band-limited saws (two edge tests and two BLEP corrections a sample). Both
+  of its edges sit at the wrap of the doubled phase at the same distance t, so one test and one correction on the doubled
+  phase are the same poly-BLEP, its sign the sign of the phase. Differences: float rounding (null under -110 dBFS).
+- **DRV's tanh of degree 4** (in x^2, rising on 0..2): was degree 8 (4.5e-6). Fitted one-sided by a linear program:
+  never above the degree-8 curve at any input, float32 rounding included, within 1.08e-3 under it (slope 0.9944 at 0),
+  so the drive is never louder than before (`test/test_a2_peaks.py`).
+- **The WDTH side through a linear SVF** (`_side12`), not a second copy of the chosen filter: one stage (two for LP24,
+  the second at K2ND, as the SVF's own LP24), the mode's SVF mix, this half's cutoff, RES's damping (at least 0.1), the
+  SVF stage's knees on its states, its level the chosen model's LP passband gain at RES (LADR, OTA, DIOD: a degree-4 fit,
+  within 0.5 dB), x min(1, 0.80 + 0.008 RES) for LADR, OTA, DIOD, x 0.97 for every model (both for the peaks, below).
+  The mid (the mono sum) is untouched. Its second inlined copy of the five models' code is gone.
+
+| steady worst block (dsp_cost.py) | SVF | LADR | OTA | DIOD | MS20 |
+|---|---:|---:|---:|---:|---:|
+| 15bedd37 | 18,510 | 18,114 | 18,318 | 18,538 | 17,700 |
+| the three picks (e4ba557d) | 16,689 | 16,607 | 16,713 | 16,913 | 16,351 |
+
+Of that: the square -929 at every model, the tanh -192, the side -240 (MS20) .. -706 (SVF), of which its knees cost +512
+(they never engaged on the peak grid) and LP24's second stage about +600; the low-RES trim +28 (LADR, OTA, DIOD), +12
+(MS20), +6 (SVF).
+
+**Peaks (no digital clipping; `scratch/a2-sound/side12-knee/peak_grid_final.md`)**: CUT swept 0 -> 127 at every model x
+mode x RES (0 3 5 8 10 13 15 20 25 30 40 60 80 100 110 120 127) x DRV (0 / 64 / 127): 1,050 settings, B's stereo peak
+(L = mid + side, R = mid - side) under A's at every one, at most -0.013 dB; the loudest B 8.25 against A's 14.0. Before
+the two side fixes: +0.6 dB at LADR/OTA/DIOD RES 0 .. 15 (their phase against the mid; the side alone was not louder),
++0.035 dB at MS20 LP24 (the side's filter on the half's end cutoff, the model's on its ramp). Not covered: other notes,
+waves, copy counts, WDTH under 127.
+
+**Room**: PERC +502 B against the base (557 B were free on integ-65 / up-v066). Anything more needs the constant pool
+(`claude/const-pool`).
+
+**Not done, measured**:
+- SIMD mid + side for the ladders (branch `claude/a2-juno-simd`, 91c3b8e8, on an earlier head): OTA -1,720, bit-exact
+  in the model; +584 instructions; SIMD has not run on the unit (a DN2 A/B first).
+- Multifunction in the filter loops: with today's registers they form no pair; the bound with the operand groups
+  ignored is -100 (OTA) .. -700 (SVF) a block; a register re-allocation of each loop would be needed.
+- The SQR kernel two samples at a time (its BLEP branches stay): about -400.
+- An L1 arena for these engines: they already run in L1 (slot words, render scratch, the A2 tables); after the side
+  change their L2/DDR traffic is ~32 L2 writes and ~10 DDR reads a block (under 250 cost units).
+
+## 2026-11-21: ANALOG 2, three sound changes the User picked (branch `claude/a2-sound-pick` on `claude/a2-juno-fast` 15bedd37)
+
+The User listened to the proposals (`scratch/a2-sound/`) and picked three; the swarm options (copies without BLEP, at
+most 4 copies) wait for the User's review. Each changes the sound (a new model identity reference), JUNO is untouched
+(its identity cases unchanged, its worst still 8,566).
+
+- **SQR from one BLEP.** The square was two band-limited saws (two edge tests and two BLEP corrections a sample). Both
+  of its edges sit at the wrap of the doubled phase at the same distance t, so one test and one correction on the doubled
+  phase are the same poly-BLEP, its sign the sign of the phase. Differences: float rounding (null under -110 dBFS).
+- **DRV's tanh of degree 4** (in x^2, rising on 0..2): was degree 8 (4.5e-6). Fitted one-sided by a linear program:
+  never above the degree-8 curve at any input, float32 rounding included, within 1.08e-3 under it (slope 0.9944 at 0),
+  so the drive is never louder than before (`test/test_a2_peaks.py`).
+- **The WDTH side through a linear SVF** (`_side12`), not a second copy of the chosen filter: one stage (two for LP24,
+  the second at K2ND, as the SVF's own LP24), the mode's SVF mix, this half's cutoff, RES's damping (at least 0.1), the
+  SVF stage's knees on its states, its level the chosen model's LP passband gain at RES (LADR, OTA, DIOD: a degree-4 fit,
+  within 0.5 dB), x min(1, 0.80 + 0.008 RES) for LADR, OTA, DIOD, x 0.97 for every model (both for the peaks, below).
+  The mid (the mono sum) is untouched. Its second inlined copy of the five models' code is gone.
+
+| steady worst block (dsp_cost.py) | SVF | LADR | OTA | DIOD | MS20 |
+|---|---:|---:|---:|---:|---:|
+| 15bedd37 | 18,510 | 18,114 | 18,318 | 18,538 | 17,700 |
+| the three picks (e4ba557d) | 16,689 | 16,607 | 16,713 | 16,913 | 16,351 |
+
+Of that: the square -929 at every model, the tanh -192, the side -240 (MS20) .. -706 (SVF), of which its knees cost +512
+(they never engaged on the peak grid) and LP24's second stage about +600; the low-RES trim +28 (LADR, OTA, DIOD), +12
+(MS20), +6 (SVF).
+
+**Peaks (no digital clipping; `scratch/a2-sound/side12-knee/peak_grid.md`)**: CUT swept 0 -> 127 at every model, mode,
+RES and DRV 0 / 127 on a grid: B's stereo peak is under A's except at RES 0 (+0.10 .. +0.36 dB, A at 0.03 .. 0.94 of the
+grid's loudest 14.0), where the side alone is not louder: its phase against the mid differs (the side's filter is not
+the mid's). The loudest B on the grid is 8.27. DIOD BP's side has its own level (its band-pass is far quieter than the
+SVF's).
+
+**Room**: perc 179,230 -> 177,716 B (-1,514 B), both regenerated on the farm (15bedd37's committed asm was older than its model).
+
+**Identity**: new model reference for the changed sound (`scratch/a2-sound/pick-ref/pick3_*.json`, bits.py's general, pair and
+SIN/TRI cases): every ANALOG 2 case differs from 15bedd37's (as it must), JUNO's 4 are identical.
+
+**To run at 14:00 (not run: the User's hold on runner and gate runs)**: on a build of this branch the brick-risk steps
+(preflight, code-fresh, rebuild, dsp-identity, hwrules, symbols, coldfire, overbridge, linkfast, rammap, boot, machines,
+engine, fuzz, paravoice, dronehold, drumamp), `sharc:a2f`, `sharc:dacover+levels`, and the gate's full `unit` step.
+
+## 2026-11-21: TAPE, FOLD, HARM, RING as multifunction code, bit-exact (agent C, branch `claude/fx-opt2` on `claude/combined-67` a43b8043)
+
+Cost survey items #10 and #14. The pre inserts run on a voice's MONO buffer, so there is no L/R pair for SIMD; SIMD over
+two consecutive samples would need loops inside `Prog.simd` (refused), constants given to PEy every pass, and the
+per-sample clip branches gone; SIMD has also not run on the unit. So the loops became `dnfw.perc.msched` code (a
+multiply and an add in one instruction, every constant's load riding on a compute), each written once as a template on
+value names (`program.*_SYM`) and given registers by a map from a search over msched's slot count
+(`program.mf_conflicts` holds each map: no two live values in one register, nothing read before it is written).
+
+- **TAPE** (`TAPE_MF`): both stages; stage 1's four clip tests a sample (compare + branch) become an integer MAX of
+  |x|'s bits and two tests a block (`_tape_sat_clips`; guard.CLIP_HIT is only read as zero or not; a NaN's ABS is all
+  ones, -1, never the largest, as a NaN never compared past the hold). Stage 2 reads the dry at I0 without a modify and
+  stores through I0, so the ring's two reads go through I1 and ride on computes.
+- **FOLD, HARM** (`FOLD_MF`, `HARM_MF`): two samples a pass (the last sample's output written straight into the
+  carried DC blocker input, no copy); FOLD's sine inline and branch-free (`_sine_sym`: x > 0.5 -> 1 - x is
+  MIN(x, 1 - x), then x < -0.5 -> -1 - x is MAX(x, -1 - x); the same bits, and at +-0.5 both forms agree); the input
+  clip once a block (`_in_clip`). Their sine coefficients and 2^30: `program.K2_TAB`, L1 0x2E3A10..0x2E3A28, the
+  free words at the end of the inserts' own claim.
+- **RING** (`RING_MF`): one sample a pass (two would be 31 slots a sample instead of 32, for 30 instructions
+  inserts.asm does not have).
+- **FUZZ / DIST**: the same method gives 49 instructions a sample against today's 48 (the gate and v's hold cost as
+  much without branches): left as they are.
+
+32 voice slots (16 voices x 2 slots), the model on dsp_cost's scale, L1 track buffers, the dearest of five knob rows
+(scratch `meas.py`):
+
+| type | before | after | |
+|---|---:|---:|---:|
+| TAPE | 139,793 | 126,244 | -13,549 (-9.7 %) |
+| FOLD | 103,434 | 80,452 | -22,982 (-22.2 %) |
+| RING | 73,764 | 55,716 | -18,048 (-24.5 %) |
+| HARM | 72,388 | 64,804 | -7,584 (-10.5 %) |
+
+Room: inserts.asm's span grew 0x2300 -> 0x2500 downward into XDLY's unused span (main, 2026-11-21).
+
+Proof: `test_inserts_held` A/B for each flag (off / on, 80 blocks of 16 tracks: every buffer, each block's clip alerts
+(CLIPTRK), every memory word but the held loops' dead per-sample stores C['k'], C['y0'], C['thr']; +-inf and NaN
+inputs), `test_the_multifunction_maps_give_no_live_value_a_shared_register`, test_inserts. Runner steps: see the
+commits.
+
+#17 CHOR and #20 JUNO: no SIMD exists for them (each chorus voice and each JUNO tap is a read at its own computed
+place; L and R are 32 words apart; JUNO's two taps read one mono ring). Their msched loops are within ~1.5 slots of
+the floor; what they cost beyond that is the per-voice span copies from the DDR rings. Left as they are (main).
+
+## 2026-11-21: the filters' worst-case pass, bit-exact (session filt-opt, agent B, branch `claude/filt-opt` on `claude/combined-67-nosm` f376a239)
+
+The measure: `scripts/dsp_cost.py`'s cost (one voice-block, host included, steady) at the worst setting: ANALOG 2 at
+the a2-juno-fast setting (LP24, WAV2 SIN synced, the mix tables loaded), EFM-CY at the cost survey's sweep worst, the
+MD track effects with all four on.
+
+| item | before | after | what |
+|---|---:|---:|---|
+| MD track effects (AM, EQ, HP, LP; any MD machine) | 4,937 | 2,598 | one pass per effect over the block (`dnfw.perc.fxpass`), words in registers, the SVFs scheduled with registers chosen for multiply / add pairs (db9f8fd3) |
+| ANALOG 2 DIOD LP24 (the worst model) / SVF LP24 | 16,849 / 16,625 | 16,254 / 16,030 | the side's SVF temporaries re-chosen for pairs, its knee bound held; the drive's constants from KC through I1, post-modify stores; the square's gain without the 1.0 multiply (6c4d38d4) |
+| EFM-CY | 17,694 | 17,378 | xround_i's A 2^7 held (MOD, FB a block, the envelope a sample), not a shift each call (5d807956); 20,033 before the effects' pass |
+
+**SIMD (#6)**: the a2-juno-simd form (mid and side through one ladder pass, PEx / PEy) does not apply since side12:
+the side runs a linear SVF and the mid the chosen model, so the lanes are different code. The side LP24's two SVF
+stages skewed by a sample would be the same code, but the knees branch on data (a SIMD region is straight-line) and
+each sample's region costs its switch and PEy reloads against about 12 operations. DIOD is a serial 4-stage chain.
+
+**Measured, not done**: a register-renaming search (`scratch/filt-opt/ralloc.py`, the Sched op list, pinned live-ins
+and live-outs) finds DIOD's sample 70 -> 69 instructions (its chain is serial). EFM: multifunction in xround_i is not
+possible under `mf.verify` (fixed-point multiplies; no fixed-point form is proven); what is left needs forms we do not
+use yet (TRUNC BY a scale: -8 a sample; an add with carry for the rounding: about -4 an xround_i call), each a selas
+form check and a digikit run first; EFM-CY's sine reads from DDR (4,096 of the block) need 128 KB of L2.
+
+**Proofs**: the MD effects 90/90 (6 machines x 15 settings: every output and memory word); ANALOG 2 / JUNO 151/151
+(`scratch/a2-sound` bits.py: general 91, pair 30, SIN/TRI 30); EFM-CY 10/10 outputs (every memory word but the two
+new state words). Room: PERC -36 instructions; the a2f L1 state 1,832 -> 1,860 B of 2,048 (KC + 7 words).

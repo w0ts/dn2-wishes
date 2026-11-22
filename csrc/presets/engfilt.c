@@ -42,7 +42,8 @@ typedef unsigned char u8;
 
 struct fn { u32 store, pad, mgr, inv; };    /* a std::function: its closure's storage, manager, invoker */
 
-u32 eng_mask __attribute__((section(".data"))) = 0;      /* bit t: machine type t ticked */
+u32 eng_mask __attribute__((section(".data"))) = 0;      /* bit r: the engine of row r (eng_types[r]) ticked (2026-11-18:
+                                                           a bit a row, not a type: our types are 50..55) */
 u32 eng_tests __attribute__((section(".data"))) = 0;     /* presets tested while a set was on (the checks read it) */
 u32 eng_lists __attribute__((section(".data"))) = 0;     /* ENGINE lists opened (the checks read it) */
 const int eng_n = ENG_N;
@@ -67,7 +68,12 @@ int eng_match(u32 lib, int slot)
 {
     int t = machine_of(lib, slot);
     eng_tests++;
-    return t >= 0 && t < 32 && ((eng_mask >> t) & 1);
+    if (t < 0)
+        return 0;
+    for (int r = 0; r < ENG_N; r++)
+        if (eng_types[r] == t)
+            return (eng_mask >> r) & 1;
+    return 0;
 }
 
 /* a std::function of stock's shape: a heap closure {view} or {view, row} */
@@ -137,7 +143,7 @@ void eng_toggle(u32 **fd)
     u32 *c = *fd, view = c[0];
     int row = (int)c[1];
     if (row >= 0 && row < ENG_N)
-        eng_mask ^= 1u << eng_types[row];
+        eng_mask ^= 1u << row;
     MENU_STEP(view + V_MENU, 1);
     rebuild(view);
 }
@@ -147,7 +153,7 @@ void eng_tick(u32 **fd, u32 unused, void *canvas, int x, int y)
 {
     int row = (int)(*fd)[1];
     (void)unused;
-    if (row >= 0 && row < ENG_N && ((eng_mask >> eng_types[row]) & 1))
+    if (row >= 0 && row < ENG_N && ((eng_mask >> row) & 1))
         D_TEXT(canvas, (const void *)F_LIST, x, y, 0, TICK);
 }
 

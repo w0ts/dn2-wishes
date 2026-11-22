@@ -23,7 +23,9 @@ MD_LEVEL = 1.4                            # the Machinedrum's full scale on a DN
 SAVE = 0x2DDE00                          # the save area PING's tail restores from
 I3_BIAS = 96                                 # 2026-11-10 (shrink): words; see voice()
 SAVE_REGS = [f"R{k}" for k in range(16)] + ["I0", "I1", "I2", "I3", "I4", "I5", "I12",
-                                            "M0", "M1", "M2", "M3", "M4"]
+                                            "M0", "M1", "M2", "M3", "M4",
+                                            "I6"]      # 2026-11-21: the constant pool's (dnfw.perc.cpool), restored
+                                                       # by PERC itself before it leaves (PING restores the others)
 NOTE_CELLS = 0x254B14
 TRIG_WORD = 0x25C4AC
 BUFFERS = 0x254A60
@@ -70,14 +72,34 @@ MNM_LEVELS: dict[str, float] = {"DRONE": 0.7,   # 2026-11-09: DRONE peaks 1.5..1
 # 2026-11-12 (the User, on r11f: SOPHIE "very loud"; "bring it back how it was, apply the correction only to the melodic
 # synths"): the drums and percussion (SOPHIE, PLAITS BD SD HH) at their levels before; the Machinedrum as is
 LEVEL_DB: dict[str, float] = {"ANALOG2": -3.2, "TB303": +4.0,   # TB303, DENS: held under the runner's 4.0 at all knobs 127
-                              "DPRO-WAVE": +4.1, "DPRO-DDRW": +2.9, "DPRO-DENS": +4.7,
+                              # DPRO-DDRW: +2.9, then +6.0 (2026-11-21, the User's "a" on 4): its MIX gain 4 -> 1.5
+                              # (mnm.ddrw MIX_GAIN: no more clip in the machine) left it 6.0 dB quieter in RMS at its
+                              # defaults (notes 36, 60); brought back after the machine, where nothing clips; its
+                              # loudest setting found then +8.4 dB, under HEADROOM_DB's +9 target
+                              "DPRO-WAVE": +4.1, "DPRO-DDRW": +2.9 + 6.0, "DPRO-DENS": +4.7,
                               # 2026-11-14 (the User: "Juno level: good"): measured on the unit (r5, the same track,
                               # both machines at their defaults) JUNO is +4.1 dB over stock WaveTone on single notes,
                               # +3.9 dB on 4-note chords, and its chords clip alone (peak 1.000); the runner had it at
                               # +1.1 (docs/levels.md). -4.0 dB brings it level with WaveTone on the unit
-                              "JUNO": -4.0}
+                              "JUNO": -4.0,
+                              # 2026-11-20: DRUM's KICK at its start, the model's voice (MD_LEVEL), first 300 ms: RMS
+                              # -8.7 dB against TRX-BD's -12.7 and EFM-BD's -11.2; -3.0 between them (its worst corner's
+                              # engine peak 0.96, so the voice stays under MD's 1.4)
+                              "DRUM": -3.0}
 PLAITS_LEVEL_DB: dict[str, float] = {"WS": -2.8, "": -2.8,      # "" the retired choice, which plays WS
                                      "SWRM": +2.5, "MDAL": +2.2, "STRG": +8.4}   # STRG: its start in the runner's MODL walk under 4.0
+
+
+# 2026-11-21 (the User: "just make it quieter! not a limiter... a synth in its normal settings must not clip. and if it
+# happens the !clip should display"; "Yes, all of them"): on top of the band, each engine whose loudest setting went
+# past the target comes down by HEADROOM_DB. The target: the engine's worst knob setting found (43 settings, notes 36
+# and 60, the Python model), one note, track LEVEL and AMP VOL at 127: Overbridge's main stays 1 dB under its full scale,
+# a machine peak of +9 dB at most (the SHARC runner: a machine's output reaches the main bus 18.5 dB lower at LEVEL 100,
+# VOL 100; scratch/clip-inner/levels.md). Its band is no longer held (test_engine_levels)
+HEADROOM_DB: dict[str, float] = {"TB303": -4.5,      # DEC 127 at note 36: +13.1 dB
+                                 "ANALOG2": -4.0,    # its knee gone: +12.6 dB at all 127
+                                 "JUNO": -3.0,       # +11.7 dB (a random setting)
+                                 "DRONE": -2.0}      # its knee gone: +3.7 dB; no hotter than with the knee
 
 
 def _db(x: float) -> float:
@@ -85,6 +107,8 @@ def _db(x: float) -> float:
 
 
 for _n, _d in LEVEL_DB.items():
+    MNM_LEVELS[_n] = MNM_LEVELS.get(_n, MD_LEVEL) * _db(_d)
+for _n, _d in HEADROOM_DB.items():
     MNM_LEVELS[_n] = MNM_LEVELS.get(_n, MD_LEVEL) * _db(_d)
 # v0.26: the DSP's room for the Monomachine voices. They never go quiet (as on the
 # Monomachine, a voice plays until the next note), and one costs as much as two to ten of
@@ -100,11 +124,18 @@ MNM_COST = {"SOPHIE": 34_000,   # SOPHIE: 29,979 measured (test_perc_live, the t
                                 # stay under MNM_BUDGET, so a cost per engine would change nothing)
             "TB303": 70_000,    # TB303: 63,577 measured (WAVE square; saw 52,140), the voice in a DN2 block
             "DRONE": 36_000,    # DRONE: 17,251 + the voice ~14,700 with BEAT (two ears); ~24k without
+            "DRUM": 28_600,     # DRUM (2026-11-20, stage 4): RIDE / CRASH (dsp_cost DRUM-RIDE, DRUM-CRSH) trig 13,753 + ~14,700
+                                # (stage 3's 28,200: KICK worst trig 13,456; SNARE 12,271, the hats 12,748 CLOSED / 12,803
+                                # OPEN, TOM 9,809, CLAP 10,157 at their dearest)
             "JUNO": 27_000,     # JUNO (2026-11-12): worst steps 11,501 (BOTH+SUB+NOIS, BOOST, its note block) + ~14,700; runner cost step: 3,991 a voice-block (defaults)
             "ANALOG2": 32_000,  # ANALOG2: 16,168 (6 copies, sync, DIOD LP24, note 127) + ~14,700; 2026-11-11 WDTH on: 21,034 (MS20 LP24, DRV) steps    # DRONE: 17,251 + the voice ~14,700 with BEAT (two ears); ~24k without
             # the Monomachine's five (28eb110's parent; back 2026-11-11)
             "SID 6581": 60_000, "DPRO-WAVE": 34_000, "DPRO-DDRW": 78_000, "DPRO-DENS": 70_000,
-            "VO-6": 75_000}
+            "VO-6": 75_000,
+            # v0.59 (upstream): FM+ (the model's steps a DN2 block: STAT ~8,100, PAR ~12,100, DYN ~8,200). Measured
+            # here 2026-11-18 as test_perc_live's cost test (defaults, all up, all down, 3 random, 6 blocks): worst
+            # STAT 11,911, PAR 15,741, DYN 12,007 steps; + the voice's ~14,700 still under each figure
+            "FM+STAT": 30_000, "FM+PAR": 40_000, "FM+DYN": 30_000}
 # v0.36: no longer the limit (the owner and misterairplane: two voices at most on a Monomachine
 # track). 150,000 fitted 2 SID / VO-6 / DENS and 1 DDRW whatever the DSP's real time; it came
 # before the frame guard (v0.27), which measures the frame and leaves out (v0.36: steals) the
@@ -150,6 +181,18 @@ assert CUM_OFF + 4 * 16 <= MNM_KEYS_OFF
 # latched at its trig (vel_latch), applied at the output guard; 0 (full level) until a velocity arrives. After
 # ANALOG 2's mix tables (dnfw.engines.analog2.analog2.TABLES_OFF, 106 words)
 VEL_OFF = 0x3400
+# 2026-11-20 (DRUM's hats, the User: "CLOSED chokes OPEN on its track"): each track's choke word, one added by every
+# CLOSED hit on the track (dnfw.engines.drum.hats); an OPEN voice of the track keeps the word's value at its hit and
+# falls in 3 ms when it moves. 16 words in the free +0x33A8..+0x3400, after ANALOG 2's mix tables, before VEL_OFF
+CHOKE_OFF = 0x33C0
+assert CHOKE_OFF + 4 * 16 <= VEL_OFF
+# 2026-11-20 (the User: a CLOSED and an OPEN hit on one track in one block -> the OPEN is ALWAYS choked, whatever the
+# slots' render order): PERC's block clock, one added at PERC's entry every block (DRUM built; mnm_ages' first act),
+# zero at load. A CLOSED hit writes it into its track's choke word (CHOKE_OFF: the block of the track's last CLOSED
+# hit); an OPEN hit keeps the word and the clock (dnfw.engines.drum.hats). In the free word under CHOKE_OFF (ANALOG 2's
+# tables end at +0x33A8)
+CLOCK_OFF = 0x33BC
+assert CLOCK_OFF + 4 <= CHOKE_OFF
 # 2026-11-10 (poly16, the User: 16 PLAITS voices on every engine): 30,000, not MNM_COST's 60,000: a
 # note's start costs about a steady block now (the heaviest engine's ~25,000 on the memory clock),
 # and sixteen notes started together must fit the frame at it (16 x 60,000 cannot: only six
@@ -161,10 +204,27 @@ STEAL_STRIKES = 2
 # machines), and the Monomachine machines
 from ..sampler import machines as _smx_types   # noqa: E402
 OURS_TYPES = (*MNM_TYPES, MACHINE_TYPE, *_smx_types.TYPES)
-assert all(0 <= t < 32 for t in OURS_TYPES)
-OURS_MASK = sum(1 << t for t in set(OURS_TYPES))
-MNM_MASK = sum(1 << t for t in MNM_TYPES)
-VOICE_MASK = MNM_MASK | 1 << MACHINE_TYPE      # PERC's loop: the slots its voice plays
+# 2026-11-18 (the User: ours on 50..55): a type under 32 by its bit in the masks, ours above by one range,
+# OURS_RANGE, every type of which is a Monomachine-style machine (ours, MNM, PERC's voice)
+OURS_HIGH = sorted(t for t in set(OURS_TYPES) if t >= 32)
+OURS_RANGE = (OURS_HIGH[0], OURS_HIGH[-1]) if OURS_HIGH else (32, 31)
+assert OURS_HIGH == list(range(OURS_RANGE[0], OURS_RANGE[1] + 1)) and set(OURS_HIGH) <= set(MNM_TYPES), \
+    "the types of ours from 32 up: one run, all Monomachine-style"
+assert all(t >= 0 for t in OURS_TYPES)
+OURS_MASK = sum(1 << t for t in set(OURS_TYPES) if t < 32)
+MNM_MASK = sum(1 << t for t in MNM_TYPES if t < 32)
+VOICE_MASK = MNM_MASK | 1 << MACHINE_TYPE      # PERC's loop: the slots its voice plays (under 32; OURS_RANGE too)
+
+
+def in_ours_range(p: Prog, t: int, then) -> None:
+    """THEN() when Rt (a type of 32 or more) is in OURS_RANGE. Clobbers R12, R13"""
+    lo, hi = OURS_RANGE
+    if lo > hi:
+        return
+    p.iconst(12, lo)
+    p.iop(13, t, "-", 12)
+    p.iconst(12, hi - lo)
+    p.if_(13, "LE", 12, lambda: p.ifz(13, "GE", then), kind="i")
 MNM_QUIET_LEVEL = 2.0 ** -16                # -96 dB: an AMP envelope's tail and a filter's are under it
 MNM_QUIET_BLOCKS = 64                      # 43 ms
 MNM_SCRATCH = 0x200A4000                   # dsp.MNM_SCRATCH_L2 (v0.32: L2; test_waverider_dsp holds them equal)
@@ -300,7 +360,8 @@ def _rest_clear(p: Prog, L: M.Layout) -> None:
 def para_prepass(p: Prog, L: M.Layout) -> None:
     """2026-11-15: ANALOG 2's PARA (dnfw.engines.analog2.para): the held slots, the chords and each slot's role, after
     mnm_ages (its ORDER). Clobbers R0-R15, I0-I2."""
-    PARA.prepass(p, TRIG_WORD, PARA.types(), L.md.mnm.scratch + ORDER_OFF, L.md.mnm.scratch + MNM_KEYS_OFF)
+    PARA.prepass(p, TRIG_WORD, PARA.types(), L.md.mnm.scratch + ORDER_OFF, L.md.mnm.scratch + MNM_KEYS_OFF,
+                 rests=(L.md.mnm.scratch + RESTS_OFF, MNM_QUIET_BLOCKS))   # 2026-11-18: a resting leader's shadows go
 
 
 def mnm_ages(p: Prog, L: M.Layout) -> None:
@@ -309,6 +370,11 @@ def mnm_ages(p: Prog, L: M.Layout) -> None:
     from ..mnm import machines as MNM
     keys = L.md.mnm.scratch + MNM_KEYS_OFF
     costs = L.md.mnm.scratch + MNM_COSTS_OFF
+    if "DRUM" in _mnm_types.NAMES:             # 2026-11-20: the block clock (CLOCK_OFF), for DRUM's choke; here, so
+        p.ld(0, L.md.mnm.scratch + CLOCK_OFF)  # every model of PERC's entry (the runner's, dsp_cost's) counts it too
+        p.iconst(12, 1)
+        p.iop(0, 12, "+", 0)
+        p.st(L.md.mnm.scratch + CLOCK_OFF, 0)
     p.ld(3, TRIG_WORD)
     p.lsh(3, 3, -16)                           # the slots' note triggers (bit 0: this slot's, shifted on)
     # 2026-11-10 (poly16): one pass of a loop a slot (until then the 16 slots unrolled: about 1,900
@@ -342,14 +408,20 @@ def mnm_ages(p: Prog, L: M.Layout) -> None:
             p.iconst(12, MNM_MASK)
             p.iop(12, 13, "AND", 12)
 
-            def mnm_cost():
-                p.iconst(12, 1)
-                p.seti(2, 12)                  # I2: a Monomachine slot this block (for the budget sums)
-                for typ, k in MNM_TYPES.items():
-                    p.iconst(12, typ)
-                    p.if_(2, "EQ", 12, lambda c=MNM_COST[MNM.NAMES[k]]: p.iconst(4, c), kind="i")
-            p.ifz(12, "NE", mnm_cost)
-        p.if_(2, "LT", 12, small, kind="i")
+        def big():                             # 2026-11-18: 32 and up: ours (OURS_RANGE, each a Monomachine-style
+            in_ours_range(p, 2, lambda: p.iconst(14, 1))   # machine) or not; R12 the same flag as R14
+            p.ipass(12, 14)
+
+        def mnm_cost():
+            p.iconst(12, 1)
+            p.seti(2, 12)                      # I2: a Monomachine slot this block (for the budget sums)
+            for typ, k in MNM_TYPES.items():
+                p.iconst(12, typ)
+                p.if_(2, "EQ", 12, lambda c=MNM_COST[MNM.NAMES[k]]: p.iconst(4, c), kind="i")
+        # 2026-11-18: 32 and up as the then-branch, so a type under 32 takes the same instructions as before
+        # (COMP, the jump, the masks); both leave R14 (ours) and R12 (a Monomachine machine) for the cost
+        p.if_(2, "GE", 12, big, small, kind="i")
+        p.ifz(12, "NE", mnm_cost)
         if MONO_THRESHOLDS:                    # 2026-11-11: MONOMACHINE's cost is its engine's
 
             def mono_cost():
@@ -737,17 +809,12 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
         p.if_(7, "EQ", 12, silence, plays, kind="i")
 
     def plays():
-        p.ld(2, C["trig"])
-        p.ld(5, C["type"])
-        MDV.block(p, L.md, [C[f"p{k}"] for k in range(8)], 2, 5, level_word=C["lev"],
-                  after_advance=mono_level if MONO_THRESHOLDS else None,
-                  no_output=lambda p: PARA.is_member(p, 0, C["t"]))   # 2026-11-15 (design B): a member's not resampled
-        PARA.role(p, 6, C["t"])
-        p.lsh(7, 6, -PARA.ROLE_SHIFT)
-        p.iconst(12, PARA.MEMBER)
-        p.if_(7, "EQ", 12, silence, kind="i")
-        p.iconst(12, PARA.LEADER)
-        p.if_(7, "EQ", 12, lambda: PARA.push_position(p, L.md.state, 6), kind="i")
+        # 2026-11-16 (PARA as one voice, dnfw.engines.analog2.para): a chord's LEADER renders its shadows (its joined
+        # notes, each from its own block, as members: not resampled) and then itself, through this one call
+        PARA.renders(p, L, I3_BIAS, lambda p: MDV.block(
+            p, L.md, [C[f"p{k}"] for k in range(8)], 2, 5, level_word=C["lev"],
+            after_advance=mono_level if MONO_THRESHOLDS else None,
+            no_output=lambda p: PARA.is_member(p, 0, C["t"])))
     from . import pairs as PAIRS
     PAIRS.unskip(p, L.md, C["mskip"])         # 2026-11-12: a voice rendered ahead this block plays it
     p.ld(0, C["mskip"])
@@ -936,7 +1003,7 @@ def out_guard(p: Prog, L: M.Layout) -> None:
         # its machine words hold integers, -1 among them, whose bits are the core's NaN)
         MDK.delay_base(p, L.md, 1)
         p.seti(5, 1, "the P-I delay lines")
-        scan(MDK.PI_DELAY_WORDS, G.WHERE_DELAY)
+        scan(L.md.delay_words, G.WHERE_DELAY)
         # then the wipe: the block silent and the voice's state zeroed, so the next block
         # starts it fresh (reset: its words and delay lines cleared). v0.33 stored R0 here,
         # which loop() uses as its counter: the state got 32, 31 .. 1 instead of zeros, its
@@ -951,6 +1018,59 @@ def out_guard(p: Prog, L: M.Layout) -> None:
         p.loop(C["tmp"], 32, lambda: p.stpost(2, 1))
     p.ld(0, C["fxy"])
     p.ifz(0, "NE", blown)
+    clip_note(p, C)
+
+
+def clip_note(p: Prog, C) -> None:
+    """2026-11-20 (clip-inner; the User: "NO DIGITAL CLIPPING ... if it does, i want the alert"): a stage of this
+    voice clipped or limited this block (guard.CLIP_HIT, set by the stage itself): slot t's bit in guard.CLIPMASK,
+    which the next clip packet carries to the ColdFire (the CLIP label and the track's "!"); CLIP_HIT cleared for the
+    next voice. Three instructions a voice when nothing clipped. Uses R0, R1, R12."""
+    from . import guard as G
+    p.ld(0, G.CLIP_HIT)
+
+    def hit():
+        p.iconst(1, 1)
+        p.ld(12, C["t"])
+        _shift_by(p, 1, 12)                   # 1 << t
+        p.ld(12, G.CLIPMASK)
+        p.iop(1, 1, "OR", 12)
+        p.st(G.CLIPMASK, 1)
+        p.iconst(1, 0)
+        p.st(G.CLIP_HIT, 1)
+    p.ifz(0, "NE", hit)
+
+
+def clip_note_track(p: Prog, tr_word: int | None = None, bit: int | None = None) -> None:
+    """2026-11-20 (clip-inner): a per-track or per-send stage clipped (guard.CLIP_HIT): bit (the word at TR_WORD, a
+    track 0..15) or bit BIT in guard.CLIPTRK, CLIP_HIT cleared. Uses R0, R1, R12."""
+    from . import guard as G
+    p.ld(0, G.CLIP_HIT)
+
+    def hit():
+        if bit is not None:
+            p.iconst(1, 1 << bit)
+        else:
+            p.iconst(1, 1)
+            p.ld(12, tr_word)                 # (a track 0..15: the callers' stages run only for one)
+            _shift_by(p, 1, 12)               # 1 << track
+        p.ld(12, G.CLIPTRK)
+        p.iop(1, 1, "OR", 12)
+        p.st(G.CLIPTRK, 1)
+        p.iconst(1, 0)
+        p.st(G.CLIP_HIT, 1)
+    p.ifz(0, "NE", hit)
+
+
+def clip_flag(p: Prog, a: int, cond: str, b: int, r: int, kind: str = "f") -> None:
+    """2026-11-20 (clip-inner): a stage's clip: if (Fa COND Fb) guard.CLIP_HIT = Rr (Rr: a register the caller knows
+    holds a nonzero word: any float but +-0, any integer but 0). Two instructions and the branch."""
+    from . import guard as G
+    p.if_(a, cond, b, lambda: p.st(G.CLIP_HIT, r), kind=kind)
+
+
+FX_PASSES = True                               # (perf, 2026-11-21) the effects one pass each (dnfw.perc.fxpass); False = the
+                                               # per-sample chain below
 
 
 def fx(p: Prog, L: M.Layout) -> None:
@@ -1079,6 +1199,10 @@ def fx(p: Prog, L: M.Layout) -> None:
     p.iop(0, 0, "OR", 1)
     p.ld(1, C["fxlp"])
     p.iop(0, 0, "OR", 1)
+    if FX_PASSES:
+        from . import fxpass
+        p.ifz(0, "NE", lambda: fxpass.run(p, L))
+        return
 
     def run():
         p.ld(0, C["buf"])
@@ -1152,7 +1276,12 @@ def _shift_by(p: Prog, d: int, s: int) -> None:
 # STEP_SPAN)
 # v0.52 merge: trx_coefs back in PERC's own span (v0.51's float TRX filters' pieces made it larger than span 2a
 # holds beside the host bodies; it runs on a knob change only, and the main span has the room)
-SUB_SPAN = {"md_idiv": "perc2a", "vo6_bqx": "perc2b"}
+SUB_SPAN = {"md_idiv": "perc2a", "vo6_bqx": "perc2b", "efm_hostd": "perc2a", "md_pitch0": "perc2a",
+            "md_pitch1": "perc2a", "trx_hathost": "perc2a",
+            # 2026-11-20 (stage 4): DRUM's subroutines beside the host bodies (PERC's span is full; the same L2 and
+            # I-cache: the same cost)
+            **{n: "perc2a" for n in ("dr_metal", "dr_drft", "dr_softF", "dr_exp", "dr_hinc", "dr_ctrain", "dr_log2",
+                                     "dr_exp2", "dr_colr", "dr_vm", "dr_tune", "dr_coef1", "dr_coef60", "dr_law")}}
 
 
 def program(L: M.Layout, rings_sw: int, prefix: str = "pk") -> str:
@@ -1160,12 +1289,23 @@ def program(L: M.Layout, rings_sw: int, prefix: str = "pk") -> str:
     return program_spans(L, rings_sw, prefix)["perc"]
 
 
-def program_spans(L: M.Layout, rings_sw: int, prefix: str = "pk") -> dict[str, str]:
+def program_spans(L: M.Layout, rings_sw: int, prefix: str = "pk", pool: list | None = None) -> dict[str, str]:
     """2026-11-12 (perc-layout): every span's text: "perc" (perc.asm) and the other L2 spans (perc2a.asm,
-    perc2b.asm), which hold code only events run; one program, its jumps between spans 48-bit absolute."""
+    perc2b.asm), which hold code only events run; one program, its jumps between spans 48-bit absolute.
+    POOL: a list that receives the constant pool's words (dnfw.perc.cpool)."""
+    from . import cpool as CP
+    from . import flow as FLOW
     p = _emit(L, rings_sw, prefix)
-    out = {"perc": p.text()}
-    for name, text in sorted(p.span_texts().items()):
+    # 2026-11-20 (DRUM's room): the R12 loads nothing reads, folded over all three spans at once (dnfw.perc.flow)
+    texts = {"perc": p.text(), **p.span_texts()}
+    folded, _n = FLOW.fold({name: text.splitlines() for name, text in texts.items()})
+    # 2026-11-21 (DSP room): then the constant pool, over all three spans at once (dnfw.perc.cpool)
+    folded, words, _moved = CP.apply(folded)
+    if pool is not None:
+        pool[:] = words
+    texts = {name: "\n".join(lines) + "\n" for name, lines in folded.items()}
+    out = {"perc": texts.pop("perc")}
+    for name, text in sorted(texts.items()):
         out[name] = (f"// {name}.asm -- PERC's code that only events run (a knob change, a note), in its own L2\n"
                      "// span (dnfw.waverider.dsp). GENERATED by scripts/gen_perc_asm.py with perc.asm; do not\n"
                      "// edit by hand.\n\n.SECTION/PM seg_pmco;\n\n" + text)
@@ -1186,6 +1326,8 @@ def _emit(L: M.Layout, rings_sw: int, prefix: str) -> Prog:
     p.raw("wr_perc.:")
     for k, r in enumerate(SAVE_REGS):
         p.e(f"DM({SAVE + 4 * k:#x}) = {r};")
+    from . import cpool as CP
+    p.e(f"I6 = {CP.POOL_I6:#x};", "the constant pool's (dnfw.perc.cpool) until PERC leaves")
     from ..md import core as MDK
     MDK.table_fill(p, L.md)                    # the Machinedrum's sine and tables, 1024 words a block until whole (v0.24: zpack)
     if {"DPRO-DDRW", "DPRO-DENS"} & set(_mnm_types.NAMES):
@@ -1215,8 +1357,10 @@ def _emit(L: M.Layout, rings_sw: int, prefix: str) -> Prog:
     raw_type(p, 2)
     p.iconst(0, 0)
     p.iconst(12, 32)
-    p.if_(2, "LT", 12, lambda: (p.iconst(13, 1), MDK._shift_r(p, 13, 13, 2), p.iconst(12, VOICE_MASK),
-                                p.iop(0, 13, "AND", 12)), kind="i")
+    # (2026-11-18: 32 and up, ours by OURS_RANGE, as the then-branch, so a type under 32 runs as before)
+    p.if_(2, "GE", 12, lambda: in_ours_range(p, 2, lambda: p.iconst(0, 1)),
+          lambda: (p.iconst(13, 1), MDK._shift_r(p, 13, 13, 2), p.iconst(12, VOICE_MASK),
+                   p.iop(0, 13, "AND", 12)), kind="i")
     p.ipass(0, 0)
     other = p.label("other")
     p.jump("EQ", other)
@@ -1251,6 +1395,7 @@ def _emit(L: M.Layout, rings_sw: int, prefix: str) -> Prog:
     p.e("COMP(R0, R12);")
     p.jump("LT", top)
     PAIRS.tick(p, L.md)                        # 2026-11-12: SIMD voice pairs' block stamp (DN2_PAIRS)
+    p.e(f"I6 = DM({SAVE + 4 * SAVE_REGS.index('I6'):#x});", "the caller's I6 again (the constant pool's until here)")
     p.e(f"JUMP {rings_sw:#x};", "smp.asm's wr_smp, then PING (which restores)")
     p.emit_subs(SUB_SPAN)
     p.raw(".wr_perc..end:")

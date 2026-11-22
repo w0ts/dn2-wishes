@@ -7,6 +7,7 @@
  * header sector and a sampled set across every range: each must read as erased (all 0x00 or
  * all 0xFF, the card's ERASED_MEM_CONT).
  *
+ *   the bank lists (pools.c, v0.65)    0x5E0000 .. 0x5EE7FF, 0x5F0000 .. 0x5FE7FF (v0.65.1: ours)
  *   the pool image (link.c)            0x600000 .. 0x6C8000   (header 0x600000)
  *   the per-project lists (pools.c)    0x6D0000 .. 0x6E02FF   (superblocks 0x6D0000/1)
  *   the inserts' records (store.c)     0x6E0400 .. 0x6E0501   (2026-11-11: missed until then, so
@@ -17,7 +18,7 @@
  *   the settings sector (jump.c)       0x6FF000
  *   the library (lib.c)                0x700000 .. the device's last sector
  *
- * Nothing below 0x600000 is ever named: the stock store (below 0x458000) and the factory
+ * Nothing below 0x5E0000 is ever named (0x600000 until v0.65.1): the stock store (below 0x458000) and the factory
  * buffer (0x458000 .. 0x5D7FFF) are below every region, which the static asserts tie to the
  * other files' constants, and every call passes er_guard (the assertion): a range outside
  * the four regions, or past the device, is refused before the driver is called and the
@@ -76,24 +77,30 @@ typedef unsigned char u8;
 /* the regions, as the files that own them define them */
 #define STOCK_STORE_END 0x458000u                                   /* the stock store ends below */
 #define FACTORY_END 0x5D8000u                                       /* the factory buffer 0x458000..0x5D7FFF */
-#define ER_FLOOR 0x600000u                                          /* nothing below is ever named */
+#define ER_FLOOR 0x5D8000u                                          /* nothing below is ever named (v0.69.2: the wishes record; 0x5E0000, 0x600000 before) */
 #define POOL_SECTOR 0x600000u                                       /* link.c STORE_SECTOR */
 #define POOL_STORE_END (0x600000u + 1u + POOL_BYTES / 512u)         /* link.c: its image ends below */
 #define PL_SB 0x6D0000u                                             /* pools.c */
 #define PL_END (0x6D0100u + 2u * 129u * 256u)
 #define SET_SECTOR 0x6FF000u                                        /* jump.c */
+#define BL_A 0x6E0600u                                              /* v0.65, pools.c: the bank lists (v0.69.2: upstream's place again), */
+#define BL_A_END (BL_A + 2u * 64u * 464u)                           /* projects 0..63 */
+#define BL_B 0x6F0800u                                              /* .. and 64..127 */
+#define BL_B_END (BL_B + 2u * 64u * 464u)
 #define LIB_SECTOR 0x700000u                                        /* lib.c */
 #define LIB_HI_AT 0x6FF800u                                         /* v0.43, lib.c: folders 64..127 */
 #define LIB_HI_END (LIB_HI_AT + 1u + 4u)
 #define LIB_X_AT 0x6F0000u                                          /* v0.45, lib.c: entries 2,048..16,383 */
 #define LIB_X_END (LIB_X_AT + 1u + 1792u)
 #define LIB_DATA (LIB_SECTOR + 1u + 256u + 4u)                      /* lib.c: superblock, index, folders */
-#define INS_AT 0x6E0400u                                            /* 2026-11-11, inserts/store.c INS_BASE */
+#define INS_AT 0x5FF000u                                            /* 2026-11-11, inserts/store.c INS_BASE (2026-11-22: here) */
 #define INS_END (INS_AT + 2u * 129u)                                /* store.c INS_END: 129 records x 2 copies */
-#define DN7C_AT 0x6E8000u                                           /* 2026-11-11, waverider/lzma7cache.c C_HDR */
+#define SB_AT 0x5FFB00u                                             /* 2026-11-21, SAFE MODE's boot record (v0.69.2: dmove.h DM_SAFE_NEW) */
+#define SB_END (SB_AT + 1u)
+#define DN7C_AT 0x5FF200u                                           /* 2026-11-11, the DSP program's copy (v0.69.2: dmove.h DM_DSP_NEW) */
 #define DN7C_END (DN7C_AT + 1u + 2048u)                             /* lzma7cache.c C_END: header + 1 MiB */
-#define WISH_AT 0x6F0800u                                           /* csrc/wishes/store.c CELL0 */
-#define WISH_END (WISH_AT + 59392u)
+#define WISH_AT 0x5D8000u                                           /* csrc/wishes/store.c CELL0 (v0.69.2: here, 92,160 cells) */
+#define WISH_END (WISH_AT + 92160u)
 #define ER_CHUNK 2048u                                              /* stock FORMAT's call */
 #define ER_TRIES 5u                     /* v0.40: a call (TRIM or a verify read) tried at most 5 times */
 #define ER_PAUSE_FR 300u                /* 200 ms between tries (or ER_PAUSE_PASSES passes ... */
@@ -110,9 +117,11 @@ _Static_assert(SET_SECTOR >= PL_END && SET_SECTOR < LIB_SECTOR, "the settings se
 _Static_assert(LIB_HI_AT > SET_SECTOR && LIB_HI_END <= LIB_SECTOR, "v0.43: folders 64..127 between the settings and the library");
 _Static_assert(LIB_X_AT >= PL_END && LIB_X_END <= SET_SECTOR, "v0.45: the library's extension between the lists and the settings");
 _Static_assert(LIB_SECTOR > SET_SECTOR && LIB_DATA == 0x700105u, "the library's headers: 0x700000..0x700104");
-_Static_assert(INS_AT >= PL_END && INS_END == 0x6E0502u && INS_END <= LIB_X_AT, "the inserts' records between the lists and the library's extension");
-_Static_assert(DN7C_AT >= INS_END && DN7C_END == 0x6E8801u && DN7C_END <= LIB_X_AT, "the DSP program's copy between the inserts and the library's extension");
-_Static_assert(WISH_AT >= LIB_X_END && WISH_END <= SET_SECTOR, "the wishes record's cells between the library's extension and the settings");
+_Static_assert(WISH_AT >= FACTORY_END && WISH_AT >= ER_FLOOR && WISH_END == 0x5EE800u, "v0.69.2: the wishes record's cells past the factory buffer");
+_Static_assert(INS_AT >= WISH_END && INS_END == 0x5FF102u && DN7C_AT > INS_END && DN7C_END <= SB_AT && SB_END < POOL_SECTOR,
+               "v0.69.2: the inserts' records (their mark at INS_END), the DSP program's copy, SAFE MODE's record: below the pool image (the move record 0x5FFC00 is never erased)");
+_Static_assert(BL_A >= 0x6E0500u && BL_A_END <= LIB_X_AT && BL_B >= LIB_X_END && BL_B_END <= SET_SECTOR,
+               "v0.69.2: the bank lists at upstream's places, around the library's extension");
 
 int smp_er_lock D_ = 0;                 /* set at the first erase call; every writer of ours refuses */
 int smp_er_req D_ = 0;                  /* link command 28: start at the next UI pass */
@@ -140,7 +149,7 @@ static u32 er_pos D_ = 0;               /* the next sector of the job */
 static u8 er_buf[512] __attribute__((section(".data"), aligned(16)));
 
 /* job -> [start, end) */
-#define ER_JOBS 11
+#define ER_JOBS 14
 static void er_job(int j, u32 *a, u32 *b)
 {
     u32 end = BLK_SECTORS;
@@ -155,7 +164,10 @@ static void er_job(int j, u32 *a, u32 *b)
     case 7: *a = DN7C_AT; *b = DN7C_END; return;                    /* 2026-11-11: the DSP program's copy */
     case 8: *a = WISH_AT; *b = WISH_END; return;                    /* the wishes record's cells (no header: a cell
                                                                      * erased reads as empty, alone) */
-    case 9: *a = POOL_SECTOR + 1u; *b = POOL_STORE_END; return;     /* the pool's frames */
+    case 9: *a = BL_A; *b = BL_A_END; return;                       /* v0.65: the bank lists (v0.65.1: their place) */
+    case 10: *a = BL_B; *b = BL_B_END; return;
+    case 11: *a = POOL_SECTOR + 1u; *b = POOL_STORE_END; return;    /* the pool's frames */
+    case 12: *a = SB_AT; *b = SB_END; return;                       /* 2026-11-21: SAFE MODE's boot record */
     default: *a = LIB_DATA; *b = end > LIB_DATA ? end : LIB_DATA; return;    /* the library's frames */
     }
 }
@@ -181,7 +193,11 @@ static int er_inside(u32 s, u32 n)
         return 1;
     if (s >= DN7C_AT && s + n <= DN7C_END)      /* 2026-11-11: the DSP program's copy */
         return 1;
+    if (s >= SB_AT && s + n <= SB_END)          /* 2026-11-21: SAFE MODE's boot record */
+        return 1;
     if (s >= WISH_AT && s + n <= WISH_END)      /* 2026-11-11: the wishes record */
+        return 1;
+    if ((s >= BL_A && s + n <= BL_A_END) || (s >= BL_B && s + n <= BL_B_END))   /* v0.65 */
         return 1;
     if (s >= LIB_SECTOR)                        /* to the device's end (checked above) */
         return 1;
@@ -296,8 +312,10 @@ static u32 er_check_sector(u32 k)
         return LIB_HI_AT + (k - (h - 1u - (LIB_HI_END - LIB_HI_AT)));
     k -= h;
     u32 j = k / ER_SPREAD, i = k % ER_SPREAD, a, b;
-    er_job(j == 0 ? 9 : j == 1 ? 1 : j == 2 ? 10 : j == 3 ? 6 : j == 4 ? 7 : 8, &a, &b);   /* the pool's frames, the lists, the library,
-                                                                                           * the inserts, the DSP program's copy, the wishes */
+    static const u8 spread_job[9] = {11, 1, 13, 6, 7, 8, 9, 10, 12};   /* the pool's frames, the lists, the library,
+                                                                  * the inserts, the DSP program's copy, the wishes,
+                                                                  * v0.65 the bank lists */
+    er_job(spread_job[j < 9u ? j : 8u], &a, &b);   /* (2026-11-21: + SAFE MODE's one sector) */
     if (b <= a)
         return a;
     u32 span = b - a - 1u;
@@ -356,7 +374,7 @@ int smp_er_start(void)
         er_job(j, &a, &b);
         smp_er_total += b - a;
     }
-    smp_er_nchecks = er_nhead() + 6u * ER_SPREAD;
+    smp_er_nchecks = er_nhead() + 9u * ER_SPREAD;     /* (v0.65: and the two bank-list ranges) */
     u32 end;
     smp_er_job = 0;
     er_job(0, &er_pos, &end);

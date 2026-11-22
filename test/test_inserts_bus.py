@@ -206,8 +206,9 @@ class _CountMem(Mem):
 
 
 def test_the_guard_bound_covers_a_clearing_fdn8():
-    # 2026-11-12: a fresh FDN8 instance's first blocks clear its ring (4,096 DDR writes a block); its guard
-    # bound (design.COST) must cover that block on the shared scale with 20 % to spare
+    # 2026-11-12: a fresh FDN8 instance's first blocks clear its ring (4,096 DDR writes a block; 1,264 since 2026-11-21,
+    # its window only); its guard bound (design.COST) must cover that block on the shared scale with 20 % to spare
+    from dnfw.fdn8 import ref as FR
     import dnfw.perc.dsl as DSL
     progs = []
     init = DSL.Prog.__init__
@@ -228,7 +229,7 @@ def test_the_guard_bound_covers_a_clearing_fdn8():
     finally:
         DSL.Prog.__init__ = init
     clearing = costs[1] - costs[0]
-    assert m.n[2] >= 4096                                    # it is a clearing block
+    assert m.n[2] >= FR.WIN[3]                               # a clearing block (HALF's window, fdn8.ref.WINDOW_CLEAR)
     assert abs(clearing - D.FDN8_MEASURED["clearing"]) <= 0.02 * clearing
     assert D.FDN8_COST_CLEAR >= 1.2 * clearing
 
@@ -236,6 +237,7 @@ def test_the_guard_bound_covers_a_clearing_fdn8():
 def test_the_guard_bound_covers_a_steady_fdn8():
     # 2026-11-14 (the staged tank): the dearer instance's steady block (1, its diffusers in DDR), as the clearing test
     # measures, is FDN8_MEASURED's; the bound is 1.2 x the dearest steady block seen over every place of the ring
+    # (2026-11-21: every bus instance's diffusers are in L2 now, instance 1 costs what instance 0 does)
     import dnfw.perc.dsl as DSL
     progs = []
     init = DSL.Prog.__init__

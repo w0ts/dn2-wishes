@@ -175,7 +175,7 @@ def _interp(p: Prog, L: C.Layout) -> None:
     p.fconst(14, 32.0)
     P = p.par
 
-    def one():
+    def one(add: bool):
         p.trunc(11, 2)                          # the buffer index
         p.float0(12, 11)
         p.fop(13, 2, "-", 12)
@@ -218,11 +218,16 @@ def _interp(p: Prog, L: C.Layout) -> None:
         p.fconst(8, -1.0)
         p.fop(9, 9, "MAX", 8)                   # C.sat
         p.fop(9, 9, "*", 7)
-        p.ld(11, W["m"])
-        p.ifz(11, "NE", lambda: (p.ldi(8, 0, 0), p.fop(9, 9, "+", 8)))
+        if add:
+            p.ldi(8, 0, 0)
+            p.fop(9, 9, "+", 8)
         p.stpost(0, 9)
         p.fop(2, 2, "+", 6)
-    p.loop_r(15, N2, one, one=15)
+    # 2026-11-21 (eng-simd): W m read once, not every sample (it does not change in the loop): a loop for each
+    # case, the same operations (scripts/mnm_identity.py)
+    p.ld(11, W["m"])
+    p.ifz(11, "NE", lambda: p.loop_r(15, N2, lambda: one(True), one=15),
+          lambda: p.loop_r(15, N2, lambda: one(False), one=15))
     p.st(W["P"], 2)
     p.geti(14, 0)
     p.st(W["out"], 14)

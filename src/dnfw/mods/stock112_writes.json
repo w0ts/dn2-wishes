@@ -1,0 +1,127 @@
+{
+ "what": "the RAM stock Digitone II OS 1.12 writes between 0x46600000 and 0x48000000 (256-byte blocks), measured by scripts/stock_ram_map.py",
+ "measured": "2026-11-16",
+ "how": "stock 1.12 MAIN OS (sec112), DNFW_DDR_ALIAS=1: emu_boot_check.py from reset with a blank +Drive and with a valid active-project header (COKi at sectors 0x40000/0x48000), then emu_waverider_menu.py --stock from ui800M-v014 (v0.56.1's clearing snapshot), seeds 1-4, 40 random stock key actions each, the audio interrupt every 75,000 instructions",
+ "runs": [
+  {
+   "run": "walk-1",
+   "rc": 0,
+   "seconds": 277
+  },
+  {
+   "run": "walk-2",
+   "rc": 0,
+   "seconds": 299
+  },
+  {
+   "run": "walk-3",
+   "rc": 0,
+   "seconds": 268
+  },
+  {
+   "run": "walk-4",
+   "rc": 0,
+   "seconds": 294
+  }
+ ],
+ "processes": 10,
+ "ranges": [
+  [
+   "0x46600000",
+   "0x466b8500"
+  ],
+  [
+   "0x466ca000",
+   "0x466ca100"
+  ],
+  [
+   "0x466cb000",
+   "0x466cb600"
+  ],
+  [
+   "0x466e7000",
+   "0x466e7100"
+  ],
+  [
+   "0x466e8100",
+   "0x466e9100"
+  ],
+  [
+   "0x466f9100",
+   "0x46701300"
+  ],
+  [
+   "0x47ffff00",
+   "0x48000000"
+  ]
+ ],
+ "detail": [
+  {
+   "from": "0x46600000",
+   "to": "0x466b8500",
+   "cpu": 853661,
+   "dma": 0,
+   "alias": 0,
+   "pcs": [
+    "0x400004d2"
+   ]
+  },
+  {
+   "from": "0x466ca000",
+   "to": "0x466ca100",
+   "cpu": 0,
+   "dma": 720,
+   "alias": 720,
+   "pcs": []
+  },
+  {
+   "from": "0x466cb000",
+   "to": "0x466cb600",
+   "cpu": 2580,
+   "dma": 0,
+   "alias": 2580,
+   "pcs": [
+    "0x40002276",
+    "0x400022b0"
+   ]
+  },
+  {
+   "from": "0x466e7000",
+   "to": "0x466e7100",
+   "cpu": 88,
+   "dma": 0,
+   "alias": 88,
+   "pcs": [
+    "0x400d571e"
+   ]
+  },
+  {
+   "from": "0x466e8100",
+   "to": "0x466e9100",
+   "cpu": 144384,
+   "dma": 0,
+   "alias": 144384,
+   "pcs": [
+    "0x401341a8"
+   ]
+  },
+  {
+   "from": "0x466f9100",
+   "to": "0x46701300",
+   "cpu": 0,
+   "dma": 50372,
+   "alias": 50372,
+   "pcs": []
+  },
+  {
+   "from": "0x47ffff00",
+   "to": "0x48000000",
+   "cpu": 52,
+   "dma": 2,
+   "alias": 0,
+   "pcs": [
+    "0x4000052c"
+   ]
+  }
+ ]
+}

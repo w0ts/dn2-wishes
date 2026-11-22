@@ -49,7 +49,7 @@ melodic synths". The drums and percussion (SOPHIE, PLAITS BD, SD, HH) are at the
 for bit; the melodic synths (ANALOG 2, TB-303, PLAITS WS, SWRM, MDAL, STRG, DPRO-WAVE, DDRW, DENS) keep their
 corrections; the Machinedrum is as it was.
 
-³ JUNO (type 23, 2026-11-12), measured after this table on r11f (v0.48 round 11) as the others: RMS -25.3 dB, 1.1 dB
+³ JUNO (type 23 then, 50 since 2026-11-18; 2026-11-12), measured after this table on r11f (v0.48 round 11) as the others: RMS -25.3 dB, 1.1 dB
 over WaveTone's -26.4, so inside the band and left bit for bit (no LEVEL_DB entry); its machine tap peaks at 1.12
 (WaveTone 1.00, ANALOG 2 0.92).
 **2026-11-14, on the unit (r5; the User: "Juno level: good"):** the same track (T13) at both machines' defaults, JUNO
@@ -76,3 +76,24 @@ comparison against the User's own drum samples is kept in the session notes (md-
 engine), `PLAITS_LEVEL_DB` (by model: `plaits_level`, the model as the engine chooses it from MODL, once a block).
 Nothing a sample. `test/test_engine_levels.py` holds the measured table and each engine in its band at the levels it
 has now. With velocity (claude/velocity) a trig at the stock default VEL 100 plays our engines a further -2.1 dB.
+
+## Headroom: no setting clips the outputs on its own (2026-11-21)
+
+The User: "just make it quieter! not a limiter... a synth in its normal settings must not clip. and if it happens the
+!clip should display"; "Yes, all of them"; then option (a) on each question: the target is Overbridge's main 1 dB under
+its full scale at the worst knob setting found, one note (a chord may clip, and lights CLIP), track LEVEL and AMP VOL at
+127.
+
+- **The chain** (SHARC runner, track 0, init sound, LEVEL 100, VOL 100): an engine's machine output reaches the main
+  bus 18.5 dB lower (ANALOG 2 -18.9, JUNO -18.4 and -19.7 at all 127, TB-303 -18.9, DDRW -17.6). The main mix is
+  +1.0 dB over the bus, Overbridge's main x 1 / 0.7 over that (docs/mixmeter.md); LEVEL and VOL at 127 add +4.2 dB. So
+  Overbridge's main reaches full scale at a machine peak of about +10 dB: the target is +9 dB.
+- **The worst settings** (the Python model, 43 settings: defaults, all 0, all 127, each knob at 0 and 127, 24 random;
+  notes 36 and 60; 0.3 s): TB-303 +13.1 dB (DEC 127, note 36), ANALOG 2 +12.6 (all 127, its knee gone), JUNO +11.7,
+  DRONE +3.7 (its knee gone; the 2 s renders), DDRW +2.4 after its MIX gain (below).
+- **What changed:** DRONE's and ANALOG 2's soft knees (Optimist's protection for its Q15 output: a limiter) are gone.
+  `HEADROOM_DB`: TB-303 -4.5, ANALOG 2 -4.0, JUNO -3.0, DRONE -2.0 (no hotter than with its knee). DPRO-DDRW's MIX gain
+  is 1.5 on the DN2 (`mnm.ddrw.MIX_GAIN`; the Monomachine's 4, kept for its golden runs, put two full waves at 2.64 into
+  its limiter: every setting measured clipped), and its level +6.0 dB after the machine gives back the RMS it lost
+  (its loudest +8.4). ANALOG 2's and JUNO's filter models still saturate as tone and light CLIP when they go flat.
+- Renders before and after: scratch/clip-inner/levels/.

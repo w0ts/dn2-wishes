@@ -23,7 +23,7 @@
  */
 #include "wr_gen.h"
 
-/* DN2_LFO4 (a generation option, default off; dnfw.waverider.pages.lfo4_on): our code's side of lfo4 -- the
+/* DN2_LFO4 (a generation option, on by default since v0.56.2; dnfw.waverider.pages.lfo4_on): our code's side of lfo4 -- the
  * parameter table and the LFO state it moves (REC_BASE, LFO_LIVE, LFO_STRIDE), LFO4's stored values in the wishes
  * record (csrc/wishes/lfo4.c), the cascade with LFO4 both ways (csrc/modulation/cascade.c), and lfo4 in
  * dnfw.mods.SHIPPED (docs/lfo-112-port.md). Off until it has passed its gate steps (6m4); then main asks the User. */
@@ -172,47 +172,44 @@ static const char *stock_long[WR_NAMED] __attribute__((section(".data")));
 static const char *stock_short[WR_NAMED] __attribute__((section(".data")));
 static int names_on __attribute__((section(".data"))) = -1;
 
-/* 2026-11-11: MONOMACHINE's engine on the active track (ENGN, page 1 H: the word in its sound, as perc_type reads
- * TYPE's), 0 on any other machine */
-static int wr_mono_engine(int kind)
-{
-    u8 t = UI_TRACK;
-    unsigned char *kit = KIT_POINTER;
-    if (MNM_MONO < 0 || mnm_index(kind) != MNM_MONO || t > 15 || !kit)
-        return 0;
-    return mnm_mono_engine(*(volatile unsigned short *)(kit + 52u + 1163u * t + 0x14u + 2u * mnm_slot[MNM_MONO_J]) >> 8);
-}
-
-/* the active track's Monomachine place (KIND as is_wr answers it): MONOMACHINE's engine's (fmt.c smp_formats);
- * -1 for any other kind */
+/* the active track's Monomachine place (KIND as is_wr answers it): a host's (MONOMACHINE by ENGN, DRUM by TYPE,
+ * 2026-11-20: the word of its SEL in the track's sound, as perc_type reads TYPE's) its choice's place (fmt.c
+ * smp_formats), any other machine's own; -1 for any other kind */
 int wr_mnm_mi(int kind)
 {
     int mi = mnm_index(kind);
-    return mi >= 0 && mi == MNM_MONO ? mnm_mono_place[wr_mono_engine(kind)] : mi;
+    u8 t = UI_TRACK;
+    unsigned char *kit = KIT_POINTER;
+    if (mnm_host(mi) < 0 || t > 15 || !kit)
+        return mi;
+    return mnm_live(mi, *(volatile unsigned short *)(kit + 52u + 1163u * t + 0x14u + 2u * mnm_slot[mnm_sel_j(mi)]));
 }
 
 static void wr_names(void)
 {
     int on = wr_active();
-    int eng = on > 1 ? wr_mono_engine(on) : 0;     /* 2026-11-11: MONOMACHINE: one set of names an engine */
-    int key = on == 1 ? 16 + perc_type() : on + 64 * eng;   /* PERC: one set of names a machine */
+    /* 2026-11-11: MONOMACHINE: one set of names an engine; 2026-11-20: every host's place (DRUM's types): a place
+     * past the types' its own row (wr_extra_*), else the kind's. PERC's keys are negative (its machine's) */
+    int mi = on > 1 ? wr_mnm_mi(on) : -1;
+    int x = mi >= MNM_N0 ? mi - MNM_N0 : -1;
+    int key = on == 1 ? -2 - perc_type() : on + 64 * (x + 1);
     if (key == names_on)
         return;
     extern void smp_formats(int kind);
     smp_formats(on);                            /* v0.15: the sample machines' value text */
     for (int k = 0; k < WR_NAMED; k++) {
         u32 id = wr_named_ids[k];
-        if (names_on < 0) {                     /* the first call: keep the stock pointers */
+        if (names_on == -1) {                   /* the first call: keep the stock pointers */
             stock_long[k] = NAME_LONG(id);
             stock_short[k] = NAME_SHORT(id);
         }
-        const char *l = on ? (eng ? wr_mono_long[eng - 1][k] : wr_named_long[on - 1][k]) : 0;
-        const char *sh = on ? (eng ? wr_mono_short[eng - 1][k] : wr_named_short[on - 1][k]) : 0;
+        const char *l = on ? (x >= 0 ? wr_extra_long[x][k] : wr_named_long[on - 1][k]) : 0;
+        const char *sh = on ? (x >= 0 ? wr_extra_short[x][k] : wr_named_short[on - 1][k]) : 0;
         if (on == 1)
             for (int j = 0; j < 8; j++)
                 if (perc_param_ids[j] == id) {
-                    l = perc_longs[perc_long[key - 16][j]];
-                    sh = perc_short[key - 16][j];
+                    l = perc_longs[perc_long[-2 - key][j]];
+                    sh = perc_short[-2 - key][j];
                 }
         NAME_LONG(id) = l ? l : stock_long[k];
         NAME_SHORT(id) = sh ? sh : stock_short[k];
@@ -328,6 +325,7 @@ static void flt_cell(void *view, void *canvas, int x0, int y0, u32 id)
 /* v0.22: the UI loop's draw of its screen (0x4011d60a(screen, canvas), at 0x4002e4ca),
  * then, while it is up, the RECORDER over all of it (rec.c, smp_page.c) */
 #define SCREEN_DRAW ((void (*)(void *, void *))0x4011D60Au)
+u32 wr_drawn_at __attribute__((section(".data"), aligned(4))) = 0;    /* the panel tick at the end of the last full draw */
 void *wr_screen_obj __attribute__((section(".data"), aligned(4))) = 0;   /* v0.30: its views (rec.c) */
 u32 wr_draws __attribute__((section(".data"), aligned(4))) = 0;   /* v0.40: the screen's draws (smp_page.c) */
 void wr_screen(void *screen, void *canvas)
@@ -341,6 +339,7 @@ void wr_screen(void *screen, void *canvas)
     extern int smp_fb_visible(void);
     extern void smp_fb_draw(void *canvas, int samp);
     extern int smp_samp_of(int track);
+    extern unsigned int smp_samp_word(int track);
     extern int smp_list_visible(void);
     extern void smp_list_draw(void *canvas);
     extern void sl_screen(int phase, int covered);      /* parameter slides (csrc/slides) */
@@ -355,19 +354,40 @@ void wr_screen(void *screen, void *canvas)
     extern void mv_begin(void);
     mv_begin();                                 /* moving controls: this draw's cells (csrc/modulation) */
     { extern void mxp_draw_begin(void); mxp_draw_begin(); }   /* the routes popup: the page's places anew (csrc/matrix) */
+    { extern void ldp_draw_begin(void); ldp_draw_begin(); }   /* the DEST popup: knob D anew (csrc/matrix/dest_pop.c) */
+    extern void mv_end(void *canvas, int drew);
+    int drew = (IS_DIRTY(screen) & 0xFF) != 0;  /* stock draws only when its byte is set (isDirty: move.b, %d0's low byte only) */
     SCREEN_DRAW(screen, canvas);
     extern int sn_up(void);
     if (sn_up()) {                              /* v0.54: the stock NAME screen: nothing of ours over it */
         sl_screen(1, 1);
+        mv_end(canvas, drew);                   /* moving controls: which lines may move alone */
+        { extern void scope_end(void *canvas, int clean); scope_end(canvas, 0); }
+        { extern void mxp_end(void *canvas, int clean); mxp_end(canvas, 0); }
+        wr_drawn_at = *(volatile u32 *)0x466768B0u;   /* the panel tick (wr_poll's turns) */
         return;
     }
-    sl_screen(1, rec_visible() || slc_visible() || smp_fb_visible() || smp_list_visible());
-    if (rec_visible())
+    extern int tn_visible(void);                /* v0.61: TUNING (csrc/sampler/tune.c) */
+    extern void tn_draw(void *canvas);
+    extern void tn_kb_draw(void *canvas);
+    extern int pf_visible(void);                /* v0.69: PERFORM (csrc/sampler/perf.c) */
+    extern void pf_draw(void *canvas);
+    {   /* (2026-11-19: the scope covers TRIG page 2's SLD and SLEN too: E and F are its, not the slides') */
+        extern int scope_visible(void);
+        sl_screen(1, rec_visible() || slc_visible() || smp_fb_visible() || smp_list_visible() || scope_visible()
+                     || tn_visible() || pf_visible());
+    }
+    if (pf_visible())                           /* v0.69: PERFORM (csrc/sampler/perf.c) */
+        pf_draw(canvas);
+    else if (tn_visible())                           /* (as REC and SLICE: no list popup, routes or DEST popup under it) */
+        tn_draw(canvas);
+    else if (rec_visible())
         rec_screen_draw(canvas);
     else if (slc_visible())
         slc_draw(canvas);
     else if (smp_fb_visible())                  /* v0.25: the folder browser (ASSIGN SAMPLE) */
-        smp_fb_draw(canvas, smp_samp_of(UI_TRACK));
+        { extern int smp_fb_browse;             /* (browse only: no track's sample to mark) */
+          smp_fb_draw(canvas, smp_fb_browse ? 0 : (int)smp_samp_word(UI_TRACK)); }   /* v0.65: the whole word (its bank) */
     else if (smp_list_visible())                /* v0.25: the sample list, over the title bar too */
         smp_list_draw(canvas);
     else {
@@ -387,7 +407,7 @@ void wr_screen(void *screen, void *canvas)
         } else if (ins_visible()) {             /* the per-track inserts' page (csrc/inserts) */
             wpop_begin();                       /* (the stock page under it offers nothing of ours) */
             ins_draw(canvas);
-        } else if (scope_visible()) {           /* AMP's oscilloscope page (csrc/scope, amp_pages.h) */
+        } else if (scope_visible()) {           /* the oscilloscope, over stock's TRIG page (csrc/scope) */
             wpop_begin();
             scope_draw(canvas);
         } else if (env2_visible()) {            /* AMP's ENV2 page (csrc/matrix/env2_page.c) */
@@ -395,15 +415,172 @@ void wr_screen(void *screen, void *canvas)
             env2_draw(canvas);
         } else {
             ins_dots(canvas);                   /* stock's FX page: FX 1/2's dots */
-            scope_dots(canvas);                 /* stock's AMP page: AMP 1/3's dots */
+            scope_dots(canvas);                 /* stock's AMP page: AMP 1/2's dots */
             { extern void fxp_draw(void *canvas); fxp_draw(canvas); }   /* XDLY's and FDN8's page 1/2, 2/2 */
             { extern void vm_draw(void *canvas); vm_draw(canvas); }     /* PARA on the VOICE menu's B */
+            tn_kb_draw(canvas);                 /* v0.61: KB SETUP's H slot (TUNE), when KB SETUP is on top */
+            { extern void mix_draw(void *canvas); mix_draw(canvas); }   /* the MIXER pages' meters (csrc/meter/mixer.c) */
+        }
+        {   /* the item's icon in the title bar while it names the page (csrc/inserts/ins.c; not under a list of ours) */
+            extern void ins_title_icon(void *canvas);
+            extern int isel_up(void);
+            if (!msel_visible() && !isel_up())
+                ins_title_icon(canvas);
         }
         wpop_draw(canvas);                      /* the list popup, over the page */
         { extern void mxp_draw(void *canvas); mxp_draw(canvas); }   /* the routes popup, over everything of ours (csrc/matrix) */
+        { extern void ldp_draw(void *canvas); ldp_draw(canvas); }   /* the DEST popup, over everything of ours (csrc/matrix) */
     }
     extern void mtr_draw(void *canvas);
-    mtr_draw(canvas);                           /* the system meter's corner, over everything */
+    mtr_draw(canvas);                           /* the system meter's box (and the load labels), over everything */
+    { extern int ovw_visible(void); extern void ovw_draw(void *canvas); extern void ovw_end(void *canvas, int drew);
+      if (ovw_visible()) ovw_draw(canvas);     /* a page key's overview, held a second, over the meter's icons too
+                                                 * (its own title bar carries its figures; csrc/inserts/ovw.c) */
+      ovw_end(canvas, drew); }                 /* ... its next frames alone over this one (ovw.c) */
+    mv_end(canvas, drew);                       /* moving controls: which lines may move alone, the frame complete */
+    {   /* the scope's next frames may be drawn alone over this one if nothing of ours drew over it (csrc/scope) */
+        extern void scope_end(void *canvas, int clean);
+        extern int wpop_shown(void);
+        extern int mxp_visible(void);
+        extern int ovw_visible(void);
+        extern int ldp_visible(void);
+        scope_end(canvas, drew && !wpop_shown() && !mxp_visible() && !ldp_visible() && !ovw_visible());
+        extern void mxp_end(void *canvas, int clean);   /* the routes popup's moving layer alone, likewise: only the
+                                                         * meter's title-bar icons may come after it (csrc/matrix) */
+        mxp_end(canvas, drew && !ovw_visible());
+        extern int mtr_big;                     /* the mixer meters' updates alone over this frame (csrc/meter/mixer.c) */
+        extern void mix_end(void *canvas, int clean);
+        mix_end(canvas, drew && !wpop_shown() && !mxp_visible() && !ldp_visible() && !ovw_visible() && !mtr_big);
+    }
+    {   /* the DEST popup's next frames may be drawn alone over this one if nothing of ours drew over it */
+        extern int ovw_visible(void);
+        extern void ldp_end(void *canvas, int clean);
+        ldp_end(canvas, !ovw_visible());
+    }
+    wr_drawn_at = *(volatile u32 *)0x466768B0u; /* the panel tick: a knob turning, the next full draw TURN_GAP after this one (wr_poll) */
+}
+
+/* ENV2's page is drawn over stock's AMP page in this draw: wr_screen reaches env2_draw (csrc/matrix/env2_page.c
+ * env2_amp_draw: stock's knobs and shape are not drawn under it). The same tests, in the same order, as wr_screen's */
+int wr_env2_covers(void)
+{
+    extern int sn_up(void), rec_visible(void), slc_visible(void), smp_fb_visible(void), smp_list_visible(void);
+    extern int msel_visible(void), ins_visible(void), scope_visible(void), env2_visible(void);
+    extern int tn_visible(void);
+    return !sn_up() && !tn_visible() && !rec_visible() && !slc_visible() && !smp_fb_visible() && !smp_list_visible()
+           && !msel_visible() && !ins_visible() && !scope_visible() && env2_visible();
+}
+
+/* cv_fill (2026-11-17, the User's CPU with notes held: our pages' clears were one stock SET_PIXEL call a pixel, 6,912 for
+ * a page): a rectangle of stock's canvas set (ON bit 0 set) or cleared, a column word at a time. The canvas as stock's
+ * SET_PIXEL 0x40113e70 reads it: +4 width, +8 height, +12 longs a column, +16 the bits; pixel (x, y) is bit
+ * 31 - (y & 31) of long x * stride + (y >> 5). Clipped exactly as SET_PIXEL clips a pixel (0 <= x < width,
+ * 0 <= y < height): the same pixels as calling it for every (x, y) of the rectangle, in any order. */
+void cv_fill(void *cv, int x0, int y0, int x1, int y1, int on)
+{
+    const int *h = (const int *)cv;
+    int w = h[1], ht = h[2], stride = h[3];
+    u32 *bits = (u32 *)h[4];
+    if (x0 < 0)
+        x0 = 0;
+    if (y0 < 0)
+        y0 = 0;
+    if (x1 >= w)
+        x1 = w - 1;
+    if (y1 >= ht)
+        y1 = ht - 1;
+    if (x0 > x1 || y0 > y1)
+        return;
+    int k0 = y0 >> 5, k1 = y1 >> 5;
+    for (int k = k0; k <= k1; k++) {
+        u32 lo = k == k0 ? (u32)(y0 & 31) : 0u, hi = k == k1 ? (u32)(y1 & 31) : 31u;
+        u32 m = (0xFFFFFFFFu >> lo) & ~(hi == 31u ? 0u : 0xFFFFFFFFu >> (hi + 1u));
+        u32 *p = bits + x0 * stride + k;
+        if (on & 1)
+            for (int x = x0; x <= x1; x++, p += stride)
+                *p |= m;
+        else
+            for (int x = x0; x <= x1; x++, p += stride)
+                *p &= ~m;
+    }
+}
+
+/* Knob turns drawn together (2026-11-18, the User: "High cpu is bad. Ui lags like crazy"; scratch/unit-now/cpu-spikes.md).
+ * Stock's UI loop takes one queue item at a time, and every knob item asks for a full redraw; the redraw comes with
+ * the loop's next tick item (0x4002e322: this test, the screen's draw 0x4011d60a, panel_diff). With the audio
+ * interrupt at about 84.5 % of the ColdFire, a page's draw and present take about 40 ms of the UI's time: a fast turn's
+ * items (one every four panel ticks) then each wait behind a whole draw, and the screen goes on moving 0.5-0.9 s after
+ * the hand stops (the coupled emulator, scripts/emu_ui_turns.py: one knob item, one draw, the queue growing).
+ * So, while a knob turns (a knob item taken within TURN_LIVE), the full redraw waits:
+ *   - until TURN_GAP after the last full draw ended (40 ms between draws at least, plus the draw's own time);
+ *   - while a knob's item already waits in the UI queue behind this pass (up to TURN_STALE after the last draw), so
+ *     the items taken first are drawn together.
+ * Only the drawing waits: every item is taken and its value set as stock sets it, at once. The screen's dirty byte stays
+ * set, so a later pass draws (the loop's tick items keep coming), and the last value is always drawn. */
+#define UI_QUEUE   ((volatile u32 *)0x4059E214u)   /* the UI queue (0x40001896 / 0x40001928): +4 items waiting, +16 the
+                                                    * index mask, +20 the ring of item pointers, +28 the next read */
+/* Timed by the panel module's tick (devtest.c: 0x466768b0, 121 a second, wrapping at 4,096), not by the audio frames:
+ * the tick runs whatever the audio interrupt does (and in every emulator harness) */
+#define PANEL_TICK (*(volatile u32 *)0x466768B0u)
+#define TICKS(a, b) (((a) - (b)) & 0xFFFu)
+#define TURN_LIVE  36u                          /* ticks: a knob item taken within 300 ms: a turn */
+#define TURN_GAP   5u                           /* ticks: 41 ms from the end of a full draw */
+#define TURN_STALE 10u                          /* ticks: drawn 83 ms after the last draw, items waiting or not */
+u32 wr_turn_held __attribute__((section(".data"), aligned(4))) = 0;   /* redraws held back (the checks) */
+static u32 turn_seq __attribute__((section(".data"))) = 0;    /* smp_knob_seq when last seen */
+static u32 turn_at __attribute__((section(".data"))) = 0;     /* the tick it moved at */
+static u32 turn_live __attribute__((section(".data"))) = 0;   /* a turn going on (cleared once TURN_LIVE has passed,
+                                                               * looked at every UI pass: the tick's wrap never
+                                                               * brings an old turn back) */
+
+/* a knob turned within TURN_LIVE (csrc/modulation/moving.c: the lines' bookkeeping waits too) */
+int wr_turning(void)
+{
+    extern u32 smp_knob_seq;                    /* rec.c smp_ui_pop: every knob item taken moves it */
+    if (smp_knob_seq != turn_seq) {
+        turn_seq = smp_knob_seq;
+        turn_at = PANEL_TICK;
+        turn_live = 1;
+    }
+    if (turn_live && TICKS(PANEL_TICK, turn_at) >= TURN_LIVE)
+        turn_live = 0;
+    return (int)turn_live;
+}
+
+/* a knob's item (type 1, code 1..8) waits in the UI queue */
+static int knob_waiting(void)
+{
+    volatile u32 *q = UI_QUEUE;
+    u32 n = q[1], mask = q[4], rd = q[7];
+    const u32 *ring = (const u32 *)q[5];
+    if (!ring || n > mask + 1u)
+        return 0;
+    for (u32 k = 0; k < n && k < 32u; k++) {
+        const u8 *it = (const u8 *)ring[(rd + k) & mask];
+        if (it && it[0] == 1 && !it[4] && !it[5] && !it[6] && it[7] >= 1 && it[7] <= 8)
+            return 1;
+    }
+    return 0;
+}
+
+/* -> 1: this pass's redraw waits. Never more than TURN_PASSES passes in a row, whatever the tick says (should it ever
+ * stand still, a turn's redraws still come, one pass in TURN_PASSES + 1) */
+#define TURN_PASSES 4u
+static u32 turn_row __attribute__((section(".data"))) = 0;    /* passes held in a row */
+static int turn_hold(void)
+{
+    u32 since = TICKS(PANEL_TICK, wr_drawn_at);
+    int hold = turn_row < TURN_PASSES
+               && (since < TURN_GAP || (since < TURN_STALE && knob_waiting()));
+    turn_row = hold ? turn_row + 1u : 0u;
+    return hold;
+}
+
+/* the last UI pass held a full redraw back for a turn (csrc/modulation/moving.c mv_poll: the lines may go alone
+ * meanwhile; BACK is still the frame on the glass) */
+int wr_redraw_held(void)
+{
+    return turn_row != 0;
 }
 
 /* the UI loop's redraw test, as stock (and the names kept current, once a loop; and
@@ -417,23 +594,35 @@ int wr_poll(void *screen)
     extern void jmp_poll(void);
     extern void smp_er_poll(void);
     extern void mtr_poll(void *screen);
-    mtr_poll(screen);                           /* the system meter: FUNC held, every page (csrc/meter) */
-    { extern void mv_poll(void *screen); mv_poll(screen); }   /* moving controls: a line moved (csrc/modulation) */
-    { extern void scope_poll(void *screen); scope_poll(screen); }   /* AMP page 2's scope, 25 a second */
+    extern int mtr_big;
+    mtr_poll(screen);                           /* the system meter, FUNC tapped then held, every page (csrc/meter) */
+    { extern void ovw_poll(void *screen); ovw_poll(screen); }   /* the page keys' overviews, FX's tap (csrc/inserts/ovw.c) */
     extern void wpop_poll(void *screen);
-    wpop_poll(screen);                          /* the list popup's redraws (popup.c) */
-    { extern void mxp_poll(void *screen); mxp_poll(screen); }   /* the routes popup: FUNC + long push, its redraws (csrc/matrix) */
+    wpop_poll(screen);                          /* the list popup's redraws (popup.c; 2026-11-19: before the lines, so the
+                                                 * polls that draw alone into BACK come last, together) */
+    if (!mtr_big) {                             /* (2026-11-19: the meter's box covers the page body: nothing of ours is
+                                                 * drawn alone into BACK under it; any key or turn takes it down first) */
+        { extern void mv_poll(void *screen); mv_poll(screen); }   /* moving controls: a line moved (csrc/modulation) */
+        { extern void scope_poll(void *screen); scope_poll(screen); }   /* the scope's frames, 15 a second */
+        { extern void mxp_poll(void *screen); mxp_poll(screen); }   /* the routes popup: FUNC + long push, its redraws (csrc/matrix) */
+        { extern void ldp_poll(void *screen); ldp_poll(screen); }   /* the DEST popup: the long NO, its frames (csrc/matrix) */
+        { extern void mix_poll(void *screen); mix_poll(screen); }   /* the MIXER pages' meters (csrc/meter/mixer.c) */
+    }
     smp_er_poll();                              /* v0.39: ERASE MOD DATA, a step a pass (erase.c) */
     { extern void wish_poll(void); wish_poll(); }   /* the wishes record's cells, read and written (csrc/wishes) */
     { extern void mx_poll(void); mx_poll(); }       /* the matrix's routes laid out for the frame (csrc/matrix) */
+    { extern void ins_ui_poll(void); ins_ui_poll(); }   /* the inserts: MIX 0 kept running under a MIX route or lock (csrc/inserts) */
     smp_boot();
     jmp_poll();                                 /* DIRECT JUMP's setting, read and written (csrc/jump) */
     { extern void msel_poll(void); msel_poll(); }   /* LIVE SELECT: MACHINE SEL's resting cursor, FUNC + G (csrc/msel) */
+    { extern void ins_title_poll(void); ins_title_poll(); }   /* a page name slid in: its icon with it (csrc/inserts/ins.c) */
     { extern void load_poll(void); load_poll(); }   /* the DSP load budget: each track's cost (csrc/load) */
     rec_poll();
-    { extern void mono_poll(void); mono_poll(); }   /* 2026-11-11: MONOMACHINE's engine turned: its start (rec.c) */
+    { extern void mono_poll(void); mono_poll(); }   /* 2026-11-11: a host's SEL turned (MONOMACHINE's ENGN, DRUM's TYPE): that place's start (rec.c) */
+    { extern void as_poll(void); as_poll(); }       /* 2026-11-20: AMP ON/OFF's mask for the DSP (csrc/msel/ampsw.c) */
     { extern void hold_poll(void); hold_poll(); }   /* DRONE's HOLD latch (csrc/hold) */
     { extern int dt_poll(void); if (dt_poll()) SET_DIRTY(screen); }   /* the test channel's keys; a redraw turns the glass (csrc/devtest) */
+    { extern void sm_poll(void); sm_poll(); }       /* 2026-11-21: SAFE MODE's healthy mark and STOP entry (csrc/safemode) */
     wr_names();
 #if FLT_SETS
     flt_names();                                /* the A2 filter machines' FLTR names */
@@ -483,7 +672,19 @@ int wr_poll(void *screen)
         ph_next = FRAMES_NOW + PH_REDRAW;
         SET_DIRTY(screen);
     }
-    return IS_DIRTY(screen);
+    int turning = wr_turning();                 /* (every pass: a turn's start and end seen) */
+    int dirty = IS_DIRTY(screen) & 0xFF;        /* (stock tests the low byte: tst.b %d0) */
+    if (dirty && turning && turn_hold()) {     /* a knob turning: drawn with the items after it (above) */
+        wr_turn_held++;
+        return 0;
+    }
+    if (!turning)
+        turn_row = 0;
+    {   /* 2026-11-20 (the User: "10 per sec is fine"): on stock's MIXER, its redraws at most 10 a second, a key or a
+         * knob at once (csrc/meter/mixer.c) */
+        extern u32 mix_dirty(int dirty);
+        return (int)mix_dirty(dirty);
+    }
 }
 
 static void *method(void *obj, int offset)
@@ -565,24 +766,37 @@ static void perc_picture(void *c, void *view)
  * parameters on PERC's eight records. A parameter's knob (0..127) as the DSP reads it
  * (dnfw.perc.program: p = clamp((value >> 8) - lo, 0, top) / top, knob = p x 127, rounded);
  * an enumerated one shows its choice by name, as the Monomachine's screen does. */
-static int mnm_knob(void *view, int j)
+static int mnm_knob_of(int w, int j)            /* the value word -> the knob */
 {
-    u8 flag;
-    int v = (GET_VALUE(view, perc_param_ids[j], &flag) >> 8) - mnm_lo[j];
+    int v = (w >> 8) - mnm_lo[j];
     int top = mnm_top[j];
     v = v < 0 ? 0 : v > top ? top : v;
     return (v * 127 * 2 + top) / (2 * top);
 }
 
+static int mnm_knob(void *view, int j)
+{
+    u8 flag;
+    return mnm_knob_of(GET_VALUE(view, perc_param_ids[j], &flag), j);
+}
+
+static const char *mnm_text_k(int m, int j, int k);
+
 static const char *mnm_text(void *view, int m, int j)
+{
+    if (!mnm_choices[m][j])
+        return 0;                                   /* a knob */
+    return mnm_text_k(m, j, mnm_knob(view, j));
+}
+
+static const char *mnm_text_k(int m, int j, int k)  /* machine M's control J at knob K, by name */
 {
     static char num[6] __attribute__((section(".data")));
     int n = mnm_choices[m][j];
-    if (!n)
-        return 0;                                   /* a knob */
-    int k = mnm_knob(view, j);
-    if (n == MNM_PCH)                               /* DENS's PCH2..4: by the ROM's table */
-        return mnm_choice_names[mnm_choice_at[m][j] + mnm_pch_idx[k > 127 ? 127 : k]];
+    if (mnm_cont(n))                                /* v0.60: DYN's 1FRQ / 2FRQ: x.x / x.xx */
+        return mnm_cont_text(n, k > 127 ? 127 : k, num);
+    if (n == MNM_PCH || n == MNM_FLIST)             /* DENS's PCH2..4, FM+'s listed: the ROM's tables */
+        return mnm_choice_names[mnm_choice_at[m][j] + mnm_choice(n, k)];
     int c = (k * n) >> 7;
     if (n == MNM_WAVES || n == 2 * MNM_WAVES) {     /* the ROM waves: S01..S32 (DDRW, DENS: the */
         c &= MNM_WAVES - 1;                         /* Digibank's 64, here the 32 twice) */
@@ -620,11 +834,13 @@ static int smp_pos(void *view, u32 id, int w)
 extern int smp_count(void);
 extern const char *smp_name(int k);
 
-static const char *sound_name(int k)
+extern int smp_view_bank(void *view), smp_bank_count(int b);
+static const char *sound_name(void *view, int k)  /* v0.65: in SAMP's bank */
 {
-    int n = smp_count();
+    int b = smp_view_bank(view);
+    int n = b ? smp_bank_count(b) : smp_count();
     if (n >= 0)
-        return k <= n ? smp_name(k - 1) : 0;
+        return k <= n && k <= 127 ? smp_name(b * 128 + k - 1) : 0;
     return k <= SMP_SOUNDS ? smp_sound[k - 1] : 0;
 }
 
@@ -639,7 +855,7 @@ static const char *smp_text(void *view, u32 id, int kind, const char *label)
         int k = smp_get(view, id);
         if (k == 0)
             return "OFF";
-        const char *nm = sound_name(k);
+        const char *nm = sound_name(view, k);
         if (nm && nm[0])
             return nm;
         buf[0] = '0' + k / 100; buf[1] = '0' + k / 10 % 10; buf[2] = '0' + k % 10; buf[3] = 0;
@@ -681,7 +897,7 @@ static const char *smp_text(void *view, u32 id, int kind, const char *label)
 static void smp_picture(void *c, void *view, int kind)
 {
     int k = smp_get(view, SMP_SAMP_ID);
-    const char *snd = k == 0 ? "OFF" : sound_name(k);
+    const char *snd = k == 0 ? "OFF" : sound_name(view, k);
     if (!snd)
         snd = "EMPTY";
     TEXT(c, FONT, WAVE_X + WR_WIDTH / 2, 30, CENTRED, "%.7s", smp_machine[SMP_IDX(kind)]);
@@ -744,6 +960,8 @@ void wr_cell(void *view, void *canvas, int x0, int y0, u32 id)
     wpop_stock_cell(view, x0, y0, id, id == 122u || id == 131u);   /* a stock list: the popup (popup_stock.c) */
     extern void mxp_cell(int x0, int y0, u32 id);
     mxp_cell(x0, y0, id);                       /* the routes popup: which parameter each knob turns (csrc/matrix) */
+    extern void ldp_cell(int x0, int y0, u32 id);
+    ldp_cell(x0, y0, id);                       /* the DEST popup: an LFO's DEST on knob D (csrc/matrix) */
     extern void mv_cell(void *canvas, int x0, int y0, u32 id);
     mv_cell(canvas, x0, y0, id);                /* moving controls: the heard value's line (csrc/modulation) */
 }
@@ -782,9 +1000,9 @@ void wr_page_draw(void *view, void *canvas)
     int kind = wr_active();
     int mi = mnm_index(kind);                   /* v0.26: a Monomachine machine's: one page */
     int mnm = mi >= 0;
-    if (mnm && mi == MNM_MONO) {                /* 2026-11-11: MONOMACHINE: its engine's page (ENGN, as the page */
-        u8 flag;                                /* draws it), as PERC's follows TYPE */
-        mi = mnm_live(mi, GET_VALUE(view, mnm_rid[MNM_MONO_J], &flag));
+    if (mnm && mnm_host(mi) >= 0) {            /* 2026-11-11: MONOMACHINE: its engine's page (ENGN, as the page */
+        u8 flag;                                /* draws it), as PERC's follows TYPE; 2026-11-20: DRUM's by TYPE */
+        mi = mnm_live(mi, GET_VALUE(view, mnm_rid[mnm_sel_j(mi)], &flag));
     }
     int smp = SMP_IDX(kind) >= 0;   /* a sample machine's (v0.44: BOUNCE's kind 13 too) */
     if (page < 0 || page >= (smp ? 2 : mnm ? mnm_npages[mi] : WR_PAGES))   /* 2026-11-10: DRONE, ANALOG2: 2 */
@@ -876,4 +1094,73 @@ void wr_page_draw(void *view, void *canvas)
     int n = PAGE_COUNT(view);
     if (n > 1)
         PAGE_DOTS(view, canvas, n, page, 7);
+}
+
+/* -- 2026-11-17: the SYN and FLTR overviews (csrc/inserts/ovw_draw.c): each track's machine and engine by name, as its
+ * sound holds them (the engine as the machine's page names it) ------------------------------------------------------ */
+static const char *const ovw_mach4[] = {"FMT", "WAV", "FMD", "SWR", "MID", "", "", "", "ONE", "WRP", "STR", "RPT",
+                                        "GRD", "SLC", "", "", "", "FLX"};   /* dnfw.overviews.MACHINE4 */
+
+static int ovw_word(int t, int slot)
+{
+    return *(volatile unsigned short *)(KIT_POINTER + 52u + 1163u * (u32)t + 0x14u + 2u * (u32)slot);
+}
+
+/* track T's Monomachine-style control J by name (its machine's place MI), 0 a knob */
+static const char *ovw_choice(int t, int mi, int j)
+{
+    if (!mnm_choices[mi][j])
+        return 0;
+    return mnm_text_k(mi, j, mnm_knob_of(ovw_word(t, mnm_slot[j]), j));
+}
+
+void wr_ovw_names(int t, const char **mach, const char **eng)
+{
+    static char md[2][4] __attribute__((section(".data")));
+    *mach = *eng = 0;
+    if (!KIT_POINTER || t < 0 || t > 15)
+        return;
+    int ty = (signed char)KIT_POINTER[52u + 1163u * (u32)t + 0xDEu];
+    if (ty < 0)
+        return;
+    if (ty == 5) {                              /* MACHINEDRUM: its machine, "TRX-BD" as TRX over BD */
+        const char *n = perc_machine[perc_of(ovw_word(t, PERC_TYPE_SLOT))];
+        int i = 0, k = 0;
+        while (n[i] && n[i] != '-' && i < 3)
+            md[0][i] = n[i], i++;
+        md[0][i] = 0;
+        if (n[i] == '-')
+            i++;
+        while (n[i] && k < 3)
+            md[1][k++] = n[i++];
+        md[1][k] = 0;
+        *mach = md[0];
+        *eng = md[1];
+        return;
+    }
+    int mi = mnm_index(ty - 4);
+    if (mi >= 0) {                              /* ours: MACHINE SEL's short name, the engine its list names */
+        int live = mnm_live(mi, ovw_word(t, mnm_slot[mnm_sel_j(mi)]));
+        *mach = mnm_name_short[mi];
+        if (mnm_host(mi) >= 0)                  /* a host: its SEL's choice (MONOMACHINE's engine, DRUM's type) */
+            *eng = ovw_choice(t, live, mnm_sel_j(mi));
+        else if (mi == LOAD_MI_PLAITS)
+            *eng = ovw_choice(t, mi, LOAD_J_PLAITS);
+        else if (mi == LOAD_MI_SOPHIE)
+            *eng = ovw_choice(t, mi, LOAD_J_SOPHIE);
+        else if (mi == LOAD_MI_A2)
+            *eng = ovw_choice(t, mi, LOAD_J_A2);
+        return;
+    }
+    if (ty < (int)(sizeof ovw_mach4 / sizeof ovw_mach4[0]))
+        *mach = ovw_mach4[ty];
+}
+
+const char *wr_ovw_flt2(int t)                  /* ANALOG 2's own FLT2 on track T, 0 on any other machine */
+{
+    if (!KIT_POINTER || t < 0 || t > 15)
+        return 0;
+    int ty = (signed char)KIT_POINTER[52u + 1163u * (u32)t + 0xDEu];
+    int mi = ty >= 0 ? mnm_index(ty - 4) : -1;
+    return mi >= 0 && mi == LOAD_MI_A2 ? ovw_choice(t, mi, LOAD_J_A2) : 0;
 }

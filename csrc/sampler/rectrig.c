@@ -92,6 +92,10 @@ u8 rt_play[BUF_N] D;                    /* the half each buffer plays */
 u32 rt_rplace[BUF_HALVES] D;            /* each half's take: its place in the area */
 u32 rt_rbytes[BUF_HALVES] D;            /* .. and bytes, 0 none */
 u16 rt_rsteps[BUF_HALVES] D;            /* .. its length in steps */
+/* v0.64.1 merge: each half's take stored 1 / TAKE_HEAD of its level (machines.py TAKE_HEAD: a track's
+ * source with GAIN, the DSP's head_mark rule), so a FLEX save that keeps its frames (v0.63, never
+ * normalised) marks its slot entry the same way (link.c smp_save_head) and plays at the buffer's level */
+u8 rt_rhead[BUF_HALVES] D;
 u8 rt_pend[BUF_N] D;                    /* a take waiting for its QPLAY boundary */
 u32 rt_pfrom[BUF_N] D, rt_plen[BUF_N] D;    /* .. the master steps seen when it began, its steps */
 u32 rt_pt0[BUF_N] D, rt_pfr[BUF_N] D;   /* .. FRAMES when it began, its length in FRAMES */
@@ -292,6 +296,7 @@ static void refuse(u32 track, u32 why)
 u32 rt_last_key D;                      /* the last trig's track << 8 | step (the checks) */
 static u32 rt_last_bytes D = 0;         /* v0.51: the last take's bytes and steps (rt_clear) */
 static u16 rt_last_steps D = 0;
+static u8 rt_last_head D = 0;
 int rt_trig(u32 track, u32 step, u32 b)         /* -> 1: the take started */
 {
     u32 now = FRAMES;
@@ -340,6 +345,8 @@ int rt_trig(u32 track, u32 step, u32 b)         /* -> 1: the take started */
     rt_rplace[ix] = place;
     rt_rbytes[ix] = frames * 2u;
     rt_rsteps[ix] = (u16)steps;
+    rt_rhead[ix] = (u8)(((rt_w[3] >> 24) & 0x3Fu) != 0 && rt_w[2] >= 2);   /* the DSP's head_mark */
+    rt_last_head = rt_rhead[ix];
     rt_last_bytes = frames * 2u;
     rt_last_steps = (u16)steps;
     rt_cur = (int)b;
@@ -370,12 +377,14 @@ int rt_clear(u32 b)
     for (int h = 0; h < 2; h++) {
         rt_rbytes[HALF_IX(b, h)] = 0;
         rt_rsteps[HALF_IX(b, h)] = 0;
+        rt_rhead[HALF_IX(b, h)] = 0;
     }
     rt_play[b] = 0;
     rt_pend[b] = 0;
     if (rt_gen != g && rt_cur == (int)b) {      /* a trig of B fired as it was cleared: its take stands */
         rt_rbytes[HALF_IX(b, 0)] = rt_last_bytes;
         rt_rsteps[HALF_IX(b, 0)] = rt_last_steps;
+        rt_rhead[HALF_IX(b, 0)] = rt_last_head;
     }
     rt_dirty = 1;
     return 1;
@@ -538,7 +547,9 @@ int rt_regions(int dest, u32 s, u32 *next)
 void rt_poll(void)
 {
     extern void bn_led_poll(void);
+    extern void pu_led_poll(void);
     bn_led_poll();                              /* v0.45: the trig LEDs follow the panel (rec.c) */
+    pu_led_poll();                              /* 2026-11-19: VOICE's LED follows the active track's PARA (csrc/para/led.c) */
     if (smp_blank_req != blank_seen) {          /* another project: every take is gone */
         blank_seen = smp_blank_req;
         for (int i = 0; i < BUF_HALVES; i++)
@@ -655,30 +666,68 @@ u32 ms_frames D = 0;
 typedef void (*copy_fn)(void *, const void *, u32);
 #define STOCK_COPY ((copy_fn)0x40134770u)
 
+/* v0.57 (NiKo, 2026-11-15: "the mute function is activated immediately when recording,
+ * shouldn't it wait for the PLEN to cycle"; "you can't simply unmute them"): the SRC track is
+ * muted only while the FLEX track PLAYS -- a voice of the FLEX track whose note is on (the
+ * frame's note-on trigger word 34 sets it, the note-off word 36 clears it, bit v for voice v:
+ * measured in the coupled emulator, 2026-11-16) and heard (its frame LEVEL above 0: a stock
+ * mute of the FLEX track gives the SRC back) -- held MS_HOLD frames past the note's end (the
+ * amp's release, and a retrigger's gap, without a flicker). The DSP's play positions were the
+ * first try: a FLEX voice's take loops on silently after its release, so they never end. */
+#define FRAME_NOTE_ON 17u                       /* u16 index: byte 34 */
+#define FRAME_NOTE_OFF 18u                      /* u16 index: byte 36 */
+static u32 ms_gate __attribute__((section(".data"))) = 0;      /* voices whose note is on */
+static u32 ms_play_at[16] __attribute__((section(".data"))) = {0};
+#define MS_HOLD 300u                            /* frames: about 0.2 s */
+u32 ms_playing_mask __attribute__((section(".data"))) = 0;   /* (the gate reads it) */
+/* the gate's emu_coupled_mute: FLEX tracks taken as playing (0 on the unit: nothing writes
+ * it); the playing itself is emu_coupled_flex --pool's, with a real take */
+u32 ms_play_force __attribute__((section(".data"))) = 0;
+
+static int ms_track_plays(u32 t)
+{
+    volatile u16 *f = CTL_FRAME;
+    for (u32 v = 0; v < 16; v++)
+        if ((ms_gate >> v & 1u) && VOICE_TRACK[v] == t && f[FRAME_LEVEL(v)] != 0)
+            return 1;
+    return 0;
+}
+
 static u32 ms_mask_now(void)
 {
-    u32 m = 0;
+    u32 m = 0, playing = 0;
+    volatile u16 *f = CTL_FRAME;
+    ms_gate = (ms_gate & ~(u32)f[FRAME_NOTE_OFF]) | f[FRAME_NOTE_ON];
     if (!KIT_POINTER)
         return 0;
     for (u32 t = 0; t < 16; t++) {
         if (!rt_is_bounce(t) || !fx_valid(t) || !fx_get(t, FX_MUTE))
             continue;
-        /* v0.55 (owner: muted at once left a gap; "trigger the mute when the rec trig ends"):
-         * the SRC track is heard while the first take records, and muted once the track's
-         * buffer holds a take (its playing half: rt_buf_samp), so FLEX's loop takes over;
-         * cleared, it is heard again */
-        if (!rt_buf_samp(rt_buf_of(t)))
+        /* v0.55: no take in the track's buffer (its playing half), nothing to take over */
+        if (!rt_buf_samp(rt_buf_of(t))) {
+            ms_play_at[t] = 0;
             continue;
+        }
+        if ((ms_play_force >> t & 1u) || ms_track_plays(t))
+            ms_play_at[t] = ms_frames + 1u;             /* (+ 1: 0 is never) */
+        if (!ms_play_at[t] || ms_frames + 1u - ms_play_at[t] > MS_HOLD) {
+            ms_play_at[t] = 0;
+            continue;
+        }
+        playing |= 1u << t;
         int src = fx_get(t, FX_SRC);
         if (src >= 2 && src < 18 && (u32)(src - 2) != t)
             m |= 1u << (src - 2);
     }
+    ms_playing_mask = playing;
     return m;
 }
 
 void ms_frame(void *dst, const void *src, u32 n)
 {
     STOCK_COPY(dst, src, n);                          /* the stock call this replaces */
+    extern void tn_retune(volatile u16 *f);           /* v0.61: microtuning (tune.c) */
+    tn_retune(CTL_FRAME);
     ms_frames++;
     u32 m = ms_mask_now();
     ms_mask = m;
@@ -816,4 +865,11 @@ u32 rt_take_handover(u32 t, u32 *bytes, u32 *steps)
     *bytes = rt_rbytes[ix];
     *steps = rt_rsteps[ix];
     return rt_rplace[ix];
+}
+
+/* v0.64.1 merge: 1 when track T's playing take (rt_take_handover's) is stored 1 / TAKE_HEAD of its level */
+u32 rt_take_head(u32 t)
+{
+    u32 b = rt_buf_of(t);
+    return rt_rhead[HALF_IX(b, rt_play[b])];
 }

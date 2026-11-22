@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import pathlib
+import re
 import sys
 import tempfile
 
@@ -34,25 +35,51 @@ JSEND = importlib.import_module("dnfw.inserts.jsend")
 OUT_JSEND = ROOT / "csrc" / "waverider" / "sharc" / "jsend.asm"
 
 
+def label_sw(text: str, offs: list, at: int, label: str) -> int:
+    """the sw address of LABEL in a resolved TEXT (OFFS: its instructions' byte offsets, AT: its load sw), checked
+    against every resolved jump to it in TEXT"""
+    k, where = 0, None
+    for ln in text.splitlines():
+        s = ln.strip()
+        if s == f"{label}.:":
+            where = k
+        elif ln.startswith("      ") and s and not s.startswith(("//", ".")) and ";" in s:
+            k += 1
+    assert k == len(offs) and where is not None, (label, k, len(offs))
+    sw = at + offs[where] // 2
+    for m in re.finditer(r"JUMP (0x[0-9a-f]+);\s*// -> " + re.escape(label) + r"\.", text):
+        assert int(m.group(1), 16) == sw, (label, m.group(0), hex(sw))
+    return sw
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--no-resolve", action="store_true")
     a = ap.parse_args(argv)
     from dnfw.engines.analog2.filters import design as AD, program as AP     # 2026-11-10: wr_ins -> wr_a2f -> PING
+    # 2026-11-21 (DSP room): jsend enters inspost's one JUNO copy (dnfw.inserts.post.juno_call), so its text is made
+    # once inspost is resolved (a callable job: the resolved texts so far -> its text)
     jobs = [(P.program(dsp.A2F_SW if AD.BUILT_MODELS else dsp.PING_SW), dsp.INS_SW, OUT),
             (POST.program(), dsp.POST_SW, OUT_POST), (BUS.program(), dsp.INSBUS_SW, OUT_BUS),
-            (JSEND.program(), dsp.JSEND_SW, OUT_JSEND)]
+            (lambda done: JSEND.program(juno_sw=label_sw(*done[OUT_POST], f"wr_ip_{POST.JUNO_ENTRY}")),
+             dsp.JSEND_SW, OUT_JSEND)]
     A2F_OUT = ROOT / "csrc" / "waverider" / "sharc" / "a2f.asm"
     if AD.BUILT_MODELS:
         jobs.append((AP.program(dsp.PING_SW), dsp.A2F_SW, A2F_OUT))
     elif A2F_OUT.exists():
         A2F_OUT.unlink()
+    done: dict = {}
     for text, at, out in jobs:
+        if callable(text):
+            if a.no_resolve:
+                raise SystemExit("jsend.asm needs inspost.asm resolved (JUNO's one copy): run without --no-resolve")
+            text = text(done)
         if not a.no_resolve:
             R = importlib.import_module("sharc_resolve_jumps")      # (selas)
             with tempfile.TemporaryDirectory() as tmp:
                 text, be, offs = R.resolve(text, at, pathlib.Path(tmp))
             print(f"resolved at sw {at:#x}: {len(offs)} instructions, {len(be)} bytes")
+            done[out] = (text, offs, at)
         out.write_text(text, encoding="utf-8", newline="\n")
         n = sum(1 for ln in text.splitlines() if ln.startswith("      ") and not ln.strip().startswith("//"))
         print(f"wrote {out.relative_to(ROOT)}: {n} instructions")

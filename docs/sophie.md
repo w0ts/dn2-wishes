@@ -1,6 +1,6 @@
 # SOPHIE: Sophie's percussion on the DN2 (fork, not released)
 
-A sixth Monomachine-style machine, **Sophie / SOP** in MACHINE SEL (machine type 20; 17 until v0.45, which gave 17 to upstream's BOUNCE), after
+A sixth Monomachine-style machine, **Sophie / SOP** in MACHINE SEL (machine type 53 since 2026-11-18; 20 v0.45..v0.58.x, now upstream's FM+ DYN; 17 until v0.45, which gave 17 to upstream's BOUNCE: docs/machine-types.md), after
 VO-6. A port of Matt Estela's **Schwung Sophie** (github.com/mestela/schwung-sophie,
 `src/dsp/sophie.c`, MIT; THIRD-PARTY.md), the synth Overtone (complex-ping) also carries as its
 SOPHIE machine on OS 1.12. Overtone publishes no source for it (its patcher ships byte diffs),
@@ -26,6 +26,9 @@ its run-mode model, in PERC's voice like the Monomachine machines (`docs/mnm.md`
 KICK is Sophie's pad-1 topology (a tuned sine body, its fold, a quiet FM texture and a click)
 with model 0. MACHINE SEL starts it at Sophie's factory snare (pad 3): DCAY 61, COLR 66, METL
 97, FBK 23, SWEP 82, CRSH 38, FUSE.
+
+On SOPHIE, H on the AMP page is AMP ON/OFF, OFF by default: the AMP envelope and VOL bypassed (gain 1.0, no release:
+DCAY is the hit's length); ON is stock's AMP (2026-11-20, docs/live-select.md "AMP ON/OFF on the drum machines").
 
 ## What is left out (against Sophie)
 

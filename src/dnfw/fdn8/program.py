@@ -52,35 +52,58 @@ DIFF_WORDS = 1024
 DIFF_SEND_L2 = 0x200A4000
 DIFF_BUS0_L2 = DIFF_SEND_L2 + 4 * DIFF_WORDS
 DIFF_LO, DIFF_HI = D.RB_A[0], D.RB_A[-1] + D.A48[-1]
+DIFF_LO_H, DIFF_HI_H = D.RB_AH[D.HALF_DIFF[0]], D.RB_AH[D.HALF_DIFF[-1]] + D.A24[D.HALF_DIFF[-1]]   # HALF's (2026-11-22)
+assert DIFF_HI_H - DIFF_LO_H + 1 <= DIFF_WORDS
 BUS0_RING = 0x82800000                            # the bus's FDN8 instance 0's ring (dnfw.inserts.design.FDN8_RING_DDR)
 assert DIFF_HI - DIFF_LO + 1 <= DIFF_WORDS and D.RING_WORDS % DIFF_WORDS == 0
 assert DIFF_SEND_L2 % (4 * DIFF_WORDS) == 0 and DIFF_BUS0_L2 + 4 * DIFF_WORDS <= 0x200A6550   # aligned; the allotment
+# 2026-11-21 (fx-fast; the User: 28 KB of the reserve above PARA's pool): the bus instances 1..7's diffusers in L2 rings
+# of their own too, instance k at DIFF_BUSK_L2 + 4 KB (k - 1), 0x200EE000..0x200F5000 (20 KB of the reserve stay free)
+DIFF_BUSK_L2 = 0x200EE000
+BUS_RING_STRIDE, BUS_INSTANCES = 0x80000, 8      # (dnfw.inserts.design FDN8_RING_STRIDE, FDN8_INSTANCES)
+DIFF_BUSK_END = DIFF_BUSK_L2 + 4 * DIFF_WORDS * (BUS_INSTANCES - 1)
+assert DIFF_BUSK_L2 % (4 * DIFF_WORDS) == 0 and DIFF_BUSK_END <= 0x200F5000
+assert BUS_RING_STRIDE == 4 * DIFF_WORDS << 7    # (the instance's ring offset >> 7 is its 4 KB diffuser ring offset)
 
-_NAMES = (["ring", "mode", "im", "cur", "clr", "pos", "force", "p4", "pd4", "xw", "gd1", "gd2", "gh", "ah", "al", "hs", "ls",
-           "dq", "io", "par", "went", "qin", "qn", "t0", "t1", "t2", "t3", "t4", "t5", "t6", "t7"]
-          + [f"{n}{k}" for n in ("ph", "ro", "eta", "ap", "lp", "c", "g", "f") for k in range(8)]
-          + [f"last{k}" for k in range(6)] + [f"pr{k}" for k in range(6)]
+# 2026-11-22 (HALF, the bus inserts' FDN8): the words an instance keeps from block to block first (PERSIST; the bus
+# pass swaps only these: dnfw.inserts.bus), the HALF resamplers' kept samples among them; then the words every block
+# writes before it reads them (scratch, shared by the send and every instance)
+_PERSIST = (["ring", "cur", "clr", "pos", "force", "p4", "pd4", "gd1", "gd2", "gh", "ah", "al", "hs", "ls", "dq", "qn"]
+            + [f"{n}{k}" for n in ("ph", "ap", "lp", "c", "g") for k in range(8)]
+            + [f"last{k}" for k in range(6)]
+            + [f"dh{k}" for k in range(17)] + [f"il{k}" for k in range(9)] + [f"ir{k}" for k in range(9)])
+_NAMES = (_PERSIST
+          + ["mode", "im", "xw", "io", "par", "went", "qin", "t0", "t1", "t2", "t3", "t4", "t5", "t6", "t7"]
+          + [f"{n}{k}" for n in ("ro", "eta", "f") for k in range(8)] + [f"pr{k}" for k in range(6)]
           + [f"sv{k}" for k in range(16)] + ["svi0", "svi1", "svi2", "svi3", "svi4", "svi12", "sva"]
-          + ["xsd", "xf", "xwl", "xwr", "gdx1", "gdx2"] + [f"gx{k}" for k in range(8)]   # 2026-11-11: the second page, after the words an instance swaps
-          + ["dmask", "dbase"])                  # 2026-11-13: the diffusers' ring (diff_ring), set every block
+          + ["xsd", "xf", "xwl", "xwr", "gdx1", "gdx2"] + [f"gx{k}" for k in range(8)]   # 2026-11-11: the second page
+          + ["dmask", "dbase"])                    # 2026-11-13: the diffusers' ring (diff_ring), set every block
 C = {n: STATE + 4 * k for k, n in enumerate(_NAMES)}
 assert len(C) == len(_NAMES), "a state word named twice"
-DYN_WORDS = (C["sv0"] - STATE) // 4               # an instance's words: STATE .. sv0 (then ACT's)
+DYN_WORDS = len(_PERSIST)                         # an instance's words: STATE .. (the send's set aside as many)
 CTAB = STATE + 4 * len(_NAMES)                    # the stock buffers' chunk addresses
 N_STOCK_CHUNKS = R.STOCK_WORDS // R.CHUNK
 assert all((b - a) % (4 * R.CHUNK) == 0 for a, b in R.STOCK_BUFS)
-# the active variant's table (what differs between FDN8 and LONG, design.variant), copied from
-# VT1 / VT2 at a switch: a line's read centre and gain length (floats), its damping length, its
-# ring offsets (x 4) and the diffusers', the decay factor
+# the active variant's table (what differs between FDN8, LONG and HALF, design.variant), copied from VT1 / VT2 at a
+# switch (the send), from VT3 by the bus pass before its instances run: a line's read centre and gain length
+# (floats), its damping length, its ring offsets (x 4) and the diffusers', the decay factor; 2026-11-22: the
+# parameters' constants (design.variant: kkt kinv fexc dgrow, the pre-delay's length as a float and an int, whp wlp)
 _ACT = ([f"lc{k}" for k in range(8)] + [f"ng{k}" for k in range(8)] + [f"sl{k}" for k in range(8)]
         + [f"rl{k}" for k in range(8)] + [f"rw{k}" for k in range(8)] + [f"db{k}" for k in range(4)]
-        + [f"dw{k}" for k in range(4)] + ["ktv"])
+        + [f"dw{k}" for k in range(4)] + ["ktv", "kkt", "kinv", "fexc", "dgrow", "pdf", "pdi", "whp", "wlp"]
+        + ["nb", "nb2", "nb4", "xtop", "lbuf", "dn", "dk4"])    # the block's sizes (stages.sizes: 32 / HALF's 16)
 ACT = CTAB + 4 * N_STOCK_CHUNKS
 A = {n: ACT + 4 * k for k, n in enumerate(_ACT)}
 NV = len(_ACT)
 VT1 = ACT + 4 * NV
 VT2 = VT1 + 4 * NV
-assert VT2 + 4 * NV <= STATE + STATE_BYTES
+VT3 = VT2 + 4 * NV
+assert VT3 + 4 * NV <= STATE + STATE_BYTES
+# the block's buffers (stages.bufs: X, S, F; 2026-11-22: out of the state, to make room for VT3) in L1 after the bus
+# FDN8 instances' stores (dnfw.inserts.bus.FD_L1, 8 x DYN_WORDS words from 0x2E4050), before 0x2E5400
+BUF_L1 = 0x2E4050 + 4 * 8 * DYN_WORDS
+BUF_L1 = (BUF_L1 + 15) & ~15
+BUF_L1_END = 0x2E5400
 
 
 def variant_words(v: int) -> list[int]:
@@ -91,8 +114,8 @@ def variant_words(v: int) -> list[int]:
         return struct.unpack("<I", struct.pack("<f", float(R.F(x))))[0]
     w = {}
     for k in range(8):
-        w[f"lc{k}"] = fw(d["L"][k] + D.CM - 0.5)
-        w[f"ng{k}"] = fw(-(d["L"][k] + D.CM))
+        w[f"lc{k}"] = fw(d["L"][k] + d["cm"] - 0.5)
+        w[f"ng{k}"] = fw(-(d["L"][k] + d["cm"]))
         w[f"sl{k}"] = fw(d["sl"][k])
         w[f"rl{k}"] = d["RL"][k]
         w[f"rw{k}"] = d["RL"][k] * 4
@@ -100,6 +123,12 @@ def variant_words(v: int) -> list[int]:
         w[f"db{k}"] = (d["RA"][k] + d["A"][k]) * 4
         w[f"dw{k}"] = d["RA"][k] * 4
     w["ktv"] = fw(d["ktv"])
+    for n in ("kkt", "kinv", "fexc", "dgrow", "whp", "wlp"):
+        w[n] = fw(d[n])
+    w["pdf"] = fw(float(d["pd"]))
+    w["pdi"] = d["pd"]
+    from . import stages
+    w.update(stages.sizes(v == 3))
     return [w[n] for n in _ACT]
 
 
@@ -120,7 +149,7 @@ def state_bytes() -> bytes:
         w[(C[f"ph{k}"] - STATE) // 4] = D.LFO_PH0[k]
     for k, a in enumerate(stock_chunks()):
         w[(CTAB - STATE) // 4 + k] = a
-    for base, v in ((VT1, 1), (VT2, 2)):
+    for base, v in ((VT1, 1), (VT2, 2), (VT3, 3)):
         for k, x in enumerate(variant_words(v)):
             w[(base - STATE) // 4 + k] = x
     return struct.pack(f"<{len(w)}I", *w)
@@ -267,6 +296,20 @@ def params(p: Prog) -> None:
     p.fop(5, 0, "*", 1)                          # s
     p.ld(0, C["pr2"])
     p.fop(6, 0, "*", 1)                          # d
+    for k, (kp, kc) in enumerate(D.SIZE_HINGES):  # design.SIZE_MAP: s -> optimist's SIZE (ref.size_map)
+        p.fconst(1, kp)
+        p.fop(0, 5, "-", 1)
+        p.fconst(1, 0.0)
+        p.fop(0, 0, "MAX", 1)
+        p.fconst(1, kc)
+        if k == 0:
+            p.fop(2, 0, "*", 1)                  # acc (ref.size_map: 0 + the first, the same bits)
+        else:
+            p.fop(0, 0, "*", 1)
+            p.fop(2, 2, "+", 0)
+    p.fop(5, 5, "+", 2)
+    p.fconst(1, 127.0)
+    p.fop(5, 5, "MIN", 1)                        # s, held to 127
     p.fconst(1, D.KNEE)
     p.fop(7, 5, "-", 1)
     p.fconst(1, 0.0)
@@ -286,7 +329,7 @@ def params(p: Prog) -> None:
     p.fconst(1, 14647.0)
     p.fop(3, 1, "-", 3)
     p.fop(3, 3, "+", 2)
-    p.fconst(1, R.K_KT)
+    p.ld(1, A["kkt"])                            # (design.variant: the tank's rate)
     p.fop(3, 3, "*", 1)                          # kt
     p.st(C["t1"], 3)
     p.fconst(1, D.DBL_PER_STEP)
@@ -373,7 +416,7 @@ def params(p: Prog) -> None:
         exp2(p)
         p.fconst(1, 1.0)
         p.fop(0, 0, "-", 1)
-        p.fconst(1, 1 / D.K48)
+        p.ld(1, A["kinv"])
         p.fop(5, 0, "*", 1)                      # q
         p.fop(6, 5, "+", 5)                      # 2q
         p.fconst(1, 4.0)
@@ -388,9 +431,9 @@ def params(p: Prog) -> None:
         p.stpost(1, 0)
     p.loop(C["f6"], 8, damp)
     p.ld(7, C["t0"])                             # y
-    p.fconst(1, R.DEP_GROW)
+    p.ld(1, A["dgrow"])
     p.fop(0, 7, "*", 1)
-    p.fconst(1, D.FEXC48)
+    p.ld(1, A["fexc"])
     p.fop(0, 0, "+", 1)
     p.ld(2, C["pr3"])
     p.fconst(1, D.MOD_MAX)
@@ -399,10 +442,10 @@ def params(p: Prog) -> None:
     p.st(C["dq"], 0)
     p.ld(0, C["pr0"])
     p.fop(0, 0, "*", 0)
-    p.fconst(1, float(D.PD_MAX))
+    p.ld(1, A["pdf"])
     p.fop(0, 0, "*", 1)
     p.trunc(0, 0)
-    p.iconst(1, D.PD_MAX)
+    p.ld(1, A["pdi"])
     p.iop(0, 0, "MIN", 1)
     p.iconst(12, D.RB_PD)
     p.iop(0, 12, "+", 0)
@@ -425,12 +468,12 @@ def params(p: Prog) -> None:
     p.fconst(1, D.GIN * 0.5)
     p.fop(0, 0, "*", 1)
     p.st(C["gh"], 0)
-    for k, w, name in ((4, R.W_HPF, "ah"), (5, R.W_LPF, "al")):
+    for k, w, name in ((4, "whp", "ah"), (5, "wlp", "al")):
         p.ld(0, C[f"pr{k}"])
         p.fconst(1, R.LOG2_100)
         p.fop(0, 0, "*", 1)
         exp2(p)
-        p.fconst(1, w)
+        p.ld(1, A[w])
         p.fop(0, 0, "*", 1)
         exp2(p)
         p.fconst(1, 1.0)
@@ -773,37 +816,45 @@ def _fdn8_block(p: Prog) -> None:
         p.st(C["p4"], 8)
         return
     diff_ring(p)
-    tank(p)
+    tank(p)                                      # 2026-11-22: the bus instances' HALF tank too (stages.tank)
 
 
 def diff_ring(p: Prog) -> None:
-    """C['dmask'], C['dbase']: the diffusers' ring this block: the send's or the bus instance 0's L2 ring (TYPE FDN8,
-    C['cur'] 1), else this instance's own ring (MASK4, C['ring']). Clobbers R0-R2, R12"""
+    """C['dmask'], C['dbase']: the diffusers' ring this block: TYPE FDN8 (C['cur'] 1), the send's L2 ring or the bus
+    instance's (0: DIFF_BUS0_L2; 1..7: DIFF_BUSK_L2 + 4 KB (k - 1), 2026-11-21); else (LONG) this instance's own ring
+    (MASK4, C['ring']). Clobbers R0-R2, R12"""
     p.iconst(0, MASK4)
     p.st(C["dmask"], 0)
     p.ld(1, C["ring"])
     p.st(C["dbase"], 1)
 
     def fdn():
-        def l2(base):
-            return lambda: (p.iconst(0, 4 * DIFF_WORDS - 1), p.st(C["dmask"], 0), p.iconst(0, base), p.st(C["dbase"], 0))
+        def bus():                               # R2: k x 4 KB from the instance's ring
+            p.iconst(2, BUS0_RING)
+            p.iop(2, 1, "-", 2)
+            p.lsh(2, 2, -7)
+            p.iconst(12, DIFF_BUSK_L2 - 4 * DIFF_WORDS)
+            p.iop(0, 12, "+", 2)
+            p.ifz(2, "EQ", lambda: p.iconst(0, DIFF_BUS0_L2))
         p.iconst(2, RING)
-        p.if_(1, "EQ", 2, l2(DIFF_SEND_L2), kind="i")
-        p.iconst(2, BUS0_RING)
-        p.if_(1, "EQ", 2, l2(DIFF_BUS0_L2), kind="i")
+        p.if_(1, "EQ", 2, lambda: p.iconst(0, DIFF_SEND_L2), bus, kind="i")
+        p.st(C["dbase"], 0)
+        p.iconst(0, 4 * DIFF_WORDS - 1)
+        p.st(C["dmask"], 0)
     p.ld(0, C["cur"])
     p.iconst(2, 1)
     p.if_(0, "EQ", 2, fdn, kind="i")
 
 
-def ring_view(get, ring: int, p4: int, l2: int | None) -> list[int]:
+def ring_view(get, ring: int, p4: int, l2: int | None, v: int = 1) -> list[int]:
     """the ring's words as the reference holds them (ref.Ref.ring), from memory GET: the ring at RING, its diffusers' words
     (the 606 past the stored p, one sample on from the last block's) from the L2 ring L2 when the instance last ran FDN8
     with one (diff_ring), else the ring's"""
     words = [get(ring + 4 * k) or 0 for k in range(D.RING_WORDS)]
     if l2 is not None:
         p = (p4 >> 2) & D.RING_MASK
-        for off in range(DIFF_LO + 1, DIFF_HI + 2):
+        lo, hi = (DIFF_LO, DIFF_HI) if v != 3 else (DIFF_LO_H, DIFF_HI_H)
+        for off in range(lo + 1, hi + 2):
             i = (p + off) & D.RING_MASK
             words[i] = get(l2 + 4 * (i % DIFF_WORDS)) or 0
     return words
@@ -820,15 +871,27 @@ def silence(p: Prog) -> None:
 
 
 def clearing(p: Prog) -> None:
-    """CHUNK words of the type switched to, then the wet silent"""
+    """a block of the type switched to's clearing, then the wet silent: FDN8 / LONG ref.WIN[type] words of the ring's
+    window (ref.WINDOW_CLEAR, 2026-11-21: from p rounded down to 16 words, C['pos'] on, each 16-word group's address
+    masked, so it wraps round the ring's end; until then the whole ring from its start, CHUNK words a block), the stock
+    buffers CHUNK words (pos / CHUNK's chunk). One store loop: R13 the base, R2 the offset (bytes), R9 its mask"""
     p.ld(0, C["pos"])
     p.ld(1, C["cur"])
 
-    def fdn():                                   # the ring, from its start
-        p.lsh(2, 0, 2)
-        p.ld(12, C["ring"])
-        p.iop(2, 12, "+", 2)
-        p.seti(4, 2)
+    def fdn():
+        p.ld(2, C["p4"])
+        p.iconst(12, MASK4 & ~63)
+        p.iop(2, 2, "AND", 12)
+        p.lsh(0, 0, 2)
+        p.ipass(12, 2)
+        p.iop(2, 12, "+", 0)
+        p.ld(13, C["ring"])
+        p.iconst(9, MASK4)
+        p.iconst(14, R.WIN[1])
+        p.iconst(12, 2)
+        p.if_(1, "EQ", 12, lambda: p.iconst(14, R.WIN[2]), kind="i")
+        p.ld(12, C["im"])                        # 2026-11-22: an instance clears HALF's window
+        p.ifz(12, "NE", lambda: p.iconst(14, R.WIN[3]))
 
     def stock():                                 # the stock buffers: chunk pos / CHUNK's address
         p.lsh(2, 0, -12)                         # (CHUNK is 2^12)
@@ -836,22 +899,28 @@ def clearing(p: Prog) -> None:
         p.iconst(12, CTAB)
         p.iop(2, 12, "+", 2)
         p.seti(4, 2)
-        p.ldi(2, 0, 4)
-        p.seti(4, 2)
+        p.ldi(13, 0, 4)
+        p.iconst(2, 0)
+        p.iconst(9, -1)
+        p.iconst(14, R.CHUNK)
     p.ifz(1, "NE", fdn, stock)
+    p.lsh(11, 14, -4)
     p.fconst(0, 0.0)
 
-    def sixteen():
+    def group():
+        p.iop(2, 2, "AND", 9)
+        p.iop(3, 13, "+", 2)
+        p.seti(4, 3)
         for _ in range(16):
             p.stpost(4, 0)
-    p.loop_r(11, R.CHUNK // 16, sixteen)
+        p.iconst(12, 64)
+        p.iop(2, 12, "+", 2)
+    p.loop_r(11, None, group)
     p.ld(0, C["pos"])
-    p.iconst(12, R.CHUNK)
-    p.iop(0, 12, "+", 0)
+    p.iop(0, 14, "+", 0)
     p.st(C["pos"], 0)
     p.ld(0, C["clr"])
-    p.iconst(1, R.CHUNK)
-    p.iop(0, 0, "-", 1)
+    p.iop(0, 0, "-", 14)
     p.st(C["clr"], 0)
     silence(p)
 
@@ -866,19 +935,28 @@ def switch(p: Prog) -> None:
     p.st(C["pos"], 0)
 
     def to_fdn():
-        p.iconst(2, VT1)                         # the variant's table into the active one
-        p.iconst(3, 2)
-        p.if_(1, "EQ", 3, lambda: p.iconst(2, VT2), kind="i")
-        p.seti(4, 2)
-        p.iconst(2, ACT)
-        p.seti(0, 2)
+        def table():
+            p.iconst(2, VT1)                     # the variant's table into the active one
+            p.iconst(3, 2)
+            p.if_(1, "EQ", 3, lambda: p.iconst(2, VT2), kind="i")
+            p.seti(4, 2)
+            p.iconst(2, ACT)
+            p.seti(0, 2)
 
-        def one():
-            p.ldpost(2, 4)
-            p.stpost(0, 2)
-        p.loop_r(11, NV, one)
-        p.iconst(0, D.RING_WORDS)
-        p.st(C["clr"], 0)
+            def one():
+                p.ldpost(2, 4)
+                p.stpost(0, 2)
+            p.loop_r(11, NV, one)
+            p.iconst(0, R.CLEAR_BLOCKS * R.WIN[1])   # (ref.WINDOW_CLEAR; D.RING_WORDS until 2026-11-21)
+            p.iconst(3, 2)
+            p.if_(1, "EQ", 3, lambda: p.iconst(0, R.CLEAR_BLOCKS * R.WIN[2]), kind="i")
+            p.st(C["clr"], 0)
+
+        def half():                              # 2026-11-22: an instance (HALF): the bus pass put VT3 in ACT
+            p.iconst(0, R.CLEAR_BLOCKS * R.WIN[3])
+            p.st(C["clr"], 0)
+        p.ld(2, C["im"])
+        p.ifz(2, "NE", half, table)
         p.iconst(0, 0)
         for k in range(8):
             p.st(C[f"ap{k}"], 0)
@@ -1015,7 +1093,9 @@ def program(prefix: str = "fd") -> str:
     p.emit_subs()
     p.raw(".wr_fdn8..end:")
     p.raw("      .type wr_fdn8.,STT_FUNC;")
-    return p.text()
+    # 2026-11-20 (DRUM's room): the R12 loads nothing reads, folded (dnfw.perc.flow)
+    from ..perc import flow as _FLOW
+    return _FLOW.fold_text(p.text())
 
 
 def run(mem: Mem, regs: dict[int, int]) -> tuple[str, Prog]:

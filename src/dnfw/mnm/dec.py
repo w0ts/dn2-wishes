@@ -159,6 +159,8 @@ def _body(p: Prog, L: C.Layout) -> None:
     p.st(W["n5"], 12)                          # (v0.41's inner count, 0 at the end)
     for k in range(5):
         p.sti(k, 2, XS[k])
+    # (2026-11-20, clip-inner: an output word the limiter held, TOP or -1.0, lights CLIP where the voice reads its
+    # stream: dnfw.md.voice._resample)
 
 
 def decimate(p: Prog, L: C.Layout) -> None:

@@ -33,7 +33,7 @@ _NAMES = (["t", "cnt", "tr", "sel", "i", "j", "rec", "sa", "rb", "lp", "rp"] + [
           + [f"s{k}" for k in range(6)]
           + ["wg", "dl", "ab", "ct", "nv", "inc", "base", "dep", "fb", "k", "ph0", "v", "a0", "d",
              "step", "gl", "gr", "pos"]
-          + [f"sv{k}" for k in range(16)] + [f"svi{i}" for i in SAVE_I] + ["sva", "bk", "bg"])
+          + [f"sv{k}" for k in range(16)] + [f"svi{i}" for i in SAVE_I] + ["sva", "bk", "bg", "jret"])
 C = {n: SCRATCH + 4 * k for k, n in enumerate(_NAMES)}
 SCRATCH_BYTES = 4 * len(_NAMES)
 # 2026-11-14 (delay leaks; the User: "Fix all, start fresh"): an insert that did not run starts from silence when it
@@ -58,7 +58,7 @@ assert D.POST_RING_STRIDE == (1 << 12) + (1 << 4)       # run(): i << 12 + i << 
 
 # 2026-11-09: DRONE's BEAT (dnfw.engines.drone.drone): the side of its two ears, per voice slot, written by the
 # machine before the chain (pre-amp) and mixed here after the pan, scaled by what the chain did to the mid
-SIDE_L2 = 0x200B1800             # slot t's block at SIDE_L2 + SIDE_STRIDE t (dnfw.waverider.dsp)
+SIDE_L2 = 0x200B1B00             # slot t's block at SIDE_L2 + SIDE_STRIDE t (dnfw.waverider.dsp; 0x200b1800 until 2026-11-16)
 SIDE_STRIDE = 0x90               # 36 words: 0..31 the side, 32 sum |mid| pre-amp, 33 flag (1.0), 34 last gain
 SIDE_BYTES = 16 * SIDE_STRIDE
 assert SIDE_L2 >= STATE + STATE_BYTES + 8 * D.BLOCK + 4 * len(_NAMES)
@@ -311,21 +311,29 @@ def wide(p: Prog) -> None:
     p.seti(2, 4)
     p.iconst(4, WR)
     p.seti(3, 4)
-    p.ld(0, C["p0"])                             # R0 MIX, R3 ab, R4 ct, R5 WDTH, R6 lb, R7 lt, R10 4,
-    p.ld(3, C["ab"])                             # R13 the ring's base, R14 4 MASK, R15 t
+    # 2026-11-21 (fx-fast): TIME is the block's, so its 32 reads are consecutive ring words: read through I4
+    # post-modified, in two runs split where they reach the ring's end (R13 the first's words, R14 the second's,
+    # R15 the ring's base; the second may be empty), not each one's address masked: the same words, the same order
+    p.iconst(14, 4 * MASK)
+    p.iop(8, 15, "AND", 14)                      # the first read's byte in the ring
+    p.iop(9, 13, "+", 8)
+    p.seti(4, 9)
+    p.ipass(15, 13)
+    p.iconst(12, 4 * D.POST_RING)
+    p.iop(13, 12, "-", 8)
+    p.lsh(13, 13, -2)                            # the words to the ring's end
+    p.iconst(12, D.BLOCK)
+    p.iop(13, 13, "MIN", 12)
+    p.iop(14, 12, "-", 13)
+    p.ld(0, C["p0"])                             # R0 MIX, R3 ab, R4 ct, R5 WDTH, R6 lb, R7 lt
+    p.ld(3, C["ab"])
     p.ld(4, C["ct"])
     p.ld(5, C["p1"])
     p.ld(6, C["s1"])
     p.ld(7, C["s2"])
-    p.iconst(10, 4)
-    p.iconst(14, 4 * MASK)
 
     def second():
-        p.iop(8, 15, "AND", 14)
-        p.iop(8, 8, "+", 13)
-        p.seti(4, 8)
-        p.ldi(8, 0, 4)                           # d
-        p.iop(15, 15, "+", 10)
+        p.ldpost(8, 4)                           # d
         p.fop(9, 8, "-", 6)
         p.fop(9, 9, "*", 3)
         p.fop(6, 6, "+", 9)                      # lb
@@ -349,12 +357,21 @@ def wide(p: Prog) -> None:
         p.fop(9, 9, "*", 0)
         p.fop(9, 12, "+", 9)
         p.stpost(1, 9)
-    p.loop_r(11, D.BLOCK, second)
+
+    def run():
+        p.ipass(11, 13)
+        p.ifz(11, "NE", lambda: p.loop_r(11, None, second))
+        p.seti(4, 15)                            # the second run from the ring's first word
+        p.ipass(13, 14)
+    p.loop_r(10, 2, run)
     p.st(C["s1"], 6)
     p.st(C["s2"], 7)
 
 
 def chor_params(p: Prog) -> None:
+    """CHOR's block values (postref.PostRef.chor's first lines). 2026-11-16 (FDBK's curve, 7 instructions more): k right
+    after nv (no reload) as recip(nv / 2), the phase's increment kept in R0 (no store and load), FDBK branch-free: the
+    same values (test_inserts_post holds them to the reference bit for bit)"""
     p.ld(0, C["p4"])
     p.fconst(1, D.CH_VOICES_K)
     p.fop(0, 0, "*", 1)
@@ -362,16 +379,22 @@ def chor_params(p: Prog) -> None:
     p.iconst(12, 1)
     p.iop(0, 12, "+", 0)
     p.st(C["nv"], 0)
+    p.iconst(1, -1)                              # k = 2 / nv as recip(nv / 2): the same bits as recip(nv) x 2 (recip's
+    p.float_(0, 0, 1)                            # guess and Newton steps scale exactly by 2)
+    FP.recip(p)
+    p.st(C["k"], 0)
     p.ld(0, C["p2"])
     p.fconst(1, D.LOG2_CR_SPAN)
     p.fop(0, 0, "*", 1)
     FP.exp2(p)
     p.fconst(1, D.CH_RATE_LO * D.PH_PER_HZ)
     p.fop(0, 0, "*", 1)
-    p.trunc(0, 0)
-    p.st(C["inc"], 0)
-    for dst, src, k, add in (("base", "p3", D.CH_DLY_SPAN, D.CH_DLY_MIN), ("dep", "p1", D.CH_DEP_MAX, None),
-                             ("fb", "p6", D.CH_FB_MAX, None)):
+    p.trunc(0, 0)                                # inc
+    p.ld(8, C["s0"])
+    p.st(C["ph0"], 8)
+    p.iop(0, 8, "+", 0)
+    p.st(C["s0"], 0)                             # ph1
+    for dst, src, k, add in (("base", "p3", D.CH_DLY_SPAN, D.CH_DLY_MIN), ("dep", "p1", D.CH_DEP_MAX, None)):
         p.ld(0, C[src])
         p.fconst(1, k)
         p.fop(0, 0, "*", 1)
@@ -379,18 +402,13 @@ def chor_params(p: Prog) -> None:
             p.fconst(1, add)
             p.fop(0, 0, "+", 1)
         p.st(C[dst], 0)
-    p.ld(0, C["nv"])
-    p.iconst(1, 0)
-    p.float_(0, 0, 1)
-    FP.recip(p)
-    p.fconst(1, 2.0)
+    p.ld(0, C["p6"])                             # FDBK (2026-11-16): c0 - 2^(p6 CH_FB_LOG2), c0 = exp2(0): exactly 0 at 0
+    p.fconst(1, D.CH_FB_LOG2)
     p.fop(0, 0, "*", 1)
-    p.st(C["k"], 0)
-    p.ld(0, C["s0"])
-    p.st(C["ph0"], 0)
-    p.ld(12, C["inc"])
-    p.iop(0, 12, "+", 0)
-    p.st(C["s0"], 0)                             # ph1
+    FP.exp2(p)
+    p.fconst(1, D.CH_FB_C0)
+    p.fop(0, 1, "-", 0)
+    p.st(C["fb"], 0)
 
 
 # 2026-11-14 (insmf): a voice's samples, four a pass as msched multifunction code (the same operations, the same
@@ -760,6 +778,12 @@ SPAN_BACK = 3                    # the words before the one read that a tap read
 SPAN_MOVE = max(D.CH_DEP_MAX * 2 * math.pi * D.CH_RATE_LO * D.CH_RATE_SPAN * D.BLOCK / D.FS,
                 max(2 * dep * D.BLOCK * inc / 65536 for dep, inc in zip(D.JN["dep"], D.JN["inc"])))
 assert D.BLOCK + SPAN_BACK + 3 + SPAN_MOVE <= LINE_WORDS
+# 2026-11-21 (fx-fast): _span copies four words a pass, each run's count rounded up: up to SPAN_ROUND words more a run,
+# read past it (still inside the ring's stride: its spare and the next ring's mirror words, or the ring) and written to
+# LINE after it (the second run then starts where the first should end; the last run's extra words are never read by
+# a tap; LINE_WORDS holds them)
+SPAN_ROUND = 3
+assert D.BLOCK + SPAN_BACK + 3 + SPAN_MOVE + SPAN_ROUND <= LINE_WORDS
 
 
 def span(p: Prog) -> None:
@@ -812,6 +836,12 @@ def _span(p: Prog, back: int) -> None:
         p.ldpost(14, 3)
         p.stpost(4, 14)
 
+    def quads(c):                                # 2026-11-21 (fx-fast): R{c} words four a pass, the count rounded up (at
+        p.iconst(12, 3)                          # most SPAN_ROUND words more: read past the run, inside the ring's
+        p.iop(c, 12, "+", c)                     # stride; written to LINE past it, where the next run or nothing
+        p.lsh(c, c, -2)                          # follows: never read by a tap)
+        p.loop_r(c, None, lambda: [word() for _ in range(4)])
+
     def before():                                # its first words are the ring's last
         p.iconst(12, 4 * D.POST_RING)
         p.iop(14, 8, "+", 12)
@@ -822,14 +852,18 @@ def _span(p: Prog, back: int) -> None:
         p.lsh(9, 9, -2)                          # the words before the ring's first
         p.iop(9, 9, "MIN", 11)
         p.iop(11, 11, "-", 9)                    # then the rest from its first word
-        p.loop_r(9, None, word)
+        p.lsh(8, 9, 2)
+        p.iconst(12, LINE)
+        p.iop(8, 12, "+", 8)                     # where the rest goes in LINE
+        quads(9)
         p.seti(3, 13)
+        p.seti(4, 8)
 
     def inside():
         p.iop(14, 8, "+", 13)
         p.seti(3, 14)
     p.ifz(8, "LT", before, inside)
-    p.ifz(11, "NE", lambda: p.loop_r(11, None, word))
+    p.ifz(11, "NE", lambda: quads(11))
 
 
 # 2026-11-14 (insmf): the two low-passes, four samples a pass as msched multifunction code (the same operations, the
@@ -898,6 +932,44 @@ def juno(p: Prog) -> None:
     p.loop(C["bk"], 2, lambda: juno_tap(p))      # the left tap into WL, then the right into WR
     juno_lp(p)
     _juno_mix(p)
+
+
+# 2026-11-21 (DSP room): JUNO's code is in the upload once. The post pass and the chorus send (dnfw.inserts.jsend)
+# both ran juno() inline (the same 1.7 KB twice); now each enters the one copy at JUNO_ENTRY in inspost.asm with
+# the return address - 1 in I12, the copy keeps it in C["jret"] (juno calls `span`, which takes I12) and returns
+# with JUMP (M14, I12). The same instructions on the same words in the same order: run mode runs juno() at the
+# call, as before. Cost: 5 instructions a JUNO run (I12 = ret, the JUMP, the store, the load, the return).
+JUNO_ENTRY = "juno"
+
+
+def juno_call(p: Prog, entry_sw: int | None = None) -> None:
+    """one block of JUNO (juno()) through its one copy; ENTRY_SW: the copy's resolved address, for a caller in
+    another object (jsend), else the label in this program (the post pass)"""
+    if p.run:
+        juno(p)
+        return
+    assert not p.ibias, f"JUNO's copy is emitted with no I-register bias; the call has {p.ibias}"
+    ret = p.label("jret")
+    p.ret_addr(12, ret)
+    p.e("I12 = R12;")
+    if entry_sw is None:
+        p.juno_called = True
+        p.jump("", f"wr_{p.prefix}_{JUNO_ENTRY}")
+    else:
+        p.jump_abs("", entry_sw, f"JUNO's one copy (inspost.asm wr_ip_{JUNO_ENTRY}.)")
+    p.place(ret)
+
+
+def juno_body(p: Prog) -> None:
+    """JUNO's one copy (emit mode, after the program): juno(), entered by juno_call"""
+    assert not p.run
+    p.place(f"wr_{p.prefix}_{JUNO_ENTRY}")
+    outer, p.ibias = p.ibias, {}
+    p.e(f"DM({C['jret']:#x}) = I12;")
+    juno(p)
+    p.e(f"I12 = DM({C['jret']:#x});")
+    p.e("JUMP (M14, I12);")
+    p.ibias = outer
 
 
 # 2026-11-14 (insmf): JUNO's mix, four samples a pass as msched multifunction code (the same operations, the same
@@ -1090,7 +1162,7 @@ def run(p: Prog) -> None:
         p.ld(0, GW["ist"])
         p.iconst(1, 1)
         p.if_(0, "EQ", 1, restart, kind="i")
-        by_type(lambda: wide(p), lambda: juno(p), lambda: chor(p))
+        by_type(lambda: wide(p), lambda: juno_call(p), lambda: chor(p))
     G.ins_gate(p, GW["icost"], GW["aa"], GW["ist"], go, typ_at=C["sel"])
     for k, (side, d0, d31) in enumerate((("lp", "dl0", "dl31"), ("rp", "dr0", "dr31"))):
         p.ld(0, C[side])
@@ -1170,10 +1242,15 @@ def program(prefix: str = "ip") -> str:
     G.ins_end(p)
     restore(p)
     p.jump_abs("", SENDS_SW, "the FX sends, entered as the engine called them")
+    p.juno_called = getattr(p, "juno_called", False)
+    assert p.juno_called, "the post pass runs JUNO through juno_call"
+    juno_body(p)                                 # (2026-11-21, DSP room) JUNO's one copy, which jsend enters too
     p.emit_subs()
     p.raw(".wr_inpost..end:")
     p.raw("      .type wr_inpost.,STT_FUNC;")
-    return p.text()
+    # 2026-11-20 (DRUM's room): the R12 loads nothing reads, folded (dnfw.perc.flow)
+    from ..perc import flow as _FLOW
+    return _FLOW.fold_text(p.text())
 
 
 def model(mem: Mem, regs: dict[int, int] | None = None) -> Prog:

@@ -186,6 +186,15 @@ def skip_padding(content: bytearray) -> None:
     print(f"  {OUTER_HOOK + 6:#010x}  eleven nops -> bra.s {OUTER_END:#010x}")
 
 
+# **2026-11-17 (the User: the same work every frame, no skip by use; the User's choice "Always run, like LFO1-3"): off.** LFO4
+# runs its fourth iteration and its
+# row refresh for every voice, every frame, as stock's LFO1-3 do: its cost is the same with no LFO4 anywhere, one, or
+# sixteen. What changes against the skip: an LFO4 with DEST 0 keeps advancing its phase and fade (as LFO1-3 do), so a
+# free-running LFO4 given a DEST again is where it would have been, not where it paused. The `nop` skip
+# (skip_padding) is content-independent and stays.
+SKIP_IDLE_LFO4 = False
+
+
 def idle_skip(source: str, ext_live: int, refresh: int, for_block: int) -> str:
     """Replace `a4_top` and `b_top` with the versions that skip an idle LFO4."""
     import re
@@ -252,7 +261,7 @@ def main(sources=SOURCES, entries=ENTRIES, out=OUT, syx=SYX, extra=(), chunks=No
     stub_va = v6a.CAVE
     v6a.require_zero(content, v6a.CAVE, v6a.CAVE_CAP, "cave region")
     stubs = cave_source(table_va, code["lfo4_refresh"], code["lfo4_row_for_block"])
-    if idle:
+    if idle and SKIP_IDLE_LFO4:
         stubs = idle_skip(stubs, code["ext_live"], code["lfo4_refresh"], code["lfo4_row_for_block"])
     payload, offsets = v6a.assemble_stubs(stubs, stub_va)
     if len(payload) > v6a.CAVE_CAP:

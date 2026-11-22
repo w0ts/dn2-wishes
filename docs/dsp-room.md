@@ -179,3 +179,148 @@ Code that way, or code compressed inside the stream and unpacked on the DSP, fre
 
 Feasible, with a unit test the User runs first (a probe build that copies a small routine into L2, flushes,
 runs it and reports through the reply ring). Not built.
+
+## DRUM's room (2026-11-20, branch claude/drum)
+
+With DRUM's hats the upload had **267 B** left (1,048,308 B unpacked); TOM did not fit. The User: find room first,
+bit-exact, no second load.
+
+**Where section 7's bytes are** (`scratch`'s s7map: `dsp.section7` on 1.12's stream, every span through `dsp._blocks`):
+stock's blocks 769,304 B (836,956 with the twin B as a fill block); ours 273,378 B: perc.asm 172,224, smp.asm + pvmix
+23,192, perc2a 17,900, inserts 8,436, fdn8 8,398, inspost 7,054, the DT2 reader's coefficients 6,160, perc2b 5,996, a2f
+5,740, xdly 4,766, insbus 4,340, jsend 2,800, PERC's L1 exp2 2,084, then state and tables under 700 B each; every zero
+span is a 16 B fill block. Inside perc (selas's offsets): PLAITS 30,682, the voice frame 17,670, subroutines 13,102,
+ANALOG2 11,188, VO-6 8,746, PI-ML 7,376, DRUM 6,958, TB303 4,738, the P-I machines ~4,000 each.
+
+**Done, bit-exact** (each measured with selas on the farm; section 7 **1,048,308 -> 1,042,682 B, 5,893 B left**):
+
+| change | bytes |
+|---|---:|
+| **R12 loads nothing reads, folded** (`dnfw.perc.flow`): `R12 = ret; I12 = R12` at a leaf call -> `I12 = ret` (550 in PERC), `R12 = K; In = R12` -> `In = K` (82; the stock's own `I5 = 0x25d748` shape), `R12 = 0x0` read only by `FLOAT Rx BY R12` / `R12 - Rx` / `R12 + Rx` -> `FLOAT Rx` / `-Rx` / `PASS Rx` (153); and 118 in smp, fdn8, xdly, inserts, inspost, jsend, a2f. Only where R12 is dead by the text's control flow (every path writes it before any read; a return, an indirect or absolute jump, CALL, a SIMD region count as reads), each fold re-checked in the folded text | -3,654 (PERC -3,170, the others -484) |
+| **PERC's DDR exp2 no longer loaded** (`ddr_spans`): the program and the sample machines read its L1 copy since 2026-11-12; no code names 0x81216000..0x81216804, and the model holds no words there either (a read would differ in the runner) | -2,068 |
+| (the hats' same-block choke, the clock: docs/drum.md) | +68 |
+| (stage 3, 2026-11-20: TOM, the re-voicing; docs/drum.md "Stage 3": section 7 1,046,118 B, **2,457 B left**; perc 175,618, perc2b 5,972) | +3,436 |
+
+**Proof.** Run mode is unchanged (it never loaded R12 for a call); the model holds the DSP to it. For the text: the
+resolved objects are the folded text modulo addresses; the folded and unfolded texts differ only at the 903 fold sites
+of the three shapes; the unfolded text of the seven other objects is the base commit's asm (nothing else changed) and
+PERC's differs from it only by the choke's code; a second liveness check written apart (scratch r12flow.py) finds R12
+dead after each folded instruction in the resolved files; test/test_perc_flow.py; and the SHARC runner on the build
+(dsp-identity, hwrules, and the steps below).
+
+**Measured, not done** (bigger, or not bit-exact, or not worth it yet: the User decides):
+
+| candidate | bytes | bit-exact | why not now |
+|---|---:|---|---|
+| a constant pool for the 48-bit loads (`R12 = K; Fn = Fn * F12` alone 1,174 times) | ~5,800 (2026-11-12 study) | yes | reserves an index register for the whole program (I0 is PLAITS'); ask first |
+| repeated runs as subroutines, event-only code (EFM host x13, P-I / FM+ init repeats) | ~1,400 | yes | per-machine DSL work; no steady-time cost |
+| repeated runs as subroutines, render code (PLAITS' 89-instruction filter x5 1,920, PI-ML x8 1,188, ...: 23 KB upper bound over all repeats >= 10 instructions) | up to ~3,000 for the top two | yes | a call a block or a sample: DSP time |
+| one exp2 subroutine for dr_exp2 / pldk_exp2 / plnoise_exp2 / plphy_exp2 (the same 34 instructions, input F13 or F15) | ~370 | yes | a move at ~50 call sites |
+| ANALOG 2's mix tables loaded twice (L2 scratch and the a2f L1 state, the same 106 words) | ~400 | yes | a2f's reads to L2 (time) or a first-frame copy |
+| `R12 = PASS Ra; Rd = R12 + Rb` -> `Rd = Rb + Ra` (108, where Rb is R8..R15: G5) | ~216 | yes | small; encoding rule G5 |
+| the DT2 reader's coefficients (6,144) over the link | 6,144 | no (the first second) | not symmetric (0 of 256 rows mirror another): no half-table |
+| stock's runs of one non-zero word as fills | 2,968 | yes | a non-zero fill argument is untested on the boot ROM |
+| a second load / code compressed in the stream | 55 KB+ | yes | cache flush and a unit test first (above) |
+
+## CLAP and the cymbals' room (2026-11-20, branch claude/drum)
+
+On the release base claude/v0626 (DRUM stage 3, the mixer meters, UP / DOWN) the upload had **1,485 B** left (section 7
+1,047,090 B; smp grew with the meters' levels pass). The User: free ~2,400 B bit-exact first, not the constant pool.
+
+**Done, bit-exact** (commit 0f44c03b; measured with selas on the farm, `s7map`):
+
+| change | bytes |
+|---|---:|
+| the machines' inits zero their long state runs by a loop (`md.core.zero_words`, 16 words and more: PI-RC / CC / HH's 96, PI-BD / MT / SD / RS / ML, TRX-S2, TB303, PLAITS, SOPHIE, FM+ STAT / PAR / DYN; TB303's first note): perc2b 5,972 -> 4,250 B | -1,902 |
+| EFM's hostD lookup one subroutine in the host bodies' span (`efm_hostd`, 14 sites) | -416 |
+| one exp2 copy (F15 in, F14 out) for PLAITS' drum kit, ANALOG 2's glide and DRONE (`pldk_exp2`; F15 = F14 after it at their 6 sites, as before) | -242 |
+| `dnfw.perc.flow`: `R12 = PASS Ra; Rd = R12 + Rb` -> `Rd = Rb + Ra` (G5, Rb in R8..R15, R12 dead: 3 sites; the 108 in the table above have Rb in R0..R7, where an add cannot take it first) | -6 |
+| **total** (section 7 1,047,090 -> 1,044,530 B: **4,045 B left**) | **-2,560** |
+
+**Proof.** The model (run mode, the program the SHARC runner holds the DSP to bit for bit) before and after: every
+Machinedrum type (34) and every Monomachine machine (PLAITS on its 13 engines, DRUM on its five types) at four knob sets,
+20 blocks with hits and a type switch each way (both machines' inits): **260 of 260 cases identical in every output word
+and the whole written memory** (only the init / host / trig paths take more or fewer steps). test/test_perc_flow.py (the
+G5 shape). On the room build (aa9416a1): dsp-identity, hwrules, and the SHARC runner's mnm-ma+frame, mnm-mb, mnm-plaits,
+mnm-drone, mnm-a2, decode+map+voice+guard: every one PASS (every model bit-exact to the DSP, types 0-4 bit-identical to
+stock).
+
+**Then, with CLAP and the cymbals** (commit 38d8b2ad; docs/drum.md "Stage 4"): the host lookups of 18 GND / P-I / TRX /
+EFM hosts (`md_pitch0`, `md_pitch1`) and TRX-CH / OH's host words (`trx_hathost`) one copy each in perc2a (-658 B), the
+Monomachine half loop two instructions shorter (15 machines), and in DRUM: the hats' and the cymbal's hit one copy, the
+decay coefficients and the drive's law one subroutine each with exp_neg's and exp2's copies as tails (`Prog.tail`).
+The model before and after: the same 260 cases, every output word identical (DRUM's five old types included). The build
+(88d1955f): section 7 1,048,266 B, **309 B left**.
+
+**Measured, not done:** ANALOG 2's mix tables loaded twice (~400 B: a2f's reads to L2 or a first-frame copy); the
+render-code repeats (PLAITS' filter x5, PI-ML x8: DSP time); plnoise_exp2 / plphy_exp2 into the shared copy (their call
+sites' registers); the constant pool.
+
+## main-next-64's room (2026-11-21, branch claude/dsp-room64)
+
+On main-next-64 (cb1b9fc0) section 7 was 1,047,962 B: **613 B left**, and DRUM (CLAP, RIDE, CRASH, the balances,
+CURV, AMP ON/OFF), live-knobs and live-drum need about 2,000 B more. Bit-exact, each measured with selas on the farm
+(`s7map`), each its own commit:
+
+| change | bytes | DSP time |
+|---|---:|---|
+| ANALOG 2 and JUNO read the A2 mix tables from the A2 filter pass's own L1 copy (`analog2.tables_at` = the a2f program's `TABLES`, the same 106 floats); the copy in the Monomachine L2 scratch (`+0x3200..+0x33A8`) is no longer loaded: that span is one zero fill now | -436 | 9 base-pointer loads change address, no instruction added; the reads are L1 reads now (L2 data costs ~4 cycles a read) |
+| JUNO's code once: the post pass and the chorus send both ran `post.juno` inline (311 instructions, 1.7 KB twice); now each enters the one copy in inspost.asm (`post.juno_call`, `wr_ip_juno`) and it returns through `C["jret"]` (JUNO calls `span`, which takes I12); jsend.asm 2,768 -> 1,044 B, inspost.asm 7,006 -> 7,034 B | -1,696 | +5 instructions a JUNO insert run (`I12 = ret`, the JUMP, the store, the load, the return), +6 on the send (its return-address load is not folded: an absolute jump counts as a read of R12): at most 16 x 5 + 6 = 86 a block |
+| Machinedrum dispatch: two step functions that emit the same text share one body (`md.voice._same_code`, by text now, not only by function): PI-HH's init is PI-CC's (110 instructions), three other inits and two trigs likewise; perc2b 5,972 -> 5,494 B, perc 176,148 -> 176,076 B | -548 | none (the table's JUMP goes to the other copy) |
+| **total** (section 7 1,047,962 -> 1,045,282 B: **3,293 B left**) | **-2,680** | |
+
+**Proof.** The tables: the bytes at `tables_at()` in the L1 span are `table_words()` (test_waverider_dsp), and the only
+text change in perc.asm is the 9 base addresses. JUNO: the copy's 311 instructions are, word for word, the inline run
+of the old inspost.asm and of the old jsend.asm, and the rest of both objects is unchanged but for the call (and
+jsend's own `span` copy gone, inspost's `recip` moved); run mode runs `juno()` at the call as before. The dispatch:
+each merged pair was the same text in the old perc / perc2b. Then the SHARC runner (every model bit-exact to the DSP)
+on each step's build: see the commits.
+
+**Next** (measured, not done): the whole-PERC constant pool (4,628 48-bit constant loads, 958 values, the top 128
+cover 3,315 of them: ~6 KB; `DM(k, I6)` is 4 B, `PM(k, I13)` 6 B, so it needs I6: the User approved it on
+2026-11-21 once stock's interrupt handlers are shown not to read I6 before saving it); the four dispatch tables as
+32-bit address words (~380 B); the register restores on the other exits of fdn8 / xdly (~700 B); perc2a's host
+repeats (up to ~1.9 KB in many small calls).
+
+## PERC's constant pool (2026-11-21, branch claude/const-pool; the User approved it)
+
+**At the combined-67 merge (main's option A, 2026-11-21) the pool is 112 words, `0x2E1980..0x2E1B40`, I6 = `0x2E1A60`
+(k in -56..55):** up-v067's AMP ON/OFF data took `0x2E1B40..0x2E1C00` first. The text below and its table are the
+128-word branch's. Measured at the merge (farm, private selas with patch 0003, on claude/up-v067 79295df4):
+3,462 loads moved to the pool (perc 3,178, perc2a 256, perc2b 28; scripts/perc_cpool_check.py against up-v067's text:
+the same instructions but those and the 3 I6 instructions); perc 178,728 -> 172,390 B (-6,338), perc2a 18,654 -> 18,142,
+perc2b 4,130 -> 4,074; section 7 unpacked 1,048,022 -> 1,041,598 (-6,424; 553 -> 6,977 B left).
+
+A 48-bit immediate load `Rn = 0x...;` whose value is outside the signed 16 bits (those have a 32-bit load already)
+becomes `Rn = DM(k, I6);` (32-bit, k in -64..63) when its value is one of the pool's 128 words: the 128 most frequent
+such values over perc, perc2a and perc2b (`dnfw.perc.cpool`, a text pass after `dnfw.perc.flow`'s fold, before the jump
+resolver). The pool is a 512 B L1 span at `0x2E1A00` (`dsp.PERC_POOL_DM`, the end of hole F2; its words are written by
+`scripts/gen_perc_asm.py` to `csrc/waverider/sharc/perc_pool.json`). I6 = `0x2E1B00` while PERC's code runs: wr_perc
+saves the caller's I6 with the other registers (`program.SAVE_REGS`, word 28 of the save area, `0x2DDE70`) and sets it;
+PERC's one exit (the JUMP on to smp.asm) restores it first, so smp.asm, PING's tail (whose two stock instructions read
+the stock frame through I6) and stock see their own I6. Left alone: return-address loads (the resolver fills them),
+conditional loads, loads in a compute + move, I / M loads, and the SIMD region (there a DM load also writes S{n}).
+
+| | before (claude/dsp-room64) | after |
+|---|---:|---:|
+| perc.asm (PERC's L2 span, 179,712 B) | 176,076 | **169,560** (-6,516) |
+| perc2a.asm / perc2b.asm | 17,868 / 5,494 | 17,372 / 5,436 |
+| the pool (L1, new) | | 512 (+16 B header) |
+| **section 7 unpacked** | 1,045,282 (3,293 B left) | **1,038,738 (9,837 B left; -6,544)** |
+
+3,544 loads moved to the pool (perc 3,267, perc2a 248, perc2b 29). DSP time: the same instruction count for every
+load (one load for one load, from L1: free in the cost model and the runner) plus 3 instructions a block (I6's save,
+set and restore). The model (run mode) never sees the text: unchanged.
+
+**The I6 proof** (stock 1.12's section 7, read with the digikit sharcdb, every instruction checked against selas'
+encodings): the interrupt vectors (IVT at sw `0x120000`) go to one dispatcher (`0x1c0a70`; SECI's at `0x1c0acd`), to
+fatal stubs (EMUI, PARI, ILOPI) or to reset. Both dispatchers read I6 only to save it (`R12 = I6; DM(3, I7) = R12`) and
+restore it on the way out (`I6 = DM(3, I7)`); they enter the handler with `RTS (DB)` without setting I6, so each handler
+saves it itself. Every handler the installer (`0xb8b782`, all its call sites) puts in the tables does: `0xb8afe4` and
+`0x1c02a4` open with `R0 = I6; I6 = I7; DM(I7, M7) = R0` on both their branches; `0xb8a947` only restores I6; the
+default `0xb8b9f2` never reads it and halts. PARI and ILOPI do not touch I6; EMUI (a debugger's) reads `DM(I6)` for its
+error record and halts. So no stock interrupt path reads I6 except to save it, and each restores it.
+
+**Proof of the text**: `scripts/perc_cpool_check.py BASE NEW`: the pool build's perc / perc2a / perc2b are the
+base's instruction for instruction (addresses aside) but for the 3 I6 instructions and the 3,544 loads, each of which
+loads `pool[k + 64]` = its old immediate. `gate_hwrules`: PASS. The SHARC runner on the pool build: see the commit.

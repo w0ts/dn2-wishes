@@ -38,6 +38,8 @@ typedef unsigned char u8;
 
 #include "wr_gen.h"
 #include "../para/para.h"                     /* para_track, para_value */
+#include "../para/one.h"                      /* pv_chord: a PARA chord's notes (2026-11-21) */
+extern pv_chord pv_ch[16];                      /* csrc/para/one.c: a chord per slot (its leader) */
 
 #define KIT       (*(volatile u32 *)0x800052A0u)
 #define SOUND(t)  ((volatile u8 *)(KIT + 52u + 1163u * (u32)(t)))
@@ -133,6 +135,14 @@ static int choice(int t, int j, int n, int frac)
     return clampi(((v * 128 / top) * n) >> 7, 0, n - 1);
 }
 
+/* place P's cost a voice (2026-11-21: the table was stale, 15 places for 55, and JUNO, DRONE, TB303, DRUM and
+ * MONOMACHINE's engines 2-5 were read past load_mnm's end: whatever came next, JUNO load_md's 4,531). wr_gen.h now
+ * refuses a table that does not cover MNM_N; a place outside it still costs the dearest place's, never a stray word */
+static u32 mnm_cost(int p)
+{
+    return p >= 0 && p < LOAD_MNM_N ? load_mnm[p] : LOAD_MNM_MAX;
+}
+
 /* a voice of track T, cycles; *STOCK set for a stock machine (whose slots cost it always) */
 static u32 track_cost(int t, int *stock)
 {
@@ -154,8 +164,8 @@ static u32 track_cost(int t, int *stock)
             c = load_sophie[choice(t, LOAD_J_SOPHIE, sizeof load_sophie / sizeof load_sophie[0], 0)];
         else if (mi >= 0 && mi == LOAD_MI_A2)
             c = load_a2flt[choice(t, LOAD_J_A2, sizeof load_a2flt / sizeof load_a2flt[0], 1)];
-        else if (mi >= 0)                       /* MONOMACHINE: its engine's place (ENGN) */
-            c = load_mnm[mnm_live(mi, WORD(t, mnm_slot[MNM_MONO_J]))];
+        else if (mi >= 0)                       /* a host: its choice's place (MONOMACHINE's ENGN, DRUM's TYPE) */
+            c = mnm_cost(mnm_live(mi, WORD(t, mnm_slot[mnm_sel_j(mi)])));
         else if (ty > 0 && ty < 32)
             c = load_type[ty];                  /* the sample machines */
     }
@@ -214,6 +224,28 @@ void load_poll(void)
     load_fx = fx;
 }
 
+/* the AMP overview (csrc/inserts/ovw_draw.c): track T's voices sounding (the slots it last owned that are held, or that
+ * the DSP still reports busy: the per-slot cost over LOAD_TAIL), and *CYCLES its DSP cycles: the DSP's measure of each
+ * of its sounding slots on one of our machines, the table's cost of every slot it last owned on a stock machine (stock
+ * renders those always, docs/load-budget.md) */
+int load_ovw(int t, u32 *cycles)
+{
+    int n = 0;
+    u32 c = 0, held = HELD;
+    for (int v = 0; v < 16; v++) {
+        if (VOICE(v)[1] != (u8)t)
+            continue;
+        int busy = smp_tlm_cost[v] > LOAD_TAIL;
+        n += busy || (held >> v & 1u);
+        if (load_stock[t])
+            c += load_stock[t];
+        else if (busy)
+            c += (u32)smp_tlm_cost[v] * 16u;
+    }
+    *cycles = c;
+    return n;
+}
+
 /* how many voices of a variant costing C fit with the kit's stock slots and sends (the lists' tag, informational) */
 int load_fit(u32 c)
 {
@@ -235,39 +267,41 @@ static u32 voice_cost(int t)
     return c && load_meas[t] > c ? load_meas[t] : c;
 }
 
-/* 2026-11-15: PARA (ANALOG 2, JUNO; docs/paraphonic.md). A chord plays on its leader: each member renders its
- * per-note part (ANALOG 2's oscillators, noise and drive, LOAD_PARA_MEMBER; JUNO's DCO, LOAD_PARA_JUNO_MEMBER) and its
- * leader adds them (LOAD_PARA_ADD / LOAD_PARA_JUNO_ADD a member). A full chord (PARA_NOTES) drops its oldest note
- * for a new one (2026-11-15, the User: "Drop the oldest"): the new note plays. The track's measured voices (load_meas) are its leader's, so they price
- * a note that starts a chord, not one that joins it. */
-extern u32 para_live;                           /* hold.c: the held voices (the DSP's HELD, as the frame sends it) */
+/* PARA (ANALOG 2, JUNO). Since 2026-11-16 a chord plays on ONE slot, its leader (csrc/para/one.c,
+ * docs/paraphonic-onevoice.md): a note joining a held chord takes no slot and never reaches load_pre (pv_pre joins
+ * it first); a PARA note that does reach it starts a new chord: one voice. The chord's slot renders every sounding
+ * note (shadows inside the leader's voice), so it is priced by its notes (2026-11-21, scripts/para_cost.py, the
+ * one-voice chords measured): the track's voice + LOAD_PARA_BASE (the pass watching the slot) + load_para_add[N]
+ * (N sounding notes, the joined notes' shadows and the pass's share). Joined notes reach the budget at once through
+ * the chord's slot (each later note-on adds them up), not a few blocks late through the DSP's measure. Until then
+ * the two-voice design's member costs (2026-11-16) priced a chord's slot as one member. */
+/* hold.c hold_latch(): DRONE HOLD's latched voices and HOLD's (stock sustain, 2026-11-20): never stolen, never released
+ * for another note; pv_pre hides other tracks' from the allocator before load_pre runs */
+_Static_assert(LOAD_PARA_NOTES == PARA_NOTES, "the PARA cost table has a cost for every chord size");
 
 static int para_on_track(int t)
 {
     return para_track(t) && para_value(t) != 0;
 }
 
-/* a member's voice on track T's engine (each engine measured: scripts/para_cost.py) */
-static u32 para_member(int t)
+/* slot V's chord on track T: its sounding notes (1 at least: the leader's own, or a chord just started) */
+static int para_notes(int v, int t)
 {
-    return para_type(t) == PARA_TYPE_JUNO ? LOAD_PARA_JUNO_MEMBER : LOAD_PARA_MEMBER;
+    const pv_chord *c = &pv_ch[v];
+    int n = 0;
+    if (c->live && c->track == (u8)t)
+        for (int k = 0; k < PV_PLACES; k++)
+            n += (c->e[k].flags & PV_SOUND) != 0;
+    return n < 1 ? 1 : n > LOAD_PARA_NOTES ? LOAD_PARA_NOTES : n;
 }
 
-/* a note on track T, its voice costing ONE: on a PARA track, while some of the track's voices are held it joins
- * their chord (a member; in a full chord too: the chord's oldest note stops); with none held it starts a chord (ONE). (A joining note is
- * the newest: the DSP runs it first, so its leader's guard room (para.reserve) is the room room_asked already keeps
- * for the last voice, FLOOR less a voice) */
-static u32 para_join_cost(int t, u32 one)
+/* a PARA chord of N notes on track T: the track's voice (its table cost: load_meas holds its chords' measures, not one
+ * voice's), the pass's share and the joined notes */
+static u32 para_chord(int t, int n)
 {
-    if (!para_on_track(t))
-        return one;
-    int held = 0;
-    for (int v = 0; v < 16; v++)
-        if (VOICE(v)[1] == t && (para_live & (1u << v)))
-            held++;
-    if (!held)
-        return one;
-    return para_member(t) + (para_type(t) == PARA_TYPE_JUNO ? LOAD_PARA_JUNO_ADD : LOAD_PARA_ADD);
+    int juno = para_type(t) == PARA_TYPE_JUNO;
+    return load_voice[t] + (juno ? LOAD_PARA_JUNO_BASE : LOAD_PARA_BASE)
+           + (juno ? load_para_juno_add[n] : load_para_add[n]);
 }
 
 /* slot V sounds: held, or released and the DSP still reports it busy (its release tail) */
@@ -285,9 +319,10 @@ static u32 slot_cost(int v)
         return load_stock[own];
     if (!sounding(v))
         return 0;
-    u32 c = para_on_track(own) ? para_member(own) : voice_cost(own), m = (u32)smp_tlm_cost[v] * 16u;
-    return m > c ? m : c;                       /* (2026-11-13: what the DSP measured, when dearer; 2026-11-15: a PARA
-                                                 * track's slot is its own measure, a leader's or a member's) */
+    u32 c = para_on_track(own) ? para_chord(own, para_notes(v, own)) : voice_cost(own),
+        m = (u32)smp_tlm_cost[v] * 16u;
+    return m > c ? m : c;                       /* (2026-11-13: what the DSP measured, when dearer; 2026-11-21: a PARA
+                                                 * track's slot is its chord, by its sounding notes) */
 }
 
 /* the DSP's room now (cycles, may be negative), from the last idle packet: 1 when it is reported and fresh */
@@ -336,7 +371,8 @@ void load_pre(const u32 *a)
     u32 one = voice_cost(t);
     if (!one)                                   /* a stock machine's or MIDI's note: stock's allocation */
         return;
-    one = para_join_cost(t, one);
+    if (para_on_track(t))                       /* a PARA note here starts a chord (a join never gets here) */
+        one = para_chord(t, 1);
     int n = PER_NOTE[t] > 0 ? PER_NOTE[t] : 1;
     u32 sum = load_fx;
     for (int v = 0; v < 16; v++) {
@@ -353,10 +389,14 @@ void load_pre(const u32 *a)
     }
     if (TICK_DUE)                               /* this tick's copy first (the allocator would make it, over ours) */
         TICK_COPY();
-    u32 held = HELD, tails = 0;
+    extern u32 hold_latch(void);
+    u32 lat = hold_latch();                     /* (2026-11-19: never a DRONE HOLD latch, held or not; 2026-11-20 nor a
+                                                 * HOLD (stock sustain) latch: hold.c) */
+    u32 held = HELD & ~lat, tails = 0;
     for (int v = 0; v < 16; v++) {              /* released voices still sounding, of our machines (2026-11-13) */
         int o = VOICE(v)[1];
-        if (!(held & (1u << v)) && o <= 15 && !load_stock[o] && smp_tlm_cost[v] > LOAD_TAIL)
+        if (!(HELD & (1u << v)) && !(lat & (1u << v)) && o <= 15 && !load_stock[o]
+            && smp_tlm_cost[v] > LOAD_TAIL)
             tails |= 1u << v;
     }
     int own = LIVE_HAS[t] != 0;
@@ -395,6 +435,8 @@ void load_post(u32 taken, u8 *fp)
         }
     int room, by_room = room_now(&room);
     u32 now = TICK;
+    extern u32 hold_latch(void);
+    u32 lat = hold_latch();                     /* DRONE HOLD's and HOLD's latches (hold.c) */
     while (by_room ? room_asked(need_now, one_now) > room + (int)freed
                    : sum + need_now > LOAD_AVAIL) {   /* a heavy note: the next oldest held voices released */
         int best = -1;
@@ -404,9 +446,10 @@ void load_post(u32 taken, u8 *fp)
             u32 st = *(volatile u32 *)(VOICE(v) + 8);
             int own = VOICE(v)[1];
             if (!(HELD & b) || (taken & b) || !cost_was[v] || st >= now || own > 15 || load_stock[own]
-                || para_on_track(own))
+                || para_on_track(own) || (lat & b))
                 continue;                       /* (a stock machine's slot costs as much released: not this way; nor a
-                                                 * PARA chord's: hold.c keeps its note-off back while the chord is held) */
+                                                 * PARA chord's: hold.c keeps its note-off back while the chord is held;
+                                                 * nor a DRONE HOLD latch, 2026-11-19: never let go for another note) */
             if (best < 0 || st < at) {
                 best = v;
                 at = st;
@@ -556,8 +599,9 @@ const char *load_tag_mnm(int mi, int j, int c)
         return fits(load_sophie[c]);
     if (mi == LOAD_MI_A2 && j == LOAD_J_A2 && c < (int)(sizeof load_a2flt / sizeof load_a2flt[0]))
         return fits(load_a2flt[c]);
-    if (MNM_MONO >= 0 && mi == MNM_MONO && j == MNM_MONO_J && c < MNM_MONO_N)
-        return fits(load_mnm[mnm_mono_place[c]]);
+    int h = mnm_host(mi);                       /* a host's SEL (MONOMACHINE's ENGN, DRUM's TYPE): its place's */
+    if (h >= 0 && j == mnm_host_j[h] && c >= 0 && c < mnm_host_n[h])
+        return fits(mnm_cost(mnm_host_place[mnm_host_at[h] + c]));
     return 0;
 }
 

@@ -16,7 +16,7 @@ and the sound carries only a 14-byte **link** to it, in bytes stock neither keep
 |---|---|---|
 | RAM, `0x47280000` (4,497 KB, `dnfw.waverider.pages.WISH_RAM`) | a sorted index of live-sound addresses, 8,192 entries of 512 B, a hash cache, the queue of cells for the +Drive, a carry's scratch (no limit on the sounds one block copy carries) | `csrc/wishes/table.c` |
 | the stored sound's lane, ids 4..28 = bytes 36, 44, .. 84 | the link: `'W'`, link version 1; the record's 64-bit hash (two xxHash32, seeds `WISH` and `N2MX`); its length; a 16-bit check | `table.c` `wish_link_*` |
-| +Drive sectors `0x6F0800` .. `0x6FEFFF` | 59,392 cells of one sector: `DN2W`, version, kind, length, the hash, the record (up to 488 B), a check | `csrc/wishes/store.c` |
+| +Drive sectors `0x5D8000` .. `0x5EE7FF` (v0.69.2; 59,392 at `0x6F0800` before, filed again once by `csrc/sampler/dmove.c`) | 92,160 cells of one sector: `DN2W`, version, kind, length, the hash, the record (up to 488 B), a check | `csrc/wishes/store.c` |
 
 Left alone in the lane: id 0 (stock's save writes slot 65 there), id 32 / byte 92 (a stock unit's sink slot 0
 keeps what stock leaves there), 55/57/59, 242/243, and 354 (a runtime flag in DNX's reading).
@@ -183,7 +183,7 @@ that way), and anything on the unit.
 
 ## Not done yet
 
-- Reference lists and collecting cells no link names (59,392 cells; a cell is never freed, so nothing can lose a
+- Reference lists and collecting cells no link names (92,160 cells; a cell is never freed, so nothing can lose a
   record; needed before the store passes about half full).
 - A SysEx dump of cells, a web-page send (the page could speak PUT and GET as `wish_pst.py` does).
 - The machine-change hook (no field needs it yet).

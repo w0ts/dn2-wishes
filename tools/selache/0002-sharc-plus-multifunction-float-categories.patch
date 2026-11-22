@@ -1,0 +1,331 @@
+diff --git a/selas/src/asmparse.rs b/selas/src/asmparse.rs
+index effbc9d..29e8e6f 100644
+--- a/selas/src/asmparse.rs
++++ b/selas/src/asmparse.rs
+@@ -2821,6 +2821,11 @@ fn try_parse_multifunction(text: &str, line: u32) -> Result<Option<ComputeOp>> {
+             let alu_part = text[first_comma + 1..].trim();
+             match parse_mf_mul_alu(first_part, alu_part, line) {
+                 Ok(op) => return Ok(Some(op)),
++                // A second half that is an ALU operation makes this a multifunction line: its error (an
++                // operand outside the multifunction's register groups, an MRF form in float) is the line's,
++                // not a reason to read it another way (which assembled the multiply alone, dropping the ALU
++                // half without a word).
++                Err(e) if is_mf_alu_text(alu_part) => return Err(e),
+                 Err(_) => return Ok(None),
+             }
+         }
+@@ -2855,6 +2860,16 @@ fn try_parse_multifunction(text: &str, line: u32) -> Result<Option<ComputeOp>> {
+     Ok(None)
+ }
+ 
++/// Does TEXT read as the ALU half of a multifunction (`Ra = Rxa op Rya`, an average, MIN, MAX), not a move or
++/// a transfer?
++fn is_mf_alu_text(text: &str) -> bool {
++    let Some(eq) = text.find('=') else { return false };
++    let rhs = &text[eq + 1..];
++    let moves = ["DM(", "PM(", "MODIFY", "BITREV"];
++    !moves.iter().any(|m| text.contains(m))
++        && (rhs.contains(" + ") || rhs.contains(" - ") || rhs.contains("MIN(") || rhs.contains("MAX("))
++}
++
+ /// Parse the MUL part of a multifunction instruction.
+ /// Returns (fp, mul_sel, rm, rxm, rym).
+ ///   mul_sel: 0=Rm=Rxm*Rym, 1=MRF+=Rxm*Rym, 2=Rm=MRF+Rxm*Rym, 3=MRF-=Rxm*Rym
+@@ -2983,6 +2998,26 @@ fn parse_mf_alu_part(text: &str, fp: bool, line: u32) -> Result<(u8, u16, u16, u
+         }
+     }
+ 
++    // Fa = MAX(Fxa, Fya) / MIN(Fxa, Fya): float only (categories 011110, 011111)
++    for (name, sel) in [("MAX(", 3u8), ("MIN(", 4u8)] {
++        if let Some(args) = rhs.strip_prefix(name).and_then(|r| r.strip_suffix(')')) {
++            if !fp {
++                return Err(Error::Parse {
++                    line,
++                    msg: format!("multifunction {name}..) is a float form: {text}"),
++                });
++            }
++            let (lhs_str, rhs_str) = args.split_once(',').ok_or_else(|| Error::Parse {
++                line,
++                msg: format!("expected two operands: {text}"),
++            })?;
++            let rxa = parse_dreg(lhs_str.trim(), line)?;
++            let rya = parse_dreg(rhs_str.trim(), line)?;
++            let (rxa_2, rya_2) = check_mf_alu_regs(rxa, rya, fp, line)?;
++            return Ok((sel, ra, rxa_2, rya_2));
++        }
++    }
++
+     // Ra = Rxa + Rya
+     if let Some((lhs_str, rhs_str)) = split_at_str(rhs, " + ") {
+         let rxa = parse_dreg(lhs_str.trim(), line)?;
+@@ -5242,6 +5277,41 @@ mod tests {
+         );
+     }
+ 
++    #[test]
++    fn multifunction_float_forms_encode_as_pgr_12_12() {
++        // each text assembled, then its compute field (the low 23 bits) against PGR Table 12-12
++        for (text, field) in [
++            ("F12 = F0 * F7, F8 = F8 + F12", 0x58c830u32),
++            ("F12 = F0 * F7, F8 = F8 - F12", 0x59c830),
++            ("F12 = F0 * F7, F8 = MAX(F8, F12)", 0x5ec830),
++            ("F12 = F0 * F7, F8 = MIN(F8, F12)", 0x5fc830),
++            ("F13 = F1 * F5, F9 = F9 + F13", 0x58d955),
++        ] {
++            let instr = parse_instruction(text).unwrap_or_else(|e| panic!("{text}: {e}"));
++            let bytes = encode::encode(&instr).unwrap();
++            let n = bytes.len();
++            let word = u32::from_be_bytes([bytes[n - 4], bytes[n - 3], bytes[n - 2], bytes[n - 1]]);
++            assert_eq!(word & 0x7F_FFFF, field, "{text}");
++            roundtrip(&instr);
++        }
++    }
++
++    #[test]
++    fn multifunction_outside_its_register_groups_is_an_error() {
++        // the multiply's operands are F0-F3 x F4-F7, the ALU's F8-F11 and F12-F15: anything else is refused,
++        // never assembled as the multiply alone
++        for text in [
++            "F12 = F4 * F7, F8 = F8 + F12",
++            "F12 = F0 * F3, F8 = F8 + F12",
++            "F12 = F0 * F7, F8 = F12 + F12",
++            "F12 = F0 * F7, F8 = F8 + F9",
++            "F12 = F0 * F7, F8 = MIN(F8, F9)",
++            "R12 = R0 * R7 (SSF), R8 = MAX(R8, R12)",
++        ] {
++            assert!(parse_instruction(text).is_err(), "{text} was accepted");
++        }
++    }
++
+     #[test]
+     fn roundtrip_nop() {
+         roundtrip(&Instruction::Nop);
+diff --git a/selinstr/src/disasm.rs b/selinstr/src/disasm.rs
+index 65d7744..71d3029 100644
+--- a/selinstr/src/disasm.rs
++++ b/selinstr/src/disasm.rs
+@@ -455,8 +455,8 @@ fn decode_multifunction(field: u32) -> String {
+ 
+     if mf_op & 0x20 != 0 {
+         decode_mf_mul_dual_addsub(field, mf_op & 0x10 != 0)
+-    } else if mf_op & 0x18 == 0x18 {
+-        decode_mf_mul_alu(field, mf_op, true)
++    } else if mf_op & 0x38 == 0x18 {
++        decode_mf_mul_alu_float(field, mf_op)
+     } else if mf_op & 0x03 == 0x03 {
+         decode_mf_mul_alu_64(field, mf_op)
+     } else {
+@@ -464,6 +464,28 @@ fn decode_multifunction(field: u32) -> String {
+     }
+ }
+ 
++/// MUL/ALU 32/40-bit float multifunction, categories 011000..011111 (PGR Table 12-12): the multiply is
++/// always `Fm = F3-0 * F7-4` (the float multiplier has no MRF forms); the low three bits pick the ALU half.
++fn decode_mf_mul_alu_float(field: u32, mf_op: u32) -> String {
++    let fm = (field >> 12) & 0xF;
++    let fa = (field >> 8) & 0xF;
++    let fxm = (field >> 6) & 0x3;
++    let fym = ((field >> 4) & 0x3) + 4;
++    let fxa = ((field >> 2) & 0x3) + 8;
++    let fya = (field & 0x3) + 12;
++    let alu = match mf_op & 0x7 {
++        0b000 => format!("F{fa} = F{fxa} + F{fya}"),
++        0b001 => format!("F{fa} = F{fxa} - F{fya}"),
++        0b010 => format!("F{fa} = FLOAT R{fxa} BY R{fya}"),
++        0b011 => format!("R{fa} = FIX F{fxa} BY R{fya}"),
++        0b100 => format!("F{fa} = (F{fxa} + F{fya})/2"),
++        0b101 => format!("F{fa} = ABS F{fxa}"),
++        0b110 => format!("F{fa} = MAX(F{fxa}, F{fya})"),
++        _ => format!("F{fa} = MIN(F{fxa}, F{fya})"),
++    };
++    format!("F{fm} = F{fxm} * F{fym} , {alu}")
++}
++
+ fn mf_mul_mod(fp: bool) -> &'static str {
+     if fp {
+         ""
+@@ -499,12 +521,16 @@ fn decode_mf_mul_alu(field: u32, mf_op: u32, fp: bool) -> String {
+     let alu_sel = mf_op & 0x3;
+     let modifier = mf_mul_mod(fp);
+ 
+-    let mul_part = match mul_sel {
+-        0b00 => format!("{mul_dst} = {mul_x} * {mul_y}{modifier}"),
+-        0b01 => format!("MRF = MRF + {mul_x} * {mul_y}{modifier}"),
+-        0b10 => format!("{mul_dst} = MRF + {mul_x} * {mul_y}{modifier}"),
+-        0b11 => format!("MRF = MRF - {mul_x} * {mul_y}{modifier}"),
+-        _ => unreachable!(),
++    // PGR Table 12-12: mf_op[5:2] 0001 Rm = Rx * Ry (SSFR), 0010 MRF = MRF + .. (SSF), 0011 Rm = MRF + ..
++    // (SSFR), 0100 MRF = MRF - .. (SSF), 0101 Rm = MRF - .. (SSFR); the rest are not MUL/ALU forms
++    let _ = (mul_sel, modifier);
++    let mul_part = match (mf_op >> 2) & 0xF {
++        0b0001 => format!("{mul_dst} = {mul_x} * {mul_y} (SSFR)"),
++        0b0010 => format!("MRF = MRF + {mul_x} * {mul_y} (SSF)"),
++        0b0011 => format!("{mul_dst} = MRF + {mul_x} * {mul_y} (SSFR)"),
++        0b0100 => format!("MRF = MRF - {mul_x} * {mul_y} (SSF)"),
++        0b0101 => format!("{mul_dst} = MRF - {mul_x} * {mul_y} (SSFR)"),
++        _ => return format!("MULTI opcode 0x{mf_op:02X} (0x{field:06X})"),
+     };
+ 
+     let alu_part = match alu_sel {
+diff --git a/selinstr/src/encode.rs b/selinstr/src/encode.rs
+index 08cda6a..0b0ac07 100644
+--- a/selinstr/src/encode.rs
++++ b/selinstr/src/encode.rs
+@@ -235,7 +235,7 @@ pub enum ShiftOp {
+ pub enum MultiOp {
+     /// MUL/ALU 32-bit fixed or 32/40-bit float.
+     /// mul_sel: 0=Rm=Rxm*Rym, 1=MRF+=Rxm*Rym, 2=Rm=MRF+Rxm*Rym, 3=MRF-=Rxm*Rym
+-    /// alu_sel: 0=Ra=Rxa+Rya, 1=Ra=Rxa-Rya, 2=Ra=(Rxa+Rya)/2
++    /// alu_sel: 0=Ra=Rxa+Rya, 1=Ra=Rxa-Rya, 2=Ra=(Rxa+Rya)/2, 3=Fa=MAX(Fxa,Fya), 4=Fa=MIN(Fxa,Fya) (float only)
+     MulAlu {
+         fp: bool,
+         mul_sel: u8,
+@@ -1160,12 +1160,37 @@ fn encode_multi(op: &MultiOp) -> Result<u32, EncodeError> {
+             //   bit[22]    = 1 (multifunction)
+             //   bits[21:16] = mf_op
+             //   bits[15:0]  = register fields
+-            // For 32-bit fixed: mf_op = 0b0_mm_aa (mm=mul_sel, aa=alu_sel)
+-            // For 32/40-bit float: mf_op = 0b011_mm_aa
++            // mf_op, PGR Table 12-12 (the ADSP-2156x programming reference):
++            //   32-bit fixed: 0b0_mmmm_aa, mmmm 0001 Rm = Rx*Ry (SSFR), 0010 MRF += .. (SSF),
++            //     0011 Rm = MRF + .. (SSFR), 0100 MRF -= .. (SSF); aa 00 +, 01 -, 10 (+)/2
++            //   32/40-bit float: 0b011_aaa, the multiply always Fm = Fx * Fy; aaa 000 +, 001 -,
++            //     100 (+)/2, 110 MAX, 111 MIN
+             let mf_op = if fp {
+-                0b011_000u32 | ((mul_sel as u32 & 3) << 2) | (alu_sel as u32 & 3)
++                if mul_sel != 0 {
++                    return Err(EncodeError {
++                        msg: "float multifunction: the multiply has no MRF forms".into(),
++                    });
++                }
++                0b011_000u32
++                    | match alu_sel {
++                        0 => 0b000,
++                        1 => 0b001,
++                        2 => 0b100,
++                        3 => 0b110,
++                        4 => 0b111,
++                        _ => {
++                            return Err(EncodeError {
++                                msg: format!("float multifunction ALU select {alu_sel}"),
++                            })
++                        }
++                    }
+             } else {
+-                ((mul_sel as u32 & 3) << 2) | (alu_sel as u32 & 3)
++                if alu_sel > 2 || mul_sel > 3 {
++                    return Err(EncodeError {
++                        msg: format!("fixed multifunction selects {mul_sel}, {alu_sel}"),
++                    });
++                }
++                ((mul_sel as u32 + 1) << 2) | alu_sel as u32
+             };
+             let field = (1u32 << 22)
+                 | (mf_op << 16)
+@@ -2872,7 +2897,7 @@ mod tests {
+             }),
+         };
+         let text = roundtrip(&instr);
+-        assert_eq!(text, "R0 = R1 * R4 (SSF) , R8 = R8 + R12");
++        assert_eq!(text, "R0 = R1 * R4 (SSFR) , R8 = R8 + R12");
+     }
+ 
+     #[test]
+@@ -2893,30 +2918,82 @@ mod tests {
+             }),
+         };
+         let text = roundtrip(&instr);
+-        assert_eq!(text, "R3 = R2 * R5 (SSF) , R9 = R10 - R14");
++        assert_eq!(text, "R3 = R2 * R5 (SSFR) , R9 = R10 - R14");
+     }
+ 
+     #[test]
+     fn roundtrip_multi_mul_alu_float() {
+-        // F0 = MRF + F1 * F4 , F8 = F8 + F12
+-        // Note: float multifunction only supports mul_sel 2 and 3
+-        // (mul_sel occupies mf_op[3:2] but bit 3 is always 1 for float)
+-        let instr = Instruction::Compute {
+-            cond: 31,
+-            compute: ComputeOp::Multi(MultiOp::MulAlu {
++        // PGR Table 12-12: the float multiply has no MRF forms; category 011000 is Fm = Fx * Fy, Fa = Fx + Fy
++        for (alu_sel, alu) in [
++            (0u8, "F8 = F8 + F12"),
++            (1, "F8 = F8 - F12"),
++            (2, "F8 = (F8 + F12)/2"),
++            (3, "F8 = MAX(F8, F12)"),
++            (4, "F8 = MIN(F8, F12)"),
++        ] {
++            let instr = Instruction::Compute {
++                cond: 31,
++                compute: ComputeOp::Multi(MultiOp::MulAlu {
++                    fp: true,
++                    mul_sel: 0,
++                    alu_sel,
++                    rm: 0,
++                    ra: 8,
++                    rxm: 1,
++                    rym: 0,
++                    rxa: 0,
++                    rya: 0,
++                }),
++            };
++            assert_eq!(roundtrip(&instr), format!("F0 = F1 * F4 , {alu}"));
++        }
++    }
++
++    #[test]
++    fn multi_float_fields_match_pgr_and_the_firmware() {
++        // the firmware's own `F12 = F0 * F7, F8 = F8 + F12` (stock 1.11, a type 5a instruction): compute 0x58c830
++        let op = MultiOp::MulAlu {
++            fp: true,
++            mul_sel: 0,
++            alu_sel: 0,
++            rm: 12,
++            ra: 8,
++            rxm: 0,
++            rym: 3,
++            rxa: 0,
++            rya: 0,
++        };
++        assert_eq!(encode_compute(&ComputeOp::Multi(op)).unwrap(), 0x58c830);
++        for (alu_sel, cat) in [(1u8, 0b011001u32), (2, 0b011100), (3, 0b011110), (4, 0b011111)] {
++            let op = MultiOp::MulAlu {
+                 fp: true,
+-                mul_sel: 2,
+-                alu_sel: 0,
+-                rm: 0,
++                mul_sel: 0,
++                alu_sel,
++                rm: 12,
+                 ra: 8,
+-                rxm: 1,
+-                rym: 0,
++                rxm: 0,
++                rym: 3,
+                 rxa: 0,
+                 rya: 0,
+-            }),
++            };
++            assert_eq!(encode_compute(&ComputeOp::Multi(op)).unwrap() >> 16 & 0x3F, cat);
++        }
++    }
++
++    #[test]
++    fn multi_float_refuses_mrf() {
++        let op = MultiOp::MulAlu {
++            fp: true,
++            mul_sel: 2,
++            alu_sel: 0,
++            rm: 0,
++            ra: 8,
++            rxm: 1,
++            rym: 0,
++            rxa: 0,
++            rya: 0,
+         };
+-        let text = roundtrip(&instr);
+-        assert_eq!(text, "F0 = MRF + F1 * F4 , F8 = F8 + F12");
++        assert!(encode_compute(&ComputeOp::Multi(op)).is_err());
+     }
+ 
+     #[test]

@@ -48,6 +48,9 @@ MANIFEST_KEYS = {"FormatVersion", "ProductType", "Payload", "FileType", "Firmwar
 DEVICE = bytes.fromhex("020005000f")
 TAG = re.compile(r"^[A-Z][A-Z0-9 -]{0,23}$")
 TEXT = re.compile(rb"[\x20-\x7e]{4,}")
+# a set whose sounds name their kind (the User, 2026-11-20): the file "DRM 01 BD CLICK" and the stored name
+# "DRM BD CLICK" carry one of these codes right after the number / the prefix
+TYPE_CODES = {"DRM": {"BD", "SD", "CH", "OH", "TOM", "CP", "RD", "CR"}}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -138,6 +141,13 @@ def check_file(path: pathlib.Path) -> tuple[Info | None, list[str]]:
     machine = body[TYPE_AT] if body else -1
     if machine not in s.types:
         bad.append(f"machine type {machine}, not the set {s.folder}'s {s.types}")
+    codes = TYPE_CODES.get(prefix)
+    if codes is not None:
+        words, nwords = path.name.split(" "), name.split(" ")
+        if len(words) < 3 or words[2].removesuffix(SUFFIX) not in codes:
+            bad.append(f"the file name has no type code {sorted(codes)} after its number")
+        if len(nwords) < 2 or nwords[1] not in codes:
+            bad.append(f"the sound's name {name!r} has no type code {sorted(codes)} after {prefix!r}")
     if s.init_only and not name.endswith(" INIT"):
         bad.append(f"{name!r}: a sound of a machine that is not ours that is not an INIT (the User's own?)")
     return Info(path.name, s, name, machine, tuple(m["MetaInfo"]["Tags"])), bad

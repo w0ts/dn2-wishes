@@ -42,8 +42,12 @@ from ..xdly import program as XP
 from . import design as D
 from . import program as PR
 
+# the FDN8 engine finds an instance's L2 diffuser ring from its DDR ring (fdn8.program.diff_ring, 2026-11-21)
+assert (FP.BUS0_RING, FP.BUS_RING_STRIDE, FP.BUS_INSTANCES) == (D.FDN8_RING_DDR, D.FDN8_RING_STRIDE, D.FDN8_INSTANCES)
+
 STATE = D.BUS_STATE                               # L2, after the code (dnfw.waverider.dsp.INSBUS_STATE_L2)
-FD_WORDS = FP.DYN_WORDS + FP.NV                   # an FDN8 instance: its words, then its variant table
+FD_WORDS = FP.DYN_WORDS                           # an FDN8 instance: its words (2026-11-22: HALF's table VT3 is in ACT
+                                                  # while instances run, put there once a pass: no table an instance)
 XD_WORDS = XP.DYN_WORDS
 FD_STRIDE, XD_STRIDE = 1024, 256                  # bytes a store (powers of two: the instance's by a shift)
 assert 4 * FD_WORDS <= FD_STRIDE and 4 * XD_WORDS <= XD_STRIDE
@@ -82,7 +86,7 @@ _NAMES = (["i", "t", "j", "rec", "sel", "inst", "fds", "xds", "own", "lp", "rp",
           + [f"sv{k}" for k in range(16)] + [f"svi{i}" for i in SAVE_I] + ["sva"])
 C = {n: WORDS_L1 + 4 * k for k, n in enumerate(_NAMES)}
 FD_SEND = WORDS_L1 + 4 * len(_NAMES)              # the send FX's words, while instances run
-XD_SEND = FD_SEND + 4 * FD_WORDS
+XD_SEND = FD_SEND + 4 * (FP.DYN_WORDS + FP.NV)    # (the send FDN8's words and its active table)
 WORDS_L1_END = XD_SEND + 4 * XD_WORDS
 assert WORDS_L1_END <= WORDS_L1_LIMIT
 XD_L2 = (HEAD_END + XD_STRIDE - 1) // XD_STRIDE * XD_STRIDE   # (where the XDLY stores were, in L2: kept, so nothing
@@ -97,7 +101,8 @@ assert XD_STORE + D.XDLY_INSTANCES * XD_L1_STRIDE <= 0x2E1980
 FD_L1 = 0x2E4050
 FD_L1_BYTES = 4 * FD_WORDS
 FD_STORE = FD_L1
-assert FD_L1 >= 0x2E4044 and FD_L1 + D.FDN8_INSTANCES * FD_L1_BYTES <= 0x2E5400
+assert FD_L1 >= 0x2E4044 and FD_L1 + D.FDN8_INSTANCES * FD_L1_BYTES <= FP.BUF_L1 <= 0x2E5400   # (FDN8's block
+assert FD_L1 == 0x2E4050                                                       # buffers after the stores, 2026-11-22)
 assert END <= D.BUS_STATE_END, f"the bus pass's state runs past its room: {END:#x}"
 # 2026-11-11 (design.MOVERS): a moved slot 2's state, 8 words for each of the track's L (2 t) and R (2 t + 1),
 # as the pre pass's (program.one: the last type and track in its last two words, zeros at power-on)
@@ -114,6 +119,7 @@ DISPLACED = "R2 = DM(0x257980);"                  # .. in place of this (stock's
 RESUME_SW = 0x1C1FF2                              # the routing's next instruction: the main bus is summed after
 G_IN = 1 / 14.125                                 # the routing's gain on a voice (docs/link-research.md §7)
 G_OUT = 14.125
+assert G_IN == __import__("dnfw.fdn8.lite", fromlist=["G_IN"]).G_IN
 
 
 def state_bytes() -> bytes:
@@ -233,7 +239,7 @@ def blend(p: Prog) -> None:
     p.if_(13, "EQ", 12, lambda: (p.fconst(8, 1.0 / D.BLOCK), p.fconst(7, 1.0 / D.BLOCK)), kind="i")
     p.iconst(12, 4)
     p.if_(13, "EQ", 12, lambda: (p.fconst(8, 1.0 - 1.0 / D.BLOCK), p.fconst(7, -1.0 / D.BLOCK)), kind="i")
-    for src, wet in (("lp", WL), ("rp", WR)):
+    def chan(src, wet, lean):
         p.ld(0, C[src])
         p.seti(0, 0)
         p.seti(1, 0)
@@ -242,18 +248,26 @@ def blend(p: Prog) -> None:
         p.fconst(4, G_OUT)
         p.ld(5, C["mix"])
         p.fpass(6, 8)
+        if lean:
+            p.fop(3, 5, "*", 6)                  # MIX g, g 1.0 throughout: the same bits each sample
 
         def one():
             p.ldpost(0, 0)                       # x
             p.ldpost(1, 2)                       # wet
             p.fop(1, 1, "*", 4)
             p.fop(1, 1, "-", 0)
-            p.fop(3, 5, "*", 6)                  # MIX g
-            p.fop(6, 6, "+", 7)
+            if not lean:
+                p.fop(3, 5, "*", 6)              # MIX g
+                p.fop(6, 6, "+", 7)
             p.fop(1, 1, "*", 3)
             p.fop(0, 0, "+", 1)
             p.stpost(1, 0)
         p.loop_r(11, D.BLOCK, one)
+
+    def both(lean):
+        for src, wet in (("lp", WL), ("rp", WR)):
+            chan(src, wet, lean)
+    p.ifz(7, "EQ", lambda: both(True), lambda: both(False), kind="f")   # 2026-11-22: no fade (step 0): lean
 
 
 def params(p: Prog, scales) -> None:
@@ -357,16 +371,12 @@ def unit_fdn8(p: Prog) -> None:
         def keep_send():
             copy(p, FD_SEND, FP.STATE, FP.DYN_WORDS)
             copy(p, FD_SEND + 4 * FP.DYN_WORDS, FP.ACT, FP.NV)
+            copy(p, FP.ACT, FP.VT3, FP.NV)       # 2026-11-22: every instance runs HALF (fdn8.lite)
             p.iconst(0, 1)
             p.st(C["fds"], 0)
         p.ifz(0, "EQ", keep_send)
         store_area(p, "own", FD_STORE, FD_L1_BYTES)
         copy(p, FP.STATE, "own", FP.DYN_WORDS)
-        p.ld(0, C["own"])
-        p.iconst(12, 4 * FP.DYN_WORDS)
-        p.iop(0, 12, "+", 0)
-        p.st(C["cnt"], 0)
-        copy(p, FP.ACT, "cnt", FP.NV)
 
         def fresh():                             # a new engine: zeros, its ring, the LFOs' start phases
             zero(p, FP.STATE, FP.DYN_WORDS)
@@ -383,10 +393,14 @@ def unit_fdn8(p: Prog) -> None:
         for name, v in (("par", PARF), ("io", DESC), ("mode", 1)):
             p.iconst(0, v)
             p.st(FP.C[name], 0)
-        take_input(p)
+        for k, src in enumerate(("lp", "rp")):  # 2026-11-22: HALF reads the track's block itself (x G_IN in its
+            p.ld(0, C[src])                      # decimator, fdn8.stages._decimate): no copy
+            p.st(INP + 4 * k, 0)
         enter(p, D.FDN8_SW, FP.run_instance)
+        for k, buf in enumerate((XL, XR)):       # (the descriptor as unit_io left it, for XDLY)
+            p.iconst(0, buf)
+            p.st(INP + 4 * k, 0)
         copy(p, "own", FP.STATE, FP.DYN_WORDS)
-        copy(p, "cnt", FP.ACT, FP.NV)
     run()                                        # (slot gates it and blends once for both units)
 
 

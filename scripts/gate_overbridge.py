@@ -19,6 +19,15 @@ Every byte of every instruction reached must be stock's in the build. An indirec
 (a0)) is not followed; they are counted and listed, as what the check cannot see.
 The mod's own link (TDM slots 8..15 in, 14..15 out) is clear of Overbridge's slots 0..13 by
 design (docs/link-research.md); that is the hardware checklist's to confirm (docs/overbridge.md).
+
+2026-11-18 (the User: "allow if bit identical yes and add a flag to switch back if needed"; the same
+for csrc/obfast's Overbridge sites, DN2_OB_FAST): the declared sites (dnfw.waverider.coldfire
+declared_sites: csrc/stocklink's, DN2_STOCK_LINK_FAST, and csrc/obfast's) are allowed in that path, each
+only as the jump or call to its own code the composer writes there (an absolute jmp/jsr, then the
+declared tail: nops over the rest of the displaced instructions, or obfast's bra.s to the loop's top).
+They are proved byte for byte against stock's by the gate's linkfast step (scripts/check_stocklink.py
+gate), which blocks. Any other byte the build changes in the path still fails; a build without them
+(the flags off) is held to the rule as before.
 """
 
 from __future__ import annotations
@@ -40,6 +49,12 @@ ROOTS = {0x40003118: "the Overbridge packet builder (mode 6: RX slots 0..13 and 
          0x40004734: "the USB writer",
          0x40006C4A: "the USB mode's getter"}
 ISR, HOOK, HOOK_BYTES = 0x40025E36, 0x40026098, 8
+# a stocklink site on: the stock code its routine calls or goes back into, walked as roots too (what the jump
+# would hide from the walk is still checked)
+STOCKLINK_ROOTS = {"skl_fill": (0x400CFA62, 0x400CFAB4), "skl_rcopy": (0x40134770,),
+                   "skl_mode5": (0x40003EDE, 0x4013419C), "skl_modex": (0x4013419C,), "skl_isr_install": (),
+                   "skl_usbout": (0x400253D0,), "skl_rxclr": (0x4013419C,), "obf_clr": (0x4013419C,),
+                   "obf_build_pair": (0x40134770, 0x400032AE), "obf_in32": (0x40134770,)}   # csrc/obfast: stock's memcpy (and the builder after its sample loop)
 
 LINE = re.compile(r"^\s*([0-9a-f]+):\s+((?:[0-9a-f]{4} )+)\s*(\S+)\s*(.*)$")
 ABS = re.compile(r"^(?:0x)?([0-9a-f]+)(?:\s|$|<)")
@@ -104,6 +119,14 @@ def reach(code: dict, roots: list[int], stop_at: set[int]) -> tuple[set[int], li
     return seen, indirect
 
 
+def stocklink_sites():
+    """the declared sites (dnfw.waverider.coldfire.declared_sites: csrc/stocklink's and csrc/obfast's):
+    (va, stock bytes hex, symbol, call, what, the bytes after the jump or None for nops)"""
+    sys.path.insert(0, str(HERE.parent / "src"))
+    from dnfw.waverider.coldfire import declared_sites     # noqa: PLC0415
+    return declared_sites()
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("stock")
@@ -120,6 +143,21 @@ def main() -> int:
         if va + len(blob) <= BASE + len(stock):
             changed.update(range(va, va + len(blob)))
     allowed = set(range(HOOK, HOOK + HOOK_BYTES))
+    linkfast, extra_roots = [], []
+    for va, stock_hex, sym, call, _what, tail in stocklink_sites():
+        n = len(stock_hex) // 2
+        at = va - BASE
+        have = build[at:at + n]
+        if have == bytes.fromhex(stock_hex):
+            continue
+        rest = bytes.fromhex(tail) if tail else b""
+        shape = have[:2] == bytes.fromhex("4eb9" if call else "4ef9") and \
+            have[6:] == rest + bytes.fromhex("4e71") * ((n - 6 - len(rest)) // 2) and \
+            not BASE <= int.from_bytes(have[2:6], "big") < BASE + len(stock)
+        if shape:                       # the declared jump out of MAIN OS: allowed (linkfast proves it)
+            allowed.update(range(va, va + n))
+            linkfast.append(f"{va:#x} {sym}")
+            extra_roots += list(STOCKLINK_ROOTS[sym])
     isr_part = [va for va in code if ISR <= va < HOOK]
     if a.control:                       # the negative control: the detector must see a patched site
         cs, _ = reach(code, [int(a.control, 0)], stop_at=set())
@@ -127,7 +165,7 @@ def main() -> int:
         print(("PASS" if chit else "FAIL") + f": the control from {a.control}: {len(chit)} patched "
               f"instructions found (must be some)")
         return 0 if chit else 1
-    seen, indirect = reach(code, list(ROOTS) + isr_part, stop_at={HOOK})
+    seen, indirect = reach(code, list(ROOTS) + isr_part + extra_roots, stop_at={HOOK})
     hits = sorted(va for va in seen
                   if any(b in changed and b not in allowed for b in range(va, va + code[va][0])))
     roots_found = {f"{r:#x}": r in code for r in ROOTS}
@@ -135,12 +173,14 @@ def main() -> int:
     rep = {"ok": ok, "instructions_reached": len(seen), "patched_bytes": len(changed),
            "hits": [f"{h:#x}" for h in hits[:20]], "indirect_calls_not_followed": len(indirect),
            "indirect_at": [f"{v:#x}" for v in indirect[:20]], "roots": roots_found,
-           "hook_only_in_isr": all(b in allowed or b not in changed for b in range(ISR, HOOK + HOOK_BYTES))}
+           "hook_only_in_isr": all(b in allowed or b not in changed for b in range(ISR, HOOK + HOOK_BYTES)),
+           "stocklink_sites_allowed": linkfast}
     if a.json:
         pathlib.Path(a.json).write_text(json.dumps(rep, indent=1))
     print(json.dumps(rep))
     print(("PASS" if ok else "FAIL") + f": {len(seen)} instructions of Overbridge's path, "
-          f"{len(hits)} touched by the build; {len(indirect)} indirect calls not followed")
+          f"{len(hits)} touched by the build; {len(indirect)} indirect calls not followed"
+          + (f"; {len(linkfast)} declared sites allowed (proved by linkfast)" if linkfast else ""))
     return 0 if ok else 1
 
 

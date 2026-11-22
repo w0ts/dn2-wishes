@@ -45,7 +45,22 @@ import ctypes.wintypes as wt
 import sys
 import time
 
-winmm = ctypes.WinDLL("winmm")
+
+
+class _NoWinmm:
+    """Off Windows: midi_watch's decoder and the telemetry map import this file on any OS (test_telemetry); a MIDI
+    port needs Windows' winmm, so any call into it says so instead of a NoneType error."""
+
+    def __getattr__(self, name):
+        raise OSError(f"winmm.{name}: the MIDI ports here go through Windows' winmm; this is {sys.platform}")
+
+
+if sys.platform == "win32":
+    winmm = ctypes.WinDLL("winmm")
+    _FUNCTYPE = ctypes.WINFUNCTYPE
+else:
+    winmm = _NoWinmm()
+    _FUNCTYPE = ctypes.CFUNCTYPE          # the callback's type only: no port opens off Windows
 
 # Only these may ever be sent. Each is read-only by definition of its own spec.
 READ_ONLY = {
@@ -191,8 +206,8 @@ def list_ports():
     return ins, outs
 
 
-PROC = ctypes.WINFUNCTYPE(None, wt.HANDLE, wt.UINT, ctypes.c_void_p,
-                          ctypes.c_void_p, ctypes.c_void_p)
+PROC = _FUNCTYPE(None, wt.HANDLE, wt.UINT, ctypes.c_void_p,
+                 ctypes.c_void_p, ctypes.c_void_p)
 
 
 class InPort:

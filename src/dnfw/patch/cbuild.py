@@ -104,6 +104,9 @@ class Linked:
     bss: int
     symbols: dict[str, int]
     kinds: dict[str, str] = field(default_factory=dict)
+    # 2026-11-18 (dnfw.mods.ramcheck): where the link put a 32-bit absolute address outside the code (an initialised
+    # pointer: the linker's R_68K_32 relocations, kept with -q); empty when objdump is missing
+    abs32: tuple[int, ...] = ()
 
     def routines(self) -> dict[str, int]:
         """-> only the symbols that are code, and so can be said to have run."""
@@ -143,6 +146,30 @@ def find_toolchain() -> CToolchain | None:
         return CToolchain(*((wsl, "-e", p) for p in picked), via_wsl=True,
                           objdump=(wsl, "-e", dump) if dump else ())
     return None
+
+
+def _abs32(tool: CToolchain, elf: Path) -> tuple[int, ...]:
+    """the addresses of the link's 32-bit absolute relocations outside the code (-Wl,-q keeps them in the ELF): each
+    an initialised pointer in data. () when objdump is missing or cannot read them"""
+    if not tool.objdump:
+        return ()
+    h = tool.run(tool.objdump, ["-h", tool.path_for(elf)])
+    r = tool.run(tool.objdump, ["-r", tool.path_for(elf)])
+    if h.returncode or r.returncode:
+        return ()
+    # objdump -r gives each offset from its section's start: + the section's VMA (-h: Idx Name Size VMA ...)
+    vma = {m.group(1): int(m.group(2), 16)
+           for m in re.finditer(r"^\s*\d+\s+(\S+)\s+[0-9a-fA-F]+\s+([0-9a-fA-F]+)\s", h.stdout, re.M)}
+    out, section = [], ""
+    for line in r.stdout.splitlines():
+        m = re.match(r"RELOCATION RECORDS FOR \[([^\]]+)\]", line)
+        if m:
+            section = m.group(1)
+            continue
+        m = re.match(r"([0-9a-fA-F]{8}) R_68K_32\b", line.strip())
+        if m and not section.startswith(".text") and section in vma:
+            out.append(vma[section] + int(m.group(1), 16))
+    return tuple(sorted(set(out)))
 
 
 def _refuse_unrunnable(tool: CToolchain, elf: Path) -> None:
@@ -207,7 +234,7 @@ def build(sources: list[Path], *, base: int, entries: list[str] = (),
         script = d / "link.ld"
         script.write_text(LINKER_SCRIPT.format(base=base), newline="\n")
         elf = d / "out.elf"
-        r = tool.run(tool.gcc, [f"-mcpu={CPU}", "-nostdlib", "-static", "-Wl,--no-warn-rwx-segments",
+        r = tool.run(tool.gcc, [f"-mcpu={CPU}", "-nostdlib", "-static", "-Wl,--no-warn-rwx-segments", "-Wl,-q",
                                 "-Wl,--gc-sections", *(f"-Wl,--undefined={e}" for e in entries),
                                 "-T", tool.path_for(script), *objects,
                                 "-lgcc", "-o", tool.path_for(elf)])
@@ -240,4 +267,4 @@ def build(sources: list[Path], *, base: int, entries: list[str] = (),
         if missing:
             raise AssemblyError(f"entries not defined: {', '.join(missing)}")
         return Linked(base, image, symbols["__bss_end"] - symbols["__bss_start"],
-                      symbols, kinds)
+                      symbols, kinds, _abs32(tool, elf))

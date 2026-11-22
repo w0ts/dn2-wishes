@@ -29,6 +29,7 @@ sys.path.insert(0, str(HERE))
 import dsp_cost as DC  # noqa: E402
 
 WARM, STEADY, N = 12, 8, 4
+WARM_BUS = 40
 
 
 def gate(mod, name: str) -> None:
@@ -54,18 +55,21 @@ def counting():
     DC.CNT.c.clear()
     DC.ZS.clear()
     DC.CNT.on, DC.CNT.prog, DC.CNT.last = True, None, 0
-    orig = DC.dsl.Prog.__init__
+    DC.CNT.multi = {}                      # 2026-11-22: every run Prog counts its own steps (the bus pass's after its
+    orig = DC.dsl.Prog.__init__            # engine's returned: copy-out, blend), each kept referenced (no id reuse)
 
     def init(self, *a, **k):
         orig(self, *a, **k)
         if self.run:                       # a program making several Progs: each counts from its start
             DC.CNT.prog, DC.CNT.last = self, 0
+            DC.CNT.multi[id(self)] = [self, 0]
     DC.dsl.Prog.__init__ = init
     try:
         yield
     finally:
         DC.dsl.Prog.__init__ = orig
         DC.CNT.on = False
+        DC.CNT.multi = None
 
 
 def total() -> float:
@@ -76,12 +80,13 @@ def total() -> float:
     return DC.est(v)
 
 
-def steady(block) -> float:
-    """BLOCK(b) runs block b; the mean cost of the STEADY blocks after WARM"""
-    for b in range(WARM):
+def steady(block, warm: int = WARM) -> float:
+    """BLOCK(b) runs block b; the mean cost of the STEADY blocks after WARM (WARM_BUS for the bus inserts: past an
+    FDN8 instance's 32 clearing blocks, 2026-11-22; 12 measured a clearing block)"""
+    for b in range(warm):
         block(b)
     got = []
-    for b in range(WARM, WARM + STEADY):
+    for b in range(warm, warm + STEADY):
         with counting():
             block(b)
         got.append(total())
@@ -104,9 +109,10 @@ def a2f() -> dict:
         img = AL.Image()
         img.route([0 if s < n else 0x7FFF for s in range(16)])
         if ftype is not None:
-            img.ftype(0, ftype)
-            img.record(0, **T.REC)
-            img.note(0, 48.0)
+            for s in range(n):                  # the frame's filter type, record and note are per voice slot (2026-11-12)
+                img.ftype(s, ftype)
+                img.record(s, **T.REC)
+                img.note(s, 48.0)
         rnd = random.Random(5)
 
         def block(b):
@@ -180,7 +186,8 @@ def bus_inserts() -> dict:
         m = T.mem0()
         par = T.table(rows)
         regs = {k: 0 for k in range(16)}
-        return steady(lambda b: T.call(m, par, [noise(rnd) for _ in range(16)], [noise(rnd) for _ in range(16)], regs))
+        return steady(lambda b: T.call(m, par, [noise(rnd) for _ in range(16)], [noise(rnd) for _ in range(16)], regs),
+                      WARM_BUS)
     idle = run({})
     for typ in D.BUS:
         cost = run({(2, 0): T.rec(typ, 0, 100, 64, 64, 64, 64, 64, 64)})

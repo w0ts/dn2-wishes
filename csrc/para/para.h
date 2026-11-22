@@ -15,10 +15,10 @@
 #define PARA_RECORD       248u                    /* MOD's record id (the knob path's setValue) */
 
 /* the engines PARA plays (dnfw.engines.analog2.para ENGINES; their machine type values, dnfw.mnm.machines
- * ALL_TYPE_SLOTS): ANALOG 2 (22), JUNO (23, 2026-11-15). The User, 2026-11-15: no PARA for SOPHIE, SID 6581, DPRO-DDRW
+ * ALL_TYPE_SLOTS): ANALOG 2 (51), JUNO (50) (22 and 23 until 2026-11-18). The User, 2026-11-15: no PARA for SOPHIE, SID 6581, DPRO-DDRW
  * or DPRO-DENS; DPRO-WAVE decided later */
-#define PARA_TYPE_A2   22
-#define PARA_TYPE_JUNO 23
+#define PARA_TYPE_A2   51
+#define PARA_TYPE_JUNO 50
 static inline int para_engine(int type)
 {
     return type == PARA_TYPE_A2 || type == PARA_TYPE_JUNO;

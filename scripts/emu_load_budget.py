@@ -26,17 +26,14 @@ stole, as every voice was released, and judged by a fixed LOAD_AVAIL the unit's 
 10. the same tails with plenty of room reported: stock's result exactly;
 11. no room reported (no packet yet): LOAD_AVAIL decides, as before: the same light tails fit, stock's result;
 12. a voice's measured cost over its table cost: the measure decides (the note that fits by the table steals).
-2026-11-15 (ANALOG 2's PARA, docs/paraphonic.md; track 0 on ANALOG 2, two of its notes held, hold.c's para_live):
-13. a note joining the held chord is priced as a member (LOAD_PARA_MEMBER + LOAD_PARA_ADD) and its chord's slots at a
-    member's each: a kit where it fits takes stock's result exactly; the same kit with PARA OFF steals;
-14. PARA OFF / ON (2026-11-15, the User): an older project's value 1 (2 pitches then) reads as ON: with two notes held a
-    third joins as a member; ON with eight held (a full chord, 2026-11-15: "Up to 8", "Drop the oldest"), a ninth joins
-    as a member too (the DSP stops the chord's oldest note);
-15. with none of the track's notes held, the note starts a chord: priced as the track's voice;
-16. a heavy note's further releases never take a PARA chord's voice (HOLD keeps its note-off back); with PARA OFF they
-    take the chord's next oldest;
-17. track 0 on JUNO (2026-11-15): a note joining its held chord is priced as a JUNO member (LOAD_PARA_JUNO_MEMBER +
-    LOAD_PARA_JUNO_ADD).
+2026-11-21 (PARA as one voice, csrc/para/one.c: a chord on one slot, its notes in pv_ch; track 0 PARA, one note held):
+13. the chord's slot is priced by its sounding notes: the track's voice + LOAD_PARA_BASE + load_para_add[N] (1, 4, 8
+    notes), PARA OFF the track's voice;
+14. the joined notes count at once: a note on another track that fits beside a chord of 1 steals beside a chord of 4;
+15. a PARA note that reaches load_pre (no chord of its track held; a join never gets there) starts a chord: one note;
+16. a heavy note's further releases never take a PARA track's voice (HOLD keeps a chord's note-off back); PARA OFF
+    takes its next oldest;
+17. JUNO: a chord priced by JUNO's own BASE and ADD.
 Exit 0 when every check passes.
 """
 
@@ -173,6 +170,16 @@ def install(e: Emu) -> dict:
             i += 1
     for load, code, _what in W._chunks():
         e.write(load, code)
+    # 2026-11-16: with lfo4 shipped (pages.lfo4_on), the wishes' memcpy / memset stubs go on into lfo4's
+    # (csrc/wishes/hooks.S): its CODE chunks too, or the allocator's tick copy (0x4002a414's memcpy) runs into
+    # unmapped code (an exception, the crash printer: every scenario's state was then never built)
+    from dnfw.waverider import pages as PG
+    if PG.lfo4_on():
+        from dnfw.mods import lfo4 as L4
+        from dnfw.mods import platform as PL
+        for _, data in L4._chunks(bytes.fromhex(L4._spec()["blob"])):
+            chunk = PL.area.CodeChunk.unpack(data)
+            e.write(chunk.load, chunk.image + bytes(chunk.bss))
     if hasattr(e.m, "flush"):
         e.m.flush()
     print(f"  installed {n} edited runs and {len(W._chunks())} chunks", flush=True)
@@ -209,6 +216,12 @@ class Kit:
         e.w32(sym["load_fx"], 0)
         e.write(sym["load_off"], bytes([off]))
         e.w32(sym["load_sp_min"], 0xFFFFFFFF)
+        # 2026-11-16 (PARA as one voice, csrc/para/one.c): no chord from an earlier scenario (a held chord would take
+        # the track's next note before the budget sees it: scripts/emu_para_onevoice.py checks that path)
+        if "pv_ch" in sym:
+            e.write(sym["pv_ch"], bytes(16 * (8 + 10 * 16)))
+            e.write(sym["pv_cur"], bytes(16))
+            e.w32(sym["pv_kept"], 0)
         # 2026-11-13: no DSP telemetry yet (no room, no slot costs), nothing measured
         for t in range(16):
             e.w16(sym["load_meas"] + 2 * t, 0)
@@ -269,15 +282,18 @@ def twin(e, sym, build, t, n):
     return got, ref, mh == ms
 
 
-A2_TYPE, JUNO_TYPE, MOD_AT = 22, 23, 20 + 2 * 37   # the PARA engines' machine type values; the sound's MOD (PARA)
+A2_TYPE, JUNO_TYPE, MOD_AT = 51, 50, 20 + 2 * 37   # (22, 23 until 2026-11-18)   # the PARA engines' machine type values; the sound's MOD (PARA)
+
+
+PV_CHORD, PV_ENTRY = 8 + 10 * 16, 16                # csrc/para/one.h: pv_chord (live, track, seq, pad, ages, 10 places)
+PV_USED, PV_HELD, PV_SOUND = 0x01, 0x02, 0x04
 
 
 def para_checks(e: Emu, sym, res) -> None:
-    """13..16: ANALOG 2's PARA (load.c para_join_cost, slot_cost, load_post)"""
+    """13..17: PARA as one voice (load.c para_notes, para_chord, slot_cost, load_pre, load_post; 2026-11-21)"""
     from dnfw import load as LD
     t = LD.load()
-    pc, avail = t["para"], t["avail"]
-    join = pc["member"] + pc["add"]
+    pa, pj, avail = t["para"], t["para_juno"], t["avail"]
     snd0 = e.r32(KIT_PTR) + 52                 # track 0's sound
     keep = (e.read(snd0 + 0xDE, 1), e.read(snd0 + MOD_AT, 2))
 
@@ -285,52 +301,65 @@ def para_checks(e: Emu, sym, res) -> None:
         e.write(snd0 + 0xDE, bytes([typ]))
         e.write(snd0 + MOD_AT, struct.pack(">H", v << 8))
 
-    def chord(value, fill, n1=10, held=True, typ=A2_TYPE, notes=(60, 64)):
-        """track 0 (a voice 10,000): NOTES held, its chord; track 1: N1 notes of FILL; PARA VALUE"""
+    def chord_of(slot, track, n):
+        """slot SLOT's chord (one.c pv_ch) on TRACK: N places held and sounding"""
+        c = bytearray(PV_CHORD)
+        c[0], c[1] = 1, track
+        for k in range(n):
+            struct.pack_into(">BBBBiII", c, 8 + PV_ENTRY * k, 60 + 4 * k, PV_USED | PV_HELD | PV_SOUND, 1, 0, 0, k + 1, 0)
+        e.write(sym["pv_ch"] + PV_CHORD * slot, bytes(c))
+
+    def chord(value, n, fill, typ=A2_TYPE, n1=10):
+        """track 0 (a voice 10,000): one note held, its slot a chord of N notes; track 1: N1 notes of FILL"""
         def build():
-            cost = [10000] + [fill] * 15
-            k = Kit(e, sym, cost)
-            for nn in notes:
-                k.play(0, nn, hook=False)
-            k.chord = e.r32(HELD)
+            k = Kit(e, sym, [10000] + [fill] * 15)
+            k.lead = k.play(0, 60, hook=False)
             for nn in range(n1):
                 k.play(1, 30 + nn, hook=False)
-            e.w32(sym["para_live"], k.chord if held else 0)
+            chord_of(k.lead.bit_length() - 1, 0, n)
             para(value, typ)
             return k
         return build
-    fill = (avail - 2 * pc["member"] - join - 500) // 10          # PARA: the slots' sum and a joining note just fit
-    try:
-        got, ref, same = twin(e, sym, chord(3, fill), 0, 67)
-        need = counters(e, sym)["last_need"]
-        check("13 PARA: a note joining a held chord is priced as a member; it fits: stock's result exactly",
-              got == ref and same and need == join, f"{got:#06x} / {ref:#06x}, need {need} (a member {join})")
+
+    def summed(build, tr=1, nn=90):
+        """the slots' sum load_pre saw for a note on TR, and whether it stole"""
         snap = e.save(SPANS)
-        k = chord(0, fill)()
-        held0 = e.r32(HELD)
+        k = build()
         o0 = counters(e, sym)["over"]
-        off = k.play(0, 67, True)
+        k.play(tr, nn, True)
         c = counters(e, sym)
         e.restore(snap)
-        check("13 ... the same kit with PARA OFF: priced as a voice, it steals a held one",
-              c["over"] == o0 + 1 and c["last_need"] == 10000 and off and not (off & ~held0),
-              f"need {c['last_need']}, took {off:#06x} of held {held0:#06x}")
-        twin(e, sym, chord(1, fill), 0, 67)
-        need = counters(e, sym)["last_need"]
-        check("14 an older project's PARA 1 (2 pitches then) reads as ON: two held, a third note joins as a member",
-              need == join, f"need {need} (a member {join})")
-        twin(e, sym, chord(3, fill, n1=6, notes=(60, 64, 67, 71, 74, 77, 81, 84)), 0, 88)
-        need = counters(e, sym)["last_need"]
-        check("14 ... ON, eight held (a full chord): a ninth note joins as a member (the oldest stops on the DSP)",
-              need == join, f"need {need} (a member {join})")
-        twin(e, sym, chord(3, fill, held=False), 0, 67)
-        need = counters(e, sym)["last_need"]
-        check("15 none of the track's notes held: the note starts a chord, priced as the track's voice", need == 10000,
-              f"need {need}")
+        return c["last_sum"], c["over"] - o0, c["last_need"]
+    try:
+        off, _, _ = summed(chord(0, 4, 5000))
+        one, _, _ = summed(chord(3, 1, 5000))
+        four, _, _ = summed(chord(3, 4, 5000))
+        eight, _, _ = summed(chord(3, 8, 5000))
+        res["para_sums"] = {"off": off, "one": one, "four": four, "eight": eight}
+        check("13 a PARA chord's slot is priced as one voice by its notes: voice + BASE + ADD[N]; PARA OFF a voice",
+              one - off == pa["base"] and four - off == pa["base"] + pa["add"][4]
+              and eight - off == pa["base"] + pa["add"][8],
+              f"over PARA OFF: 1 note {one - off}, 4 {four - off}, 8 {eight - off} (table base {pa['base']}, "
+              f"add {pa['add']})")
+        fill = (avail - 10000 - pa["base"] - pa["add"][4] // 2) // 11   # 10 held + the note: fits by half a chord of 4
+        _, over1, _ = summed(chord(3, 1, fill), nn=90)
+        _, over4, _ = summed(chord(3, 4, fill), nn=90)
+        res["para_fit"] = {"fill": fill, "over_chord1": over1, "over_chord4": over4}
+        check("14 the joined notes count at once: a note that fits beside a chord of 1 steals beside a chord of 4",
+              over1 == 0 and over4 == 1, f"steals: chord of 1 {over1}, chord of 4 {over4} (track 1 notes {fill})")
+        _, _, need = summed(chord(3, 1, 5000), tr=0, nn=67)
+        check("15 a PARA note that reaches the budget starts a chord: priced as one note (voice + BASE)",
+              need == 10000 + pa["base"], f"need {need} (10,000 + {pa['base']})")
 
         def heavy(value):
             snap = e.save(SPANS)
-            k = chord(value, 20000, n1=12)()
+            k = Kit(e, sym, [10000] + [20000] * 15)
+            k.play(0, 60, hook=False)
+            k.play(0, 64, hook=False)
+            ch = e.r32(HELD)
+            for nn in range(12):
+                k.play(1, 30 + nn, hook=False)
+            para(value)
             e.w16(sym["load_voice"] + 2 * 2, 60000)       # track 2: a heavy voice
             held0 = e.r32(HELD)
             k0 = counters(e, sym)["keyups"]
@@ -338,23 +367,21 @@ def para_checks(e: Emu, sym, res) -> None:
             gone = held0 & ~e.r32(HELD) & ~got
             ups = counters(e, sym)["keyups"] - k0
             e.restore(snap)
-            return k.chord, got, gone, ups
+            return ch, got, gone, ups
         ch, got, gone, ups = heavy(3)
         ch0, got0, gone0, ups0 = heavy(0)
         res["para_heavy"] = {"chord": ch, "took": got, "released": gone, "keyups": ups,
                              "off": {"took": got0, "released": gone0, "keyups": ups0}}
-        check("16 a heavy note's further releases never take a PARA chord's voice; PARA OFF takes the chord's next",
+        check("16 a heavy note's further releases never take a PARA track's voice; PARA OFF takes its next oldest",
               ups >= 1 and gone and not (gone & ch) and ups0 >= 1 and (gone0 & ch0),
-              f"PARA: released {gone:#06x} (chord {ch:#06x}); OFF: released {gone0:#06x}")
-        pj = t["para_juno"]
-        twin(e, sym, chord(3, fill, typ=JUNO_TYPE), 0, 67)
-        need = counters(e, sym)["last_need"]
-        check("17 JUNO: a note joining its held chord is priced as a JUNO member",
-              need == pj["member"] + pj["add"], f"need {need} (a JUNO member {pj['member'] + pj['add']})")
+              f"PARA: released {gone:#06x} (track 0 {ch:#06x}); OFF: released {gone0:#06x}")
+        offj, _, _ = summed(chord(0, 4, 5000, typ=JUNO_TYPE))
+        fourj, _, _ = summed(chord(3, 4, 5000, typ=JUNO_TYPE))
+        check("17 JUNO: a chord of 4 priced by JUNO's costs (voice + its BASE + its ADD[4])",
+              fourj - offj == pj["base"] + pj["add"][4], f"{fourj - offj} ({pj['base']} + {pj['add'][4]})")
     finally:
         e.write(snd0 + 0xDE, keep[0])
         e.write(snd0 + MOD_AT, keep[1])
-        e.w32(sym["para_live"], 0)
 
 
 def main() -> int:

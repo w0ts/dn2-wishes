@@ -61,6 +61,9 @@ HELLO, WRITE, STATUS, CLEAR, SAVE, LOAD, FORGET, BEGIN, END, DIR = 1, 2, 3, 4, 5
 L_INFO, L_FOLDER, L_BEGIN, L_WRITE, L_END, L_LIST, L_DELETE, L_FOLDERS = 16, 17, 18, 19, 20, 21, 22, 23
 STATUS_TEXT = {0: "ok", 1: "refused", 2: "unknown command", 3: "the +Drive refused the write"}
 DSP_RATE = 48000
+# HELLO's last word (link 4, v0.22): the DSP's power-on RAM check; 3 since 2026-11-19 (before, "no answer" read 2)
+RAM_CHECK_TEXT = {0: "not run yet", 1: "passed (all 400 MB load)", 2: "FAILED: only the first 128 MB load",
+                  3: "not answered (the DSP never ran it): only the first 128 MB load"}
 LINK_BYTES_PER_S = 24 * 1500
 
 
@@ -450,8 +453,7 @@ def main(argv=None):
         if a.command == "hello":
             print(f"sample link {proto}: room for {room / 2 ** 20:.0f} MB of samples, the pool at DSP 0x{ddr:08x}")
             if ram is not None:
-                print("  the DSP's RAM check: " + {0: "not run yet", 1: "passed (all 400 MB load)",
-                                                     2: "FAILED: only the first 128 MB load"}.get(ram, str(ram)))
+                print("  the DSP's RAM check: " + RAM_CHECK_TEXT.get(ram, str(ram)))
         elif a.command.startswith("lib-"):                 # v0.31 (link 5): the +Drive's library
             if proto < 5:
                 raise SystemExit("the library needs v0.31 or later on the instrument")

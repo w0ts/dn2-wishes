@@ -1139,6 +1139,27 @@ class TRXCH:
     @classmethod
     def host(cls, p: Prog, L: K.Layout) -> None:
         cls._gap(p)                                   # GAP
+        p.call("trx_hathost", lambda: cls._host_words(p, L))   # (one copy for CH and OH: 2026-11-20, the room)
+
+        def note():
+            p.iconst(2, 1)
+            ws(p, 9, 2)
+            cls._dec(p)                               # DEC
+            ws(p, 10, 2)
+        note_only(p, note)
+        w(p, 9, 3)
+        w(p, 10, 4)
+        set_res4(p, L, cls.RS)
+        w(p, 9, 6)
+        w(p, 10, 7)
+        set_hp1(p, L, cls.HP)
+        p.iconst(9, 0x30)
+        p.iconst(10, 0)
+        set_hp1(p, L, cls.FX)
+
+    @classmethod
+    def _host_words(cls, p: Prog, L: K.Layout) -> None:
+        """the host words but GAP's and DEC's (TRX-CH's and TRX-OH's alike), from GAP in R2"""
         iaddk(p, 2, 2, 227)
         table_word(p, L, 3, "hostD", 2)
         ws(p, 2, 3)
@@ -1166,22 +1187,6 @@ class TRXCH:
         ws(p, 8, 2)
         p.iconst(2, 294)
         ws(p, 1, 2)
-
-        def note():
-            p.iconst(2, 1)
-            ws(p, 9, 2)
-            cls._dec(p)                               # DEC
-            ws(p, 10, 2)
-        note_only(p, note)
-        w(p, 9, 3)
-        w(p, 10, 4)
-        set_res4(p, L, cls.RS)
-        w(p, 9, 6)
-        w(p, 10, 7)
-        set_hp1(p, L, cls.HP)
-        p.iconst(9, 0x30)
-        p.iconst(10, 0)
-        set_hp1(p, L, cls.FX)
 
     @classmethod
     def init(cls, p: Prog, L: K.Layout) -> None:
@@ -1845,7 +1850,7 @@ class TRXS2:
         # clear, as the golden vectors have them, not as another machine left them)
         hpc_clear(p, TRXS2.HP)
         res4_clear(p, TRXS2.RS)
-        clear(p, range(TRXS2.XA, TRXS2.XA + 32))
+        K.zero_words(p, TRXS2.XA, 32)                 # (2026-11-20: a loop, perc2b's room)
 
     @staticmethod
     def trig(p: Prog, L: K.Layout) -> None:

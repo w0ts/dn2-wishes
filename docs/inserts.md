@@ -90,13 +90,37 @@ follow M.SEL because our code draws them. Each track keeps every insert's knobs,
 back keeps them. (An insert a build does not run shows SOON under M.SEL and passes the sound
 through; none in this build.)
 
-**Saved with the project** (2026-11-10, below "Saving"); not lockable, not reachable by LFOs. Real
-lockable parameters (Overtone's slots, a relocated parameter table) are a separate step.
+**Saved with the project** (2026-11-10, below "Saving"). Since 2026-11-20 each track's 14 knobs (each slot's
+K1..K6 and MIX; M.SEL never) take p-locks and the matrix's routes ("Locks and live modulation", below).
+
+## INSERT SEL and the FX icons (2026-11-20)
+
+The User: "same code/ui as filter and synth engine => coherence and less code". On an INSERT page, pushing A (M.SEL)
+or FUNC + turning A opens INSERT SEL: MACHINE SEL's page, drawn by the same code (`csrc/msel/msel.c` sel_draw and
+cell, shared with MACHINE SEL and FILTER SEL), titled "INSERT n > TRACK t". The 14 types, OFF then A-Z, each with its
+7 x 5 icon, in two columns of six: 12 on the first screen, WIDE and XDLY on the second, with the scrollbar.
+
+- UP / DOWN: one row, stopping at the ends (as stock's MachineListView, measured in the 1.12 emulator). LEFT / RIGHT:
+  INSERT 1 / INSERT 2 (as MACHINE SEL's LEFT / RIGHT switch the machine and filter pages; the two dots), the INSERT
+  page under it following. Knob A moves the cursor; the other knobs do nothing while it is up.
+- YES picks the row's type (as turning M.SEL there: MIX 0, AUTO OFF) and closes; NO closes. With LIVE SELECT on, as on
+  MACHINE SEL: a cursor resting 250 ms picks, NO puts both slots back as they were when it opened.
+- A [TRIG] key and FUNC go on as ever; any other key closes it and does what it does.
+- The icons are one table, `dnfw.waverider.msel` FX_ICONS (drawn by the machine icons' rule: gear -> its look, a word
+  -> the word, else the sound on a scope; the User's OK 2026-11-20). The same icons are in M.SEL's box over the name,
+  in the FX overview's cells (the cell is 15 px: the icon replaces the 3 letters), and in the title bar.
+- The title bar (place A): while its message line shows the page's name (once it has slid in), the item's icon at its
+  right end (x 119, row 2): the machine's on the SYN pages, the filter's on FLTR, the insert's on an INSERT page. The
+  draw is `ins.c` ins_title_icon; measured 38 instructions a draw with no page name up, about 230..280 with it, about
+  860 the first draw of another item (its columns made once). Stock draws the slide's last step before it marks the
+  line shown, so `ins_title_poll` (every UI pass, a few instructions) asks for one redraw when a page name has slid in.
+- Checked by the gate's `insel` step; the overview by `insovw` and `overviews`.
 
 ## The values' way to the DSP
 
-The link (`csrc/sampler/link.c` `smp_tdm`) sends them whenever `ins_gen` moves, 3 times (one packet may
-be lost), after any recorder command and before a load's next chunk: 58 words at the sample pool's
+The link (`csrc/sampler/link.c` `smp_tdm`) sends them once every 8 DSP blocks in a fixed phase (since 2026-11-20,
+"Locks and live modulation" below; until then whenever `ins_gen` moved, 3 times), after any recorder command and
+before a load's next chunk: 58 words at the sample pool's
 directory page `+0xf18` (`0x84000f18`), all that lies between the command block (`0xf00`, 6 words) and the
 directory page's end; loads never write past the command block (a static assert in link.c).
 
@@ -108,6 +132,82 @@ fields 4w .. 4w+3 in its bits 0..27, fields 28..31 are the 7 words' top nibbles.
 into its table (`design.TABLE`, L2 `0x200afb00`, 32 x 8 words) whenever the change word moved; the three
 passes read the table. At power-on the pool's directory and the table are zeros: every insert OFF until
 the ColdFire's first send. A slot whose FDN8 / XDLY found no instance (FULL) is sent as OFF.
+
+**A slot at MIX 0 is sent as OFF** (2026-11-16, the User: an insert at no effect should cost nothing; `ins.c mix_off`).
+Its record is exactly an OFF slot's at MIX 0: all eight fields 0, and TAPE's PGAIN byte 0 (so the DSP does exactly
+what it does for OFF, the -0.0 and non-finite corners included). **Every M.SEL pick of another type sets MIX 0**
+(the User, A): a type picked does nothing and costs nothing until MIX is turned up; a loaded project keeps its saved MIX.
+Proved against 4ee6e25c's ins.c on 20,000 random projects: with MIX 1..127 every word sent and every record saved is
+the same; with MIX 0, each MIX-0 record is an OFF slot's, the rest unchanged but for FDN8 / XDLY instance numbers (a
+MIX-0 FDN8 / XDLY keeps its instance, so a ninth FDN8 is FULL even when one of the eight is at MIX 0).
+The DSP's mix is `x + (wet - x) x MIX/127`: at MIX 0 the output is the dry (measured bit for bit on every type's
+model, a sine and noise, 300 blocks), yet the type's code ran in full (the runner, the pass alone, 16 voices: FUZZ
+46,195 against 1,358 with every insert OFF, TAPE 64,012, JUNO 51,185; a bus FDN8 12,140 against 245). Sent as OFF it
+costs what an OFF slot costs. The DSP code does not change. Its MIX, knobs and FDN8 / XDLY instance stay on the ColdFire
+(saved, shown, the instance held); when MIX leaves 0 the type is sent again and **starts from silence**, as every
+insert that did not run does (2026-11-14, below: its state, ring, AUTO powers and GATER phase from zeros; a bus FDN8
+clears its ring over 32 blocks). Against running the type at MIX 0 (the models, every type, knobs 0 / 127, AUTO on,
+TAPE PGAIN +31 / -32, hot input): 0 values differ; only an input sample of -0.0 may come out -0.0 where the mix gave
++0.0, and a non-finite wet no longer reaches the output. **Kept:** slot 1 a CHOR, WIDE, JUNO, FDN8 or
+XDLY at MIX 0 while slot 2 sends a voice insert: slot 1 is still sent, so slot 2 stays on the bus after it (`design.moved`;
+sent OFF, slot 2 would go back to the voice, before the filter). Until this rule a picked type kept the slot's MIX (127,
+fully wet, on a NEW slot); at the DEFAULT knobs every type changes the sound (+2 .. +19 dB of difference on noise), so
+no type was at no effect when picked.
+
+## Locks and live modulation (2026-11-20)
+
+The User's picks (scratch/mod-live-design.md C, every first option). Code: `csrc/inserts/ins.c` (the live values),
+`csrc/slides/slide.c` (the locks), `csrc/matrix/matrix.c` and `routes_pop.c` (the routes), `csrc/sampler/link.c`
+(the packet). Tests: `test/test_ins_live_c.py`, the matrix step's scenarios `inslive` and `inslock`
+(`scripts/emu_matrix.py`).
+
+**P-locks.** Seven lock kinds, K1..K6 and MIX, stored ids **211..217** (heads 0x5B..0x61 in the pattern's lock pool,
+as SLD / SLEN / REC / ENV2's): a step's u16 holds **slot 1 in its low byte, slot 2 in its high byte** (0xFF none).
+A track fully locked uses 7 of the pattern's 80 records; a full pool refuses the lock, as stock does. The lock list's
+tail moved to 1584 to carry them. On an INSERT page, a trig held and a knob turned locks every held step (from the
+lock it holds, else the knob's value, as stock's locks start), drawn inverted as stock draws a p-lock; trig + push
+clears it. M.SEL, FUZZ's and TAPE's AUTO and TAPE's PGAIN are not lockable. At a trig (`sl_apply` -> `ins_trig`) the
+track's inserts take the step's locks in place of the knobs until the track's next trig; for a chord every voice
+applies the same list. Notes of the track still sounding, and FDN8 / XDLY tails, hear the newest trig's values; a
+trigless lock changes the insert with no note. Older builds and stock skip ids 211..217 (the locks dropped, the
+values kept).
+
+**Routes.** Destinations **0xC0 + 7 j + i** (slot j, knob i: K1..K6, MIX), ordinary routes of the track's LFO and
+envelope routes (no extra cost in `mx_eval`); their cells sit in each voice's ENV2 knob row after ENV2's. The insert
+is per track, the LFOs per voice: a track's inserts follow its **last-played voice** (slides' `sl_lastv`, the
+moving line's voice); no voice yet: no offset; a voice that left the track holds its last offset. A plain push on an
+INSERT page's knob opens the routes popup on it. **Not routable, still lockable** (no smoothing, so they would click or
+jump): CHOR DLY / DPTH / VOIC, WIDE TIME, FDN8 PRE, SUB OCT, GATR PATN / RATE, JUNO MODE, the AUTO switches, and the
+fields off the page (`ROUTE_OK`). MIX is routable on every type.
+
+**The round-robin** (`ins_period`, every DSP block from `smp_tdm`): one group of 4 records (2 tracks) packed a block,
+each from SET (the lock or the knob) plus the routes' offset that `mx_eval` worked out for that group in that frame;
+every group every 8 blocks, **187.5 Hz a track**, the values at most 10.7 ms old. One 58-word packet every 8 blocks
+after the last group (only commands go first); its change word moves only when the packed words differ from the last
+packet's, so the DSP unpacks exactly as before and its code is unchanged. The same work with or without modulation.
+Sample loading keeps 7 of 8 blocks (744 -> 651 KB/s). TAPE's PGAIN has its own change word (`ins_tpg_gen`).
+A record's header (field 0, MIX 0 = OFF, which knobs its type routes) and TAPE's PGAIN byte are made again only for a
+track marked changed (`ins_hdirty`: a type, instance, AUTO, MIX or PGAIN turn, a MIX lock or route appearing), when
+its group is packed next (2026-11-21): never all 32 records in one block; a PGAIN turn reaches the DSP within 8 blocks.
+
+**Lock timing.** A trig whose locks change a track's SET packs its group at once and sends the packet in the next
+block (`ins_urgent`); at most 2 such groups a block besides the round-robin's (2026-11-21, the worst frame: 16 tracks'
+trigs in one block are packed over 4 blocks, the last tracks' locks 2 ms later). Measured (the `inslock` scenario): the packet carrying the lock is the link's first period
+after `sl_apply` (`smp_tdm`'s next call, one DSP block, 0.67 ms), not the round-robin's turn (up to 8 blocks).
+Not measured through the DSP: the frame ISR applies a step's locks (`0x40026c20`) and fills the voices
+(`0x400275b0`) after the link's hook (`0x40026098`), so the note's frame words and the lock's packet would leave in
+the same next period; whether the DSP's pre pass unpacks it in the note's first block or one block later (0.67 ms
+of the previous values) is still open.
+
+**Cost** (the ColdFire emulator, the `inslive` scenario; 1 % of the CPU taken as 580 instructions a frame,
+docs/scope.md). Before 2026-11-21 / now: `ins_period` every block 1,001 / 605 instructions (1.7 / 1.0 % of the CPU);
+the worst block after 16 tracks' trigs with MIX locks 18,012 / 2,894 (31 / 5.0 %; it was the full header rebuild and
+all 8 groups packed at once); the same again with the MIX locks kept 8,774 / 1,475; the 16 `ins_trig` (in `sl_apply`)
+6,272 / 4,624, one 461 / 312. `mx_eval` unchanged (5,892..6,062) with or without an insert route.
+
+**MIX 0 = OFF** only when nothing can move MIX: no MIX route and no MIX lock in the UI track's pattern (`ins_keep`,
+the UI pass's scan 5 times a second; a trig's MIX lock at once). A locked or modulated MIX at 0 is dry, never OFF
+and on again (which would restart the type from silence and cut its tails).
 
 ## DSP
 
@@ -257,6 +357,21 @@ loud one (the levels are matched over ~50 ms, not per transient). c is computed 
 they stood (no ramp: they move ~1.3 % a block). The powers update every block, ON or OFF, so a switch to ON starts
 from the voice's level; they start from zeros with the insert's state (a new type or track).
 
+**AUTO is OFF by default** (2026-11-19, the User: "auto gain should be off by default on our disto FXs"). The
+defaults were OFF already (DEFAULT's field 5 0 for DIST, FOLD and HARM; `ins_fza` 0 for FUZZ and TAPE; a NEW project and
+power-on `ins_defaults`), but a pick could bring an ON back: a slot keeps every type's knobs (`ins_kv[track][slot][type]`)
+and FUZZ and TAPE share one AUTO a slot (`ins_fza`), so picking a type gave the slot's last value of it, ON once it had
+been turned on there (or on FUZZ, for TAPE), even from a project loaded earlier (a LOAD sets only the saved type's
+knobs). Now **every M.SEL pick of a distortion sets its AUTO OFF** (`ins.c auto_off`, beside the pick's MIX 0); M.SEL
+moved inside a type's band is no pick, and **a saved project keeps its AUTO** (a record's ON loads, plays and saves
+back ON: no conversion). **FUNC + a long push** (0.6 s) on an INSERT page's knob B..G puts that place back to its
+default, as stock's pages do (`ins_knob_reset`, from `csrc/matrix/routes_pop.c mxp_poll`, whose routes popup is refused
+there): AUTO OFF, TAPE's PGAIN 0 dB, any other knob the type's DEFAULT; M.SEL and MIX are left as they are. A FUNC +
+push there no longer counts as a FUNC tap on its release (`ins_func_push`: it switched FUZZ's or TAPE's page). The DSP
+has no default of its own: it reads the fields it is sent. Checked by `test/test_inserts_c.py` (the C on the host) and
+the `insovw` step's part 11 (the build in the emulator: every distortion picked through M.SEL's knob with AUTO ON
+beforehand, then FUNC + long push G on TAPE and DIST).
+
 **OFF** (0 in every record saved before AUTO: its place was empty, DEFAULT 0) multiplies the wet by exactly 1.0:
 the inserts are bit-identical to before (checked against the previous reference over 400 random blocks of every
 type, G anywhere in 0..63). State: two words per (voice slot, insert slot) at `design.AUTO_L2` (L2, after the bus
@@ -273,9 +388,23 @@ envelope follower, instant up, ~0.35 s down; floor 0.1), so DRIV clips a quiet a
 DRIV 0.5x .. 48x (0.5 x 96^p) of the peak into FUZZ's clip (BIAS, its static part out, the 20 Hz DC
 blocker, TONE 300 Hz .. 12 kHz); the band under LOW (a one-pole, 20 Hz x 16^p: 20 .. 320 Hz; Optimist's
 fixed 55 Hz) stays out of the clip and is added back dry; the clip's output goes back to the peak's level
-with a make-up of 1 / (1.5 min(G, 1)); LEV x 2. It fades in over ~10 ms (FUZZ's gate smoothing, the gate
-off). (FUZZ's loop gained 6 instructions a sample for it: the pre-filter and release from words, the dry
-share, the low band back.)
+with a make-up of 1 / (1.5 min(G, 1)); LEV x 2. (FUZZ's loop gained 6 instructions a sample for it: the
+pre-filter and release from words, the dry share, the low band back.)
+
+**DIST's onset (2026-11-21, dist-onset).** Until then the peak was the follower's value at the block's start, so
+a hit lagged a block: after silence (or on a fresh instance, the floor 0.1) the first block was driven ~9x harder
+at ~1/9 of its level, the gate smoothing faded it in over ~10 ms, and AUTO, following the powers, made that up
+several times over (a hat peaking at 0.92: 6.7 at LEV 64, 26 at LEV 127; AUTO off, the first hat at half the
+others' peak). Now: the peak is max(the follower, the block's largest |x|, 0.1), the block read once before the
+loop (`program.fz_peak`, FUZZ's and DIST's: it also raises the input's clip flag for the block, which the loop did
+sample by sample; the loop then reads the buffer again: main, 2026-11-21, no L1 copy, as its planned place
+0x2E1750 holds the bus XDLY stores; on the unit the buffers are in L1 already, the runner's DDR scale sees about +300
+a run); one reciprocal 1 / (pk h) gives both
+G / pk and the make-up; gg is held at 1 (no fade-in: the guard's smoothing already covers an instance going out and
+coming back); with AUTO on the wet's LEV x 2 is left out (AUTO's T is LEV x 2: it applied it twice when its powers
+started from zero). AUTO off, the first hat on a fresh instance peaks as the warm ones; AUTO on, it stays under
+AUTO's own target (T x the dry). Cost: DIST -21 a run, FUZZ -11 (tests' scale and with L1 buffers; the loop's ABS and the clip flag
+out of the loop pay for the look at the block); FUZZ bit-identical.
 
 **RING**: the voice times a sine of FREQ, 26 Hz x 100^p (26 Hz .. 2.6 kHz, Optimist's exponential knob);
 SHPE drives the sine into a clip (x 1 .. 16: towards a square); AM lifts the carrier towards 1 (0 ring
@@ -395,9 +524,32 @@ R = m - s'; MIX the dry / wet.
 **CHOR**: one to four voices (VOIC: 1 + trunc(3.99 VOIC / 127)) reading one ring of the mid; voice v's delay
 DLY (5 .. 15 ms) + DPTH (0 .. 4 ms) x a sine at RATE (0.05 .. 5 Hz), each voice a quarter turn on, moved
 linearly across the block and read between two samples; even voices to the left, odd to the right by WDTH
-(a voice alone stays centred), x 2 / voices; the ring takes the mid + FDBK (0 .. 0.7) x the wet's mid; MIX
+(a voice alone stays centred), x 2 / voices; the ring takes the mid + FDBK (0 .. 0.97, below) x the wet's mid; MIX
 the dry / wet (127: the wet alone, a vibrato). Every read is 48 samples or more back, so of an earlier
 block.
+
+**FDBK up to 0.97** (2026-11-16, the User: "why chor feed back goes only to 70 %?", then "as high as safe"):
+FDBK = c0 - 0.03^(knob / 127), c0 the DSP's exp2(0) (1 - 2^-23: knob 0 gives exactly 0.0, branch-free) (`design.CH_FB_MAX`,
+`CH_FB_LOG2`, `CH_FB_C0`; knob 64 0.83, 100 0.94, 127 0.97; the post pass's code stays 7,034 B: `chor_params` saved the 7
+instructions it adds, the same values bit for bit), so
+the feedback's decay time doubles every ~25 steps and the top is fine-grained (FDN8 SIZE's idea); the readout shows
+it in %. Until then FDBK was 0.7 x knob / 127: every value but 0 now sounds different (more feedback at the same knob;
+a saved project's FDBK is read on the new curve). **Why it is safe:** the loop's gain is at most FDBK at every setting
+(each voice's read is a convex mix of two ring words; the voices' L + R gains sum to 2 / voices, so the wet's mid is
+their mean), so any top under 1 is stable. Measured (a numpy copy of the reference, 1 ulp from it; 64 corners: 1..4
+voices, DPTH RATE DLY WDTH at 0 / 127; full-scale inputs; the peak over the input's, the decay after it stops):
+
+| top | sine on the comb's resonance | chirp | noise | square 110 Hz | slowest decay | -60 dB after | runaway |
+|---|---|---|---|---|---|---|---|
+| 0.70 (old) | +13.0 dB | +12.0 | +11.7 | +9.7 | -175.9 dB/s | 0.3 s | 0 / 256 |
+| 0.90 | +22.5 | +18.2 | +17.4 | +15.3 | -52.9 | 1.1 | 0 / 256 |
+| 0.95 | +28.1 | +21.1 | +20.1 | +17.9 | -25.8 | 2.3 | 0 / 256 |
+| **0.97** | +31.6 | +22.9 | +21.9 | +19.4 | -15.4 | 3.9 | 0 / 256 |
+| 0.98 | +33.7 | +24.4 | +23.5 | +20.3 | -10.2 | 5.9 | 0 / 256 |
+| 0.99 | +36.1 | +27.3 | +25.6 | +22.3 | -5.1 | 11.7 | 0 / 256 |
+
+The top is set by level and tail, not stability: the worst peak is up to 4/3 / (1 - FDBK) (3 voices at WDTH 127 put
+two voices' 2/3 on one side). 0.97 keeps the tail under 4 s and real material about +10 dB over the old top.
 
 A slot starts its post insert from zeros (state and ring) whenever its track or that track's M.SEL
 changes.
@@ -522,6 +674,115 @@ its tail with the voice (a stolen slot starts again) and cost once a voice, so F
 | M.SEL FDN8 | PRE | SIZE | DAMP | MOD | HPF | LPF | MIX |
 | M.SEL XDLY | TIM1 | TIM2 | FDBK | MOD | TONE | | MIX |
 
+## The FX key on its release, and the overview held (2026-11-17)
+
+The User: "hold longer. and we should not change fx page on press, but on release of the button (and not change page if
+held long of course)". Stock 1.12 uses the FX key held: on the FX page the labels read the values while it is down
+(measured in the emulator, stock alone). So:
+
+- **FX pressed**: nothing moves. On stock's FX page the press goes on to stock alone, so its value view shows while
+  FX is down; on an INSERT page our labels read the values while FX is down (as SYN held).
+- **Let go before the key repeats** (a tap): the tap of before, played then. Its press and release go in where the
+  panel's own go (stock 0x4011fc8c, as the test channel's keys). So FX 1/3 -> 2/3 -> 3/3, stock's page change from
+  any other page, and every popup that a key closes behave exactly as a tap did on its press.
+- **Held until the key repeats, then let go**: nothing steps. This is stock's own test of a hold, the one the MOD key
+  (the LFO pages) uses. The first repeat comes 24 ticks after the press (0.2 s on the unit; `0x4029f0c8`, then one every
+  8 ticks). Measured on stock's MOD in the emulator: a 20-tick press steps, a 28-tick one does not. The first version
+  (95a560a2) stepped on any release before one second. On the unit a hold of half a second showed the values and then
+  stepped anyway (the User: "currently goes to next page even for long presses"). Found on the unit (2026-11-17,
+  through the test channel): the second's mark and the overview worked; the gap was this shorter boundary.
+- **Held a second** (121 ticks of the panel's clock): the **overview**, over everything. Let go: it closes, no page
+  changes. Any other key or knob while FX is down closes it (or, before the second, cancels the tap and the overview)
+  and then does what it does. AMP follows the same rules without the overview.
+- **FUNC + FX**: stock's SEND pages, as stock; a stock question takes FX as stock.
+- **From another page: on the press** (2026-11-18, the User: "switching to amp and FX page is slower than other
+  pages", then: "the switch to next page on release yes. but coming from another page... it on press down"). When
+  neither the key's stock page nor a page of ours of that key is up (FX or AMP from TRIG, SYN, ...), the press, its
+  repeats and the release go on to stock as they come, as for TRIG, SYN, FLTR and MOD: stock enters page 1 (FX 1/3,
+  ENV1/AMP) on the press, and the release steps nothing more, after a tap or a hold. FX held a second there still
+  brings the overview; let go, FX 1/3. Already on the key's pages, the rules above hold: the next page on the
+  release, a hold never steps. Stock's "Amplitude" is renamed ENV1/AMP where stock makes the page's name
+  (`ins_header`), and stock's "FX" before the first draw with no slide after it, so the first frame names the page.
+  Measured in the emulator (`scripts/emu_page_keys.py`: the panel UART at the unit's rate, the build's own snapshot,
+  a tap of 8 ticks, from the press until the new page has fully left the UART): TRIG -> FX or AMP 240 ms before
+  (the press held back, a tap played after the release, the name a draw later), 141 ms now, as FLTR and MOD (and
+  stock 1.12). FX 2/3, 3/3 and AMP 2/3, 3/3 (on the release, their names slid in as stock's SEND pages slide
+  theirs) stay at 225-235 ms: most of it is the UART carrying a page that differs in about 400 of 1,024 bytes.
+  `emu_ins_overview.py` steps 1 and 10 check these rules.
+
+The overview (the User's layout, 2026-11-17): the title bar "INSERTS n/32" (the slots the DSP runs) and "DSP nn%" (the
+system meter's D: the last half second's peak; "--" with no reading); tracks 1-8 then 9-16, each a numbers row (the
+active track lit) over its slot 1 and slot 2, a cell 16 px wide, in a 3x5 font of ours (stock's labels are wider
+than 16 px for four letters):
+
+| cell | the slot |
+|---|---|
+| lit box, the name dark | the DSP runs it (a slot-1 CHOR / WIDE / JUNO / FDN8 / XDLY at MIX 0 kept before a voice insert in slot 2 too) |
+| the name lit | MIX 0: sent as OFF, it costs nothing |
+| an outline "FUL", blinking | FDN8 / XDLY with no instance left (FULL: it passes the sound through) |
+| a dot | OFF |
+
+Names: FUZ TAP FLD CHO WID HRM FDN XDL SUB DST GAT RNG JUN. The picture is `dnfw.inserts.overview.render`, pixel for
+pixel; `csrc/inserts/ovw.c` draws it. Checked: `test/test_ins_overview.py` (the letters and names are the model's),
+ship_gate step `insovw` (`scripts/emu_ins_overview.py`, the emulator: tap, value view, all 32 slots, FULL, closing).
+
+### The other page keys' overviews (2026-11-17)
+
+The User: "lets try them all, we can revert what we dont like". The same second's hold on SYN, FLTR, MOD (the LFO
+pages) and AMP shows an overview in the same layout (`csrc/inserts/ovw_draw.c`, the picture `dnfw.overviews`):
+
+| key | title bar | a track's two rows |
+|---|---|---|
+| SYN | MACHINES, MUTED n | the machine (lit box; an outline when the track is muted: global, pattern or solo), its engine (PERC's family over its machine: TRX over BD; PLAITS' and SOPHIE's MODL, ANALOG 2's FLT2, MONOMACHINE's engine) |
+| FLTR | FILTERS | FLT1, the filter machine (lit box), FLT2: ANALOG 2's own FLT2 on an ANALOG 2 track, else a dot (the DN2's FLTR 2 page is the base-width filter, which has no type; the User, 2026-11-18) |
+| MOD | LFO POOL n/256, MUTED m | LFO1-4: a mark each, filled when it modulates (stock's DEST, an unmuted route of the record, LFO4's DEST); the routes in use in a lit box, the muted ones beside it |
+| AMP | VOICES n/16, C nn% D nn% | the voices sounding (held, or the DSP's per-slot cost over the tail), the track's share of the DSP's frame (our machines: the DSP's per-slot cost; a stock machine: the VOICE BUDGET's table cost of every slot it last owned); the busiest lit |
+
+Names are 3 letters (4 fill the 16 px pitch and run into the next cell): a longer engine name loses its first vowel
+after the first letter, else (two digits at its end) its second letter, else its last (STRG STR, SL12 S12). SYN, FLTR
+and MOD are stock's keys: stock already steps them on a tap's release and shows their values while held, and every
+item of theirs still goes on to stock (measured in the emulator, stock against ours: tap, 0.5 s, 2 s, the release);
+the overview only covers stock's value view after the second and closes on the release, which stock takes as a hold.
+Up, the overview is redrawn 4 times a second, alone over the glass when the last full draw ended with it on top (the
+scope's method), with word fills; the scope and the moving lines draw nothing under it. Nothing runs while none is
+up. Checked: `test/test_overviews.py`, ship_gate step `overviews` (`scripts/emu_overviews.py`).
+
+### The VOICE key's overview (2026-11-19)
+
+The User: "a long-press overview on the VOICE button: which tracks are in which mode -- unison, para -- and number of
+voices". **Stock 1.12** (measured in the emulator, stock and ours pixel for pixel alike): VOICE's press and its hold
+do nothing on the screen (3.3 s held); its **release** opens the VOICE menu (VOICE SETUP), or closes it when it is
+open, however long the hold (the main key handler's VOICE case, 0x4005ef80, acts on the item's release bit; FUNC held
+there was stock's UNISON toggle, ours opens the RECORDER). No long hold of its own.
+
+**The build** (`csrc/inserts/ovw.c` voice_item, `ovw_draw.c` voice_view): every VOICE item still goes on to stock,
+but one. Held a second (the overviews' 121 ticks), the overview comes over whatever is up (the VOICE menu too); it
+stays while VOICE is held. Let go: it closes with one full redraw and that release is dropped, so the screen is left
+as it was before the press (the menu neither opens nor closes). A tap, or a hold shorter than the second, is stock's:
+the menu on the release, pixel for pixel. Another key or knob while it is up closes it and does what it does (VOICE's
+release after it is still dropped); one before the second means no overview and stock's release. FUNC held at the
+press (the RECORDER) or a stock question: no overview. The VOICE key's LED is untouched (stock's, and PARA's magenta).
+
+The picture (`dnfw.overviews.voice_render`): the title bar "VOICE SETUP" and "DYN n" (the menu's "(n)": the DYN
+voices, 16 less every track's fixed ones); the track numbers as the other overviews' (the active one lit); then
+three rows a track, 7 px apart:
+
+| row | shows |
+|---|---|
+| the machine | as SYN's overview names it (MID on a MIDI track; a dot with no machine) |
+| the mode | **PAR** in a lit box: ANALOG 2 or JUNO with PARA ON (UNISON is ignored there); **UNI** in an outline: UNISON on; **MON**: one fixed voice; **PLY**; a dot on a MIDI track |
+| the voices | VOICES as the menu shows it: **DYN**, or the fixed count; a dot on a MIDI track |
+
+The data is stock's own: VoiceMenuView's draw (0x400282c6) reaches the voice setup through the UI's model
+(0x4018ac5a, 0x4003e41a, 0x40030af8); per track 5 bytes, read through stock's getters: VOICES 0x40029054 (+1, a
+signed byte: 0 DYN), UNISON 0x40029126 (+2's bit 7 clear), the DYN pool 0x40028ffc. Cost: nothing while it is not up;
+up, one draw when it opens and whenever stock redraws under it, no timed redraws (nothing on it moves). Checked:
+`test/test_overviews.py` (the model, the C's labels, VOICE's code 50), ship_gate step `overviews`
+(`scripts/emu_voice_overview.py`, run by `emu_overviews.py`: stock's menu on a tap and a 0.5 s hold against stock
+1.12's own screens; the overview against the model for a project with ANALOG 2 PARA ON, JUNO with UNISON, MIDI, one
+and four fixed voices; the release restoring the screen; FLTR closing it; FUNC + VOICE the RECORDER; stock 1.12 as
+the negative control).
+
 ## Saving (with the project)
 
 The User (2026-11-10): "works with project save". Stock has no record to hold them (16 tracks x 2 slots
@@ -536,7 +797,9 @@ x 8 values), so, as the per-project pools, they keep their own per project slot 
 | - | an edit by the knobs: record 128 written 2 s after the last |
 | power-on (stock's temp slot) | record 128 |
 
-Record p (0..127 the projects, 128 the working copy, as stock's temp slot): sectors `0x6e0400 + 2 p + c`,
+Record p (0..127 the projects, 128 the working copy, as stock's temp slot): sectors `0x5ff000 + 2 p + c`
+(v0.69.1; `0x6e0400 + 2 p + c` until v0.68.1, copied once at power-on: `store.c` `move_once`, its mark
+`0x5ff102`, gate step `insmove`),
 two copies, one sector each ('DN2I', version 1, p, sequence, the 32 records as type, MIX, the type's six
 knobs, a check); written into the older copy, the newer whole copy read: a write cut by power-off leaves
 the one before. Between the pools' lists (to `0x6e02ff`) and the library's index (`0x6f0000`). A record

@@ -48,7 +48,7 @@ BASE = 0x40000400
 
 EVAL_A = 0x40137a06
 MIRROR_SLOTS, MIRROR_BYTES = 101, 202
-STATE = (0x46700000, 0x46701000, 0x46702000)   # live, second, backup (v6a's relocation)
+STATE = (0x46808000, 0x46809000, 0x4680A000)   # live, second, backup (v6a's relocation)
 STATE_LEN, STATE_STRIDE = 2560, 160
 TRACKS = 16
 DEST_SLOT = 76                                  # what the build points LFO4 at

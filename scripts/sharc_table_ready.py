@@ -7,8 +7,9 @@ tables are zpack's last words, so a wrong decode shows there first):
   (b) this build's word kept from the boot before (a restart on the same build): it decodes at once, JUNO plays;
   (c) a cold DDR (nothing there): it waits for READY at block READY_AT, then decodes, JUNO plays.
 
-Each case: the decode's position (fill) before and after READY_AT, JUNO's peaks after its note, and the PERC
-voices' bit-exactness to the model. The runner's step `tableready` (sharc_waverider_m5.py, gate_sharc's part of its
+Each case: the decode's position (fill) before and after READY_AT, JUNO's peaks after its note, the PERC
+voices' bit-exactness to the model, and (upstream PR cc95e22d) every decoded word, the tables_in_l2 copies too,
+against the model's (dnfw.md.bench.table_mem, as the voice step's sine run compares them): 0 may differ. The runner's step `tableready` (sharc_waverider_m5.py, gate_sharc's part of its
 own, about 15 min); alone:
     python scripts/sharc_table_ready.py IMAGE DIGIKIT"""
 import pathlib
@@ -18,6 +19,7 @@ import tempfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent / "src"))
+from dnfw.md import bench as MDB  # noqa: E402
 from dnfw.md import core as MDK  # noqa: E402
 from dnfw.mnm import machines as MM  # noqa: E402
 from dnfw.perc import live as PL  # noqa: E402
@@ -38,6 +40,9 @@ def run(M5, snap, m2mach, m5img, stockimg, sound, machines) -> dict:
     words = [struct.unpack_from("<I", shipped, k)[0] for k in range(0, len(shipped), 4)]
     zend = 4 * (MDK.TABLE_LAYOUT["hostP"][1] + MDK.TABLE_LAYOUT["zpack"][1])   # zpack's end (PERC's own tables after)
     stale_from, stale_to = (zend - STALE_TAIL) // 4, zend // 4
+    want = MDB.table_mem(L)                   # the decoded tables and their L2 copies, word for word
+    decoded = [*range(L.tables, L.tables + 4 * MDK.Z_N, 4),
+               *(a for lo, hi in MDK.l2_copy_spans(L) for a in range(lo, hi, 4))]
 
     def ready(st, magic, s):
         m2.poke(st, L.ready, magic)
@@ -79,11 +84,16 @@ def run(M5, snap, m2mach, m5img, stockimg, sound, machines) -> dict:
         after = f[-1] if f else None
         timing = before == 0 if case in "ac" else (len(f) > 2 and f[2] > 0)
         exact = M5.perc_exact(rr)
-        checks[f"({case}) {what}; whole, JUNO plays"] = (bool(rr["ok"]) and timing and after == MDK.Z_N
-                                                        and max(pk or [0]) > PLAYS)
-        numbers[case] = {"fill_before_ready": before, "fill_end": after, "peaks": pk, "exact": exact}
-        print(f"  case {case}: fill before READY {before}, at the end {after} (Z_N {MDK.Z_N}); JUNO peaks/8 blocks "
-              f"{pk}; exact {exact}", flush=True)
+        st = rr["state"].state if rr["ok"] else None
+        differ = (sum(1 for a in decoded if (m2.word(st, a) or 0) != want.get(a, 0))
+                  if st is not None else None)
+        checks[f"({case}) {what}; whole, every decoded word the model's, JUNO plays"] = (
+            bool(rr["ok"]) and timing and after == MDK.Z_N and differ == 0 and max(pk or [0]) > PLAYS)
+        numbers[case] = {"fill_before_ready": before, "fill_end": after, "peaks": pk, "exact": exact,
+                         "words_differ": differ, "words": len(decoded)}
+        print(f"  case {case}: fill before READY {before}, at the end {after} (Z_N {MDK.Z_N}); decoded words "
+              f"differing from the model {differ} of {len(decoded)}; JUNO peaks/8 blocks {pk}; exact {exact}",
+              flush=True)
     return {"ok": all(checks.values()), "checks": checks, "numbers": numbers}
 
 

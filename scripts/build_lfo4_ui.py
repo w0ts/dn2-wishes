@@ -52,7 +52,7 @@ SYX = ROOT / "00_Resources/02_Builds/lfo4-ui_DN2_1.11.syx"
 
 SOURCES = value.SOURCES + ("slew.c", "slewhooks.S", "desthooks.S")
 ENTRIES = value.ENTRIES + ["lfo4_slew_stub", "lfo4_slew_entries",
-                           "lfo4_dest_stub", "lfo4_dest_mask"]
+                           "lfo4_dest_stub", "lfo4_dest_mask", "lfo4_list_mask", "lfo4_hdr_stub"]
 
 NOP = b"\x4e\x71"
 
@@ -140,6 +140,18 @@ DEST_MASK_STOCK = bytes.fromhex(
     "08010010 6602"     # btst #16,%d1 ; bne
     "4280".replace(" ", ""))                                   # clrl %d0
 
+# 2026-11-17: the DEST list opener's cascade (the only one that runs when the list opens, emu_dest_probe): the same
+# three steps writing the list's mask into -28(%fp), 48 bytes, all converging on 0x4006732E
+LIST_MASK = 0x400672FE
+LIST_MASK_STOCK = bytes.fromhex(
+    "08000012 670a 327c1e00 2d49ffe4 6020"      # btst #18,%d0 ; beq ; moveaw #0x1e00,%a1 ; movel %a1,-28(%fp) ; bra
+    "08000011 670c 203c00000e00 2d40ffe4 600e"  # btst #17 ; beq ; movel #0x0e00,%d0 ; movel %d0,-28(%fp) ; bra
+    "08000010 6708 307c0600 2d48ffe4".replace(" ", ""))   # btst #16 ; beq ; moveaw #0x0600,%a0 ; movel %a0,-28(%fp)
+
+# 2026-11-18: the DEST list's header names the group from the list's mask; a fourth case, 0x0200 -> "MOD4"
+HDR = 0x40106CF0
+HDR_STOCK = bytes.fromhex("0c8000000600" "6636")          # cmpil #0x600,%d0 ; bne 0x40106d2e
+
 
 def dest(content, code):
     """Let LFO4's `DEST` past the gate, and give the mask a fourth step."""
@@ -150,6 +162,11 @@ def dest(content, code):
     _jump(content, DEST_MASK, DEST_MASK_STOCK, code["lfo4_dest_mask"], "the DEST mask")
     print(f"  {DEST_MASK:#010x}  mask 0x1e00/0x0e00/0x0600 -- and 0x0200 -> "
           f"lfo4_dest_mask {code['lfo4_dest_mask']:#010x}")
+    _jump(content, LIST_MASK, LIST_MASK_STOCK, code["lfo4_list_mask"], "the DEST list's mask")
+    _jump(content, HDR, HDR_STOCK, code["lfo4_hdr_stub"], "the DEST list's header")
+    print(f"  {HDR:#010x}  the list's header MOD1/MOD2/MOD3 -- and MOD4 -> lfo4_hdr_stub {code['lfo4_hdr_stub']:#010x}")
+    print(f"  {LIST_MASK:#010x}  the list's mask 0x1e00/0x0e00/0x0600 -- and 0x0200 -> "
+          f"lfo4_list_mask {code['lfo4_list_mask']:#010x}")
 
 
 if __name__ == "__main__":

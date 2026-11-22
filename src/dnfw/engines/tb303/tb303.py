@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import math
 
+from ...md import core as MK
 from ...mnm import core as C
 from ...perc.dsl import Prog
 
@@ -224,9 +225,9 @@ def exact(A: int, F: int, knobs, pre: int = 0) -> dict:
 
 def init(p: Prog, L: C.Layout) -> None:
     """Every word 0, idle (silent until the first note, as Open303 before its first)."""
-    p.iconst(0, 0)
-    for k in (*range(S_END), T_FQ):
-        _sv(p, k, 0)
+    assert not _I0[0] and T_FQ >= S_END
+    MK.zero_words(p, 0, S_END)                   # (a loop: perc2b's room)
+    _sv(p, T_FQ, 0)
     C.sts(p, S_GATE, 0)
     p.fconst(0, SLEW)
     _sv(p, S_SLC, 0)
@@ -270,21 +271,7 @@ def trig(p: Prog, L: C.Layout) -> None:
     after this)."""
     # the accent: ACC above 0 accents the note, by ACC
     _unit(p, 4, 4)
-    _sv(p, S_ACC, 4)
-    # the filter envelope's decay: an accent's 200 ms, else DEC's 200 x 10^n ms; c = e^y,
-    # y = -1 / (ms x 44.1)
-    _unit(p, 5, 3)
-    _mulk(p, 5, 5, math.log2(10.0))
-    _exp2p(p, 6, 5)
-    _mulk(p, 5, 6, 200.0)
-    p.fconst(12, 0.0)
-    p.if_(4, "GT", 12, lambda: p.fconst(5, ACC_DECAY))
-    _mulk(p, 5, 5, SR / 1000.0)
-    _recip(p, 5, 5)
-    p.fconst(12, 0.0)
-    p.fop(5, 12, "-", 5)
-    _exp_small(p, 6, 5)
-    _sv(p, S_MC, 6)
+    _sv(p, S_ACC, 4)                             # (latched for the note: `live_coefs` reads it)
     _unit(p, 7, 5)                               # SLID
 
     def slide():
@@ -305,16 +292,19 @@ def trig(p: Prog, L: C.Layout) -> None:
 
         def first():                             # the first ever note: everything from rest
             p.iconst(0, 0)
-            for k in (S_PH, *range(S_DX1, S_NY2 + 1), *range(S_E, S_END)):
+            _sv(p, S_PH, 0)
+            if _I0[0] or S_NY2 + 1 - S_DX1 < MK.ZERO_LOOP_MIN:
+                for k in range(S_DX1, S_NY2 + 1):
+                    _sv(p, k, 0)
+            else:
+                MK.zero_words(p, S_DX1, S_NY2 + 1 - S_DX1)   # (2026-11-20: a loop, PERC's room)
+            for k in range(S_E, S_END):
                 _sv(p, k, 0)
         p.iconst(1, 1)
         p.if_(0, "EQ", 1, first, kind="i")
         p.fconst(8, SLEW)
         _sv(p, S_SLC, 8)
-        # mainEnv: y = 1 / c (its first output 1); the amp envelope at 1
-        _ld(p, 6, S_MC)
-        _recip(p, 6, 6)
-        _sv(p, S_MENV, 6)
+        # the amp envelope at 1 (mainEnv's start, 1 / c: the first half's _params, S_IDLE 3, after `live_coefs`)
         p.fconst(6, 1.0)
         _sv(p, S_AENV, 6)
         p.iconst(0, 3)                           # S_IDLE 3: the half jumps the slew to the note
@@ -328,6 +318,35 @@ def trig(p: Prog, L: C.Layout) -> None:
                                      kind="i"), note)
     p.iconst(0, 1)
     C.sts(p, S_GATE, 0)
+
+
+def live_coefs(p: Prog, L: C.Layout) -> None:
+    """2026-11-20 (live knobs): the filter envelope's decay coefficient S_MC from DEC, at a trig (after it, in the
+    render) and on the voice's turn (dnfw.md.voice.live_turn, ~94 Hz): DEC follows modulation and p-locks while a
+    note rings, as a 303's DECAY knob does. An accented note (S_ACC, latched at its trig) keeps the accent's 200 ms.
+    The decay: an accent's 200 ms, else DEC's 200 x 10^n ms; c = e^y, y = -1 / (ms x 44.1)."""
+    _ld(p, 4, S_ACC)
+    _unit(p, 5, 3)
+    _mulk(p, 5, 5, math.log2(10.0))
+    _exp2p(p, 6, 5)
+    _mulk(p, 5, 6, 200.0)
+    p.fconst(12, 0.0)
+    p.if_(4, "GT", 12, lambda: p.fconst(5, ACC_DECAY))
+    _mulk(p, 5, 5, SR / 1000.0)
+    _recip(p, 5, 5)
+    p.fconst(12, 0.0)
+    p.fop(5, 12, "-", 5)
+    _exp_small(p, 6, 5)
+    _sv(p, S_MC, 6)
+
+
+def _note_start(p: Prog) -> None:
+    """a trigger's first half (S_IDLE 3): the slew jumps to the note (F4 = S_BASE); mainEnv: y = 1 / c (its first
+    output 1), c `live_coefs`' of this block. Keeps R0."""
+    _sv(p, S_FRQ, 4)
+    _ld(p, 6, S_MC)
+    _recip(p, 6, 6)
+    _sv(p, S_MENV, 6)
 
 
 def _params(p: Prog, L: C.Layout) -> None:
@@ -374,7 +393,7 @@ def _params(p: Prog, L: C.Layout) -> None:
     _sv(p, S_TGT, 4)
     _ld(p, 0, S_IDLE)
     p.iconst(1, 3)
-    p.if_(0, "EQ", 1, lambda: _sv(p, S_FRQ, 4), kind="i")
+    p.if_(0, "EQ", 1, lambda: _note_start(p), kind="i")
     p.iconst(1, 2)
     p.if_(0, "GE", 1, lambda: (p.iconst(0, 0), _sv(p, S_IDLE, 0)), kind="i")
 

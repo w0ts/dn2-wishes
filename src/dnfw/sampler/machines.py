@@ -162,7 +162,41 @@ def table_sum(data: bytes) -> int:
         a = (a + x) & 0xFFFFFFFF
         b = (b + a) & 0xFFFFFFFF
     return ((b << 16) ^ a) & 0xFFFFFFFF
-REC_BYTES = TABLE_AREA - REC_OFFSET        # v0.23: the recordings' area ends at the slice area (v0.26: the tables)
+# 2026-11-16 (PARA as one voice, csrc/para/one.c, docs/paraphonic-onevoice.md): the chords the DSP renders on their
+# leader slot, a row of PV_ROW_WORDS words a slot (one.h), sent by the TDM link, after the slice tables in the slice
+# area's unused 32 KB (no load, page job or recording writes there: pools.c, smp_rec_place stop at TABLE_AREA). DDR
+# keeps it across a DSP restart: the DSP zeroes it at its first block (dnfw.engines.analog2.para), before the link
+# sends a row (only once the tables are READY, smp_tables 2)
+PV_ROW_WORDS = 6
+PV_TABLE = SLICE_AREA + POOL_SLOTS * SLICE_TABLE_BYTES
+assert PV_TABLE + 4 * 16 * PV_ROW_WORDS <= REC_END and PV_TABLE % 4 == 0
+# v0.65 PROJECT RAM banks (docs/banks.md): banks B..D's directory pages, each one of bank A's own
+# format (magic BANK_MAGIC, count, POOL_SLOTS entries, names, library ids) with its meta block at
+# + BANK_META and its slice area at + BANK_SLICES, in the recordings' area below the tables. SAMP's
+# value carries its bank in the low byte: BANK_TAGS[b], read back as (low + 0x20) >> 6 (at most 3)
+BANK_N = 4
+BANK_PAGE = 0x20000                         # 128 KB a bank
+BANK_AREA = TABLE_AREA - (BANK_N - 1) * BANK_PAGE
+BANK_MAGIC = 0x42504D53                     # 'SMPB'
+BANK_META = 0x1000
+BANK_SLICES = 0x3000
+BANK_TAGS = (0x00, 0x40, 0x80, 0xC0)
+BANK_SLOTS = 127                            # SAMP 1..127 in each bank (bank A's 124..127 the recorder's)
+TABLE_RAM_MAX = 0x70000                     # v0.65.1, ours: the tables' chunk in RAM, at most 448 KB (78,888 B 2026-11-12)
+BANK_RAM = 0x47070000                       # the ColdFire's copies of banks B..D's pages (3 x BANK_PAGE), then
+                                            # their slots' overviews, slice columns and sums (link.c, banks.h)
+                                            # (v0.65.1, ours: past the tables' chunk, up to the wishes record at 0x47280000;
+                                            # not upstream's 0x47100000: our profiler was there, moved to 0x47700000)
+BANK_RAM_BYTES = 0x210000                   # link.c's 0x80000, then pools.c's (the bank lists' staging,
+                                            # the sums a load must meet, each list's bank entries, the reserved extents)
+assert TABLE_LOAD + TABLE_RAM_MAX <= BANK_RAM and TABLE_RAM_MAX <= TABLE_ROOM and BANK_RAM + BANK_RAM_BYTES <= 0x47800000   # below the stack's 8 MB
+assert BANK_SLICES + POOL_SLOTS * SLICE_TABLE_BYTES <= BANK_PAGE and BANK_META + 0x2000 <= BANK_SLICES
+REC_BYTES = BANK_AREA - REC_OFFSET         # v0.23: the recordings' area ends at the slice area (v0.26: the tables; v0.65: the banks)
+
+
+def bank_of(word: int) -> int:
+    """the bank (0 A .. 3 D) of a SAMP value's whole word, as the DSP reads it"""
+    return min(3, ((word & 0xFF) + 0x20) >> 6)
 USER_HOLE = (REC_OFFSET, REC_END)           # yours: 0..96 MB, then 128..400 MB (dn2samples.py skips the hole)
 HOLE_BYTES = REC_END - REC_OFFSET              # what a send skips: the recordings and the slice area
 USER_BYTES = POOL_BYTES - HOLE_BYTES - DATA_OFFSET
@@ -183,6 +217,12 @@ TRK_GAIN = 11.627                          # 0x1c244d's gain into that buffer, b
 REC_STAGE = 0x2DF800                       # 32 floats of the block being recorded (dnfw.waverider.dsp)
 REC_GAIN = 0x2DF7F4                        # v0.50: a FLEX take's GAIN index (0 none) and factor (dnfw.waverider.dsp;
                                            # the scratch words 'rgain', 'rgfac' since the v0.52 merge, was 0x2e0080)
+# v0.59 MON (the RECORDER's C): the command's channel word's bit MON_BIT, kept here by every
+# recorder command; with it, SRC IN and the recorder armed or recording, pvmix adds the input
+# (IN_BUF, L and R) to the main mix at unity, after the MAIN tap. Here the sample machines' last
+# scratch word, 'rmon' (dnfw.sampler.program.SC_WORDS; upstream's REC_GAIN + 8 too)
+REC_MON = REC_GAIN + 8
+MON_BIT = 30
 # v0.50 (impbox: FLEX takes far quieter than their source): measured on the SHARC runner
 # (2026-11-12, step 3f flexlevel: track 0 ONESHOT looping at its defaults, each track routed to
 # its own slot, RMS past the amp envelope's attack). A take of TRK1 made with the RECORDER's
@@ -198,7 +238,16 @@ REC_GAIN = 0x2DF7F4                        # v0.50: a FLEX take's GAIN index (0 
 # the init sound in its amp sustain, ONESHOT looping, VEL 127, GAIN 0, played back on the same track) the take came
 # out 17.86 dB under its source; the User: GAIN 0 is the source's level on the unit. So x 10^(17.86 / 20)
 TRK_UNITY_UNIT_DB = 17.86                  # the unit's shortfall at 2.339 (unit-now, 2026-11-15)
-TRK_UNITY = 0.1696 / 0.0725 * 10.0 ** (TRK_UNITY_UNIT_DB / 20.0)   # 18.28 (+25.2 dB): x the 1 / TRK_GAIN
+# 2026-11-21 (v0.65.1, the User: take upstream's v0.65 level): GAIN 0 is upstream's TRK_HW_DB = 12 dB over the old
+# 2.339 (9.31), 5.86 dB under the unit's init-sound unity above. Upstream calibrated on a sound with every level at
+# 127 (NiKo, v0.63, through Ableton over USB): the runner puts such a take +0.88 dB over its source on the unit, the
+# init sound's 5.95 dB under (docs/flex-trk-level.md: the take's level depends on the sound, not measured why)
+# 2026-11-22 (v0.68.1, the User: take upstream's v0.68 level): upstream's owner, on v0.67 itself (pattern volume 100,
+# compressor off), heard a track's take 12 dB short: TRK_HW_DB 24 (37.08), as upstream's v0.63. That puts the init
+# sound's take 6.14 dB over its source on the unit (TRK_INIT_UNIT_DB), and the every-level-127 sound's about 12.9 dB over
+TRK_HW_DB = 24.0
+TRK_UNITY = 0.1696 / 0.0725 * 10.0 ** (TRK_HW_DB / 20.0)   # 37.08 (+31.4 dB): x the 1 / TRK_GAIN
+TRK_INIT_UNIT_DB = TRK_HW_DB - TRK_UNITY_UNIT_DB          # +6.14: the init sound's take against its source, on the unit
 # 2026-11-15 (v0.54.3, the owner: "Fix in v0.54.3"): with TRK_UNITY at the unit's level a hot track filled the int16
 # take (7.7 % of a WaveTone's frames at the clamp, GAIN 0). A FLEX take of a track (GAIN set, SRC TRK) is stored
 # TAKE_HEAD times lower and played TAKE_HEAD times louder: GAIN 0 still plays at the source's level, with 18 dB of
@@ -210,6 +259,15 @@ TRK_UNITY = 0.1696 / 0.0725 * 10.0 ** (TRK_UNITY_UNIT_DB / 20.0)   # 18.28 (+25.
 TAKE_HEAD = 8.0
 TAKE_HEAD_BIT = 1 << 17
 SLA_HEAD = 1 << 30
+# v0.66 (owner, 2026-11-20; Error Kit): a FLEX take of MAIN or IN played far too quiet, and
+# GAIN raised to make up for it clipped (the gain is applied before the recorder's int16
+# clamp). Now such a take is recorded as it is, marked (bit 15 of its buffer entry's steps
+# word), and a voice playing a marked take adds MAIN_PLAY_DB. One constant: raise it if MAIN
+# is still short on the unit (the owner heard close to +24). TRK takes are unchanged
+# (ours: their TAKE_HEAD mark is bit 17, this one bit 15: a take carries one or the other, by its source).
+# v0.68 (upstream's owner, on v0.67, the same setup): MAIN and IN need +12 more: 24 (taken, 2026-11-22)
+MAIN_PLAY_DB = 24
+MAIN_MARK = 0x8000
 GAIN_ZERO = 25                             # the index of 0 dB: 1..63 is -24..+38 dB
 CMD_OFFSET = 0xF00                         # the command block in the pool's directory page:
 CMD_WORDS = 6                              #   seq, cmd, src, chan, thres (0..32767), dest << 24 | frames
@@ -346,8 +404,52 @@ LINK_BUF = 0x2DF980                         # a packet's 256 units, decoded
 LINK_WORDS = ("u", "v", "w", "sum", "bad", "good", "lseq", "nbad", "sbusy", "spos", "send",
               "sseq", "cnt", "off", "a", "pg",
               "vpos", "vend", "vsum", "vsum2", "vdone", "vseq",       # VERIFY: the running sum of a word range
-              "vmode", "vstart")                                      # v0.34 SCAN: 1 while scanning; the range's first address
+              "vmode", "vstart",                                      # v0.34 SCAN: 1 while scanning; the range's first address
+              # 2026-11-20 (the mixer meters, sampler.program.levels): each channel's peak since the last levels packet
+              # (LV_CH; 2026-11-21 lpk24 the recorder's, the link's last free word), this block's clip bits and the last block's, the blocks counted while asked, a spare word, the
+              # analog outputs' peaks (L, R) of the last block (wr_pvmix's dac_guard), the returns' first
+              # block, and the channel loop's base address, bit, peak pointer and count
+              *(f"lpk{k}" for k in range(25)), "lclip", "lprev", "lcnt", "lsc", "dpkl", "dpkr", "lret",
+              "lbase", "lbit", "lpkp", "lloop", "pvs4", "pvs5",     # (and wr_pvmix's saves of R4, R5)
+              "dobl", "dobr")   # 2026-11-20: Overbridge main's last block, L and R (wr_pvmix's ob_peaks: |word| >> 8)
+assert LINK_DM + 4 * len(LINK_WORDS) <= LINK_BUF, "the link's scratch words fit below its packet buffer"
 VERIFY_CHUNK = 1024                          # words a block VERIFY adds up
+
+# -- 2026-11-20: the mixer meters (scratch/mixer-overview.md; csrc/meter/mixer.c) ------------------------------------
+# Every block the DSP takes the peak |x| of what each fixed-point output stage is about to get: the 16 tracks' and the 3
+# send returns' Overbridge / USB channels (the output stage's blocks, A or B as the frame's +0xa7a says, times stock's
+# gain OB_GAIN), the main mix as Overbridge gets it (the MAIN tap, x OB_GAIN), the analog outputs (the main mix as the
+# driver converts it, wr_pvmix's dac_guard), the input (the ADC's block) and the recorder's clamp. Clip bits (a channel
+# at or past its stage's full scale) go to the ColdFire every block in the SPI reply's word 6 (bytes 0x18..0x1b, which
+# neither stock nor ours writes: docs/link-research.md 3b): LV_REPLY_MAGIC | this block's bits | the last block's.
+# The peaks go in a levels packet (LV_MAGIC, in place of every LV_EVERY-th idle packet) only while the ColdFire asks
+# for them: LV_WANT at pool + LV_WANT_OFF (the READY page after TAPE's PGAIN words; K_READY zeroes it at every boot).
+LV_MAGIC = 0x5A35
+# 2026-11-20 (clip-inner; the User: "NO DIGITAL CLIPPING ... if it does, i want the alert"): the voices' own clips and
+# limiters (perc.guard.CLIPMASK, set by perc.program.clip_note): while a slot's bit is set, a clip packet (CLIP_MAGIC,
+# unit 1 the slots' mask, unit 2 the tracks', unit 3 the send returns' (perc.guard.CLIPTRK)) in place of an idle packet, never two in a row (the idle packets keep coming at least every
+# other block); the mask is then cleared. The ColdFire stamps each slot's track (csrc/meter/mixer.c mix_inner_in)
+CLIP_MAGIC = 0x5A36
+LV_CH = 25                                  # 0..15 tracks, 16..18 the returns (Overbridge scale), 19 / 20 the analog
+                                            # outputs L / R, 21 the input, 22 / 23 Overbridge / USB main L / R (TX
+                                            # slots 0, 1 as sent: 2026-11-20, the ColdFire no longer reads them), 24
+                                            # the recorder while it records (2026-11-21, the OUTPUTS overview: its
+                                            # block peak rpk, at its clamp REC_TOP ~ 1.0); each 1.0 = its stage's
+                                            # full scale
+LV_EVERY = 4                                # a levels packet every 4th block while asked: 375 a second
+LV_ONE = 0x4000                             # a unit's 1.0 (the peak, held under 4.0)
+LV_TOP = 3.9998                             # a peak (or a NaN) past it is sent as it
+LV_WANT_OFF = TABLE_READY + 0x120
+LV_WANT = 0x4D584C31                        # 'MXL1'
+LV_REPLY_AT = 0x18                          # the SPI reply's word 6
+LV_REPLY_MAGIC = 0xC5000000
+LV_BIT_MAIN_OB, LV_BIT_DAC, LV_BIT_IN, LV_BIT_REC = 19, 20, 21, 22
+LV_UNIT_REC = 24                            # the recorder's peak in the levels packet (2026-11-21)
+OB_GAIN_BITS = 0x3FB6DB6E                   # stock's channel table gain for k 0..39 (1 / 0.7), read from the image
+DAC_TOP = 1.0 - 2.0 ** -24                  # the largest float32 under 1.0: FIX BY 31 of it fits (0x7fffff80)
+IN_TOP = 0.9999                             # the input at its converter's full scale (its 24-bit words top out at
+                                            # 0.99999988; -0.0009 dB)
+REC_TOP = 0.999969                          # the recorder's clamp (program.recorder's MIN)
 
 # v0.33: SLCE at NOTE picks slice (note - SLICE_NOTE_BASE) mod the slices: from C1 (MIDI 24),
 # as the DT2's manual ("slices play from C1 and upwards, wrapping around after the last

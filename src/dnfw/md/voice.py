@@ -52,7 +52,7 @@ def _same_code(step: str) -> dict[int, int]:
         q.spill = _PROBE_L.C["ash"]
         getattr(M, step)(q, _PROBE_L)
         return q.text()
-    out, seen = {}, {}
+    out, seen, by_text = {}, {}, {}
     for k, M in enumerate(ALL):
         if hasattr(M, "MNM"):                 # their own code each, but one host per host function
             # (v0.56: DPRO-DDRW has its own, machines._host_ddrw; the others share machines._host)
@@ -63,9 +63,16 @@ def _same_code(step: str) -> dict[int, int]:
         key = getattr(f, "__func__", f)
         if key in seen and text(ALL[seen[key]]) == text(M):
             out[k] = seen[key]
-        else:
-            seen.setdefault(key, k)
-            out[k] = k
+            continue
+        # 2026-11-21 (DSP room): two functions that emit the same text are the same code too (PI-HH's init is
+        # PI-CC's, 110 instructions): the table's JUMP goes to the first copy, as for one function
+        t = text(M)
+        if t in by_text:
+            out[k] = by_text[t]
+            continue
+        seen.setdefault(key, k)
+        by_text[t] = k
+        out[k] = k
     return out
 
 
@@ -165,7 +172,7 @@ def reset(p: Prog, L: K.Layout) -> None:
     K.delay_base(p, L, 0)
     p.seti(5, 0)
     p.iconst(6, 0)
-    _zeros(p, K.PI_DELAY_WORDS)
+    _zeros(p, L.delay_words)
     p.iconst(0, -1)
     K.vws(p, "mach", 0)
     p.fconst(0, START)
@@ -218,7 +225,7 @@ def new_track(p: Prog, L: K.Layout) -> None:
             K.delay_base(p, L, 0)
             p.seti(5, 0)
             p.iconst(6, 0)
-            _zeros(p, K.PI_DELAY_WORDS)
+            _zeros(p, L.delay_words)
         p.ifz(2, "NE", lines)
     p.if_(3, "NE", 4, moved, kind="i")
 
@@ -280,7 +287,7 @@ def advance(p: Prog, L: K.Layout) -> None:
                     K.delay_base(p, L, 0)
                     p.seti(5, 0)
                     p.iconst(6, 0)
-                    _zeros(p, K.PI_DELAY_WORDS)
+                    _zeros(p, L.delay_words)
                 K.vw(p, 1, "mach")
                 p.iconst(12, DELAY_LO)
                 p.iconst(2, 0)
@@ -345,6 +352,7 @@ def advance(p: Prog, L: K.Layout) -> None:
         p.ifz(0, "NE", init)
     p.loop(L.C["hpass"], 2, hpass)
     K.vw(p, 0, "trg")
+    live_turn(p, L)
 
     def trig():
         _each(p, L, "trig")
@@ -383,6 +391,29 @@ def advance(p: Prog, L: K.Layout) -> None:
         p.iconst(12, QUIET_BLOCKS)
         p.if_(0, "GE", 12, silent, sound, kind="i")
     p.ifz(0, "GE", playing, silent)
+
+
+def live_turn(p: Prog, L: K.Layout) -> None:
+    """2026-11-20 (live knobs): VW['live'] = 0 when this voice re-reads its note-start knobs this block: R0 (VW trg)
+    nonzero (a trig: the engine's coefficients are worked out after it, in its render), or its turn ((the block
+    count - the slot words' address >> 10) & 15 == 0: one slot a block, each every LIVE_EVERY blocks). The same
+    instructions every block, whatever the knobs (no idle skip). Keeps R0; clobbers R1, R12."""
+    assert K.LIVE_EVERY == 16
+    p.ld(1, K.BLOCKS_WORD)
+    p.ld(12, L.C["mdb"])
+    p.lsh(12, 12, -10)
+    p.iop(1, 1, "-", 12)
+    p.iconst(12, K.LIVE_EVERY - 1)
+    p.iop(1, 1, "AND", 12)
+    p.ifz(0, "NE", lambda: p.iconst(1, 0))
+    K.vws(p, "live", 1)
+
+
+def live(p: Prog, coefs) -> None:
+    """2026-11-20 (live knobs): COEFS (an engine's knobs -> its words) when VW['live'] says so (live_turn). Clobbers
+    R0 before COEFS."""
+    K.vw(p, 0, "live")
+    p.ifz(0, "EQ", coefs)
 
 
 def inputs(p: Prog, L: K.Layout, knobs: list[int]) -> None:
@@ -458,14 +489,16 @@ def _resample(p: Prog, L: K.Layout, level: float, level_word: int | None) -> Non
     # the same operations in the same order, the same words (scripts/md_identity.py)
     K.vw(p, 6, "pos")
     p.ipass(13, 0)
+    # 2026-11-21 (multifunction): the level in F4 and the step in F15 (were F15, F4): b x level can then ride on
+    # an add as one multifunction instruction (the multiplier's operands are F0-F3 x F4-F7)
     if level_word is None:
         p.fconst(14, 0.5 * level)
-        p.fconst(15, level)
+        p.fconst(4, level)
     else:                                      # v0.26: the level from a word (x 0.5, then x level:
         p.fconst(14, 0.5)                      # the same product, bit for bit)
-        p.ld(15, level_word)
+        p.ld(4, level_word)
 
-    p.fconst(4, K.STEP)                        # 2026-11-10 (poly16): the step held in F4
+    p.fconst(15, K.STEP)                       # 2026-11-10 (poly16): the step held (F15 since 2026-11-21)
     # 2026-11-12 (opt-host): the same operations on the same values, in an order that lets the four stream
     # loads ride on computes, with 4.0 held in F7 through the 32 samples and the samples written through I2
     # (I0..I3 take a move beside a compute; I4 stays at the block's start): 31 instructions a sample, not 36
@@ -482,14 +515,23 @@ def _resample(p: Prog, L: K.Layout, level: float, level_word: int | None) -> Non
         p.ldpost(0, 1)                         # a = B[i-1]
         p.fop(8, 6, "-", 8)                    # f
         p.ldpost(1, 1)                         # b
+        # 2026-11-20 (clip-inner; the User: "NO DIGITAL CLIPPING ... if it does, i want the alert"): a stream word the
+        # machine's 56300 limiter held (TOP or -1.0 exactly: the Machinedrum's and Monomachine's outputs store through
+        # it): the voice's clip (perc.program clip_flag; F12, TOP's or -1.0's bits, the nonzero word)
+        from ..perc import program as PP
+        p.fconst(12, K.TOP)
+        PP.clip_flag(p, 1, "EQ", 12, 12)
+        p.fconst(12, -1.0)
+        PP.clip_flag(p, 1, "EQ", 12, 12)
         # y = b + f/2 (c - a + f (2a - 5b + 4c - d + f (3(b - c) + d - a)))
         p.fop(10, 0, "+", 0)                   # 2a
         p.ldpost(2, 1)                         # c
         p.fconst(12, 5.0)
-        p.fop(11, 1, "*", 12)
+        p.fop(12, 1, "*", 12)                  # 5b (in F12: the ALU half below reads F12-F15)
         p.ldpost(3, 1)                         # d
-        p.fop(10, 10, "-", 11)                 # - 5b
-        p.fop(11, 2, "*", 7)
+        # 2026-11-21 (multifunction): 4c and the - 5b in one instruction (each reads the values before either
+        # writes: the same two operations on the same operands as in turn, bit for bit)
+        p.par(("*", 11, 2, 7), ("-", 10, 10, 12))   # F11 = 4c || F10 = 2a - 5b
         p.fop(10, 10, "+", 11)                 # + 4c
         p.fop(10, 10, "-", 3)                  # - d
         p.fop(9, 1, "-", 2)
@@ -500,15 +542,16 @@ def _resample(p: Prog, L: K.Layout, level: float, level_word: int | None) -> Non
         p.fop(9, 9, "*", 8)
         p.fop(9, 9, "+", 10)
         p.fop(9, 9, "*", 8)
-        p.fop(10, 2, "-", 0)
-        p.fop(9, 9, "+", 10)
+        p.fop(12, 2, "-", 0)                   # c - a (in F12)
+        # 2026-11-21 (multifunction): b x level (was after the products below; its operands do not change) and
+        # the + (c - a) in one instruction
+        p.par(("*", 10, 1, 4), ("+", 9, 9, 12))     # F10 = b level || F9 = f(...) + (c - a)
         p.fop(9, 9, "*", 8)
         p.fop(9, 9, "*", 14)
         if level_word is not None:
-            p.fop(9, 9, "*", 15)
-        p.fop(10, 1, "*", 15)
+            p.fop(9, 9, "*", 4)
         p.fop(9, 9, "+", 10)
-        p.fop(6, 6, "+", 4)                    # the position on
+        p.fop(6, 6, "+", 15)                   # the position on
         p.stpost(2, 9)                         # the sample out (with the add above: one instruction)
     p.loop_r(5, 32, one)
     K.vws(p, "pos", 6)

@@ -1,9 +1,9 @@
 # Presets
 
 Digitone II sounds (`.dn2pst`) for the machines this firmware adds, made with this repository's own tools: an INIT
-and a set of sounds for each machine of ours, and an INIT for each of the other machines. Download them all as one zip from the
-[presets page](https://w0ts.github.io/dn2-wishes/presets.html) (size and sha256 there), or take single files from the
-folders below.
+and a set of sounds for each machine of ours, and an INIT for each of the other machines. Download them all, or one
+set, as a zip from the [presets page](https://w0ts.github.io/dn2-wishes/presets.html) (sizes and sha256 there), or
+take single files from the folders below.
 
 <!-- sets: presets_sync.py writes this table -->
 | folder | sounds | what |
@@ -14,7 +14,7 @@ folders below.
 | [`SPH/`](SPH/) | 15 | SOPHIE (type 53): an INIT and drum sounds after Schwung Sophie's factory kit |
 | [`303/`](303/) | 5 | TB-303 (type 54): an INIT and acid sounds after Optimist's ACID presets |
 | [`PLT/`](PLT/) | 7 | PLAITS (type 55): an INIT and sounds after Optimist's PLAITS presets |
-| [`DRM/`](DRM/) | 55 | DRUM (type 56): KICK, SNARE, CLOSED and OPEN HAT and TOM sounds (TYPE on page 1 H); a name ending +DS, +FZ, +FD or +TP wants the DIST, FUZZ, FOLD or TAPE insert on its track (the project's, not the sound's) |
+| [`DRM/`](DRM/) | 84 | DRUM (type 56): KICK, SNARE, CLOSED and OPEN HAT, TOM, CLAP, RIDE and CRASH sounds (TYPE on page 1 H), named by kind (BD SD CH OH TOM CP RD CR); a name ending +DS, +FZ, +FD or +TP wants the DIST, FUZZ, FOLD or TAPE insert on its track (the project's, not the sound's) |
 | [`MD/`](MD/) | 14 | MACHINEDRUM (type 5, PERC): an INIT and drum sounds of the Machinedrum models |
 | [`MNM/`](MNM/) | 15 | MONOMACHINE (type 6): an INIT and sounds of each engine (SID, WAVE, DDRW, DENS, VO-6) |
 | [`INIT/`](INIT/) | 14 | an INIT sound for each machine that is not ours: Elektron's FM TONE, WAVETONE, FM DRUM, SWARMER; upstream's ONESHOT, WERP, STRETCH, REPITCH, GRID, SLICE, FLEX and FM+ STAT / PAR / DYN |
@@ -45,5 +45,5 @@ for anything private (only Elektron's own fields, no +Drive slot, no text but th
 the set's types, only INITs of machines that are not ours) and, when all pass, copies the new and changed ones into
 their set's folder here and rewrites the table above; one failing file and nothing is copied. A new machine of ours
 is one row in its `SETS`. `scripts/presets_sync.py --check` checks this folder (the tests run it).
-`scripts/presets_zip.py OUTDIR` makes the download, byte for byte the same from the same files;
+`scripts/presets_zip.py OUTDIR` makes the downloads, byte for byte the same from the same files;
 `scripts/make_site.sh` runs it for the presets page.

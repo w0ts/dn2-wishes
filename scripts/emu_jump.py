@@ -60,6 +60,7 @@ sys.path.insert(0, str(HERE))
 
 from emulib.image import differences                    # noqa: E402
 from emulib import bounded                                      # noqa: E402
+from emulib.cpu import kept                                       # noqa: E402
 from emulib.machine import Machine                      # noqa: E402
 from emulib.panel import NO, YES, Panel                 # noqa: E402
 
@@ -126,6 +127,8 @@ def main() -> int:
             from dnfw.mods import platform      # noqa: PLC0415
             for va, blob in platform.runtime(image):
                 m.write(va, blob)
+            from emulib import attkit
+            attkit.store_kit(m)  # (2026-11-21) a converted kit stored back: converted once
         sys.path.insert(0, str(HERE.parent / "src"))
         lay = json.loads((HERE.parent / "src/dnfw/mods/waverider_code.json").read_text())["layout"]
         syms = {k: v for k, v in lay.items() if k.startswith("jmp_")}
@@ -166,35 +169,21 @@ def main() -> int:
     def sym(name, n=1):
         return int.from_bytes(m.read(syms[name], n), "big") if name in syms else None
 
-    regs = [getattr(K, f"UC_M68K_REG_{r}{i}") for r in "DA" for i in range(8)]
-
     def isr():
-        saved = [uc.reg_read(r) for r in regs]
-        pc = uc.reg_read(K.UC_M68K_REG_PC)
-        sp = STACK_TOP - 0x100
-        m.write(sp, struct.pack(">HHI", 0x4000 | (SEQ_VECTOR << 2), 0x2000, SENTINEL))
-        m.write(SENTINEL, bytes.fromhex("4e714e71"))
-        uc.reg_write(K.UC_M68K_REG_A7, sp)
-        try:
+        with kept(uc):                          # D0-A7, PC and SR put back (emulib/cpu.py; its rte sets SR 0x2000)
+            sp = STACK_TOP - 0x100
+            m.write(sp, struct.pack(">HHI", 0x4000 | (SEQ_VECTOR << 2), 0x2000, SENTINEL))
+            m.write(SENTINEL, bytes.fromhex("4e714e71"))
+            uc.reg_write(K.UC_M68K_REG_A7, sp)
             bounded.run(uc, m.m, SEQ_ISR, SENTINEL, 3_000_000)
-        finally:
-            for r, v in zip(regs, saved):
-                uc.reg_write(r, v)
-            uc.reg_write(K.UC_M68K_REG_PC, pc)
 
     def guest(fn, *args):
-        saved = [uc.reg_read(r) for r in regs]
-        pc = uc.reg_read(K.UC_M68K_REG_PC)
-        sp = STACK_TOP - 0x100
-        m.write(sp, struct.pack(">I", SENTINEL) + b"".join(struct.pack(">I", x) for x in args))
-        m.write(SENTINEL, bytes.fromhex("4e714e71"))
-        uc.reg_write(K.UC_M68K_REG_A7, sp)
-        try:
+        with kept(uc):                          # D0-A7, PC and SR put back (emulib/cpu.py)
+            sp = STACK_TOP - 0x100
+            m.write(sp, struct.pack(">I", SENTINEL) + b"".join(struct.pack(">I", x) for x in args))
+            m.write(SENTINEL, bytes.fromhex("4e714e71"))
+            uc.reg_write(K.UC_M68K_REG_A7, sp)
             bounded.run(uc, m.m, fn, SENTINEL, 5_000_000)
-        finally:
-            for r, v in zip(regs, saved):
-                uc.reg_write(r, v)
-            uc.reg_write(K.UC_M68K_REG_PC, pc)
 
     E = types.SimpleNamespace(m=m, panel=panel, isr=isr, guest=guest, u8=u8, u16=u16, u32=u32, sym=sym, syms=syms,
                               disk=disk, io=io, faults=faults, ui_share=lambda k: panel.settle(200_000) if k % 8 == 7 else None)

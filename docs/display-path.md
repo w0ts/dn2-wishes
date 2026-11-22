@@ -1291,3 +1291,150 @@ so the stamp carries from that first screen into the animation — needs that
 screen's drawing code found first. The route: `guirun --png-at` from the 60M
 snapshot across 250M–380M to see when the text appears, then a write watch on the
 panel memory in that window.
+
+## Line-only updates: the moving controls' lines without a page draw — 2026-11-17
+
+The User: "why do we redraw the whole screen? we could redraw only the knob/line?" Measured on OS 1.12 (the image,
+then the ColdFire emulator; `csrc/modulation/moving.c`, `scripts/emu_line_redraw.py`).
+
+**How stock presents a frame.** Each UI pass the loop (`0x4002e44c`) asks `isDirty` (`0x4011d5d4`, our `wr_poll`
+in its place). When it answers yes:
+
+1. A canvas is built on FRONT (`*0x4059e1b0`; ctor `0x40113e2a`: 128 x 64, 2 longwords a column, the buffer at
+   +16).
+2. `0x4011d60a` draws the views, but only while the screen's dirty byte (+32) is set. It clears the canvas first
+   (`0x40115074`).
+3. `panel_diff` (`0x40131fd2`) compares FRONT with BACK in 128 groups. A group is 8 columns of one 8-px page:
+   bytes `64g + 8k + page`.
+4. Each changed group goes to the panel controller through `0x40131f04(column, page, bytes)`: 10 bytes into the
+   UART ring under a mutex. Then one `0xB8` show (`0x40131eec`), and the two pointers swap (`0x402a10c8` FRONT,
+   `0x402a10cc` BACK).
+
+So **between presents, BACK is exactly the frame on the glass**, and FRONT is an older one. That is why every
+redraw clears FRONT and draws everything.
+
+`isDirty` is a `move.b`: only `%d0`'s low byte is the answer. C must read it as a `u8`. Read as an `int`, its
+upper bytes are whatever `%d0` held before.
+
+**The update.** When only lines move, `mv_poll` does this instead of asking for the redraw:
+- it rewrites each moved line's row in BACK;
+- it sends the groups whose bytes changed through `0x40131f04`, then one `0xB8`;
+- it does not swap.
+
+The next full draw compares against a BACK that already holds the lines. The test channel's screen mirror reads
+that buffer, and its inverted glass (`dt_glass` at `0x40131f04`) inverts these groups too.
+
+**When a cell may move alone (clean).** `mv_end` decides it at the end of each full draw, after everything of
+ours. A cell is clean when all of these hold:
+- Its row holds exactly the page's own pixels there, as they were when the line was drawn, with the line ORed
+  over them. Example: a graph across cells, such as FLTR's envelope baseline. A cell drawn all inverted (lit
+  because it is p-locked) also passes.
+- Its 5 guard rows hash as they did when the line was drawn. These are the label rows under the line; the cell's
+  label is drawn before its line, and the page's graphs stay above the labels. A cell with nothing under its line
+  guards with the 5 rows above it instead (its own widget, also drawn before the line). A cell blank both ways is
+  never clean.
+- Its row lies inside the screen and is at most 32 px wide.
+- No other cell's line shares pixels of that row.
+
+Anything that covers a line covers its label or marks its row: popups, the meter's corner, the RECORDER, the
+inserts overview, the NAME screen. A move of a cell that is not clean asks for the full redraw as before. So does
+any move while a redraw is already due, or while BACK is not the buffer that frame was drawn into.
+
+ONESHOT 2/2's top row has no labels, and the waveform's end marker, drawn after the cells, lies in those rows. So
+its cells guard with their boxes above the line, and move alone like the others.
+
+**Measured (emulator, MACHINEDRUM's page, all 8 lines moving at once):**
+
+| path | instructions |
+|---|---|
+| line-only update | 21,855 (24 groups sent) |
+| full redraw: poll 700 + page draw 280,027 + panel_diff 16,727 | 297,454 |
+
+That is about 2,700 instructions a line, most of it stock's group sender (about 900 a group, 3 groups a 21-px
+line). The rate limit is unchanged: at most 25 updates a second.
+
+**Proof (gate step `lineonly`).** The emulator models the glass byte for byte from every group sent. After every
+step of every scenario, two things must hold:
+- the glass equals BACK (inverted while the test channel inverts it);
+- a full redraw forced at that moment draws a FRONT byte-identical to BACK, so it sends nothing.
+
+The scenarios:
+- MONOMACHINE's three pages, MACHINEDRUM's, ONESHOT's two, WaveTone's SYN and FLTR;
+- page changes while lines move;
+- the meter, the routes popup and the inserts overview over moving lines;
+- the inverted glass.
+
+The cells left clean must move alone.
+
+## Knob turns drawn together — 2026-11-18
+
+The User: "High cpu is bad. Ui lags like crazy". On the unit (`scratch/unit-now/cpu-spikes.md`) the audio interrupt
+takes about 84.5 % of the CPU; a fast knob turn put the CPU at 97-100 % and the screen went on moving 0.5-0.9 s
+after the hand stopped, on stock pages and ours. ENV2's page updated 4-5 times a second (stock's 9-15).
+
+**Why the screen lags (measured in the coupled emulator, `scripts/emu_ui_turns.py`, the interrupt at 84.5 % of each
+frame, the panel UART at 15,625 bytes a second).** The UI loop takes one item of its queue (`0x4059e214`: +4 items
+waiting, +16 the index mask, +20 the ring of item pointers, +28 the next read; send `0x40001896`, receive
+`0x40001928`) a pass. The panel task sums an encoder's counts and posts one knob item every four panel ticks at most
+(about 30 a second). Every knob item makes the screen dirty; the draw itself comes with the loop's next item of
+type 5 (`0x4002e322`, called from `0x40136504`: the redraw test, the views, `panel_diff`). With the interrupt's load
+a draw and its present take about 40 ms of the UI's time, so each knob item waited behind a whole draw: one item,
+one draw, the queue growing. After a fast turn the last item was taken 0.36-0.86 s after the last detent.
+
+**The changes.**
+1. *Turns drawn together* (`csrc/waverider/page.c` `wr_poll`): while a knob turns (a knob item taken within 300 ms),
+   the redraw test answers "not now" until 41 ms after the last full draw ended, and while a knob's item already
+   waits in the queue (up to 83 ms after it); never more than 4 passes in a row. Timed by the panel module's tick
+   (`0x466768b0`, 121 a second): the audio frame counter stands still in the ColdFire-only emulator steps. Every item
+   is taken and its value set as before, at once; only the drawing waits, the dirty byte stays set, and the last
+   value is always drawn.
+2. *ENV2's page* (`csrc/matrix/env2_page.c` `env2_amp_draw`, the AMP page view's draw in its vtable): stock's AMP
+   knobs and shape were drawn first and then cleared and drawn again with ENV2's values. While ENV2's page covers it
+   only stock's level meter is drawn under it: the same pixels, one draw instead of two.
+3. *Moving lines quiet while turning* (`csrc/modulation/moving.c` `mv_knob`): during a turn the page is redrawn whole,
+   so the bookkeeping that lets a line go alone (the row's pixels, the guard rows and their hash, here and in
+   `mv_end`) waits; a line that moves meanwhile asks for the full redraw, and the first full draw after the turn
+   keeps the cells again. In a full draw it was about half of our cost (ENV1: `mv_end` 28 k and `mv_knob` 24.5 k of
+   about 91 k instructions in `wr_screen`, the ColdFire emulator alone).
+4. *List popups by words* (`csrc/waverider/popup.c`): the box, its dotted rule and the lit row were one stock
+   `SET_PIXEL` call a pixel (5,778 for the box); now `cv_fill`, a word-wise XOR and direct bit sets: the same pixels.
+
+5. *Moving lines keep up* (`moving.c` `mv_poll`, the User: "the bar/line that display is slow", an LFO on AMP DEC): a
+   line alone may come 25 frames after the last (was 60: with a UI pass about every 33 ms that gave 12-14 a second);
+   it may go alone while a turn holds the full redraw back (BACK is still the glass; the held draw redraws it as it
+   is); and during a turn only cells that show no line skip the bookkeeping of 3.
+
+**Measured** in the coupled emulator: the ColdFire alone with its audio interrupt, the panel UART at its rate, every
+build given the same frame (`--frame-units 30405.8`: main 270de295's interrupt at 84.5 % of it, as on the unit; a
+build whose interrupt is cheaper leaves the UI more). *Catch-up*: the last detent to the first frame drawn after
+the last knob item, out of the UART. *UI share*: the UI's work less the idle loop, as a share of all the CPU's time
+(an approximation: digikit credits an idle pass as one unit). Fast = 40 detents a second, 20 up then 20 down.
+
+On main 270de295 (the unit's build) the fix took the catch-up after a fast turn from 376-890 ms to 64-115 ms (ENV1
+376 -> 106, ENV2 568 -> 91, LFO1 480 -> 83, FLTR 421 -> 115, SYN 860 -> 64, WAVE list 890 -> 85, insert picks 678 ->
+72; slow turns 56-364 -> 35-75 ms). On main 493bad7e (the CPU cuts) the UI already keeps up; there the change
+mostly halves the turn's full draws and lowers the CPU:
+
+| action, main 493bad7e -> with the changes | screen updates a second | full draws a second | catch-up | UI share while turning |
+|---|---|---|---|---|
+| ENV1 fast | 16.4 -> 9.2 | 29.8 -> 15.4 | 29 -> 41 ms | 17.5 -> 13.4 % |
+| ENV2 fast | 8.2 -> 8.2 | 29.8 -> 14.4 | 37 -> 77 ms | 20.4 -> 13.3 % |
+| LFO1 fast | 22.6 -> 12.3 | 29.8 -> 15.4 | 39 -> 44 ms | 18.7 -> 14.3 % |
+| FLTR fast | 21.5 -> 11.3 | 29.8 -> 15.4 | 64 -> 72 ms | 18.2 -> 13.8 % |
+| SYN fast | 4.1 -> 4.1 | 22.6 -> 15.4 | 42 -> 69 ms | 20.7 -> 13.7 % |
+| WAVE list popup fast | 3.1 -> 3.1 | 22.6 -> 15.4 | 56 -> 39 ms | 21.1 -> 14.1 % |
+| insert picks | 2.4 -> 2.0 | 8.5 -> 6.4 | 68 -> 78 ms | 13.6 -> 11.4 % |
+
+The price: during a fast turn the stock pages update about half as often (the next full draw 41 ms after the last one
+ENDED; `TURN_GAP` in page.c sets it). Moving lines (`line-env1`, `line-lfo1`: a 2 Hz modulation, 55 pixel moves a
+second): at rest the line moved 15-16 times a second, 1.4-1.5 px behind on average, and moves 21-27 times, 0.8-1.0 px
+behind; while a knob turns 26 (main, with its 30 full draws a second) against 19 a second, 1.1 against 1.4 px.
+
+Where the knob items were the same in both runs, every value the turn set was the same, in the same order, and the
+audio frame 7 s after the turn's start was the same word for word (where the panel task summed the encoder's counts
+into other items, from the two builds' snapshots, the values follow those items). After each action, a full redraw
+forced draws exactly the glass below the title bar.
+
+Not measured: the unit itself (the changes have not been flashed); the emulator counts instructions, not cycles,
+and gives the interrupt 84.5 % of each frame by construction; the line measurement moves the heard value by hand
+(the emulator's notes did not reach a voice row), FLTR's line not measured (its cell not found).

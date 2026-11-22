@@ -48,7 +48,8 @@ SC_WORDS = ("t", "count", "tr", "trig", "sbase", "type", "rate", "kill",
             "rst", "rent", "rpos", "rmax", "rsrc", "rthr", "rbase", "rchan", "rpk",
             "rseq", "rmode",
             "tr0", "note", "segnext",                  # v0.18: TUNE's transposition alone; the note; WERP's boundary                           # v0.15: the last command's sequence; armed on 0 THRES, 1 PLAY
-            "rgain", "rgfac")                   # v0.50: the recorder's GAIN index and factor (machines.REC_GAIN; v0.52 merge)
+            "rgain", "rgfac",                   # v0.50: the recorder's GAIN index and factor (machines.REC_GAIN; v0.52 merge)
+            "rmon")                             # v0.59 MON (machines.REC_MON = REC_GAIN + 8): the 64th word, the span's last
 GRAIN = 2048                              # STRETCH's grain, output samples (43 ms); two, half apart
 TEMPO_OFFSET = 216                        # the frame's tempo word: BPM x 120 (docs/modulation-display.md)
 
@@ -393,6 +394,7 @@ def start(p: Prog, L: Layout) -> None:
     p.iconst(12, SM.POOL_MAGIC)
 
     def found():
+        bank_page(p, L)                      # v0.65: C['tmp'], SAMP's bank's page
         p.ld(0, L.pool + 4)                  # count
         p.ld(4, C["samp"])
         p.iconst(12, -1)
@@ -402,6 +404,8 @@ def start(p: Prog, L: Layout) -> None:
         # BOUNCE's buffer halves (slots BUF_SLOT0..: the buffer directory, SM.BUF_DIR)
         p.iconst(12, SM.REC_FIRST)
         p.if_(4, "GE", 12, lambda: p.iconst(0, SM.BUF_SLOT0 + SM.BUF_HALVES), kind="i")
+        bank_count(p, L)                     # v0.65: banks B..D: their page's count
+        p.ld(4, C["samp"])
         p.e("COMP(R4, R0);")
 
         def have():
@@ -412,6 +416,8 @@ def start(p: Prog, L: Layout) -> None:
             def pool_entry():
                 p.lsh(4, 4, 4)               # 16 bytes an entry
                 p.iconst(12, L.pool + 8)
+                p.iop(4, 12, "+", 4)
+                p.ld(12, C["tmp"])           # v0.65: in its bank's page (0: bank A's)
                 p.iop(4, 12, "+", 4)
                 p.seti(1, 4)
                 p.ldi(5, 0, 1)
@@ -434,10 +440,13 @@ def start(p: Prog, L: Layout) -> None:
                 p.ldi(13, 2, 1)
                 p.iconst(8, SM.TAKE_HEAD_BIT)        # 2026-11-15 (v0.54.3): a TRK take's mark, kept in the
                 p.iop(8, 13, "AND", 8)               # format word below as a slot's would be
+                p.iconst(12, SM.MAIN_MARK)
+                p.iop(11, 13, "AND", 12)     # v0.66: a MAIN / IN take's mark, kept apart (R11; R8 the TRK one)
                 p.iconst(12, 0x7FFF)
                 p.iop(13, 13, "AND", 12)
                 p.iconst(12, 1)
                 p.iop(13, 13, "MAX", 12)     # 1..32767 steps (0 would divide by it)
+                p.iop(13, 13, "OR", 11)      # the mark back (tempo() masks the steps to 0x7FFF)
                 p.fconst(7, 1.0)
                 p.iconst(12, SM.FMT_I16)
                 p.iop(8, 8, "OR", 12)
@@ -467,6 +476,9 @@ def start(p: Prog, L: Layout) -> None:
                 p.iop(4, 12, "+", 4)          # slot x 768
                 p.iconst(12, L.pool + SM.SLICE_AREA)
                 p.iop(9, 12, "+", 4)
+                p.ld(4, C["tmp"])             # v0.65: banks B..D: their page's own slice area
+                p.ifz(4, "NE", lambda: (p.iconst(12, SM.BANK_SLICES - SM.SLICE_AREA), p.iop(4, 12, "+", 4),
+                                        p.iop(9, 9, "+", 4)))
             p.ifz(9, "NE", area)
             # v0.44: a BOUNCE take (steps in C['x']) has no slices; its steps go in 'sla',
             # tagged negative (an address never is), for tempo(): STRETCH fits the take to
@@ -498,6 +510,48 @@ def head_mark(p: Prog, C: dict, d: int) -> None:
         p.iconst(12, 2)
         p.if_(d, "GE", 12, lambda: p.iconst(d, SM.TAKE_HEAD_BIT), lambda: p.iconst(d, 0), kind="i")
     p.ifz(d, "NE", gained)
+
+
+def bank_page(p: Prog, L: Layout) -> None:
+    """v0.65 PROJECT RAM banks (docs/banks.md): C['tmp'] = the offset into the pool of the
+    directory page of SAMP's bank: 0 for bank A, SM.BANK_AREA + (b - 1) x SM.BANK_PAGE for
+    B..D. The bank is the word's low byte, (low + 0x20) >> 6 at most 3 (SM.bank_of). R10 the
+    track's frame base, as start() set it. Clobbers R0, R1, R4, R12, I1."""
+    slot, lo, top = SM.RECORDS[SM.SAMP_REC]
+    PP.half(p, 4, PM.frame_offset(slot), 10)
+    p.iconst(12, 0xFF)
+    p.iop(4, 4, "AND", 12)
+    p.iconst(12, 0x20)
+    p.iop(4, 12, "+", 4)
+    p.lsh(4, 4, -6)
+    p.iconst(12, 3)
+    p.iop(4, 4, "MIN", 12)
+    p.iconst(12, 0)
+    p.st(L.C["tmp"], 12)
+
+    def other():
+        p.iconst(12, -1)
+        p.iop(4, 12, "+", 4)
+        p.lsh(4, 4, 17)                         # x 128 KB (SM.BANK_PAGE)
+        p.iconst(12, SM.BANK_AREA)
+        p.iop(4, 12, "+", 4)
+        p.st(L.C["tmp"], 4)
+    p.ifz(4, "NE", other)
+
+
+def bank_count(p: Prog, L: Layout) -> None:
+    """v0.65: for banks B..D (C['tmp'] not 0) R0 = their page's count, or -1 (nothing plays)
+    when the page has not its magic; bank A's R0 is left as it is. Clobbers R4, R12, I1."""
+    def page():
+        p.iconst(12, L.pool)
+        p.iop(4, 12, "+", 4)
+        p.seti(1, 4)
+        p.ldi(0, 0, 1)
+        p.iconst(12, SM.BANK_MAGIC)
+        p.e("COMP(R0, R12);")
+        p._branch(lambda: p.r[0] == p.r[12], "EQ", lambda: p.ldi(0, 1, 1), lambda: p.iconst(0, -1))
+    p.ld(4, L.C["tmp"])
+    p.ifz(4, "NE", page)
 
 
 def entry_check(p: Prog, L: Layout) -> None:
@@ -1198,6 +1252,18 @@ def dec_at(p: Prog, L: Layout) -> None:
     p.seti(5, 5)
 
 
+def main_makeup(p: Prog, L: Layout, f: int) -> None:
+    """v0.66: Ff x 10^(MAIN_PLAY_DB / 20) when the voice plays a FLEX take of MAIN or IN ('sla'
+    negative, a take; MAIN_MARK set by the recorder). Clobbers R9, R12, F12."""
+    v(p, 9, "sla")
+
+    def take():
+        p.iconst(12, SM.MAIN_MARK)
+        p.iop(9, 9, "AND", 12)
+        p.ifz(9, "NE", lambda: (p.fconst(12, 10.0 ** (SM.MAIN_PLAY_DB / 20.0)), p.fop(f, f, "*", 12)))
+    p.ifz(9, "LT", take)
+
+
 def render(p: Prog, L: Layout) -> None:
     """ONESHOT, REPITCH and GRID (v0.18): the DT2's reader. Each output sample is two
     96 kHz samples of the six-tap interpolator (`tick`), stepping half the block's rate,
@@ -1223,6 +1289,7 @@ def render(p: Prog, L: Layout) -> None:
     v(p, 9, "sla")                            # 2026-11-15 (v0.54.3): a TRK take (SLA_HEAD) plays TAKE_HEAD louder
     p.lsh(9, 9, 1)
     p.ifz(9, "LT", lambda: (p.fconst(12, SM.TAKE_HEAD), p.fop(0, 0, "*", 12)))
+    main_makeup(p, L, 0)                      # v0.66: a MAIN / IN take's +MAIN_PLAY_DB
     p.st(C["tmp"], 0)                         # LEV with the make-up (C['lev'] stays: a retrigger renders twice)
     if L.line:
         p.iconst(0, LINE_NONE)
@@ -1581,6 +1648,7 @@ def render_stretch(p: Prog, L: Layout) -> None:
     v(p, 9, "sla")
     p.lsh(9, 9, 1)
     p.ifz(9, "LT", lambda: (p.fconst(12, SM.TAKE_HEAD), p.fop(0, 0, "*", 12)))
+    main_makeup(p, L, 0)                      # v0.66: a MAIN / IN take's +MAIN_PLAY_DB
     p.st(C["tmp"], 0)
     # the jump this block: (T - rate) 2048, by the play direction
     p.ld(0, C["sr"])
@@ -1724,7 +1792,7 @@ def render_stretch(p: Prog, L: Layout) -> None:
             p.fconst(12, 0.0)
             p.fop(0, 0, "MAX", 12)
             vs(p, "gp1", 0)
-            p.ld(3, C["tmp"])                   # LEV (x TAKE_HEAD for a TRK take, above)
+            p.ld(3, C["tmp"])                   # LEV (x TAKE_HEAD for a TRK take, x MAIN_PLAY_DB for MAIN / IN: above)
             p.fop(4, 4, "*", 3)
             faded(p, L, 4)
             out(p, L, 4)
@@ -1934,6 +2002,12 @@ def recorder(p: Prog, L: Layout) -> None:
             p.iop(6, 4, "AND", 12)
             p.ifz(6, "NE", lambda bit=bit: (p.fconst(12, 10.0 ** ((1 << bit) / 20.0)), p.fop(5, 5, "*", 12)))
         p.st(SM.REC_GAIN + 4, 5)
+        # v0.59 MON: bit MON_BIT of the channel word (the RECORDER's C; FLEX REC sends 0)
+        p.ld(4, cmd + 12)
+        p.lsh(4, 4, -SM.MON_BIT)
+        p.iconst(12, 1)
+        p.iop(4, 4, "AND", 12)
+        p.st(SM.REC_MON, 4)
 
     def new_command():
         p.ld(0, cmd)
@@ -2024,17 +2098,37 @@ def recorder(p: Prog, L: Layout) -> None:
                     p.iop(7, 7, "AND", 12)
                     head_mark(p, C, 13)       # 2026-11-15 (v0.54.3): and a TRK take's mark
                     p.iop(7, 7, "OR", 13)
+
+                    def main_take():          # v0.66: a FLEX take (GAIN set) of IN or MAIN: marked,
+                        p.ld(8, SM.REC_GAIN)  # made up on playback (main_makeup), never before the clamp
+                        p.ifz(8, "NE", lambda: (p.iconst(12, SM.MAIN_MARK), p.iop(7, 7, "OR", 12)))
+                    p.ld(8, C["rsrc"])        # 0 IN, 1 MAIN, 2 + t a track
+                    p.iconst(12, 2)
+                    p.if_(8, "LT", 12, main_take, kind="i")
                     p.sti(2, 1, 7)
                 p.if_(5, "GE", 12, buf_dest, pool_dest, kind="i")
                 p.iconst(7, 0)
                 p.st(C["rpos"], 7)
-                p.iconst(7, state)
+                if state is None:             # (the shared body: NOW records at once, ARM and ARM_PLAY arm)
+                    p.ld(7, cmd + 4)
+                    p.iconst(12, SM.CMD_NOW)
+                    p.if_(7, "EQ", 12, lambda: p.iconst(7, 2), lambda: p.iconst(7, 1), kind="i")
+                else:
+                    p.iconst(7, state)
                 p.st(C["rst"], 7)
             return body
+        # 2026-11-21 (the DSP room): ARM, ARM_PLAY and NOW share one copy of start()'s body (it was inlined three
+        # times, ~58 instructions each); R3 = 1 for those three commands. The same words are written, in the same
+        # order: each command's own words (ARM's rmode, ARM_PLAY's) after the body, as before
+        p.iconst(3, 0)
+        for c in (SM.CMD_ARM, SM.CMD_NOW, SM.CMD_ARM_PLAY):
+            p.iconst(12, c)
+            p.if_(2, "EQ", 12, lambda: p.iconst(3, 1), kind="i")
+        p.ifz(3, "NE", start(None))
+        p.ld(2, cmd + 4)
         p.iconst(12, SM.CMD_ARM)
 
         def arm():
-            start(1)()
             p.iconst(7, 0)
             p.st(C["rmode"], 7)
             # v0.38: THRES 0 (the ColdFire sends its floor, 33, under REC_AUTO_BELOW) arms on
@@ -2049,10 +2143,7 @@ def recorder(p: Prog, L: Layout) -> None:
         p.if_(2, "EQ", 12, arm, kind="i")
         p.ld(2, cmd + 4)
         p.iconst(12, SM.CMD_ARM_PLAY)
-        p.if_(2, "EQ", 12, lambda: (start(1)(), p.iconst(7, 1), p.st(C["rmode"], 7)), kind="i")
-        p.ld(2, cmd + 4)
-        p.iconst(12, SM.CMD_NOW)
-        p.if_(2, "EQ", 12, start(2), kind="i")
+        p.if_(2, "EQ", 12, lambda: (p.iconst(7, 1), p.st(C["rmode"], 7)), kind="i")
         p.ld(2, cmd + 4)
         p.iconst(12, SM.CMD_STOP)
 
@@ -2534,8 +2625,6 @@ def tdm_rx(p: Prog, L: Layout) -> None:
                     lo = SM.CMD_OFFSET // 4
                     hi = SM.CMD_OFFSET // 4 + 6
                     top = SM.POOL_WORDS
-                    p.iconst(12, lo)
-                    p.e("COMP(R9, R12);")
 
                     def write():
                         p.ld(8, K["off"])
@@ -2593,7 +2682,13 @@ def tdm_rx(p: Prog, L: Layout) -> None:
                                 p._branch(lambda: s32(p.r[9]) <= s32(p.r[12]), "LE", write, None)
                             p._branch(lambda: p.r[8] == p.r[12], "EQ", at_lo, None)
                         p._branch(lambda: s32(p.r[8]) >= s32(p.r[12]), "GE", below_top, command)
-                    p._branch(lambda: s32(p.r[9]) <= s32(p.r[12]), "LE", write, above)
+                    def placed():
+                        p.iconst(12, lo)
+                        p.e("COMP(R9, R12);")
+                        p._branch(lambda: s32(p.r[9]) <= s32(p.r[12]), "LE", write, above)
+                    # 2026-11-20 (the ghost audit, docs/memory-map.md): a negative offset (high half >= 0x8000) writes nothing. It passed
+                    # "wholly before the command block" and wrote below the pool: stock's and our delay lines lie there
+                    p.ifz(8, "GE", placed)
                 p._branch(lambda: s32(p.r[7]) <= s32(p.r[12]), "LE", counted, None)
 
             def failed():
@@ -2692,6 +2787,166 @@ def probe(p: Prog, L: Layout) -> None:
             p.if_(8, "LE", 13, below, stop, kind="i")
         p.if_(8, "GE", 12, nonneg, stop, kind="i")
     p.ifz(0, "NE", running)
+
+
+# -- 2026-11-20: the mixer meters (sampler.machines LV_*; scratch/mixer-overview.md; csrc/meter/mixer.c) -----------
+LV_TRK_A, LV_TRK_B = 0x258F68, 0x259F68     # the output stage's track blocks (0x100 apart, L then R at + 0x80): A after
+                                            # the routing (it has scaled it x 3.2768 in place), B the raw track
+LV_RET_A, LV_RET_B = 0x25B168, 0x25B068     # the send returns' blocks, A and B as the channel table (k 34..39) has them
+LV_RET_STRIDE = 0x300
+LV_SRC_WORD = 0x25C48C + 0xA78              # the frame copy's word whose high half is +0xa7a: 0 takes B, else A
+
+
+def _lv_maxabs(p: Prog) -> None:
+    """F8 = the largest |x| of the 64 words at I1 (any NaN among them: NaN); I1 left 65 words on. A software loop, 4
+    words an iteration (a MAX with the next word's load, a MIN, each): the sample machines' code runs inside stock's
+    voice dispatch and writes no LCNTR (no hardware loop: test_waverider_dsp). Uses R2, R3, R8, R9, R12, R13, I1."""
+    p.ldpost(2, 1)
+    p.fpass(8, 2)
+    p.fpass(9, 2)
+
+    def body():
+        p.fop(8, 8, "MAX", 2)
+        p.ldpost(3, 1)
+        p.fop(9, 9, "MIN", 2)
+        p.fop(8, 8, "MAX", 3)
+        p.ldpost(2, 1)
+        p.fop(9, 9, "MIN", 3)
+        p.fop(8, 8, "MAX", 2)
+        p.ldpost(3, 1)
+        p.fop(9, 9, "MIN", 2)
+        p.fop(8, 8, "MAX", 3)
+        p.ldpost(2, 1)
+        p.fop(9, 9, "MIN", 3)
+    p.loop_r(13, 16, body, one=12)
+    p.fconst(12, 0.0)
+    p.fop(9, 12, "-", 9)
+    p.fop(8, 8, "MAX", 9)
+
+
+def _lv_take(p: Prog, keep: bool) -> None:
+    """the peak in F8 (its stage's scale) against the top in F13 (a call clobbers R12): at it or past it (a NaN too),
+    the bit in R4 into R7 (the block's clip bits); KEEP: held under LV_TOP and kept (the larger) in the peak I4
+    points at, I4 one word on. Uses R9, R12, I4."""
+    p.if_(8, "GE", 13, lambda: p.iop(7, 7, "OR", 4))   # (a NaN compares neither less nor equal: GE, a clip)
+    if not keep:
+        return
+    p.fconst(12, SM.LV_TOP)
+    p.if_(8, "GE", 12, lambda: p.fpass(8, 12))
+    p.ldi(9, 0, 4)
+    p.fop(9, 9, "MAX", 8)
+    p.stpost(4, 9)
+
+
+def _lv_one(p: Prog, keep: bool, top: float) -> None:
+    """the channel whose peak is in F8, at R4's bit, then R4 the next bit"""
+    p.fconst(13, top)
+    p.call("lvkeep" if keep else "lvbit", lambda: _lv_take(p, keep))
+    p.lsh(4, 4, 1)
+
+
+def levels(p: Prog, L: Layout) -> None:
+    """The mixer meters (2026-11-20; sampler.machines LV_*): from the last block's output buffers (the output stage and
+    the driver's conversion ran after this code last ran; until the engine's routing and output stage run again they
+    hold that block), each fixed-point stage's peak in its own scale, the clip bits (a peak at or past full scale),
+    and the clip word to the ColdFire in both SPI reply pages: LV_REPLY_MAGIC | this block's bits | the last block's.
+    The peaks are kept (the larger) in lpk0..lpk24 until the levels packet takes them (tdm_tx); bit k is channel k's:
+      0..15  each track's Overbridge / USB channel: its block (A or B) x OB_GAIN, at 1.0 FIX saturates
+      16..18 each send return's, the same
+      19     the main mix as Overbridge / USB gets it: TX slots 0, 1 as sent (wr_pvmix's ob_peaks), its peaks L and R
+             in lpk22, lpk23 (2026-11-20; until then the MAIN tap x OB_GAIN, which stock empties in Overbridge mode)
+      20     the analog outputs: wr_pvmix's dac_guard's peaks, L in lpk19 and R in lpk20 (the main mix as converted,
+             preview and MON in)
+      21     the input (the ADC's block), at IN_TOP its converter's top, in lpk21
+      22     the recorder recording at its clamp; its block peak (rpk) kept in lpk24 while it records (2026-11-21,
+             the OUTPUTS overview), held under LV_TOP
+    Uses R0..R13, I1, I2, I4, I12."""
+    K = LK
+    from ..perc.dsl import flt
+    g = flt(SM.OB_GAIN_BITS)
+    p.iconst(7, 0)                            # R7: the block's clip bits
+    p.ld(0, LV_SRC_WORD)
+    p.lsh(0, 0, -16)
+    p.iconst(5, LV_TRK_B)                     # R5: the channel's block; R6: the first return's
+    p.iconst(6, LV_RET_B)
+
+    def take_a():
+        p.iconst(5, LV_TRK_A)
+        p.iconst(6, LV_RET_A)
+    p.ifz(0, "NE", take_a)
+    p.iconst(4, 1)                            # R4: the channel's bit
+    p.iconst(0, K["lpk0"])
+    p.seti(4, 0)                              # I4: its kept peak
+
+    def chan():                               # the 16 tracks, then the 3 returns
+        p.seti(1, 5)
+        p.call("lvmax", lambda: _lv_maxabs(p))
+        p.fconst(12, g)
+        p.fop(8, 8, "*", 12)
+        p.fconst(13, 1.0)
+        p.call("lvkeep", lambda: _lv_take(p, True))
+        p.iconst(9, 0x100)                    # the next block: a track's 0x100 on, a return's 0x300; after the
+        p.iconst(10, 1 << 15)                 # 16th track, the first return's
+        p.if_(4, "GT", 10, lambda: p.iconst(9, LV_RET_STRIDE), kind="i")
+        p.iop(5, 9, "+", 5)
+        p.if_(4, "EQ", 10, lambda: p.ipass(5, 6), kind="i")
+        p.lsh(4, 4, 1)
+    p.loop_r(11, 19, chan)
+    # the main mix as Overbridge / USB audio gets it: TX slots 0, 1 as the last block sent them (wr_pvmix's ob_peaks,
+    # |word| >> 8, 2^23 its full scale). 2026-11-20 (the User's CPU: the ColdFire read these 64 words from uncached
+    # memory every period, 1.56 % of it in Overbridge mode): the bit at 0x7fffff (the ColdFire's own test before), the
+    # peaks kept in lpk22, lpk23 below
+    p.ld(0, K["dobl"])
+    p.ld(1, K["dobr"])
+    p.iop(0, 0, "MAX", 1)
+    p.iconst(12, -23)
+    p.float_(8, 0, 12)                        # F8 = the larger / 2^23 (exact: under 2^24)
+    _lv_one(p, False, OB_PEAK_TOP)
+    p.ld(8, K["dpkl"])                        # the analog outputs, L then R, one bit
+    p.fconst(13, 1.0)
+    p.call("lvkeep", lambda: _lv_take(p, True))
+    p.ld(8, K["dpkr"])
+    _lv_one(p, True, 1.0)
+    p.iconst(0, SM.IN_BUF)                    # the input
+    p.seti(1, 0)
+    p.call("lvmax", lambda: _lv_maxabs(p))
+    _lv_one(p, True, SM.IN_TOP)
+    p.ld(0, L.C["rst"])                       # the recorder at its clamp while it records (state 2)
+    p.iconst(12, 2)
+
+    def recording():
+        p.ld(8, L.C["rpk"])
+        _lv_one(p, False, SM.REC_TOP)
+    p.if_(0, "EQ", 12, recording, kind="i")
+    for w in ("dobl", "dobr"):                # Overbridge main's peaks, kept in lpk22, lpk23 (I4 there after the input)
+        p.ld(0, K[w])
+        p.iconst(12, -23)
+        p.float_(8, 0, 12)
+        p.ldi(9, 0, 4)
+        p.fop(9, 9, "MAX", 8)
+        p.stpost(4, 9)
+    # 2026-11-21 (the OUTPUTS overview; the User: "only what is not float"): the recorder's block peak while it records
+    # (state 2), kept in lpk24, held under LV_TOP (its full scale, the clamp REC_TOP, is 1.0 within 0.0003 dB)
+    p.ld(0, L.C["rst"])
+    p.iconst(12, 2)
+
+    def rec_peak():
+        p.ld(8, L.C["rpk"])
+        p.fconst(12, SM.LV_TOP)
+        p.if_(8, "GE", 12, lambda: p.fpass(8, 12))
+        p.ld(9, K[f"lpk{SM.LV_UNIT_REC}"])
+        p.fop(9, 9, "MAX", 8)
+        p.st(K[f"lpk{SM.LV_UNIT_REC}"], 9)
+    p.if_(0, "EQ", 12, rec_peak, kind="i")
+    # the clip word, both reply pages: magic | this block's | the last block's (a block read twice or missed by the
+    # ColdFire's copy still shows each clip once)
+    p.ld(9, K["lprev"])
+    p.st(K["lprev"], 7)
+    p.iop(7, 7, "OR", 9)
+    p.iconst(9, SM.LV_REPLY_MAGIC)
+    p.iop(7, 7, "OR", 9)
+    for page in SM.REPLY_PAGES:
+        p.st(page + SM.LV_REPLY_AT, 7)
 
 
 def tdm_tx(p: Prog, L: Layout) -> None:
@@ -2840,7 +3095,7 @@ def tdm_tx(p: Prog, L: Layout) -> None:
         p.iop(6, 6, "AND", 9)
         p.stpost(4, 6)
         _loop_done(p, K, SM.TX_UNITS - 1)
-        _tx_out(p, K)
+        # (2026-11-20: then _tx_out, after the choice between this and the levels packet: one copy of it)
 
     def busy():
         # the units: build into the buffer, then write them out tagged
@@ -2909,7 +3164,95 @@ def tdm_tx(p: Prog, L: Layout) -> None:
         p.e("COMP(R4, R5);")
         p._branch(lambda: s32(p.r[4]) >= s32(p.r[5]), "GE",
                   lambda: (p.iconst(6, 0), p.st(K["sbusy"], 6)), None)
-    p.ifz(0, "EQ", idle, busy)
+    def levels_packet():                      # 2026-11-20: the mixer meters' peaks (levels), then cleared
+        p.iconst(6, SM.LV_MAGIC)
+        p.st(SM.LINK_BUF, 6)
+        p.iconst(12, K["lpk0"])
+        p.seti(1, 12)
+        p.iconst(12, SM.LINK_BUF + 4)
+        p.seti(4, 12)
+        p.fconst(9, float(SM.LV_ONE))
+        p.iconst(7, 0)
+
+        def unit():
+            p.ldpost(6, 1)
+            p.fop(6, 6, "*", 9)
+            p.trunc(6, 6)                     # (each peak held under LV_TOP: under 0x10000)
+            p.stpost(4, 6)
+            p.sti(-1, 1, 7)
+        p.loop_r(11, SM.LV_CH, unit)
+        _loop_done(p, K, SM.TX_UNITS - 1)
+
+    def clip_packet():                        # 2026-11-20 (clip-inner): the voices' clips (perc.guard.CLIPMASK), then cleared
+        from ..perc import guard as G
+        p.iconst(6, SM.CLIP_MAGIC)
+        p.st(SM.LINK_BUF, 6)
+        p.ld(6, G.CLIPMASK)
+        p.iconst(12, 0xFFFF)
+        p.iop(6, 6, "AND", 12)
+        p.st(SM.LINK_BUF + 4, 6)               # unit 1: the voice slots
+        p.ld(6, G.CLIPTRK)
+        p.iop(7, 6, "AND", 12)
+        p.st(SM.LINK_BUF + 8, 7)               # unit 2: the tracks (per-track stages)
+        p.lsh(7, 6, -16)
+        p.iconst(12, 7)
+        p.iop(7, 7, "AND", 12)
+        p.st(SM.LINK_BUF + 12, 7)              # unit 3: the send returns
+        p.iconst(6, 0)
+        p.st(G.CLIPMASK, 6)
+        p.st(G.CLIPTRK, 6)
+        _loop_done(p, K, SM.TX_UNITS - 1)
+
+    def maybe_clip():                         # 2026-11-20 (clip-inner): R2 = 2 for a clip packet: a slot's bit set, and
+        from ..perc import guard as G         # the last packet was not one (lsc: 1 after a clip packet)
+        p.ld(3, K["lsc"])
+        p.iconst(4, 0)
+        p.st(K["lsc"], 4)
+
+        def check():
+            p.ld(4, G.CLIPMASK)
+            p.ld(5, G.CLIPTRK)
+            p.iop(4, 4, "OR", 5)
+            p.ifz(4, "NE", lambda: (p.iconst(2, 2), p.iconst(4, 1), p.st(K["lsc"], 4)))
+        p.ifz(3, "EQ", check)
+
+    def other():                              # (R2: 2 the clip packet, else the idle one)
+        p.iconst(12, 2)
+        p.if_(2, "EQ", 12, clip_packet, idle, kind="i")
+
+    def quiet():
+        # while the ColdFire asks (LV_WANT in the pool's READY page), a levels packet in place of every LV_EVERY-th idle
+        # packet; the peaks start afresh with the asking
+        p.ld(0, K["lcnt"])
+        p.ld(1, L.pool + SM.LV_WANT_OFF)
+        p.iconst(12, SM.LV_WANT)
+
+        def asked():
+            def fresh():
+                p.iconst(7, 0)
+                p.iconst(12, K["lpk0"])
+                p.seti(1, 12)
+                p.loop_r(11, SM.LV_CH, lambda: p.stpost(1, 7))
+            p.ifz(0, "EQ", fresh)
+            p.ld(0, K["lcnt"])
+            p.iconst(8, 1)
+            p.iop(0, 8, "+", 0)
+            p.st(K["lcnt"], 0)
+            p.iconst(12, SM.LV_EVERY - 1)
+            p.iop(0, 0, "AND", 12)
+            p.iconst(2, 0)
+            p.ifz(0, "EQ", lambda: p.iconst(2, 1))
+
+        def not_asked():
+            p.iconst(0, 0)
+            p.st(K["lcnt"], 0)
+            p.iconst(2, 0)
+        p.if_(1, "EQ", 12, asked, not_asked, kind="i")
+        p.ifz(2, "EQ", maybe_clip)
+        p.iconst(12, 1)
+        p.if_(2, "EQ", 12, levels_packet, other, kind="i")   # (R2: 1 this block's packet is the levels', 2 a clip one)
+        _tx_out(p, K)
+    p.ifz(0, "EQ", quiet, busy)
 
 
 def _tx_out(p: Prog, K) -> None:
@@ -3119,6 +3462,7 @@ def run_recorder(L: Layout, mem):
     verify_step(p, L)
     recorder(p, L)
     probe(p, L)
+    levels(p, L)
     tdm_tx(p, L)
     return p
 
@@ -3138,6 +3482,7 @@ def program(L: Layout, next_sw: int, prefix: str = "sm") -> str:
     verify_step(p, L)
     recorder(p, L)
     probe(p, L)
+    levels(p, L)                             # 2026-11-20: the mixer meters' peaks and clip bits
     tdm_tx(p, L)
     p.iconst(0, 0)
     p.st(PP.MNM_SCRATCH + PP.SMP_I, 0)
@@ -3212,7 +3557,9 @@ def program(L: Layout, next_sw: int, prefix: str = "sm") -> str:
     p.emit_subs()
     p.raw(".wr_smp..end:")
     p.raw("      .type wr_smp.,STT_FUNC;")
-    return p.text()
+    # 2026-11-20 (DRUM's room): the R12 loads nothing reads, folded (dnfw.perc.flow)
+    from ..perc import flow as _FLOW
+    return _FLOW.fold_text(p.text())
 
 
 def run_voice(L: Layout, read, t: int, mtype: int, mem=None):
@@ -3235,6 +3582,7 @@ def run_voice(L: Layout, read, t: int, mtype: int, mem=None):
 # stock's. Every register it uses is saved first and restored after, ASTAT included.
 PVMIX_TAIL = (0x5A5A0001, 0x5A5A0002, 0x5A5A0003)    # `R0 = TAIL[k];`: 48-bit placeholders
 PVMIX_SAVE = (0, 1, 2, 3, 12, 13)
+PVMIX_SAVE2 = (4, 5)                        # 2026-11-20: dac_guard's (sampler.machines LINK_WORDS pvs4, pvs5)
 
 
 PV_LOOP = 1 << 30                           # v0.30: pvln's loop bit
@@ -3267,6 +3615,7 @@ def pvmix(p: Prog, L: Layout) -> None:
         p.iop(1, 12, "+", 1)
         p.st(C["pvk"], 1)
     _loop16(p, C, tap_word, 64)
+    mon(p, L)
     p.ld(0, C["pvn"])
     p.iconst(12, 0)
 
@@ -3339,6 +3688,95 @@ def pvmix(p: Prog, L: Layout) -> None:
             p.ifz(2, "NE", loop)
         p.ifz(0, "EQ", again)
     p.if_(0, "GT", 12, some, kind="i")
+    dac_guard(p, L)                           # 2026-11-20: the analog outputs' overs as a clean clip, and their peaks
+    ob_peaks(p, L)                            # 2026-11-20: Overbridge / USB main's peaks as sent (TX slots 0, 1)
+
+
+# 2026-11-20 (the mixer meters; the User's yes under the stock-code rule): the driver converts MIX_BUF for the codec
+# with `FIX BY 31` and every arm then negates the page's words as integers (sw 0x1c9d3f, 0x1c9e29), ALUSAT off: a sample
+# at or over full scale overflows to all ones (the SHARC+ PRM's FIX page) and reaches the DAC as -(-1) = 1, about
+# silence; exactly -1.0 as -(0x80000000), the wrong sign (scripts/sharc_dacover_step.py measures both on stock). Here,
+# after the preview and MON (the last things added to the mix), every word is held to +-DAC_TOP, so an over is a clean
+# clip, as Overbridge's channels already are (the output stage turns ALUSAT on); words under it are untouched. The
+# block's peaks |x| before the hold, L and R, for the meters (levels).
+def dac_guard(p: Prog, L: Layout) -> None:
+    """MIX_BUF's 64 words held to +-DAC_TOP; LK['dpkl'], LK['dpkr'] = each side's largest |x| before (a NaN: NaN).
+    Uses R0..R5, R12, R13, I1 (wr_pvmix saves them)."""
+    K = LK
+    p.fconst(12, SM.DAC_TOP)
+    p.fconst(13, -SM.DAC_TOP)
+    for side, dst in ((0, K["dpkl"]), (1, K["dpkr"])):
+        p.iconst(0, SM.MIX_BUF + 0x80 * side)
+        p.seti(1, 0)
+        p.ldi(1, 0, 1)
+        p.fpass(2, 1)                         # the side's largest and smallest x
+        p.fpass(3, 1)
+
+        def pair():
+            p.ldi(4, 0, 1)
+            p.ldi(5, 1, 1)
+            p.fop(2, 2, "MAX", 4)
+            p.fop(3, 3, "MIN", 4)
+            p.fop(2, 2, "MAX", 5)
+            p.fop(3, 3, "MIN", 5)
+            p.fop(4, 4, "MIN", 12)
+            p.fop(4, 4, "MAX", 13)
+            p.fop(5, 5, "MIN", 12)
+            p.stpost(1, 4)
+            p.fop(5, 5, "MAX", 13)
+            p.stpost(1, 5)
+        p.loop_r(0, 16, pair, one=1)
+        p.fconst(1, 0.0)
+        p.fop(3, 1, "-", 3)
+        p.fop(2, 2, "MAX", 3)
+        p.st(dst, 2)
+
+
+# 2026-11-20 (the User's CPU on the unit: the ColdFire's mix_ob_main read Overbridge main's 64 TDM words every audio
+# period from uncached memory, 1.56 % of its time in Overbridge mode; the User: "the DSP reports Overbridge main's peak
+# and clip itself"): here, after stock filled TX slots 0, 1 of this block's page and pv_overbridge added the preview,
+# each side's largest |word| >> 8 (as the ColdFire read them: 2^23 full scale, a word at or past 0x7fffff00 at the
+# top), for the next block's levels. Only reads the page: no output word changes.
+OB_PEAK_TOP = (0x7FFFFF) / 2.0 ** 23        # a clip: |word| >> 8 at 0x7fffff (the output stage's FIX saturated)
+
+
+def ob_peaks(p: Prog, L: Layout) -> None:
+    """LK['dobl'], LK['dobr'] = max over the page's 32 frames of |w >> 8| (arithmetic) of TX slot 0, 1. Uses R0, R2..R5,
+    R12, R13, I1 (wr_pvmix saves them). (2026-11-21) No shifter op: the >> 8 is the multiplier's floor(w x 2^23 / 2^31)
+    (SSF, exact for every word), the page's + 0x800 a PASS and a constant. The shifter's flags (ASTAT SV, SZ, SS) are
+    then left as stock's by this code itself; the SHARC runner (pvmix: every register as stock's) found SV changed by
+    the shifts, which the emulator's ASTAT restore did not undo (it leaves the flags of the last ops: so the last multiply
+    is the largest's, >= 0)."""
+    K = LK
+    for side, dst in ((0, K["dobl"]), (1, K["dobr"])):
+        p.ld(13, SM.TDM_PAGE)
+        p.iconst(12, 1)
+        p.iop(13, 13, "AND", 12)
+
+        def odd():
+            p.iconst(13, 0x800)
+        p.ifz(13, "NE", odd)                  # the page: + 0 / 0x800
+        p.iconst(12, SM.TDM_TX + 4 * side)
+        p.iop(13, 12, "+", 13)                # R13: slot SIDE of frame 0; a frame 16 words on
+        p.iconst(2, 0)                        # R2 the largest word (>= 0), R3 the smallest (<= 0)
+        p.iconst(3, 0)
+        p.iconst(5, 64)
+
+        def frame():
+            p.seti(1, 13)
+            p.ldi(4, 0, 1)
+            p.iop(2, 2, "MAX", 4)
+            p.iop(3, 3, "MIN", 4)
+            p.iop(13, 13, "+", 5)
+        p.loop_r(0, 32, frame)
+        p.iconst(12, 1 << 23)
+        p.mul_ssf(4, 3, 12)                   # the smallest >> 8 (<= 0)
+        p.mul_ssf(2, 2, 12)                   # the largest >> 8: floor(R2 x 2^23 / 2^31); last, so the multiplier's
+                                              # flags end on a result >= 0 (MN clear, as stock's)
+        p.iconst(12, 0)
+        p.iop(4, 12, "-", 4)                  # |smallest >> 8| (0 when the smallest is 0)
+        p.iop(2, 2, "MAX", 4)
+        p.st(dst, 2)
 
 
 # The preview over Overbridge / USB audio (the user on 1.12: heard on the outputs, not over
@@ -3416,6 +3854,46 @@ def _ob_add(p: Prog, k: int) -> None:
     p.sti(k, 1, 0)
 
 
+def mon(p: Prog, L: Layout) -> None:
+    """v0.59 MON: with REC_MON on, SRC IN (rsrc 0) and the recorder armed or recording (rst 1,
+    2), MIX_BUF[k] += IN_BUF[k] for the block's 32 frames, L and R (both laid out as 32 floats
+    then 32): the input heard at unity, as it is recorded. Uses R0..R3, R12, R13, I1, pvk."""
+    C = L.C
+
+    def live():
+        p.iconst(1, 0)
+        p.st(C["pvk"], 1)
+
+        def word():
+            p.ld(1, C["pvk"])
+            p.lsh(12, 1, 2)
+            p.iconst(13, SM.IN_BUF)
+            p.iop(13, 13, "+", 12)
+            p.seti(1, 13)
+            p.ldi(2, 0, 1)
+            p.iconst(13, SM.MIX_BUF)
+            p.iop(13, 13, "+", 12)
+            p.seti(1, 13)
+            p.ldi(3, 0, 1)
+            p.fop(3, 3, "+", 2)
+            p.sti(0, 1, 3)
+            p.iconst(12, 1)
+            p.iop(1, 12, "+", 1)
+            p.st(C["pvk"], 1)
+        _loop16(p, C, word, 64)
+
+    def armed_or_recording():
+        p.ld(0, C["rst"])
+        p.iconst(12, 1)
+        p.if_(0, "GE", 12, lambda: (p.iconst(12, 2), p.if_(0, "LE", 12, live, kind="i")), kind="i")
+
+    def src_in():
+        p.ld(0, C["rsrc"])
+        p.ifz(0, "EQ", armed_or_recording)
+    p.ld(0, SM.REC_MON)
+    p.ifz(0, "NE", src_in)
+
+
 def _loop16(p: Prog, C, body, n: int = 16) -> None:
     """for n (16) times body(); the count in pvk (body() counts it up from 0)"""
     top = p.label("pv")
@@ -3446,6 +3924,8 @@ def pvmix_program(L: Layout, prefix: str = "pv") -> str:
     p.raw("wr_pvmix.:")
     for r in PVMIX_SAVE:
         p.st(C[f"pvs{r}"], r)
+    for r in PVMIX_SAVE2:                     # 2026-11-20: dac_guard's R4, R5 (in the link's scratch words)
+        p.st(LK[f"pvs{r}"], r)
     p.e(f"DM({C['pvsi']:#x}) = I1;")
     p.e(f"DM({C['pvsa']:#x}) = ASTAT;")
     pvmix(p, L)
@@ -3453,6 +3933,8 @@ def pvmix_program(L: Layout, prefix: str = "pv") -> str:
     p.e(f"I1 = DM({C['pvsi']:#x});")
     for r in PVMIX_SAVE:
         p.ld(r, C[f"pvs{r}"])
+    for r in PVMIX_SAVE2:
+        p.ld(r, LK[f"pvs{r}"])
     for w in PVMIX_TAIL:                      # the stock call, copied in by the build
         p.e(f"R0 = {w:#x};", "placeholder: the stock instruction")
     # the call returns here when it returns through the PC stack (a CJUMP's return

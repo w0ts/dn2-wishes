@@ -27,8 +27,8 @@ SETS = (
     Set("303", "TB-303", (54,), ("303",), "TB-303 (type 54): an INIT and acid sounds after Optimist's ACID presets"),
     Set("PLT", "PLAITS", (55,), ("PLT",), "PLAITS (type 55): an INIT and sounds after Optimist's PLAITS presets"),
     Set("DRM", "DRUM", (56,), ("DRM",),
-        "DRUM (type 56): KICK, SNARE, CLOSED and OPEN HAT and TOM sounds (TYPE on page 1 H); a name ending +DS, +FZ, "
-        "+FD or +TP wants the DIST, FUZZ, FOLD or TAPE insert on its track (the project's, not the sound's)"),
+        "DRUM (type 56): KICK, SNARE, CLOSED and OPEN HAT, TOM, CLAP, RIDE and CRASH sounds (TYPE on page 1 H), "
+        "named by kind (BD SD CH OH TOM CP RD CR); a name ending +DS, +FZ, +FD or +TP wants the DIST, FUZZ, FOLD or TAPE insert on its track (the project's, not the sound's)"),
     Set("MD", "MACHINEDRUM", (5,), ("MD",),
         "MACHINEDRUM (type 5, PERC): an INIT and drum sounds of the Machinedrum models"),
     Set("MNM", "MONOMACHINE", (6,), ("MNM",),

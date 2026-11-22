@@ -99,11 +99,30 @@ Every stock parameter cell is drawn as before, its number the value set. In the 
 machines [E]), a 1 px line from `x0 + 1`, 21 px, shows the **heard** value: from the left, or from the
 centre for a parameter whose default is mid-range. Shown while heard != set, kept 400 ms after.
 
-- **Heard** = `OUT` and **set** = the smoother's own state `STATE` 0x8000de60 rounded (`OUT` before
-  the sources are added), at the voice row the UI track last played (`sl_lastv`, csrc/slides) while
+- **Heard** = `OUT`, at the voice row the UI track last played (`sl_lastv`, csrc/slides) while
   `OWNER` (0x80005308) says it still plays that track. The rows are voices [S]: the six-source apply
-  takes each row's track from `OWNER`, the evaluator walks the same 16 rows. A knob's glide and our
-  parameter slides move `STATE` and `OUT` together, so they draw nothing.
+  takes each row's track from `OWNER`, the evaluator walks the same 16 rows.
+- **Set (2026-11-20, the User: "modulation and plock should be displayed with our line ... but not MOVE
+  the knob")** = the UI track's sound's own stored value (sound + 20 + 2 x slot, as csrc/matrix/routes.c
+  reads it). So a **p-lock playing** shows as the line (stock's applier writes the locked value into the
+  smoother's input `SRC` 0x80003af0 and `STATE` glides to it), and so does a parameter slide of ours; the
+  knob keeps drawing the stored value. For 300 ms (450 frames) after a cell's stored value changed (a knob
+  turned, a load, CC, Overbridge), set is the smoother's own state `STATE` 0x8000de60 rounded, as before:
+  stock's smoother glides the voice to a turned value, and that glide draws no line. A voice playing a
+  locked-in other sound shows the difference between the two sounds. Emulator (`emu_modulation.py
+  --scenario locks`, `scripts/emu_modlocks.py`, with stock's own lock builder, applier and undo): on
+  WaveTone's FLTR (FREQ), TB-303's and ONESHOT's first pages, the line at the locked value, the knob's
+  pixels and the stored value unchanged, gone 400 ms after the next step without the lock; FREQ turned:
+  no line at any poll. `emu_line_redraw.py --scenario locks`: every knob of three pages locked, the lines
+  go alone and the glass is always what a full redraw draws.
+- **LFO4's page (DN2_LFO4 builds only, slots 101..108)**: set = lfo4's table for the sound, heard = set
+  plus what LFO1..3 add to that control on the voice (`mod_l4_carry`, csrc/modulation/cascade.c); never
+  its DEST (`emu_lfo4.py --scenario line`).
+- **PER NOTE** (the routes popup's header, csrc/matrix/routes_pop.c `mxp_note`): on a control read only
+  at the note's start (pages.py `MNM_PER_NOTE`: TB-303 ACC SLID, DRONE HOLD, SID PWRS, DPRO WPRS, VO-6
+  V-SW CONS CLEN CVOL, DRUM's TYPE VEL SNAP and its per-type NOIS/TONE; PERC's TYPE; a sample machine's
+  SAMP, BUF, and SLICE/GRID, WERP's SEG and MODE), as the page under the popup drew them
+  (`emu_matrix.py --scenario pernote`).
 - A cell is a sound slot only when stock's slot -> record map (`0x400dc18e`, with our machines' hook)
   gives the cell's record back for its slot; the global FX pages, MIDI tracks and the track level get
   no line.
@@ -126,7 +145,7 @@ centre for a parameter whose default is mid-range. Shown while heard != set, kep
   every knob's row free before anything is modulated; one knob's heard value moved gives exactly
   the line; LFO1 aimed at Machinedrum's AMD and at MONOMACHINE's WAV1 at full depth, run by the
   frame's evaluator, moves the line by itself (0.1 s apart: ends 8, 17, 16, 7, 0; 20, 19, 11, 2, 0
-  of 20) and it leaves once LFO1's depth is zero. JUNO (type 23) draws through the same
+  of 20) and it leaves once LFO1's depth is zero. JUNO (type 50; 23 until 2026-11-18) draws through the same
   Monomachine page code, so its knobs have the line too.
 - **A sample machine's PAGE 2 bottom row (2026-11-13)** [E]: E, F, G (labels or WERP's icons) and H
   (LEV's pill) have no widgets, but their controls move like any other: their lines go on row 7,
@@ -150,7 +169,7 @@ The redraw rate is capped at 25 a second, the rate stock itself redraws at while
 26, measured on the unit on 1.11, display.md); one page draw was about 1.4 ms there, so the cap is
 about 3.5 % of the ColdFire while any line moves [D], and 0 when none does. The cap is the bound:
 more modulated cells do not raise the redraw rate, only the 2,148 instructions our lines add to each
-draw (67,948 against 65,800). The state is 1,104 + 284 B in a RAM block of its own, `MOD_RAM`
+draw (67,948 against 65,800). The state is 1,104 + 284 B (and 96 B more for the stored values, 2026-11-20) in a RAM block of its own, `MOD_RAM`
 0x46af8000 (2 KB, above BSS like the meter's).
 
 ## Not verified on the unit

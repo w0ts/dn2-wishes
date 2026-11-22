@@ -16,6 +16,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+pytest.importorskip("scipy", reason="dnfw.fascia.model needs scipy (scipy.signal), which is not in this environment")
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 import fascia_audition as A  # noqa: E402

@@ -16,6 +16,12 @@ The machines are the owner's own, from his Ravel firmware
 GPL-3.0): designs after the Elektron Machinedrum's TRX, EFM and GND machines. The modal
 P-I machines are not ported.
 
+On MACHINEDRUM, H on the AMP page is AMP ON/OFF, OFF by default: the AMP envelope and VOL bypassed (gain 1.0, no
+release: the machine's DEC is the hit's length); ON is stock's AMP (2026-11-20, docs/live-select.md "AMP ON/OFF on the
+drum machines"). With every control at its top and AMP OFF, TRX-B2, GND-SN, GND-NS and TRX-OH ring until their voice
+gets another note (measured: docs/live-select.md). Kept so (the User, 2026-11-20): the machine has its own decay, and
+at its top it is meant to sustain; AMP ON brings stock's AMP back.
+
 ## The pages
 
 | page | A | B | C | D | E | F | G | H |
@@ -99,7 +105,7 @@ engine init (5.0 M instructions) and every stock machine on all 16 tracks: reads
 image's end `0x2008823c`**. PERC's 64 KB span sits 230 KB above that and 200 KB below
 the startup's non-cacheable window `0x200fa000..0x200fdfff`. Its voices' state (16 x 128
 bytes, `0x2de180`) and scratch (`0x2dde80`) are in L1, its tables (6 KB, `0x81216000`)
-in DDR beside the others, and it reads SHFT's sine table.
+in DDR beside the others (2026-11-20: no longer loaded; exp2 is read from its L1 copy `0x2e0640`, tan and the sine come over the link), and it reads SHFT's sine table.
 
 **Two more spans for the code only events run** (2026-11-12, perc-layout, `scratch/perc-layout/README.md`). Counted
 per address on the SHARC runner (every engine and mode, 88 cases: a note, steady blocks, a knob move, a retrigger),

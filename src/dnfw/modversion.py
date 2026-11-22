@@ -8,7 +8,8 @@ stores at the sample browser's top (csrc/sampler/smp_page.c, MOD_VERSION from th
 renderer's header). Elektron's own OS version string is never touched (Transfer and the
 updater read it).
 
-A build without the file, or with anything but DIGITS.DIGITS in it, fails.
+A build without the file, or with anything but DIGITS.DIGITS (or DIGITS.DIGITS.DIGITS, a release
+on an upstream base, e.g. 0.62.5: the User, 2026-11-19) in it, fails.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ FILE = pathlib.Path(__file__).resolve().parents[2] / "VERSION"
 
 
 class VersionError(ValueError):
-    """VERSION is missing or not DIGITS.DIGITS"""
+    """VERSION is missing or not DIGITS.DIGITS[.DIGITS]"""
 
 
 def mod_version() -> str:
@@ -29,8 +30,8 @@ def mod_version() -> str:
     except (OSError, UnicodeDecodeError) as e:
         raise VersionError(f"{FILE}: the mod's version file cannot be read ({e}): the build needs it") from None
     v = text.strip()
-    if not re.fullmatch(r"[0-9]{1,3}\.[0-9]{1,3}", v) or text not in (v, v + "\n"):
-        raise VersionError(f"{FILE}: {text!r} is not a version like 0.39 (one line, digits, a dot, digits)")
+    if not re.fullmatch(r"[0-9]{1,3}\.[0-9]{1,3}(\.[0-9]{1,3})?", v) or text not in (v, v + "\n"):
+        raise VersionError(f"{FILE}: {text!r} is not a version like 0.39 or 0.62.5 (one line, digits and dots)")
     return v
 
 

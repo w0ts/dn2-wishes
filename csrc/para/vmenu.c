@@ -98,9 +98,8 @@ int vm_pop(u8 *it)
 
 static void fill(void *c, int x0, int y0, int x1, int y1, int on)
 {
-    for (int x = x0; x <= x1; x++)
-        for (int y = y0; y <= y1; y++)
-            SET_PIXEL(c, x, y, on);
+    extern void cv_fill(void *cv, int x0, int y0, int x1, int y1, int on);
+    cv_fill(c, x0, y0, x1, y1, on);             /* (2026-11-17) the same pixels a column word at a time: page.c */
 }
 
 /* page.c wr_screen, after stock's screen: B as PARA, over stock's "---". The menu's middle above B and C is its 16

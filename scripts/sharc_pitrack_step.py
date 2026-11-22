@@ -38,7 +38,8 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
         return f.to_bytes()
 
     def lines(st):
-        return [m2.word(st, dsp.MD_DELAY_DDR + 4 * k) or 0 for k in range(K.PI_DELAY_WORDS)]
+        # (2026-11-16: slot 0's lines in L1 block 2, dsp.MD_DELAY_L1, 6 KB a slot)
+        return [m2.word(st, dsp.MD_DELAY_L1 + 4 * k) or 0 for k in range(dsp.MD_DELAY_STRIDE // 4)]
 
     def play(ring_first):
         caps = []

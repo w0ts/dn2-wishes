@@ -56,7 +56,7 @@ fx_type_hook:
         move.l  %d3, -(%sp)
         move.l  %d2, -(%sp)
         move.l  %d0, -(%sp)
-        jsr     fx_type_quant
+        jsr     fx_type_knob                    | (2026-11-19: fx_type_quant, then the knob notch)
         lea     16(%sp), %sp
         move.l  %d0, %d3
         movem.l (%sp), %d0-%d1/%a1
@@ -77,9 +77,20 @@ smp_tdm_hook:
         movem.l %d0-%d2/%a0-%a1, (%sp)
         move.l  0xfc07000c, %d0         | the system meter (csrc/meter): the ISR's time from here
         move.l  %d0, METER_RAM + 4      | mtr_t_in (its entry 0x40025e36..here is Overbridge's path: untouched)
+#if DN2_STOCK_LINK_FAST
+        move.l  smp_tdm_sent, -(%sp)    | (stocklink: whether smp_tdm sends a packet this frame)
+#endif
         move.l  -56(%fp), -(%sp)
         jsr     smp_tdm
         addq.l  #4, %sp
+#if DN2_STOCK_LINK_FAST
+        move.l  (%sp)+, %d0
+        sub.l   smp_tdm_sent, %d0       | 0: nothing sent
+        move.l  %d0, -(%sp)
+        move.l  -56(%fp), -(%sp)
+        jsr     skl_tx_after            | csrc/stocklink: the transmit half's clears, after the packet
+        addq.l  #8, %sp
+#endif
         move.l  PROF_RAM + 88, %d0      | 2026-11-11, the profiler's AUDIO source (csrc/devtest/prof.c W_AUDIO_GATE)
         cmpi.l  #0x50524641, %d0        | 'PRFA' only while it runs: a load and a compare a frame otherwise
         bne.s   1f
@@ -179,3 +190,98 @@ kb_rec_hook:
         addq.l  #8, %sp
         moveq   #0, %d0                         | stock's answer: off
 1:      rts
+
+| v0.65 PROJECT RAM banks (docs/banks.md): the per-frame driver's jsr 0x40137a06 at 0x400272d4 (the
+| LFOs, once a frame for every track, seven arguments on the stack). Here: the caller's return
+| put aside, so the arguments lie where the evaluator expects them; the evaluator; then
+| smp_lfo_fix (link.c) puts each sample voice's bank back from its target (an LFO's raw offset
+| on SAMP's word moves its low byte, the bank); d0 as the evaluator left it, the return back.
+| The caller pops the arguments itself (lea 28(%sp),%sp). The audio interrupt does not nest.
+        .globl  smp_lfo_hook
+smp_lfo_hook:
+        move.l  (%sp)+, smp_lfo_ret
+        jsr     0x40137a06
+        lea     -12(%sp), %sp
+        movem.l %d0-%d1/%a0, (%sp)
+        jsr     smp_lfo_fix
+        movem.l (%sp), %d0-%d1/%a0
+        lea     12(%sp), %sp
+        move.l  smp_lfo_ret, -(%sp)
+        rts
+        .data
+        .align  4
+smp_lfo_ret:
+        .long   0
+        .text
+
+| ---- smp_tdm's packet words (2026-11-21, the User's CPU: "assembly for the most host CPU code") ------------------
+| tdm_units(q, src, nn, job, sum, tag) -> sum: link.c smp_tdm's RX_WORDS (124) words into the transmit half, word j as
+| unit 4 + 2 j (its low half) and 5 + 2 j (its high half), each TAG | the half (TDM slots 8..15 of the frame rows: unit
+| i at row i >> 3, slot 8 + (i & 7)); Q the place of unit 4 (row 0, slot 12). Words 0..NN-1 from SRC (longs) or, SRC
+| 0, from JOB (little-endian, bytewise: le32), the rest 0. The stores in the C's order (unit 4, 5, 6, ...), the sum of
+| every half added to SUM (mod 2^32). gcc kept its loop's values on the stack: ~25 instructions a word, here ~13.
+| C ABI: d0, d1, a0, a1 scratch.
+        .macro  TDMW                    | the word in %d1 -> its two units; %d4 words left in the row
+        mvz.w   %d1, %d5
+        add.l   %d5, %d0
+        or.l    %d3, %d5
+        move.l  %d5, (%a0)+
+        clr.w   %d1
+        swap    %d1
+        add.l   %d1, %d0
+        or.l    %d3, %d1
+        move.l  %d1, (%a0)+
+        subq.l  #1, %d4
+        bne.s   9f
+        lea     32(%a0), %a0            | slot 16 -> the next row's slot 8
+        moveq   #4, %d4
+9:
+        .endm
+        .globl  tdm_units
+tdm_units:
+        lea     -20(%sp), %sp
+        movem.l %d2-%d5/%a2, (%sp)
+        movem.l 24(%sp), %a0-%a1                | q, src
+        move.l  32(%sp), %d2                    | nn
+        movea.l 36(%sp), %a2                    | job
+        move.l  40(%sp), %d0                    | sum
+        move.l  44(%sp), %d3                    | tag
+        moveq   #2, %d4                         | row 0: units 4..7
+        moveq   #124, %d1
+        cmp.l   %d1, %d2
+        bls.s   1f
+        move.l  %d1, %d2                        | (at most the 124)
+1:      move.l  %d2, -(%sp)                     | the zeros after: 124 - nn
+        tst.l   %d2
+        beq.s   5f
+        move.l  %a1, %d1
+        beq.s   3f
+2:      move.l  (%a1)+, %d1                     | from SRC
+        TDMW
+        subq.l  #1, %d2
+        bne.s   2b
+        bra.s   5f
+3:      mvz.b   3(%a2), %d1                     | from JOB: le32
+        lsl.l   #8, %d1
+        mvz.b   2(%a2), %d5
+        or.l    %d5, %d1
+        lsl.l   #8, %d1
+        mvz.b   1(%a2), %d5
+        or.l    %d5, %d1
+        lsl.l   #8, %d1
+        mvz.b   (%a2), %d5
+        or.l    %d5, %d1
+        addq.l  #4, %a2
+        TDMW
+        subq.l  #1, %d2
+        bne.s   3b
+5:      moveq   #124, %d2
+        sub.l   (%sp)+, %d2
+        beq.s   7f
+6:      moveq   #0, %d1                         | the rest: 0
+        TDMW
+        subq.l  #1, %d2
+        bne.s   6b
+7:      movem.l (%sp), %d2-%d5/%a2
+        lea     20(%sp), %sp
+        rts

@@ -467,9 +467,15 @@ def _pulses(p: Prog, L: C.Layout) -> None:
 
 
 
+TAP_FIXED = True                            # 2026-11-21 (eng-simd): _tap_body on the fixed-point multiplier
+
+
 def _tap_body(p: Prog, L: C.Layout) -> None:
     """ring[R3] = lim(ring[R3] + floor((x1 T[R4] + y0 T[R4 + dt]) / 2^23)), exactly; then R3 + 1,
     R4 + step (the words dt, step: bytes). Clobbers R1, R2, R5-R15, I0-I2."""
+    if TAP_FIXED:
+        _tap_fixed(p, L)
+        return
     p.ld(9, _a(L, "x1"))
     _split(p, 9, 1, 2)
     p.ld(9, _a(L, "y0"))
@@ -487,6 +493,62 @@ def _tap_body(p: Prog, L: C.Layout) -> None:
         _split(p, 9, 7, 8)
         _prod(p, fv, fv + 1, 7, 8, False)
     _sum(p, 23)                                # floor((x1 T + y0 T') / 2^23)
+    _ring_addr(p, L, 7, 3)
+    p.seti(2, 7)
+    p.ldi(10, 0, 2)
+    _word(p, 10, 10)
+    p.iop(14, 14, "+", 10)
+    limi(p, 14)
+    i2f(p, 10, 14)
+    p.sti(0, 2, 10)
+    addk(p, 3, 3, 1)
+    p.ld(9, _a(L, "step"))
+    p.ipass(12, 9)
+    p.iop(4, 12, "+", 4)
+
+
+def _word24(p: Prog, r: int) -> None:
+    """run mode: Rr is a 24-bit word (the fixed-point products' shifts need it)"""
+    if p.run:
+        from ..perc.dsl import s32
+        assert -(1 << 23) <= s32(p.r[r]) < (1 << 23), "a VO-6 product's word outside 24 bits"
+
+
+def _tap_fixed(p: Prog, L: C.Layout) -> None:
+    """_tap_body's words on the fixed-point multiplier (2026-11-21, eng-simd), as _crossfade_fixed: x1 T and y0 T' each
+    as hi = floor(u v / 2^18) (u << 7 times v << 6, SSF) and lo = u v mod 2^18 (SSI); floor(S / 2^23) = floor((H +
+    floor(L / 2^18)) / 2^5), the same integer as the 12-bit halves' float partial products. R9 x1, R5 y0, R1 / R2 their
+    << 7, R6 2^18 - 1, R13 H, R14 L."""
+    p.ld(9, _a(L, "x1"))
+    _word24(p, 9)
+    p.lsh(1, 9, 7)
+    p.ld(5, _a(L, "y0"))
+    _word24(p, 5)
+    p.lsh(2, 5, 7)
+    p.iconst(6, 0x3FFFF)
+    p.seti(1, 4)
+    p.ld(10, _a(L, "dt"))
+    p.iop(10, 10, "+", 4)
+    p.seti(0, 10)
+    p.ldi(7, 0, 1)
+    _word(p, 7, 7)                             # T
+    _word24(p, 7)
+    p.lsh(8, 7, 6)
+    p.mul_ssf(13, 1, 8)
+    p.mul_ssi(14, 9, 7)
+    p.iop(14, 14, "AND", 6)
+    p.ldi(7, 0, 0)
+    _word(p, 7, 7)                             # T'
+    _word24(p, 7)
+    p.lsh(8, 7, 6)
+    p.mul_ssf(8, 2, 8)
+    p.iop(13, 13, "+", 8)
+    p.mul_ssi(8, 5, 7)
+    p.iop(8, 8, "AND", 6)
+    p.iop(14, 14, "+", 8)
+    p.ash(14, 14, -18)
+    p.iop(14, 13, "+", 14)
+    p.ash(14, 14, -5)                          # floor((x1 T + y0 T') / 2^23)
     _ring_addr(p, L, 7, 3)
     p.seti(2, 7)
     p.ldi(10, 0, 2)
@@ -773,10 +835,85 @@ def _bq_body(p: Prog, L: C.Layout) -> None:
     p.sti(3, 0, 5)
 
 
+BQX_FIXED = True                            # 2026-11-21 (eng-simd): _bqx_body on the fixed-point multiplier
+
+
+def _bqx_fixed(p: Prog, L: C.Layout) -> None:
+    """_bqx_body's words on the fixed-point multiplier (2026-11-21, eng-simd), as _crossfade_fixed: each c x as hi =
+    floor(c x / 2^18) (c << 7 times x << 6, SSF) and lo = c x mod 2^18 (SSI), floor(2 S / 2^23) = floor((H +
+    floor(L / 2^18)) / 2^4): the same integer as the 12-bit halves' float partial products. The coefficients' words
+    (hi 4096 + lo, from CO's halves) and their << 7 in the render scratch's XB row (VO-6 does not use it), read
+    through I1. R1 x, R2 x1, R3 x2, R4 y1, R5 y2 (words), R6 2^18 - 1, F10 2^23, R11 / R15 the limiter's bounds."""
+    p.iconst(12, L.XB)
+    p.seti(1, 12)
+    for k in range(5):
+        p.ld(7, _a(L, "CO") + 8 * k)
+        p.trunc(7, 7)
+        p.lsh(7, 7, 12)
+        p.ld(9, _a(L, "CO") + 8 * k + 4)
+        p.trunc(9, 9)
+        p.iop(9, 9, "+", 7)                     # the word
+        _word24(p, 9)
+        p.sti(2 * k + 1, 1, 9)
+        p.lsh(9, 9, 7)
+        p.sti(2 * k, 1, 9)
+    p.fconst(10, 2.0 ** 23)
+    for k, r in enumerate((2, 3, 4, 5)):
+        p.ldi(r, k, 0)
+        p.fop(r, r, "*", 10)
+        p.trunc(r, r)                           # (_word)
+    p.iconst(6, 0x3FFFF)
+    p.iconst(11, 0x7FFFFF)
+    p.iconst(15, -0x800000)
+
+    def one():
+        p.ldpost(1, 5)
+        p.fop(1, 1, "*", 10)
+        p.trunc(1, 1)                           # x
+        _word24(p, 1)
+        for k, v, sub in ((0, 1, False), (1, 2, False), (2, 3, False), (3, 4, True), (4, 5, True)):
+            p.ldi(7, 2 * k, 1)
+            p.lsh(8, v, 6)
+            p.ldi(9, 2 * k + 1, 1)
+            if k == 0:
+                p.mul_ssf(13, 7, 8)
+                p.mul_ssi(14, 9, v)
+                p.iop(14, 14, "AND", 6)
+                continue
+            p.mul_ssf(8, 7, 8)
+            p.iop(13, 13, "-" if sub else "+", 8)
+            p.mul_ssi(9, 9, v)
+            p.iop(9, 9, "AND", 6)
+            p.iop(14, 14, "-" if sub else "+", 9)
+        p.ash(14, 14, -18)
+        p.iop(13, 13, "+", 14)
+        p.ash(13, 13, -4)                       # floor(2 S / 2^23)
+        p.iop(13, 13, "MIN", 11)
+        p.iop(13, 13, "MAX", 15)                # limi
+        p.ipass(3, 2)
+        p.ipass(2, 1)
+        p.ipass(5, 4)
+        p.ipass(4, 13)
+        i2f(p, 0, 13)
+        p.stpost(2, 0)
+    p.loop(_a(L, "n4"), 16, one)
+    p.ldi(1, -1, 5)
+    p.sti(0, 0, 1)
+    p.ldi(1, -2, 5)
+    p.sti(1, 0, 1)
+    p.ldi(1, -1, 2)
+    p.sti(2, 0, 1)
+    p.ldi(1, -2, 2)
+    p.sti(3, 0, 1)
+
+
 def _bqx_body(p: Prog, L: C.Layout) -> None:
     """The consonant biquad in the 56300's arithmetic, exactly: y = lim(floor(2 (c0 x + c1 x1 +
     c2 x2 - c3 y1 - c4 y2) / 2^23)) on the words; the coefficients' 12-bit halves at CO (10
     floats). I5 the input, I2 the output, I0 the state (x1, x2, y1, y2)."""
+    if BQX_FIXED:
+        _bqx_fixed(p, L)
+        return
     for k, (h, l) in enumerate(((3, 4), (5, 6), (7, 8), (9, 10))):
         p.ldi(1, k, 0)
         _word(p, 13, 1)
@@ -837,9 +974,15 @@ def _biquad(p, L, coefs, src, dst, state):
         p.call("vo6_bq", lambda: _bq_body(p, L))
 
 
+XF_FIXED = True                             # 2026-11-21 (eng-simd): _crossfade on the fixed-point multiplier
+
+
 def _crossfade(p, L):
     """EXC = lim(floor((y31 UNV + lim(y31 + xk) EXC) / 2^23)) exactly (xk: L -0x800000 = -1.0,
     M N Z -0x7FFFF8)"""
+    if XF_FIXED:
+        _crossfade_fixed(p, L)
+        return
     ls(p, 9, "y31")
     _split(p, 9, 1, 2)
     p.ld(10, _a(L, "xk"))
@@ -868,6 +1011,65 @@ def _crossfade(p, L):
         i2f(p, 7, 14)
         p.stpost(2, 7)
     p.loop_r(0, 16, one)                  # v0.42: the count in R0 (docs/mnm-recode.md)
+    p.iconst(12, 0)
+    p.st(_a(L, "n3"), 12)
+
+
+def _crossfade_fixed(p, L):
+    """_crossfade's words on the SHARC's fixed-point multiplier, as _ser_body's terms (2026-11-21, eng-simd): each
+    product u v of two 24-bit words as hi = floor(u v / 2^18) (u << 7 times v << 6, SSF) and lo = u v mod 2^18 (SSI,
+    the low bits), floor(S / 2^23) = floor((H + floor(L / 2^18)) / 2^5): the same integer as the 12-bit halves' four
+    float partial products summed (both exact), so the same words (scripts/fm_identity.py VO6). The two y31 words, their
+    << 7, the limiter's bounds, 2^23 and the mask held in registers: R2 u1, R4 u2, R1 u1 << 7, R3 u2 << 7, R6 2^18 - 1,
+    R11 / R15 the bounds, F10 2^23, R0 the count."""
+    ls(p, 2, "y31")
+    p.ld(10, _a(L, "xk"))
+    p.ipass(4, 2)
+    p.iop(4, 10, "+", 4)                       # (R10 first: integer adds take R8..R15 first)
+    limi(p, 4)
+    p.lsh(1, 2, 7)
+    p.lsh(3, 4, 7)
+    p.iconst(6, 0x3FFFF)
+    p.iconst(11, 0x7FFFFF)
+    p.iconst(15, -0x800000)
+    p.fconst(10, 2.0 ** 23)
+    p.iconst(12, _a(L, "UNV"))
+    p.seti(5, 12)
+    p.iconst(12, _a(L, "EXC"))
+    p.seti(2, 12)
+
+    def word24(r: int) -> None:                # the words are 24-bit (the hi product's shifts need it)
+        if p.run:
+            from ..perc.dsl import s32
+            assert -(1 << 23) <= s32(p.r[r]) < (1 << 23), "a crossfade word outside 24 bits"
+
+    def one():
+        p.ldpost(5, 5)
+        p.fop(5, 5, "*", 10)
+        p.trunc(5, 5)                          # v1 (_word)
+        word24(5)
+        p.lsh(8, 5, 6)
+        p.mul_ssf(13, 1, 8)                    # H = hi(u1 v1)
+        p.mul_ssi(14, 2, 5)
+        p.iop(14, 14, "AND", 6)                # L = lo(u1 v1)
+        p.ldi(7, 0, 2)
+        p.fop(7, 7, "*", 10)
+        p.trunc(7, 7)                          # v2
+        word24(7)
+        p.lsh(8, 7, 6)
+        p.mul_ssf(9, 3, 8)
+        p.iop(13, 13, "+", 9)
+        p.mul_ssi(8, 4, 7)
+        p.iop(8, 8, "AND", 6)
+        p.iop(14, 14, "+", 8)
+        p.ash(14, 14, -18)
+        p.iop(13, 13, "+", 14)
+        p.ash(13, 13, -5)                      # floor(S / 2^23)
+        p.iop(13, 13, "MIN", 11)
+        p.iop(13, 13, "MAX", 15)               # limi
+        i2f(p, 7, 13)
+        p.stpost(2, 7)
+    p.loop_r(0, 16, one)
     p.iconst(12, 0)
     p.st(_a(L, "n3"), 12)
 

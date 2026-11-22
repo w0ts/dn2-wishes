@@ -23,7 +23,7 @@ STOCK = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.12_dist.zip"  # the shi
 @pytest.fixture(scope="module")
 def stock():
     if not STOCK.exists():
-        pytest.skip("Digitone II 1.11 is not in 00_Resources")
+        pytest.skip("Digitone II 1.12 is not in 00_Resources")
     return load(read_image(STOCK))
 
 

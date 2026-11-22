@@ -34,6 +34,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import struct
 import pathlib
 import sys
 import time
@@ -81,7 +82,49 @@ def stock_path():
     return os.path.join(os.environ["DT2_SECTIONS"], "section_3_MAIN_OS.bin")
 
 
-def run(image_path, limit, frame_at, entries=(), aniz=None, guard=False):
+# 2026-11-16 (7f7e7d6c, EXCEPTION at every power-on: OS 1.12's +Drive bounce buffer, 0x4e6f9300..0x4e709300,
+# the uncached alias of 0x466f9300..0x46709300, overwrote the boot-screen stamp at 0x46708000). Stock's read
+# (0x4012c87a) goes through that buffer whenever its destination is not 16-aligned or its length not whole
+# sectors, 64 KiB a call. A blank emulated card never makes such a read long enough (measured: stock's own
+# boot reads end at 0x4e6f9500 on a blank card, 0x4e701300 with a project, in 32 KiB pieces); a unit with a
+# project and samples does. BOUNCE makes one: after stock's first +Drive read at power-on (it returns to
+# 0x400f1804), the boot task calls stock's read itself, SECTOR, BYTES into BUF (unaligned), then goes on as
+# before. Everything under the buffer is then what the instrument would hold. With DNFW_DDR_ALIAS=1
+# (emulib/quickboot.py) 0x4e... is the same memory as 0x46..., as on the instrument.
+READ_112, FIRST_READ_RET = 0x4012C87A, 0x400F1804
+
+
+def bounce_read(uc, spec, state):
+    from unicorn.m68k_const import (UC_M68K_REG_A0, UC_M68K_REG_A1, UC_M68K_REG_A7,  # noqa: PLC0415
+                                    UC_M68K_REG_D0, UC_M68K_REG_D1, UC_M68K_REG_PC)
+    sector, nbytes, buf = spec
+    regs = (UC_M68K_REG_D0, UC_M68K_REG_D1, UC_M68K_REG_A0, UC_M68K_REG_A1)
+    box = {}
+
+    def at_ret(uc, address, size, user):
+        sp = uc.reg_read(UC_M68K_REG_A7)
+        if not box:                                         # stock's first read is back: ours now
+            box["saved"] = [uc.reg_read(r) for r in regs]
+            box["sp"] = sp
+            frame = sp - 16
+            uc.mem_write(frame, struct.pack(">4I", FIRST_READ_RET, sector, nbytes, buf))
+            uc.reg_write(UC_M68K_REG_A7, frame)
+            uc.reg_write(UC_M68K_REG_PC, READ_112)
+        elif "done" not in box and sp == box["sp"] - 12:      # ours is back (its rts popped the return
+            box["done"] = uc.reg_read(UC_M68K_REG_D0)         # address; the arguments are ours to pop)
+            uc.reg_write(UC_M68K_REG_A7, box["sp"])          # as before it
+            for r, v in zip(regs, box["saved"]):
+                uc.reg_write(r, v)
+            state["bounce"] = {"sector": sector, "bytes": nbytes, "buf": f"{buf:#010x}", "rc": box["done"]}
+    uc.hook_add(UC_HOOK_CODE, at_ret, begin=FIRST_READ_RET, end=FIRST_READ_RET)
+
+
+def bounce_spec():
+    v = os.environ.get("DNFW_BOOT_BOUNCE")
+    return None if not v else tuple(int(x, 0) for x in v.split(":"))
+
+
+def run(image_path, limit, frame_at, entries=(), aniz=None, guard=False, bounce=None):
     """Boot from reset. -> (instructions, frames, the fault or None, reached, the code guard's failure or None).
 
     `entries` are the build's own routines. Whether they ran is as much a part
@@ -103,10 +146,17 @@ def run(image_path, limit, frame_at, entries=(), aniz=None, guard=False):
             except Exception:                                  # noqa: BLE001
                 record = b""
             state["fault"] = {"at": st["n"], "a2": a2, "record": record.hex()}
+            if aniz is not None:
+                try:
+                    state["fault"]["stamp_words"] = bytes(uc.mem_read(aniz["stamp"], 8)).hex()
+                except Exception:                              # noqa: BLE001
+                    pass
             uc.emu_stop()
 
         m.uc.hook_add(UC_HOOK_CODE, at_frame, begin=frame_at, end=frame_at)
         m.uc.hook_add(UC_HOOK_CODE, at_reporter, begin=REPORTER, end=REPORTER)
+        if bounce is not None:
+            bounce_read(m.uc, bounce, state)
         for name, addr in entries:
             def hit(uc, address, size, user, name=name):
                 reached[name] += 1
@@ -137,6 +187,11 @@ def run(image_path, limit, frame_at, entries=(), aniz=None, guard=False):
     if guard and os.environ.get("DNFW_CODEGUARD") == "1":   # remoteui-6: the C chunk's code as built
         from emulib import codeguard                         # noqa: PLC0415
         state["guard"] = codeguard.after_boot(m.uc)
+    print(f"  the run stopped on: {stop}", flush=True)
+    if bounce is not None:
+        print(f"  +Drive read through the bounce buffer at power-on: {state.get('bounce', 'NOT MADE')}")
+        if "bounce" not in state:
+            state["guard"] = state["guard"] or "CODEGUARD FAIL: the boot never made its +Drive bounce read"
     return st["n"], state["frames"], state["fault"], reached, state["guard"]
 
 
@@ -222,10 +277,15 @@ def main() -> int:
         # the intro's timers do not run on (stock too stops at one frame), so here the first
         # frame is checked, and scripts/emu_aniz_check.py checks every frame from `boot400M`
         args.limit = max(args.limit, ANIZ_LIMIT)
-    ran, frames, fault, reached, guard = run(args.image, args.limit, frame_at, entries, aniz, guard=True)
+    bounce = bounce_spec()
+    ran, frames, fault, reached, guard = run(args.image, args.limit, frame_at, entries, aniz, guard=True,
+                                             bounce=bounce)
     print(f"  {os.path.basename(os.path.dirname(args.image))}: {frames} frame(s) in "
           f"{ran:,} instruction(s), {round(time.time() - started, 1)}s\n")
 
+    if aniz is not None and fault:
+        print(f"  the intro called the stamp {aniz['calls']} time(s); the stamp's first words when it stopped: "
+              f"{fault.get('stamp_words', '?')}")
     if fault:
         rec = bytes.fromhex(fault["record"])
         print("  FAULT -- the firmware drew EXCEPTION." if not fault["at"] else

@@ -1,5 +1,11 @@
 # PARA: paraphonic mode for ANALOG 2 (pilot) and JUNO (2026-11-15)
 
+> **2026-11-16: superseded by PARA as one voice** (the User: "i would rather take one bigger voice";
+> `docs/paraphonic-onevoice.md`). A chord now holds ONE voice slot; its joined notes take no slot and render on the
+> leader from pool blocks. The control, the sound, the envelope, "Drop the oldest", the level and the engines below
+> stand; what follows about members as slots (design A/B's slot groups, roles, the guard's reservation, the HOLD
+> rule per slot, the runner's slot-chord runs) is the pilot's history.
+
 The User's idea: "Each new note does not trigger a new voice, but add a osc to current voice if there is one?
 Cheap(er) chords." The study is docs/paraphonic-study.md; this is its pilot, design A, on ANALOG 2.
 

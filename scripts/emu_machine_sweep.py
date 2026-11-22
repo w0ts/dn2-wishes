@@ -67,6 +67,8 @@ class Run:
             from dnfw.mods import platform       # noqa: PLC0415
             for va, blob in platform.runtime(image):
                 self.m.write(va, blob)
+            from emulib import attkit
+            attkit.store_kit(self.m)  # (2026-11-21) a converted kit stored back: converted once
             self.m.flush()
         self.stock = stock
         self.panel = Panel(self.m, png_dir=png_dir)
@@ -168,6 +170,45 @@ def tracks(a, stock, mod_types) -> dict:
             "faults": r.faults}
 
 
+def lit(buf) -> set:
+    """the frame's lit pixels, y 0 at the top (digikit emu/panel.py's page order)"""
+    return {(x, y) for x in range(128) for y in range(64)
+            if (buf[(7 - (y // 8)) + 8 * x] >> (y % 8)) & 1}
+
+
+# v0.68.1 (the User, 2026-11-22, "A"): upstream v0.68 checks its icons in stock's left pane; our two-column MACHINE
+# SEL (csrc/msel/msel.c) covers that pane, and upstream's machines show the owner's icons in our 7 x 5 cells
+# (dnfw.waverider.msel OWNER_ICONS). Cell k of a screen of twelve: x 2 + 61 (k // 6), y 12 + 8 (k % 6) from the top;
+# its icon at x + 1.., y..; the cursor's cell is inverted (msel.c cell)
+CELLS, ROWS = 12, 6
+
+
+def cell_icon(px: set, k: int) -> list:
+    """the 7 x 5 icon of cell K as rows, read inverted (the cursor's cell)"""
+    x, y = 2 + 61 * (k // ROWS) + 1, 12 + 8 * (k % ROWS)
+    return ["".join("." if (x + c, y + r) in px else "#" for c in range(7)) for r in range(5)]
+
+
+def want_icon(t):
+    """v0.68.1: type t's cell icon as dnfw.waverider.msel draws it, and whether it is the owner's"""
+    sys.path.insert(0, str(HERE.parent / "src"))
+    from dnfw.waverider import msel              # noqa: PLC0415
+    icons, owner = msel.machine_icons(), msel.owner_icons()
+    return icons.get(t), t in owner
+
+
+def cell_facts(picks) -> dict:
+    """v0.68.1: the cursor's cell shows each type's icon; upstream's machines the owner's, the others their own"""
+    owner = [p for p in picks if p["icon"][1]]
+    other = [p for p in picks if not p["icon"][1]]
+    return {
+        "MACHINE SEL's cursor cell: every row's icon exactly as dnfw.waverider.msel draws it":
+            all(p["icon"][0] is not None and p["cell"] == p["icon"][0] for p in picks),
+        "MACHINE SEL: upstream's machines seen with the owner's icons (v0.68), the others with their own":
+            bool(owner) and bool(other),
+    }
+
+
 def sweep(a, stock, order) -> dict:
     r = Run(a.snapshot, stock, a.png_dir)
     r.step = "settle"
@@ -194,16 +235,21 @@ def sweep(a, stock, order) -> dict:
         fltr = r.frame()
         r.tap(SRC)
         syn = r.frame()
+        px = lit(menu) if menu else set()
+        pane = {"icon": want_icon(t), "cell": cell_icon(px, i % CELLS)}   # (the list's rows have no dividers: i is the cell)
         row = {"i": i, "want": t, "got": got, "menu_closed": closed != menu,
                "fltr_drawn": fltr != closed, "syn_drawn": syn != fltr, "screen": shot}
         row["ok"] = got == t and row["menu_closed"] and row["fltr_drawn"] and row["syn_drawn"]
         ok = ok and row["ok"]
-        picks.append(row)
+        picks.append({**row, **pane})
         print(f"  {'ok  ' if row['ok'] else 'FAIL'}  pick {i:2d}: type {t:2d} -> track {track + 1} has {got}"
               f"{'' if row['menu_closed'] else '; the menu did not close'}"
               f"{'' if row['fltr_drawn'] and row['syn_drawn'] else '; a page did not draw'}", flush=True)
     facts = {"every row picked, in the list's order": ok and len(picks) == len(order),
-             "no read below 0x40000000 by our code": not r.low, "no EXCEPTION": not r.faults}
+             "no read below 0x40000000 by our code": not r.low, "no EXCEPTION": not r.faults,
+             **cell_facts(picks)}
+    for p in picks:
+        p["owner_icon"] = p.pop("icon")[1]
     return {"ok": all(facts.values()), "facts": facts, "track": track, "picks": picks,
             "low": r.low, "low_steps": r.low_steps, "faults": r.faults}
 

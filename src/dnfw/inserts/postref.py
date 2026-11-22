@@ -123,7 +123,9 @@ class PostRef:
         base = dly * F(D.CH_DLY_SPAN)
         base = base + F(D.CH_DLY_MIN)
         dep = dpth * F(D.CH_DEP_MAX)
-        fb = fdbk * F(D.CH_FB_MAX)
+        fb = fdbk * F(D.CH_FB_LOG2)                 # (2026-11-16) c0 - 2^(p log2(1 - top)), c0 = exp2(0): FDBK 0 exactly 0
+        fb = exp2(fb)
+        fb = F(D.CH_FB_C0) - fb
         k = recip(F(float(nv)))
         k = k * F(2.0)
         ph0 = int(s[0]) & 0xFFFFFFFF

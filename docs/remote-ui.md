@@ -64,7 +64,7 @@ by the handshake only).
   boot path resets from it (`0x400f21d4`: bit 1 also when the factory armed a reset, `0x405ce870`). So
   `jmp_poll`, on its first pass of a boot with that bit, sets REMOTE CONTROL OFF and writes the sector (DIRECT JUMP
   kept as stored). EMPTY RESET leaves it as it was.
-- **Verified in the 1.12 emulator (2026-11-12, farm, the build's own 800M snapshot; SETTINGS opens under the
+- **Verified in the 1.12 emulator (2026-11-12, the farm, the build's own 800M snapshot; SETTINGS opens under the
   emulator now, ~100M instructions after the key).** SETTINGS > SYSTEM (7 DOWN) > USB CONFIG draws the fourth
   entry, ticked; DOWN x3 and YES: the box empties, the sector reads `DN2S` v1 flags 2, the armed channel disarms and
   the glass turns upright; SCREEN, ARM ASK, KEY, PEEK, SWITCH SET and PROFILE answer 7, ARM STATUS, COUNTERS and
@@ -421,7 +421,7 @@ installed; the bench container, and the same steps in `scratch/remoteui/farm_ru.
   interrupted. Called as a function (`isr:3`) the hook records 3 samples (the gate and the ring work; the frame
   there is not an interrupt's).
 - `late` is meaningless here (the counter stands still): every sample counts as late.
-- **farm** (`scratch/remoteui/farm_ru.sh`, the build's own snapshot: `boot400M` with this build installed, run to
+- **the farm** (`scratch/remoteui/farm_ru.sh`, the build's own snapshot: `boot400M` with this build installed, run to
   800M): booted from reset to 800M instructions with no fault; the earlier test channel steps unchanged (seven
   screen readouts equal the glass's buffer pixel for pixel, SETTINGS refused, KEY / ARM / PEEK as before); the
   timer source on the UI alone, 300 slices: 300 samples, every PC the raised one, all at `idle_spin`; with the

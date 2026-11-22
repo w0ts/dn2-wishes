@@ -23,7 +23,7 @@ def _voice(kind: str, t: int = 3) -> PL.Harness:
         from dnfw.engines.analog2 import analog2 as A2
         from dnfw.perc.dsl import bits
         for k, w in enumerate(A2.table_words()):
-            h.mem.put(h.L.md.mnm.scratch + A2.TABLES_OFF + 4 * k, bits(w) if isinstance(w, float) else w)
+            h.mem.put(A2.tables_at() + 4 * k, bits(w) if isinstance(w, float) else w)
     if kind == "md":
         h.set_controls(M.NAMES.index("TRX-BD"), PL.defaults("TRX-BD"))
     else:

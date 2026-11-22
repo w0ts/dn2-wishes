@@ -128,19 +128,35 @@ class Ref:
         gd = drv * F(D.DS_DRIVE_OCT)
         gd = exp2(gd)
         gd = gd * F(D.DS_DRIVE_LO)
-        pk = max(F(s[1]), F(D.DS_FLOOR))
-        g = recip(pk)
-        g = gd * g
-        m = min(gd, F(1.0))
-        m = m * F(1.5)
-        m = recip(m)
+        h = min(gd, F(1.0))
+        h = h * F(1.5)                           # the make-up's divisor
+        gh = gd * h
+        pk = self.ds_peak(buf)                   # (2026-11-21) this block's samples in the peak: no lag at a hit
+        pk = max(pk, F(s[1]))
+        pk = max(pk, F(D.DS_FLOOR))
+        q = pk * h
+        q = recip(q)
+        g = gh * q                               # G / pk
         lv = lev * F(D.DS_LEV_MAX)
-        lv = lv * pk
-        lv = lv * m
+        if auto > F(D.AUTO_ON):                  # (2026-11-21) AUTO on: its T is LEV x 2, the wet carries it no more:
+            lv = F(1.0)                          # the first block (AUTO's powers from zeros, its gain T) as the rest
+        p2 = pk * pk
+        lv = lv * p2
+        lv = lv * q                              # LEV x 2 (AUTO on: 1) x pk / h
         pa = self.pole_c(low, D.W_DL, D.LOG2_DL_SPAN)
+        s[2] = F(1.0)                            # (2026-11-21) gg 1: DIST has no gate, and no fade-in from a fresh
+        #                                          state (AUTO made up the fade: the onset overshot)
         v = dict(g=g, k=F(1.0), thr=F(0.0), pa=pa, rel=F(D.DS_REL), a1=F(0.0), lv=lv, kl=F(1.0),
                  au=auto > F(D.AUTO_ON), at=lev * F(D.DS_LEV_MAX))
         self.fz_loop(s, v, tone, bias, mod, buf)
+
+    @staticmethod
+    def ds_peak(buf) -> np.float32:
+        """DIST's peak of the block (program.fz_peak): the largest |x|, held to IN_MAX"""
+        m = F(0.0)
+        for j in range(D.BLOCK):
+            m = max(m, F(abs(F(buf[j]))))
+        return min(m, F(D.IN_MAX))
 
     def fz_loop(self, s, v, tone, bias, mod, buf) -> None:
         """FUZZ's and DIST's sample loop; state s0 lp, s1 env, s2 gg, s3 dx, s4 dy, s5 tl"""
@@ -166,7 +182,7 @@ class Ref:
             h = h * k
             xe = x * a1
             xe = xe + h
-            a = max(x, F(0.0) - x)
+            a = F(abs(x))                        # (2026-11-21: ABS; max(x, 0 - x) until then)
             env = env * rel
             env = max(a, env)
             tg = F(1.0)

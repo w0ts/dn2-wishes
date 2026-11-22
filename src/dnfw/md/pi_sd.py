@@ -289,8 +289,9 @@ class _PI:
     @classmethod
     def _init(cls, p: Prog, L: K.Layout) -> None:
         p.fconst(0, 0.0)
-        for k in (18, 29, 30, 31, 32, 33, *range(41, 57)):
+        for k in (18, 29, 30, 31, 32, 33):
             ss(p, k, 0)
+        K.zero_words(p, 41, 16)                    # (2026-11-20: a loop, perc2b's room)
         p.fconst(0, 0x7FFCB9 * Q)                  # host words 5 and 6, until the next
         ws(p, 5, 0)
         ws(p, 6, 0)

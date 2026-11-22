@@ -59,6 +59,9 @@ from dataclasses import dataclass
 STOCK_END = 0x4030C980
 
 TABLE, RECORD, COUNT = 0x401F83D8, 60, 320
+# OS 1.11's, for the 1.11 mods that only check the table is where stock keeps it (fxmod: base_sites): 2026-11-17,
+# the 1.12 port left base_sites refusing every 1.11 image, so fxmod applied to neither OS
+STOCK_END_111, TABLE_111 = 0x4030B980, 0x401F7FC8
 BIASES = (8, 16, 40)                       # the field each accessor wants
 EXPECTED_BASES = {8: 53, 16: 1, 40: 2}     # measured on stock 1.11, 56 in all (the same on 1.12: gen_lfo4_code)
 
@@ -122,15 +125,23 @@ class Site:
         return 4
 
 
+def _os(content: bytes, base: int) -> tuple[int, int]:
+    """-> (the image's end, the table's address) for the OS this MAIN OS is: 1.12's, or 1.11's when it is exactly
+    1.11's length (with or without an appended area it is at least that long)"""
+    if len(content) >= STOCK_END - base:
+        return STOCK_END, TABLE
+    if len(content) >= STOCK_END_111 - base:
+        return STOCK_END_111, TABLE_111
+    raise ValueError(f"MAIN OS is {len(content):,} B, shorter than OS 1.11's {STOCK_END_111 - base:,}")
+
+
 def _stock(content: bytes, base: int) -> bytes:
     """`content` cut to the firmware's own image, without the appended area.
 
-    2026-11-14: this module's addresses are OS 1.12's (scripts/port_os112.py, docs/lfo-112-port.md); a MAIN OS
-    shorter than 1.12's (1.11's, 3,192,192 B) is refused rather than searched at the wrong addresses."""
-    if len(content) < STOCK_END - base:
-        raise ValueError(f"MAIN OS is {len(content):,} B, shorter than OS 1.12's {STOCK_END - base:,}: "
-                         "this parameter table is 1.12's")
-    return content[:STOCK_END - base]
+    2026-11-14: this module's addresses are OS 1.12's (scripts/port_os112.py, docs/lfo-112-port.md); base_sites
+    alone also reads a 1.11 image, at 1.11's table (_os)."""
+    end, _ = _os(content, base)
+    return content[:end - base]
 
 
 def _even_occurrences(content: bytes, base: int, value: int) -> list[int]:
@@ -147,10 +158,11 @@ def _even_occurrences(content: bytes, base: int, value: int) -> list[int]:
 
 def base_sites(content: bytes, base: int) -> list[Site]:
     """The 56 pre-biased bases of the 60-byte table."""
+    _, table = _os(content, base)
     content = _stock(content, base)
     out = []
     for bias in BIASES:
-        literal = TABLE - RECORD + bias
+        literal = table - RECORD + bias
         found = _even_occurrences(content, base, literal)
         if len(found) != EXPECTED_BASES[bias]:
             raise TableError(f"expected {EXPECTED_BASES[bias]} site(s) holding "
@@ -224,6 +236,27 @@ def bound_sites(content: bytes, base: int) -> list[Site]:
     if len(out) != EXPECTED_BOUNDS:
         raise TableError(f"expected {EXPECTED_BOUNDS} bound sites, found {len(out)}")
     return out
+
+
+def live_base(stock: bytes, build: bytes, base: int) -> int:
+    """The 60-byte table's pre-biased base (`table - 60 + 8`: record ID's bytes start at it + 60 * ID) that
+    BUILD's own accessors use: stock's `0x401f83a4`, or where a relocation (lfo4) moved it. For a harness that
+    reads records out of RAM: after a move the stock copy stays in the image and no accessor reads it.
+
+    Read from BUILD's code at STOCK's 56 base sites; every one must hold its stock literal plus one and the same
+    delta, or the build reads two tables and this raises."""
+    if len(stock) < STOCK_END - base:          # an older OS (1.11): this module's sites are 1.12's, and nothing
+        literal = TABLE - RECORD + 8            # moves its table; the build must hold stock's base as often as stock
+        n_stock = len(_even_occurrences(stock, base, literal))
+        n_build = len(_even_occurrences(build[:len(stock)], base, literal))
+        if n_stock == 0 or n_build != n_stock:
+            raise TableError(f"older MAIN OS: stock holds 0x{literal:08x} {n_stock} time(s), the build {n_build}")
+        return literal
+    deltas = {struct.unpack_from(">I", build, s.va - base)[0] - s.was for s in base_sites(stock, base)}
+    if len(deltas) != 1:
+        raise TableError("the build's table accessors disagree on where the table is: deltas "
+                         + ", ".join(hex(d) for d in sorted(deltas)))
+    return TABLE - RECORD + 8 + deltas.pop()
 
 
 def records(content: bytes, base: int) -> bytes:

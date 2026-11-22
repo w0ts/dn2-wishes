@@ -87,7 +87,12 @@ def scenario_steps(lay) -> list[str]:
     ticks (the arp running), the RECORDER up over it, keys again, the arp page"""
     from dnfw.sampler import machines as SMx
     sl = SMx.TYPE_OF["SLICE"]
-    st = ["wait:2"] + [f"poke:{KIT + 52 + SOUND * t + 0xDE:#x}:{sl:02x}" for t in range(16)]
+    # 2026-11-21 (SAFE MODE): the build is installed over a snapshot, so normal.c's sm_poll counts its "first ~3 s
+    # after boot" (SM_STOP_TICKS) from this run's first UI pass, and the scenario's STOP tap (alone) fell inside it:
+    # the firmware went SAFE as designed (its soft reset) and the arp was never played. A unit is long past that window
+    # when anyone plays an arp: the panel tick is run one second on first (dt:age, 1,000 ticks > SM_STOP_TICKS 360,
+    # < SM_HEALTHY 3,630) after one UI pass has started sm_poll's count. STOP at boot is safeboot's (emu_safeboot.py).
+    st = ["wait:2", "dt:age:1"] + [f"poke:{KIT + 52 + SOUND * t + 0xDE:#x}:{sl:02x}" for t in range(16)]
     st += [f"poke:{KIT + 52 + SOUND * t + 0x6A:#x}:0100" for t in range(16)]
     st += [f"poke:{KIT + 52 + SOUND * t + SLCE_AT:#x}:0000" for t in range(16)]
     st += pool_steps(lay) + ["wait:6", "tap:2", "wait:8", "alive:start"]

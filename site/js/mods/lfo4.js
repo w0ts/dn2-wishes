@@ -28,7 +28,7 @@ export const SECTION = 3;
 const BASE = 0x40000400;
 
 // dnfw.patch.paramtable
-const TABLE = 0x401f7fc8, RECORD = 60, COUNT = 320;
+const TABLE = 0x401f83d8, RECORD = 60, COUNT = 320;   // OS 1.12 (1.11: 0x401f7fc8)
 // dnfw.patch.lfo4records
 const LFO3_FIRST = 94, GROUP_SIZE = 10, SLOT0 = 101;
 const SLOT = 12, NRPN = 36, UNIQUE = 40, FLAGS = 44, PAGE_NAME = 52;
@@ -49,9 +49,19 @@ const put32 = (d, at, v) => {
 /** An edit the platform makes: the start-up call or the loader in its cave. */
 const platformOwned = (e) => {
   const lo = e.va - BASE, hi = lo + e.new.length / 2;
-  return platform.extents().some((x) => x.start < hi && lo < x.start + x.length);
+  return platform.extents(0).some((x) => x.start < hi && lo < x.start + x.length);
 };
-const OWN = CODE.edits.filter((e) => !platformOwned(e));
+// dnfw.mods.lfo4.series_hook: edits our series leaves out (OS 1.12). The stored-sound LOAD and SAVE sites are the
+// wishes record's hooks, and stock's memcpy and memset stay stock (they are on Overbridge's audio path: ship_gate
+// `overbridge`); lfo4's carry is reached through the wishes record's stub instead.
+const STORE_SITES = [[0x400dd3e6, 6], [0x400dd888, 8]];      // load, save
+const MEMORY_SITES = [[0x40134770, 8], [0x401347b8, 8]];     // memcpy, memset
+const touches = (sites) => (e) => {
+  const lo = e.va, hi = e.va + e.new.length / 2;
+  return sites.some(([va, n]) => va < hi && lo < va + n);
+};
+const seriesHook = (e) => touches(STORE_SITES)(e) || touches(MEMORY_SITES)(e);
+const OWN = CODE.edits.filter((e) => !platformOwned(e) && !seriesHook(e));
 
 export const EDITS = OWN.length;
 export const EDITED_BYTES = OWN.reduce((n, e) => n + e.new.length / 2, 0);

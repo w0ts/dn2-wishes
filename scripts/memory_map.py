@@ -97,7 +97,7 @@ IMAGE_END = 0x4030B980
 BSS = (0x402FC000, 0x466B74D0)
 SDRAM_TOP = 0x48000000
 RAM_TENANTS = [
-    (0x46700000, 0x46700000 + 3 * 0x1000, "lfo4-tick6a",
+    (0x46808000, 0x46808000 + 3 * 0x1000, "lfo4-tick6a",
      "three 2,560-byte LFO state arrays (LIVE/SECOND/BACKUP), 4 KB slots",
      "scripts/build_lfo4_tick.py"),
     (0x46710000, 0x46710000 + 2056, "bootscreen-bang",

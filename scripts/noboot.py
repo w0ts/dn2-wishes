@@ -21,7 +21,12 @@ def install() -> None:
         section7 = W.dsp.section7(stream)
         codes = [(platform.area.CODE, platform.area.CodeChunk(load, code).pack())
                  for load, code, _ in W._chunks()]
-        base_os = W._main_os(main_os)
+        base_os = bytearray(W._main_os(main_os))
+        # v0.67 (upstream): the arp on MIDI tracks (midiarp), its sites checked stock in this image first, as the
+        # release apply does (its spec ported to 1.12: scripts/build_arp_midi_play.py, gen_midiarp_code.py)
+        from dnfw.mods import midiarp as MA
+        MA.check(bytes(base_os))
+        MA.write(base_os, main_os)
         content = platform.join(bytes(base_os), others + codes)
         area_length = len(content) - platform.STOCK_LENGTH
         ext = [e for e in W.extents(firmware, area_length) if "intro hook" not in e.what]

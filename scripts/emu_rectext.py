@@ -20,6 +20,7 @@ sys.path.insert(0, str(HERE.parent / "src"))
 
 from emulib.image import differences                           # noqa: E402
 from emulib import bounded                                      # noqa: E402
+from emulib.cpu import kept                                       # noqa: E402
 from emulib.machine import Machine                             # noqa: E402
 
 ISR, ISR_RTE = 0x40025E36, 0x40027BC6
@@ -34,6 +35,7 @@ PAT_LENGTH, PAT_MODE = 122196, 122201
 REC, RECS, INDEX, TABLE_BYTES = 258, 80, 20640, 22256 + 2048
 LIST_BYTES = 20 + 202 * 8
 STACK_TOP, SENTINEL = 0x46A20000, 0x46A20400
+IDLE = 0x400CF246                   # the UI task's idle loop (1.11: 0x400CF0E2)
 REC_FIRST = 123
 RAM_REC, ID_REC, TAG = 0x52, 202, 0x20
 PAT_LOCK_TABLE = 97872                  # v0.44: the pattern's lock table inside the pattern object (rectrig.c)
@@ -74,6 +76,8 @@ def main() -> int:
     from dnfw.sampler import machines as SM                    # noqa: PLC0415
     for va, blob in platform.runtime(image):
         machine.write(va, blob)
+    from emulib import attkit
+    attkit.store_kit(machine)  # (2026-11-21) a converted kit stored back: converted once
     for page in range(SM.MIRROR, SM.MIRROR + SM.MIRROR_BYTES, 0x100000):
         try:
             uc.mem_map(page, 0x100000, UC_PROT_ALL)
@@ -81,19 +85,34 @@ def main() -> int:
             pass
     machine.flush()
     lay = json.loads(pathlib.Path(a.layout).read_text())["layout"]
-    regs = [getattr(K, f"UC_M68K_REG_{r}{i}") for r in "DA" for i in range(8)]
+
+    # A direct call runs on the CPU as the run left it. A run can stop inside an interrupt
+    # handler; a call made there and the UI resumed after it left the UI task's context on
+    # this call's stack, and the task later returned into SENTINEL (an illegal instruction:
+    # the EXCEPTION screen, no frame drawn after it). So once the panel runs, a call waits
+    # until the UI is back in its idle loop, as it is between two inputs on the unit.
+    held = {"panel": None}
+
+    def to_idle():
+        p = held["panel"]
+        for _ in range(400):                           # at most 20 M instructions
+            if p is None or machine.pc == IDLE:
+                return
+            p.settle(50_000)
+        raise SystemExit(f"the UI never came back to its idle loop {IDLE:#x} (pc {machine.pc:#x})")
 
     def call(fn, *args, until=None, limit=50_000_000):
-        saved = [uc.reg_read(r) for r in regs]
-        sp = STACK_TOP - 0x200
-        machine.write(sp, struct.pack(">I", SENTINEL) + b"".join(struct.pack(">I", x & 0xFFFFFFFF) for x in args))
-        machine.write(SENTINEL, bytes.fromhex("4e714e71"))
-        uc.reg_write(K.UC_M68K_REG_A7, sp)
-        bounded.run(uc, machine.m, fn, until if until is not None else SENTINEL, limit)
-        d0 = uc.reg_read(K.UC_M68K_REG_D0)
-        pc = uc.reg_read(K.UC_M68K_REG_PC)
-        for r, v in zip(regs, saved):
-            uc.reg_write(r, v)
+        to_idle()
+        # 2026-11-17: D0-A7, PC and SR put back (emulib/cpu.py). The PC left at SENTINEL was this check's failure on
+        # 7ce7b8be: the next chunk's interrupt pushed it as its return, and its rte ran into the sentinel
+        with kept(uc):
+            sp = STACK_TOP - 0x200
+            machine.write(sp, struct.pack(">I", SENTINEL) + b"".join(struct.pack(">I", x & 0xFFFFFFFF) for x in args))
+            machine.write(SENTINEL, bytes.fromhex("4e714e71"))
+            uc.reg_write(K.UC_M68K_REG_A7, sp)
+            bounded.run(uc, machine.m, fn, until if until is not None else SENTINEL, limit)
+            d0 = uc.reg_read(K.UC_M68K_REG_D0)
+            pc = uc.reg_read(K.UC_M68K_REG_PC)
         return d0, pc
 
     def L(name):
@@ -121,6 +140,7 @@ def main() -> int:
     setv("smp_dir_ok", 1)
     from emulib.panel import Panel                             # noqa: PLC0415
     panel = Panel(machine, png_dir=a.png_dir or "out/rectext")
+    held["panel"] = panel
     panel.settle(5_000_000)
     put32(lay["rec_overlay"], 1)
     put32(lay["rec_phase"], 0)
@@ -156,6 +176,7 @@ def main() -> int:
     ]
     border0, bad = None, {}
     for name, v in states:
+        v = dict(v)                                       # (v0.59: kept for MON's pass below)
         heard = v.pop("heard", True)
         px = show("rec_" + name, heard, **v)
         border = {p for p in px if on_border(*p)}
@@ -167,6 +188,30 @@ def main() -> int:
             bad[name] = (out[:6], len(border ^ border0))
     check("every centre-box message of the RECORDER stays inside its box (no pixel in the gutters, "
           "the dotted border untouched) in all " + str(len(states)) + " states", not bad, bad)
+
+    # v0.59 MON (C): upstream draws "MON" in its box's top right corner; ours, the DT2's RECORDER screen
+    # (csrc/sampler/rec_dt2.c), between the meter (rows 0..9) and THRES's value: right-aligned at x 127, its
+    # baseline y 47. When on, in every state: drawn there and only there (x 100..127, screen rows 10..17), over
+    # nothing any state draws there, the box and the gutters as above; off (every state above) nothing there.
+    MX0, MX1, MR0, MR1 = 100, 127, 10, 17
+    mon_bad, mon_seen, base = {}, 0, {}
+    for name, v in states:
+        v = dict(v)
+        heard = v.pop("heard", True)
+        off = show("mon0_" + name, heard, rec_mon=0, **v)
+        on = show("mon1_" + name, heard, rec_mon=1, **v)
+        added = on - off
+        corner = {q for q in off if MX0 <= q[0] <= MX1 and MR0 <= q[1] <= MR1}
+        outside = sorted(q for q in added if not (MX0 <= q[0] <= MX1 and MR0 <= q[1] <= MR1))
+        mon_seen += bool(added)
+        border = {q for q in on if on_border(*q)}
+        if not added or outside or corner or (off - on) or border != border0:
+            mon_bad[name] = (len(added), outside[:4], sorted(corner)[:4], len(off - on))
+        base[name] = len(added)
+    put32(lay["rec_mon"], 0)
+    check("v0.59: MON drawn between the meter and THRES (x 100..127, rows 10..17) in all " + str(len(states)) + " states, over "
+          "nothing else, the border untouched; nothing there with MON off", not mon_bad and mon_seen == len(states),
+          mon_bad or base)
 
     # R.LEN (x 47, its 32-pixel column 31..62): MAX and step counts on one line
     rows, cols = {}, {}

@@ -29,7 +29,7 @@ are read in every block; the bookkeeping in the t0..t7 / f0..f3 words (params()'
 
 from __future__ import annotations
 
-from ..perc.dsl import Prog
+from ..perc.dsl import POISON, Prog
 from . import design as D
 from . import program as P
 
@@ -47,11 +47,22 @@ def lr_bufs() -> tuple[int, int]:
 
 
 def bufs() -> tuple[int, int, int]:
-    """(X, S, F): the diffusers' x (sample n at X + 4 (31 - n)), the lines' sum s / s4 (S + 4 n), line k's f
-    (F + 128 k + 4 n)"""
-    at = P.VT2 + 4 * P.NV
-    assert at + BUF_BYTES <= P.STATE + P.STATE_BYTES, "FDN8's block buffers past its L1 state"
+    """(X, S, F): the diffusers' x (sample n at X + 4 (NB - 1 - n)), the lines' sum s / s4 (S + 4 n), line k's f
+    (F + 128 k + 4 n); 2026-11-22: in L1 after the bus instances' stores (program.BUF_L1)"""
+    at = P.BUF_L1
+    assert at + BUF_BYTES <= P.BUF_L1_END, "FDN8's block buffers past their L1 room"
     return at, at + 4 * BLOCK, at + 8 * BLOCK
+
+
+# 2026-11-22 (HALF): the block's sizes are words of the active table (program._ACT), so the send (32 samples) and the bus
+# instances' HALF tank (16) run the same stage code: NB, NB / 2, 4 NB, X's top (X + 4 (NB - 1)), the lines' L buffer
+# (lr_bufs()[0], HALF: 9 words up, its interpolator's kept samples below it), the diffusers' count and k4 step
+def sizes(half: bool) -> dict:
+    X, _, _ = bufs()
+    L, _ = lr_bufs()
+    nb = BLOCK // 2 if half else BLOCK
+    return {"nb": nb, "nb2": nb // 2, "nb4": 4 * nb, "xtop": X + 4 * (nb - 1), "lbuf": L + (4 * 9 if half else 0),
+            "dn": 2 if half else 4, "dk4": 8 if half else 4}
 
 
 def _w(n: str) -> int:
@@ -88,7 +99,7 @@ def until_wrap(p: Prog, word: str | None = None) -> None:
     p.lsh(11, 13, -2)
     p.iconst(14, 1)
     p.iop(11, 11, "+", 14)
-    p.iconst(14, BLOCK)
+    p.ld(14, P.A["nb"])
     p.iop(11, 11, "MIN", 14)
     if word:
         p.st(_w(W[word]), 11)
@@ -104,10 +115,10 @@ def seg(p: Prog, name: str, body, body2=None) -> None:
     if body2 is None:
         seg_call(p, name, body)
         return
-    p.iconst(14, BLOCK)
+    p.ld(14, P.A["nb"])
 
     def whole():
-        p.iconst(11, BLOCK // 2)
+        p.ld(11, P.A["nb2"])
         seg_call(p, name + "2", body2)
     p.if_(11, "EQ", 14, whole, lambda: seg_call(p, name, body), kind="i")
 
@@ -119,7 +130,7 @@ def run1(p: Prog, name: str, i: int, inc, body, body2=None) -> None:
     until_wrap(p, "n")
     seg(p, name, body, body2)
     p.ld(0, _w(W["n"]))
-    p.iconst(1, BLOCK)
+    p.ld(1, P.A["nb"])
     p.iop(11, 1, "-", 0)
 
     def rest():
@@ -145,7 +156,7 @@ def _wrap_i(p: Prog, i: int, inc) -> None:
 def run_n(p: Prog, name: str, streams, body, body2=None) -> None:
     """several ring streams [(I, its words-before-wrap word, INC)]: BODY over the block in segments, each up to the
     next crossing of any stream (at most one each in a block)"""
-    p.iconst(0, BLOCK)
+    p.ld(0, P.A["nb"])
     p.st(_w(W["rem"]), 0)
 
     def segment():
@@ -295,6 +306,38 @@ def _k_loop(p: Prog, n: int, body) -> None:
     p.loop(_w("t3"), n, one)
 
 
+def _k_loop_w(p: Prog, body) -> None:
+    """the diffusers' loop (2026-11-22): BODY for k4 = 0, dk4, 2 dk4, .. (word t4), word dn times (count in t3): the
+    send's four (step 4), HALF's diffusers 0 and 2 (step 8)"""
+    p.iconst(0, 0)
+    p.st(_w("t4"), 0)
+    p.ld(0, P.A["dn"])
+    p.st(_w("t3"), 0)
+    def tail():
+        p.ld(13, _w("t4"))
+        p.ld(14, P.A["dk4"])
+        p.iop(13, 13, "+", 14)
+        p.st(_w("t4"), 13)
+        p.ld(0, _w("t3"))
+        p.dec(0, 0)
+        p.st(_w("t3"), 0)
+    if p.run:
+        while True:
+            p.known.clear()                         # (the top label)
+            p._mg = p._mv = None
+            body()
+            tail()
+            p.e("IF NE JUMP 0x0;")                  # (run mode: its one step)
+            p.r[12] = POISON
+            if p.r[0] == 0:
+                return
+    top = p.label("loop")
+    p.place(top)
+    body()
+    tail()
+    p.jump("NE", top)
+
+
 def _diffusers(p: Prog) -> None:
     """for k = 0..3: diffuser k over the block, x from the pre-delay's read (k 0) or X, into X"""
     X, _, _ = bufs()
@@ -313,7 +356,7 @@ def _diffusers(p: Prog) -> None:
         p.ldi(14, 0, 4)
         start(p, 2, None, 4, 15)
         until_wrap(p, "w2")
-        p.iconst(13, X + 4 * (BLOCK - 1))
+        p.ld(13, P.A["xtop"])
         p.seti(3, 13)
 
         def first():
@@ -321,7 +364,7 @@ def _diffusers(p: Prog) -> None:
             until_wrap(p, "w0")
 
         def later():
-            p.iconst(13, X + 4 * (BLOCK - 1))
+            p.ld(13, P.A["xtop"])
             p.seti(0, 13)
             p.iconst(13, 1 << 20)                   # (L1: never crosses)
             p.st(_w(W["w0"]), 13)
@@ -336,7 +379,7 @@ def _diffusers(p: Prog) -> None:
         p.ldi(5, 0, 4)
         run_n(p, "fd_diff", [(0, "w0", RING_INC), (1, "w1", "dmask"), (2, "w2", "dmask")],
               lambda: _diff_body(p), lambda: _diff_pair(p))
-    _k_loop(p, 4, one)
+    _k_loop_w(p, one)
 
 
 # a line's sum into s and its output into L / R, in sample()'s order: line 0 sets s and L (kind l0), 1 adds to s and
@@ -443,7 +486,7 @@ def _lines(p: Prog) -> None:
         p.iconst(14, 4)
         p.iop(13, 13, "AND", 14)
         p.lsh(13, 13, 5)
-        p.iconst(14, L)
+        p.ld(14, P.A["lbuf"])
         p.iop(14, 14, "+", 13)
         p.seti(3, 14)
         _k_at(p, 14, P.C["ro0"])
@@ -492,7 +535,8 @@ def _lines(p: Prog) -> None:
         p.fop(1, 1, "*", 5)
         p.stpost(1, 0)
         p.stpost(1, 1)
-    p.loop_r(11, BLOCK // 2, quarter)
+    p.ld(11, P.A["nb2"])
+    p.loop_r(11, None, quarter)
 
 
 def _write2_body(p: Prog) -> None:
@@ -545,7 +589,7 @@ def _writes(p: Prog) -> None:
         p.seti(0, 14)
         p.iconst(14, S)
         p.seti(1, 14)
-        p.iconst(14, X + 4 * (BLOCK - 1))
+        p.ld(14, P.A["xtop"])
         p.seti(2, 14)
         _k_at(p, 14, P.A["rw0"], 1)                 # rw of line 2j, 2j + 1
         p.seti(4, 14)
@@ -606,14 +650,149 @@ def _output(p: Prog) -> None:
 
 
 def tank(p: Prog) -> None:
-    """the block's samples (program.sample's work), stage by stage; then p moves 32 words on"""
+    """the block's samples (program.sample's work), stage by stage; then p moves NB words on. 2026-11-22: a bus
+    instance (C['im'] not 0) runs HALF: the decimator and its input stage, the same diffusers / lines / writes over
+    16 samples (the size words), the interpolators"""
     io_words(p)
-    _input(p)
+
+    def im():
+        p.ld(0, P.C["im"])
+    im()
+    p.ifz(0, "NE", lambda: (_decimate(p), _input_h(p)), lambda: _input(p))
     _diffusers(p)
     _lines(p)
     _writes(p)
-    _output(p)
+    im()
+    p.ifz(0, "NE", lambda: _interp(p), lambda: _output(p))
     p.ld(8, P.C["p4"])
-    p.iconst(14, 4 * BLOCK)
+    p.ld(14, P.A["nb4"])
     p.iop(8, 8, "-", 14)
     p.st(P.C["p4"], 8)
+
+
+# -- HALF (2026-11-22): the bus instances' tank at 24 kHz (dnfw.fdn8.lite.BusRef, bit for bit) -------------------
+
+HB_REG = (8, 9, 10, 13, 14)                          # the half-band's side taps (not R11 / R12: the loops')
+
+
+def _copy(p: Prog, src: int, dst: int, n: int) -> None:
+    p.iconst(13, src)
+    p.seti(0, 13)
+    p.iconst(13, dst)
+    p.seti(1, 13)
+
+    for _ in range(n):                              # (straight: no loop's DEC + JUMP a word)
+        p.ldpost(0, 0)
+        p.stpost(1, 0)
+
+
+def _decimate(p: Prog) -> None:
+    """the 32 sums L + R after the 17 kept (Z, in F's room), the half-band's 16 outputs into XD (S's room), the
+    last 17 sums kept (dh0..)"""
+    from . import lite as LT
+    _, S, F = bufs()
+    Z, XD = F, S
+    _copy(p, P.C["dh0"], Z, LT.DEC_HIST)
+    p.ld(13, _w(IO["inl"]))
+    p.seti(0, 13)
+    p.ld(13, _w(IO["inr"]))
+    p.seti(1, 13)
+    p.iconst(13, Z + 4 * LT.DEC_HIST)
+    p.seti(2, 13)
+
+    p.fconst(3, LT.G_IN)
+
+    def sum_():                                     # (2026-11-22: the bus pass's x G_IN here: its input is the track's)
+        p.ldpost(0, 0)
+        p.ldpost(1, 1)
+        p.fop(0, 0, "*", 3)
+        p.fop(1, 1, "*", 3)
+        p.fop(0, 0, "+", 1)
+        p.stpost(2, 0)
+    p.loop_r(11, BLOCK, sum_)
+    p.iconst(13, Z + 4 * 9)
+    p.seti(0, 13)
+    p.iconst(13, XD)
+    p.seti(3, 13)
+    p.fconst(7, LT.HC)
+    for q in range(LT.HB_P):
+        p.fconst(HB_REG[q], LT.HQ[q])
+
+    def out():
+        p.ldi(0, 0, 0)
+        p.fop(1, 0, "*", 7)
+        for q in range(LT.HB_P):
+            p.ldi(2, -(1 + 2 * q), 0)
+            p.ldi(3, 1 + 2 * q, 0)
+            p.fop(2, 2, "+", 3)
+            p.fop(2, 2, "*", HB_REG[q])
+            p.fop(1, 1, "+", 2)
+        p.stpost(3, 1)
+        p.ldpost(4, 0)                              # (I0 two words on)
+        p.ldpost(4, 0)
+    p.loop_r(11, BLOCK // 2, out)
+    _copy(p, Z + 4 * BLOCK, P.C["dh0"], LT.DEC_HIST)
+
+
+def _input_h(p: Prog) -> None:
+    """_input over HALF's 16 decimated sums (XD): x gh, the HPF and LPF one-poles, into the pre-delay"""
+    _, S, _ = bufs()
+    p.iconst(0, S)
+    p.seti(0, 0)
+    p.ld(4, P.C["gh"])
+    p.ld(5, P.C["hs"])
+    p.ld(6, P.C["ah"])
+    p.ld(7, P.C["ls"])
+    p.ld(3, P.C["al"])
+    ring_regs(p)
+    start(p, 2, D.RB_PD)
+
+    def body():
+        p.ldpost(0, 0)
+        p.fop(0, 0, "*", 4)                         # xin
+        p.fop(2, 0, "-", 5)
+        p.fop(2, 6, "*", 2)
+        p.fop(5, 5, "+", 2)                         # hs
+        p.fop(0, 0, "-", 5)
+        p.fop(2, 0, "-", 7)
+        p.fop(2, 3, "*", 2)
+        p.fop(7, 7, "+", 2)                         # ls
+        p.stm(2, 7)                                 # the pre-delay
+    run1(p, "fh_in", 2, RING_INC, body)
+    p.st(P.C["hs"], 5)
+    p.st(P.C["ls"], 7)
+
+
+def _interp(p: Prog) -> None:
+    """each of L, R (the lines' sums, after the 9 kept tank samples): two outputs a tank sample into out L / R, the
+    last 9 kept (il0.., ir0..)"""
+    from . import lite as LT
+    lb = sizes(True)["lbuf"]
+    for ch, (hist, outw) in enumerate((("il0", "outl"), ("ir0", "outr"))):
+        b = lb + 4 * BLOCK * ch
+        _copy(p, P.C[hist], b - 4 * LT.INT_HIST, LT.INT_HIST)
+        p.iconst(13, b)
+        p.seti(0, 13)
+        p.ld(13, _w(IO[outw]))
+        p.seti(3, 13)
+        p.fconst(7, LT.GO)
+        for q in range(LT.HB_P):
+            p.fconst(HB_REG[q], LT.KQ[q])
+
+        def two():
+            p.ldi(0, -5, 0)
+            p.fop(1, 0, "*", 7)                     # even: B[m - 5] G
+            p.stpost(3, 1)
+            p.ldi(2, -4, 0)
+            p.fop(2, 2, "+", 0)
+            p.fop(1, 2, "*", HB_REG[0])
+            for q in range(1, LT.HB_P):
+                p.ldi(2, -4 + q, 0)
+                p.ldi(3, -5 - q, 0)
+                p.fop(2, 2, "+", 3)
+                p.fop(2, 2, "*", HB_REG[q])
+                p.fop(1, 1, "+", 2)
+            p.stpost(3, 1)
+            p.ldpost(4, 0)                          # (I0 one word on)
+        p.loop_r(11, BLOCK // 2, two)
+        _copy(p, b + 4 * (BLOCK // 2 - LT.INT_HIST), P.C[hist], LT.INT_HIST)

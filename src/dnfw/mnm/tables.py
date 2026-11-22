@@ -20,8 +20,9 @@ __all__ = ["JU_WORDS", "JUNO_DRIVE", "MNM_OS_PARTS", "MNM_OS_WORDS", "PL_TABLES"
            "plaits_words", "table_words"]
 
 # the Monomachine's own machines' words (dnfw.mnm.rom.packed_words; dnfw.mnm.core.MNM_OS_WORDS)
-MNM_OS_WORDS = 31871
-MNM_OS_PARTS = ("MNM_SID", "MNM_DPRO_WAVE", "MNM_DPRO_DDRW", "MNM_DPRO_DENS", "MNM_VO6")
+MNM_OS_WORDS = 31871 + 8474               # v0.59: + FM+'s tables (dnfw.mnm.core.FM_TABLES), after VO-6's
+MNM_OS_PARTS = ("MNM_SID", "MNM_DPRO_WAVE", "MNM_DPRO_DDRW", "MNM_DPRO_DENS", "MNM_VO6",
+                "MNM_FMSTAT", "MNM_FMPAR", "MNM_FMDYN")   # v0.59: FM+ reads the same OS file
 
 
 def mnm_os_on() -> bool:

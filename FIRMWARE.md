@@ -34,7 +34,20 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.56** | 2026-11-15 | DDRW: **TIME** glides between waves (up to ~2 s), **BR1/BR2** heard across the whole knob; the patcher builds test builds | `builds/v0.56-DDRW/` | yes |
+| v0.69 | 2026-11-21 | **PERFORM**: eight Analog Four MKII-style macros ([MOD] + [FX]), each offsetting up to five parameters on any tracks, saved per project, PERF MUTE; **DSP limit**: MACHINE SEL refuses a machine that would take the kit past what the DSP can run | `builds/v0.69-PERFORM/` | yes |
+| v0.68 | 2026-11-21 | **machine icons**: MACHINE SEL's left pane shows the mod machine under the cursor, its icon and name (the owner's sheet); **FLEX takes 12 dB louder** (a track's and MAIN/IN's, +24 dB) | `builds/v0.68-ICONS/` | yes |
+| v0.67 | 2026-11-21 | **the arpeggiator on MIDI tracks**: the ARPEGGIATOR menu on a MIDI track, its notes sent over MIDI one per arp step with N.LEN (upstream's midiarp, Angel Linares) | `builds/v0.67-MIDIARP/` | yes |
+| v0.66 | 2026-11-20 | **slides to the next trig**: SLEN NXT (the default) lasts until the track's next trig; FM+ DYN FUNC + turn jumps 1FRQ/2FRQ to whole ratios; FLEX takes of MAIN and IN recorded as they are, +12 dB on playback | `builds/v0.66-NXT/` | yes |
+| v0.65 | 2026-11-20 | **PROJECT RAM banks**: four banks A–D (508 slots), the DT2's bank box, FUNC + UP/DOWN jumps a bank; FLEX takes of a track at unity with GAIN 0 (12 dB, not 24); about 87 KB more room (optimal packer) | `builds/v0.65-BANKS/` | yes |
+| v0.64 | 2026-11-20 | **keyboard HOLD**: PTN + KEYBOARD sustains every track (held notes latch, MIDI in, arp); start-up animation at half rate | `builds/v0.64-HOLD/` | yes |
+| v0.63 | 2026-11-19 | **FLEX level**: a FLEX take of a track plays at the level heard (+24 dB built in; GAIN 0 = old +24); a FLEX save never normalises | `builds/v0.63-FLEXLEVEL/` | yes |
+| v0.62 | 2026-11-19 | **slice editor**: edits play live, playing a slice selects it, zoom to 128 frames, FUNC + START/END snaps to zero crossings; CREATE SLICE GRID FUNC + E jumps 2..64 | `builds/v0.62-SLICE/` | yes |
+| v0.61 | 2026-11-19 | **microtuning**: KB SETUP's H is TUNE; a tuning per project (11 factory, 8 USER), switched per track; TUNING and EDIT pages | `builds/v0.61-MICROTUNING/` | yes |
+| v0.60 | 2026-11-18 | fixes: **FM+** pages (knobs on the right parameters, the frequency bars drawn); **GRID** ALLOCATE SLICE RANDOM keeps its locks on NO | `builds/v0.60-FIXES/` | yes |
+| v0.59 | 2026-11-18 | the Monomachine's **FM+ STAT / PAR / DYN** machines; **MON** on the RECORDER (hear the input while armed or recording) | `builds/v0.59-FMPLUS/` | yes |
+| ~~v0.58~~ PULLED | 2026-11-17 | two microtonal scales in KB SETUP: **Poole Rod12** and **Poole12 Min** after Locr. bb3 bb7, each note tuned by its cents above ROOT | `builds/v0.58-SCALES/` | yes |
+| **v0.57** | 2026-11-16 | FLEX **MUTE SRC** mutes the source only while the FLEX track plays (no more stuck tracks); REC 1/2 names gone; F bank letter for buffers | `builds/v0.57-FLEXMUTE/` | yes |
+| v0.56 | 2026-11-15 | DDRW: **TIME** glides between waves (up to ~2 s), **BR1/BR2** heard across the whole knob; the patcher builds test builds | `builds/v0.56-DDRW/` | yes |
 | v0.55 | 2026-11-15 | the 8 **FLEX buffers in every sample machine**: SAMP past 127 to B1..B8 (knob, list, p-locks), a track on Bn plays that buffer's take; MUTE SRC waits for the first take (no gap) | `builds/v0.55-FLEXPOOL/` | yes |
 | v0.54 | 2026-11-15 | our names on the Digitone's **own NAME screen**: a recording's FILE NAME, the browser's RENAME and CREATE FOLDER open stock's naming screen (its keys, FUNC + ARROW edit grid, SETTINGS: RANDOM, copy/paste name) | `builds/v0.54-NAME/` | yes |
 | v0.53 | 2026-11-13 | FLEX polish: FLEX REC's page LEDs follow its page (NiKo); a switch to FLEX sets trig LEN to INF; BUF snaps buffer to buffer, a p-locked BUF shows its number, and BUF locks pick the buffer a trig plays (NiKo); PLAY two detents a mode; FUNC + turn moves R.LEN a bar | `builds/v0.53-PAGES/` | yes |
@@ -94,6 +107,621 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.69 — PERFORM (performance macros, the DSP limit)
+
+`DN2mod_v0.69_PERFORM_OS1.11.syx`
+sha256 `bfbd62a33d3e20731eb6874761270da0c45f17d4c050374b07904a83d6ee7f2e`
+Gate: CLEARED TO FLASH, 2026-11-21 (every step: preflight, DSP identity and hardware rules, ColdFire, unit, all ColdFire emulator steps incl. the new perform, performrec and guardrail, the coupled thres/flex/flexplay/mute, fuzz, dead link; SHARC runner types 0-4 bit-identical to stock, the stress part with the guardrail's kits). Source: commit `55e1e97` (branch `perform`). Notes: `docs/perform.md`, `docs/guardrail.md`.
+
+Everything in v0.68, plus:
+
+**PERFORM** (the owner, after the Analog Four MKII's PERFORMANCE mode, its manual §9.3). [MOD] +
+[FX] opens it: eight macros, A–H, one per knob, each moving up to five targets (a track and one
+of its machine's modulatable parameters, each with a depth of −64..+63). A macro is an
+**offset**: it is added to the modulated value (the sound's own setting with its LFOs and
+p-locks), never written over it, and at 0 the parameter is exactly its own again. Push a knob
+(or YES) for MODULATION SETUP: A–E the five depths, F the column's track, G its parameter, H the
+value, push H for BIPOLAR (−64..+63), YES renames (8 characters), FUNC + NO clears the macro.
+FUNC + YES on the PERFORM page is PERF MUTE. FUNC + push resets a macro to 0. Saved per project
+in the +Drive's mod sectors (0x6E0500, two copies, a check word). [MOD] + [FX] again, NO, or a
+page key closes it; the [TRIG] keys and the keyboard play as usual while it is open.
+
+**DSP limit** (the guardrail, tester _aLinG_'s suggestion). Each mod machine weighs what its
+voices cost as the frame guard sees them (the SHARC runner's memory clock; a Monomachine/FM+
+track two voices; PERC at P-I, its heaviest family). MACHINE SEL refuses a machine that would
+take the kit's total past 320,000 cycles, the most our voices can take with none left out, and
+shows DSP LIMIT for two seconds; the track keeps its machine. Stock machines weigh nothing and a
+lighter machine is always allowed. Roughly: three VO-6 tracks, two DENS, seven PERC, eleven
+sample tracks.
+
+**Gate:** `perform` (UI: the combo, the macro page, MODULATION SETUP, renaming, PERF MUTE) and
+`performrec` (the offsets on the modulated mirror, put back at 0 and when muted or removed; each
+project's macros saved and loaded, a bad copy ignored). `guardrail`: three VO-6 tracks, a fourth
+refused with its message, the commit refused with the machine unchanged, a stock machine
+allowed. SHARC `stress`: three VO-6 tracks, seven P-I tracks and eleven ONESHOTs (the limit's
+kits) play every block with no voice left out; sixteen VO-6 voices do leave voices out. The
+`machines` step sets the other tracks to FM TONE before its picks (its power-on kit, a mod
+machine on all sixteen tracks, is past the limit).
+
+**Tests**
+1. [MOD] + [FX] opens PERFORM, again closes it; NO and the other page keys close it too.
+2. A macro with two targets on two tracks: turn it, both move; back to 0, both are their own again.
+3. BIPOLAR, and a negative depth: the parameter moves the other way.
+4. PERF MUTE: the macros drop out and come back.
+5. Rename a macro, SAVE PROJECT, power-cycle, reload: the macros as left. A second project keeps its own.
+6. Three VO-6 tracks, then a fourth: DSP LIMIT, the fourth keeps its machine; a stock or lighter machine is allowed.
+7. A kit inside the limit: any notes dropped? (FUNC on a PERC or Monomachine page shows the load.)
+8. The regression check (top of this file).
+
+**Known issues**
+- Turning a macro isn't recorded into patterns yet.
+- ERASE PROJECT doesn't clear the macros (nor the microtuning).
+- The limit counts every track as sounding, so it can refuse a kit whose tracks rarely play together.
+- Everything listed for v0.68.
+
+## v0.68 — ICONS (machine icons in MACHINE SEL, FLEX takes louder)
+
+`DN2mod_v0.68_ICONS_OS1.11.syx`
+sha256 `b77f88fe778dc467250bcabc8681f10c73af8be6b2d4987fe2e40d2bae6eb29a`
+Gate: CLEARED TO FLASH, 2026-11-21 (every step: preflight, DSP identity and hardware rules, ColdFire, unit, all ColdFire emulator steps incl. the coupled thres/flex/flexplay/mute, the machines step's new MACHINE SEL pane checks, fuzz, dead link; SHARC runner types 0-4 bit-identical to stock, incl. flexlevel and mainmark at the new levels). Source: commit `ae48c14` (branch `icons`). Art: `src/dnfw/msicons.py`.
+
+Everything in v0.67, plus:
+
+**MACHINE SEL icons** (the owner, with his own icon sheets). In MACHINE SEL's SRC column the left
+pane shows the machine under the cursor: its icon in place of stock's wave and its name in place of
+SYN. PERC, WAVE (DPRO WAVE), DDRW, DENS, VO-6, STAT, PAR, DYN (the FM+ machines), SID, DT2 (the six
+sample machines) and FLEX. The stock machines and MIDI keep the wave and SYN; the FLTR column is
+stock's. Two stock instructions changed (the pane's bitmap call and its "SYN"), nothing else.
+
+**FLEX takes 12 dB louder** (the owner, on v0.67 at pattern volume 100, compressor off: both needed
++12 more). A take of a track is made 24 dB over v0.50's unity (`TRK_HW_DB` 24, as v0.63), and a take
+of MAIN or IN plays 24 dB up (`MAIN_PLAY_DB` 24). GAIN still -24..+38 dB.
+
+**Gate:** the `machines` step checks MACHINE SEL's pane on every row: a stock machine keeps stock's
+wave and SYN; a mod machine's icon exactly as `dnfw.msicons` draws it; each label its own, none of
+them SYN. `drivenav`: the action menu's held DOWN gets four frames to land before the test's clock
+moves on (the same facts, a harness margin). `flexlevel` and `mainmark` follow the two constants.
+
+**Tests**
+1. FUNC + SRC, scroll the whole list: each mod machine shows its icon and name, the stock ones the wave and SYN.
+2. LEFT / RIGHT to the FLTR column and back: as before.
+3. FLEX a single track at GAIN 0: the take at about its source's level.
+4. FLEX REC from MAIN, then from IN: the same.
+5. A loud source track at GAIN 0: does its take clip? (a track's take gets its gain when recorded)
+6. The regression check (top of this file).
+
+**Known issues**
+- The four-letter names sit close to the < > arrows.
+- A MAIN or IN take saved as a sample plays 24 dB quieter than it did live.
+- Everything listed for v0.67.
+
+## v0.67 — MIDIARP (the arpeggiator on MIDI tracks)
+
+`DN2mod_v0.67_MIDIARP_OS1.11.syx`
+sha256 `0ab36b2afebebc113bd512f5e671beeecf06de8e929512889d1526f680323ab6`
+Gate: CLEARED TO FLASH, 2026-11-21 (every step: preflight, DSP identity and hardware rules, ColdFire, unit, all ColdFire emulator steps incl. the coupled thres/flex/flexplay/mute and the new `midiarp`, fuzz, dead link; SHARC runner types 0-4 bit-identical to stock). Source: commit `6302a70` (branch `midiarp`). Docs: `docs/midiarp.md`.
+
+Everything in v0.66, plus:
+
+**The arpeggiator on MIDI tracks** (the owner: "just arp on midi tracks"). This is the `midiarp`
+mod from the upstream project this firmware is built on, Angel Linares's dn2_firmware_explore: his
+work, tested on his unit on 2026-09-17 (DNX captures: offsets, velocity, SPD, RNG, N.LEN within a
+millisecond, no stuck notes). It is now part of the DN2 mk2 build.
+- The ARPEGGIATOR menu opens on a MIDI track.
+- With the arp on, a MIDI track's notes (sequencer trigs and keys) go through the arp, and each arp
+  step is sent as a MIDI note on the track's channel, its length N.LEN (INF is sent as the longest
+  finite length).
+- Arp off on a MIDI track, and every synth track: stock.
+
+**Gate:** `midiarp` (new; ColdFire emulator, three runs with KEYBOARD on, a key down and up): a MIDI
+track with the arp on takes the key gate to the voice starter, never the MIDI sender, reaches the
+MIDI-record hook, and the engine's voice trigger is never called for it; negative controls: the arp
+off sends through the MIDI sender as stock, and a synth track starts a voice as stock.
+
+**Tests**
+1. A MIDI track to an external synth, arp on, hold a key: the synth plays the arp.
+2. The same from sequencer trigs.
+3. SPD, RNG, the offsets and N.LEN: the notes follow.
+4. Stop mid-arp, and turn the arp off mid-note: no stuck notes.
+5. Arp off: the MIDI track sends as before.
+6. The MIDI track with the arp on is silent on the DN2's own outs.
+7. HOLD (v0.64) on a MIDI track with the arp on.
+8. The regression check (top of this file).
+
+**Known issues**
+- Not yet tested on our own unit; upstream's tests were on his. The MIDI task's sending is not run by
+  the emulator.
+- HOLD with the arp on a MIDI track is untested.
+- Everything listed for v0.66.
+
+## v0.66 — NXT (slides to the next trig, FM+ DYN jumps, FLEX MAIN and IN levels)
+
+`DN2mod_v0.66_NXT_OS1.11.syx`
+sha256 `a22a87943318f1cfbe2f3e2fa0eb10f799e2edbfb6304fe6a891c9fbec61f7e1`
+Gate: CLEARED TO FLASH, 2026-11-20 (every step: preflight, DSP identity and hardware rules, ColdFire, unit, all ColdFire emulator steps incl. the coupled thres/flex/flexplay/mute, fuzz, dead link; SHARC runner types 0-4 bit-identical to stock, incl. the new mainmark part). Source: commit `7471bd9` (branch `slidesnext`). Docs: `docs/slides.md` (v0.66 section), `docs/mnm.md`, `docs/flex-design.md`.
+
+Everything in v0.65, plus:
+
+**Slides last until the next trig** (the owner, after a Discord thread quoting the Analog Keys
+manual: "the slide is completed when the next trig is reached").
+- SLEN's first choice is **NXT**, and it is the value with no SLEN lock: the slide lasts from its
+  trig to the track's next trig, a note trig or a lock (trigless) trig alike, counted round the
+  track's length. No other trig on the track: the whole length.
+- The fixed lengths (1/8 .. 64) are still there after NXT; a SLEN you set before plays as it did.
+- **Changed:** a slide trig with no SLEN lock used to last 1 step; it now lasts until the next trig.
+- Chained trigless trigs each slide to the next one.
+- Micro timing and trig conditions are not counted (a trig that will not play still ends the slide).
+- A project with an explicit NXT lock, opened on older firmware, plays it as 1 step.
+
+**FM+ DYN: FUNC + turn jumps 1FRQ and 2FRQ to whole ratios** (the owner). A plain turn stays
+continuous, as on the Monomachine. 1FRQ: 0, 1, 2. 2FRQ: 0, 1, 2, 3, 4 (2 shows as 2.02, the nearest
+the knob's 128 steps reach; 3 lands on 3.00).
+
+**FLEX takes of MAIN and IN at a usable level** (the owner and Error Kit). A FLEX take of MAIN or
+IN played far too quiet, and raising GAIN to make up for it clipped the take, because GAIN is
+applied before the recorder's 16-bit limit.
+- Such a take is now recorded as it comes in, marked, and any voice playing it adds **12 dB**
+  (FLEX, and any sample machine on SAMP B1..B8, STRETCH included). Nothing clips.
+- Takes of a single track are unchanged (v0.65's level).
+- 12 dB is one constant (`MAIN_PLAY_DB`); if MAIN is still short on the unit it can be raised.
+
+**Gate:**
+- `slides` (`emu_slides.py` part 10, run last so the checks before it run as on v0.65): NXT with
+  trigs on 4 and 7 (3 steps), round the length (4 -> 0: 12 of 16), no other trig (16), the next
+  step (1), a 64-step pattern (36), an explicit SLEN still wins, an explicit NXT lock, a per-track
+  length (8), each exact per frame against the model; stock's own track objects hand the step
+  flags at pattern + 1701 x track for all 16 tracks; the knob's NXT first.
+- `functurn`: seven FM+ DYN FUNC cases (both ways, the end of the knob) and a plain turn.
+- SHARC runner part `mainmark` (new): MAIN and IN FLEX takes marked, their frames the source's,
+  each playing x 3.981 (+12 dB) its unmarked self within 0.1 % on ONESHOT and STRETCH; negative
+  controls: a track take and a plain RECORDER take of MAIN unmarked and unchanged.
+
+**Tests**
+1. A trig with SLIDE and a p-lock, no SLEN set, the next trig 4 steps on: the slide lasts 4 steps.
+2. Move the next trig: the slide's length follows it.
+3. A slide on the last trig of a track: it slides round to the first trig.
+4. SLEN set to 1 step on a slide trig: 1 step, as before.
+5. Hold a trig on TRIG page 2 and turn F from no lock: NXT, then 1/8, 1/4 ...
+6. FM+ DYN: FUNC + turn 1FRQ and 2FRQ: whole ratios; a plain turn: continuous.
+7. FLEX REC from MAIN, GAIN 0: the take plays at about the main mix's level, without clipping.
+8. The same from IN.
+9. FLEX REC from a track: as on v0.65.
+10. The regression check (top of this file).
+
+**Known issues**
+- A MAIN or IN FLEX take saved as a sample plays 12 dB quieter than it did live (the mark is not
+  saved with it).
+- MAIN may still be short of the source on the unit (the owner heard close to +24); to be checked.
+- Existing patterns whose slide trigs had no SLEN lock now slide to the next trig instead of 1 step.
+- Everything listed for v0.65 except the FLEX MAIN and IN level.
+
+## v0.65 — BANKS (four PROJECT RAM banks, A–D)
+
+`DN2mod_v0.65_BANKS_OS1.11.syx`
+sha256 `bec1e2f995d9d34fd159073ed5626320e5803e7f1ef22cc18e3113badf992dd3`
+Gate: CLEARED TO FLASH, 2026-11-20 (every step: preflight, DSP identity and hardware rules, ColdFire, unit, the new `depack` and `banks` steps, all ColdFire emulator steps incl. the coupled thres/flex/flexplay/mute, fuzz, dead link; SHARC runner types 0-4 bit-identical to stock). Source: commit `3f33d64` (branch `banks`). Docs: `docs/banks.md`, `docs/packer.md`.
+
+Everything in v0.64, plus:
+
+**Four banks of project RAM.** The sample list now runs A001–A127, B001–B127, C001–C127,
+D001–D127 (508 slots), then the FLEX buffers, as the DT2's list runs through its banks.
+- Turn SAMP (or UP / DOWN in the list) past A127 and it goes on to B001. **FUNC + UP / DOWN**
+  in the list jumps a whole bank.
+- SAMP's box on the SRC page and the list's header show the bank letter.
+- **LOAD TO PROJECT** fills the first empty slot of the bank your track's SAMP is in, then the
+  banks after it.
+- The +Drive browser's PROJECT RAM shows every bank's samples (marked >B004 etc.).
+- p-locks, sounds, kits and presets keep the bank (it is stored in SAMP's value itself).
+- Each project keeps its own banks, as it keeps bank A.
+- Banks are slots, not more memory: the pool is still 400 MB, shared by all four banks.
+- Every existing project, sound and p-lock is bank A and plays exactly as before.
+
+**FLEX takes of a single track at unity.** v0.63 lifted a FLEX take of one track by 24 dB, which
+was 12 dB too much (thanks NiKo for measuring it: on v0.63 a take matched its source at GAIN -12).
+It is now 12 dB, so GAIN 0 plays a take at the level of its source. If you set FLEX tracks to
+GAIN -12 on v0.63/v0.64, set them back to 0.
+
+**More room in the firmware.** The build now packs the firmware optimally (the same format,
+the same limits as Elektron's own files): about 87 KB smaller, so new features fit again
+(v0.64 had 291 bytes left; this build, with banks in, has about 82 KB).
+
+**Gate:**
+- `depack` (new): the instrument's own decompressor (the bootstrap's, run in the emulator)
+  unpacks every repacked section to exactly the bytes we packed; a stream with one byte
+  flipped does not.
+- `banks` (new, ColdFire emulator): bank B's page loads with the pool and plays by the DSP's
+  own rule while A's slot of the same number does not; the list's rows run A127 > B001; an
+  edit and a LOAD TO PROJECT into bank B reach the +Drive, the DSP and the image's header; a
+  power cycle keeps them; after the LFOs SAMP keeps its bank. Controls: a wrong header word
+  (bank B comes up empty), an old recording where the banks' pages go (banks off, nothing
+  written there).
+- SHARC runner and the DSP model: a bank slot plays its own entry and slice table; bank A
+  unchanged; a page without its magic is silent (`test_banks.py`).
+
+**Tests**
+1. Turn SAMP up past 127: the list goes on to B001, the header shows B.
+2. FUNC + DOWN in the list: one bank on; FUNC + UP: one back.
+3. With a track on a B slot, +DRIVE > LOAD TO PROJECT: the sample lands in bank B.
+4. Hold a trig, turn SAMP to a C slot: the p-locked trig plays the C sample; the others the track's.
+5. Save the project, load another, load it back: its banks B..D are as they were.
+6. FLEX a single track at GAIN 0: the take plays at the source's level.
+7. An LFO on SAMP: it moves through slots, never into another bank.
+8. An old project: everything in bank A, as before.
+9. The regression check (top of this file).
+
+**Known issues**
+- The recorder records into bank A only (as before).
+- A MIDI CC on SAMP picks a slot in the bank SAMP is already in (127 slots per bank).
+- The host tool (dn2samples / the web import tool) sends into bank A only; banks B..D are
+  filled from the +Drive on the instrument.
+- If you kept more than about 31 MB of recordings on v0.64, banks B..D stay off until the
+  recording at the end of that area is deleted (it lies where the banks' pages go).
+- Everything listed for v0.64, except the FLEX level (fixed here).
+
+## v0.64 — HOLD (PTN + KEYBOARD holds the keyboard's notes)
+
+`DN2mod_v0.64_HOLD_OS1.11.syx`
+sha256 `b155e97db50a6e35a6871849beac3b67085a61073b9adead91bf42733acf52bf`
+Gate: CLEARED TO FLASH, 2026-11-20 (every step: preflight, DSP identity and hardware rules, ColdFire, unit, all ColdFire emulator steps incl. the new kbhold and the coupled thres/flex/flexplay/mute, fuzz, dead link; SHARC runner types 0-4 bit-identical to stock). Source: commit `1541dab` (branch `holdv64`). Docs: `docs/kbhold.md`.
+
+Everything in v0.63, plus:
+
+**KEYBOARD HOLD.** Hold **PTN** and press **KEYBOARD** to turn HOLD on; again to turn it off.
+The screen says KB HOLD ON / KB HOLD OFF while PTN is held.
+- HOLD works like a sustain pedal held down on every track: notes keep sounding after you let
+  go of the key, or after a MIDI note-off arrives.
+- Notes you are **already holding** when HOLD comes on are latched as you let go of them.
+- Notes played while HOLD is on are added to the held ones.
+- Works with [TRIG] keys in KEYBOARD mode, MIDI in, chords, microtuning and the arpeggiator
+  (the arp keeps running on the latched keys).
+- HOLD off releases every held note. HOLD starts off after a power cycle.
+- PTN alone, KEYBOARD alone, PTN + [TRIG], PTN + YES / NO and DIRECT JUMP work as before.
+
+**Start-up animation at half the frame rate.** Every other frame of s!Rwa²'s animation, each
+shown twice as long: the same length and the same last frame. This made room for HOLD (the
+firmware image was full).
+
+**Gate:** `kbhold` (new, ColdFire emulator): PTN + KEYBOARD turns sustain on for all 16 tracks
+and off again, with the message on the PTN screen and the PTN view closed at PTN's release; a
+key held before HOLD and a key played during HOLD are not released when let go; a MIDI
+note-off is kept; HOLD off releases both voices and empties every list. Negative controls:
+with HOLD off the same MIDI note-off and key release go through at once. KEYBOARD mode and
+DIRECT JUMP's setting are unchanged.
+
+**Tests**
+1. KEYBOARD on, hold a chord on the [TRIG] keys, PTN + KEYBOARD (KB HOLD ON), let go: the chord keeps sounding.
+2. While held, play more notes: they join the held chord.
+3. PTN + KEYBOARD again (KB HOLD OFF): everything releases.
+4. From a MIDI keyboard: hold notes, HOLD on, let go: they keep sounding; HOLD off releases them.
+5. Arp on, hold a chord, HOLD on, let go: the arp keeps running; HOLD off stops it.
+6. PTN alone, KEYBOARD alone, PTN + [TRIG] (pattern change), DIRECT JUMP: as before.
+7. Power cycle: HOLD is off.
+8. The start-up animation plays, slightly less smooth, ending on the same frame.
+9. The regression check (top of this file).
+
+**Known issues**
+- The arpeggiator with HOLD is untested on hardware (the emulator cannot run the arp).
+- New notes are added to the held ones rather than replacing them (sustain pedal behaviour).
+- PTN + KEYBOARD no longer toggles KEYBOARD mode (it did on stock while PTN was held).
+- **FLEX takes of a track are about 12 dB too loud at GAIN 0** (v0.63's built-in +24 should have been +12; measured by a tester on v0.63): set GAIN to -12 on FLEX tracks. Fixed in the next build.
+- Everything listed for v0.63.
+
+## v0.63 — FLEXLEVEL (FLEX takes at the level you hear; a FLEX save never normalises)
+
+`DN2mod_v0.63_FLEXLEVEL_OS1.11.syx`
+sha256 `b73f2179c137afbe67f0c0ce90b7f27141f19fa6b3c5575b4fc43851e3a7c83e`
+Gate: CLEARED TO FLASH, 2026-11-19 (every step: preflight, DSP identity and hardware rules, ColdFire, unit, all ColdFire emulator steps incl. the coupled thres/flex/flexplay/mute, fuzz, dead link; SHARC runner types 0-4 bit-identical to stock, and its flexlevel step). Source: commit `1fd9d24` (branch `flexlevel`). Docs: `docs/sampler.md`.
+
+Everything in v0.62, plus:
+
+**FLEX takes of a track as loud as you heard them.** A FLEX recording of a single track (SRC
+TRK) now plays back at about the level the track had in the mix, with REC LEVEL / GAIN left at
+0. The number is the owner's, measured on his unit: GAIN +24 on v0.62 made a take match its
+source by ear, so +24 dB is now built in. GAIN 0 is what +24 was; GAIN −24 is the old unity.
+- **Existing tracks whose GAIN you had boosted will now be 24 dB hotter.** Turn GAIN back
+  down (to 0 for "as heard").
+- MAIN and IN are unchanged in this build (no measured number for them yet).
+
+**A FLEX save never normalises.** Saving a FLEX buffer to a sample slot used to normalise the
+take in place: the same frames the FLEX track was still playing jumped to full scale. A FLEX
+save now keeps the take exactly as recorded, on the +Drive and in the buffer. Other recordings
+(SAMPLING, RECORD NOW of a sample track) are normalised as before.
+
+**Gate:**
+- `sharc:flexlevel` (rewritten): on the SHARC runner, a TRK take at GAIN −24 renders within
+  0.5 dB of the runner's unity; GAIN 0 is the same take × 15.85 (24 dB) frame by frame wherever
+  it does not clip, and renders more than 12 dB over its source; negative control: a 0 dB
+  ratio is refused.
+- `link16` (norm scenario): a fifth take saved as `bn_save` saves one keeps its peak (4000)
+  with no normalising pass, the flag is cleared after, and an ordinary save still normalises.
+
+**Tests**
+1. FLEX, SRC a single synth track, GAIN 0: record a few bars, play the FLEX track: about as loud
+   as the track was.
+2. A track you had at GAIN +24 on v0.62: now much louder (expected); GAIN 0 brings it back.
+3. Save the FLEX buffer to a slot while it plays: the playing take does not jump in level; load
+   the saved sample on another track: same level as the FLEX take.
+4. SAMPLING a sample and saving it: still normalised as before.
+5. MAIN and IN takes: same level as on v0.62.
+6. The regression check (top of this file).
+
+**Known issues**
+- MAIN and IN takes are still quieter than heard (no measured number yet).
+- The keyboard HOLD is not in this build: it does not fit the 2 MiB image yet.
+- Everything listed for v0.62.
+
+## v0.62 — SLICE (the slice editor, impbox's requests)
+
+`DN2mod_v0.62_SLICE_OS1.11.syx`
+sha256 `33fba4ac03ca02befd2d5ace395bff4a7041577b5ac25745a210fd5c6cee3f1f`
+Gate: CLEARED TO FLASH, 2026-11-19 (every step: preflight, DSP identity and hardware rules, ColdFire, unit, all ColdFire emulator steps incl. the new slicefine and the coupled thres/flex/flexplay/mute, fuzz, dead link; SHARC runner types 0-4 bit-identical to stock). Source: commit `2a37c41` (branch `slicefix`). Docs: `docs/sampler.md` (v0.62).
+
+Everything in v0.61, plus:
+
+**EDIT SLICE POINTS** (impbox):
+- **Live edits.** A slice's key plays your edit without pressing YES: the change is sent 0.2 s
+  after the knobs come to rest. YES and NO still close the editor as before.
+- **Playing a slice selects it.** A note on the editor's track (SLCE on NOTE) selects the slice it
+  plays: from the keyboard, the [TRIG] keys or the sequencer.
+- **Finer zoom.** ZOOM goes down to a 128-frame view, small enough to see single waveform cycles.
+  From 8,192 frames down, the frames themselves are read from the +Drive and drawn.
+- **Zero crossings.** FUNC + turning E (START) or H (END) snaps the point to the nearest zero
+  crossing (within 512 frames, never past the neighbouring slices). Without FUNC, E and H move as
+  before.
+
+**CREATE SLICE GRID** (Wolljamin): FUNC + E jumps SLICES through 2, 4, 8, 16, 32, 64, one detent
+a jump. E alone still moves one at a time.
+
+**Gate (new step):**
+- `slicefine`: the editor opens on the slices; a change is not sent while turning and is sent once
+  0.2 s after (the DSP's and the +Drive's tables, then the editor's); FUNC + END lands on a zero
+  crossing (moving the next slice's start with it), END alone does not snap; the deepest zoom
+  reads its own frames and each column is the sample's lowest and highest there, zoom 0 reads
+  nothing; a note on the track's voice picks its slice, another track's note or a fixed SLCE picks
+  nothing; NO closes with the table kept, on the +Drive too; in CREATE SLICE GRID, FUNC + E goes
+  13 → 16 → 32 → 16 → 8 → 4 → 2 → 2 and five detents to 64, while E alone moves one.
+
+**Tests**
+1. EDIT SLICE POINTS: move a slice's START, stop turning, play its key: you hear the new start
+   without pressing YES.
+2. Play the track (keyboard, [TRIG] keys or the sequencer): the slice that plays is the one
+   selected in the editor.
+3. ZOOM all the way in on a slice: single waveform cycles are visible.
+4. FUNC + turn E or H: the point lands on a zero crossing (no click at the slice's start/end).
+   Without FUNC: moves as before.
+5. CREATE SLICE GRID: FUNC + E steps 2/4/8/16/32/64; E alone steps one.
+6. YES and NO still close the editor; the slices are kept after a power cycle.
+7. The regression check (top of this file).
+
+**Known issues**
+- The same note again on the same voice does not re-select its slice (a new note does).
+- Everything listed for v0.61.
+
+## v0.61 — MICROTUNING (a tuning per project, chosen per track)
+
+`DN2mod_v0.61_MICROTUNING_OS1.11.syx`
+sha256 `6c945a66b627e2bbbfcc29ed0bf4f42c41ef276a560baba2f2a2b924301fb4de`
+Gate: CLEARED TO FLASH, 2026-11-19 (every step: preflight, DSP identity and hardware rules, ColdFire, unit, all ColdFire emulator steps incl. the new tune/tunerec and the coupled thres/flex/flexplay/mute, fuzz, dead link; SHARC runner types 0-4 bit-identical to stock). Source: commit `796f5d6` (branch `microtuning`). Docs: `docs/microtuning.md`.
+
+Everything in v0.60, plus:
+
+**Microtuning.** One tuning per project: 12 offsets in tenths of a cent, one per semitone above
+its ROOT, repeating every octave. Each of the 16 tracks is tuned or not.
+- Factory tunings: 12-TET, Just Major, Just Minor, Pythagorean, Meantone 1/4, Werckmeister III,
+  Kirnberger III, Vallotti, Arabic Rast, Poole Rod12, Poole12 Min. Plus USER 1..8, your own.
+- Everything played on a tuned track is retuned voice by voice: keyboard, trigs, chords, arp,
+  slides. MIDI tracks and MIDI out stay 12-TET. KB SETUP's SCALE, ROOT and MODE stay stock's.
+- **KB SETUP** (FUNC + KEYBOARD): the empty H slot is **TUNE**. Turn H to tune the active track
+  (OFF or a tuning); push H to open TUNING.
+- **TUNING**: A TUNE, B ROOT, C TRK (this track on/off), D ALL (every track on/off). YES on a
+  USER tuning opens EDIT; NO closes. The [TRIG] keys and the keyboard play through.
+- **EDIT**: A NOTE (or LEFT/RIGHT), B CENT, C .1CT, D FROM; FUNC + YES copies FROM into the slot
+  (copy 12-TET to reset it); NO goes back.
+- Saved with the project on the unit's flash, two seconds after the last change and before a
+  LOAD or NEW; read back on LOAD and at power-on.
+- It never touches stock's scale tables (v0.58's chord MODE crash cannot come back).
+
+**Gate (new steps):**
+- `tune`: Poole Rod12 at ROOT D moves each tuned voice by its offset; an untuned track, a voice
+  with no track, 12-TET, and a SLICE track move nothing; on the main page H is stock's; the KB
+  SETUP, TUNING and EDIT flows; every screen drawn.
+- `tunerec`: the record per project: written two seconds after a change into its own sectors,
+  LOAD/NEW/power cycle, corrupted copies and another project's record refused, ERASE's lock,
+  every write inside 0x6E0400..0x6E04FF.
+
+**Tests**
+1. FUNC + KEYBOARD: H reads TUNE OFF; turning it shows the tunings; the main page's H is unchanged.
+2. Track 1 on POOLE ROD12 (or JUST MAJOR), play a C major chord: it sounds retuned against a
+   12-TET track playing the same chord.
+3. Push H: TUNING. Change ROOT and hear the tuning move; C TRK and D ALL switch tracks (the boxes follow).
+4. A USER slot: YES opens EDIT; move a note's CENT and .1CT; FUNC + YES copies FROM; NO, NO closes.
+5. Wait two seconds, LOAD another project, LOAD this one back: the tuning, ROOT, tracks and USER slot are kept. Power cycle: still kept.
+6. Chords, arp and slides on a tuned track: all retuned, nothing crashes.
+7. A SLICE or GRID track stays where it was (never retuned).
+8. The regression check (top of this file).
+
+**Known issues**
+- ERASE MOD DATA does not yet clear the tunings: a project's tuning survives an erase.
+- One tuning per project. USER slots are USER 1..8; they cannot be renamed.
+- SLICE and GRID tracks are never retuned (their note picks the slice).
+- Everything listed for v0.60.
+
+## v0.60 — FIXES (FM+ pages, GRID's ALLOCATE SLICE)
+
+`DN2mod_v0.60_FIXES_OS1.11.syx`
+sha256 `e52b56157c89e4ef69d03610e390d06301a7d96679c6793f7108fa1e760eae53`
+Gate: CLEARED TO FLASH, 2026-11-18 (every step: preflight, DSP identity and hardware rules, ColdFire, unit, all ColdFire emulator steps incl. the coupled thres/flex/flexplay/mute, fuzz, dead link; SHARC runner types 0-4 bit-identical to stock). Source: commit `a4fbca6` (branch `microtuning`; no microtuning code is in the firmware yet). Docs: `docs/mnm.md` (FM+).
+
+Everything in v0.59, plus:
+
+**FM+ pages fixed** (zuzsw, Thos Grol): on FM+ STAT, PAR and DYN the knobs moved the wrong
+parameters and some showed "unused". The page lookup skipped over BOUNCE's machine number, so STAT
+got PAR's page, PAR got DYN's, and DYN read past the table. Each Monomachine machine now finds its
+page by an explicit test.
+- FM+'s listed frequencies (1FRQ, 2FRQ, 3FRQ) are drawn as the Monomachine's bar with the ratio
+  under it; DYN's 1FRQ / 2FRQ as its meter with the value as x.x / x.xx.
+- The sound was not affected: only which knob reached which parameter, and the drawing.
+
+**GRID: ALLOCATE SLICE, RANDOM** (impbox): RANDOM seemed to do nothing, because NO afterwards put
+the old locks back. As on the DT2, NO now leaves the menu keeping the locks RANDOM made.
+
+**Gate (changed checks):**
+- `mnmpages`: each Monomachine type's page record is its own (none shared, none past the table).
+- `alloc`: after RANDOM and NO, the slice locks are RANDOM's (any of the sample's slices).
+
+**Tests**
+1. FM+ STAT, PAR, DYN: each knob on each page moves the parameter its name says; none says "unused".
+2. 1FRQ / 2FRQ / 3FRQ: the bar and ratio follow the knob; on DYN the meter and value.
+3. A GRID track, a sliced sample: ALLOCATE SLICE, RANDOM, then NO: the steps keep the random slices.
+4. The regression check (top of this file).
+
+**Known issues**
+- Everything listed for v0.59.
+
+## v0.59 — FMPLUS (the Monomachine's FM+ machines, MON on the recorder)
+
+`DN2mod_v0.59_FMPLUS_OS1.11.syx`
+sha256 `1c1c62d80910966aa365a995030fb50736ab4f2d2dfd75747999d8953763d594`
+Gate: CLEARED TO FLASH, 2026-11-18 (every step: preflight, DSP identity and hardware rules, ColdFire, unit, all ColdFire emulator steps incl. the coupled thres/flex/flexplay/mute, fuzz, dead link; SHARC runner types 0-4 bit-identical to stock). Source: commit `aee05a8` (branch `fmplus`). Docs: `docs/mnm.md` (FM+), `docs/sampler.md` (MON).
+
+Everything in v0.57, plus (v0.58 SCALES was pulled; it is not in this build):
+
+**FM+ STAT, FM+ PAR, FM+ DYN** (MACHINE SEL, after VO-6): the Monomachine's three FM machines.
+- **FM+ STAT**: 1FRQ 1FIN 1ENV 1FB 2FRQ 2VOL TONE TUNE. Operator 2 at its listed ratio (2VOL above 64
+  feeds it back); operator 1 at its ratio and fine tune with self feedback (1FB) and a decaying
+  envelope (1ENV).
+- **FM+ PAR**: 1FRQ 1ENV 2FRQ 2ENV 3FRQ 3ENV TONE TUNE. Three operators in parallel, each with its
+  own decaying envelope (xENV; above 64 it also feeds the operator back).
+- **FM+ DYN**: 1FRQ 1FEN 1VOL 1VEN 2FRQ 2ENV 2FB TUNE. Operator 1 with a frequency envelope (1FEN)
+  and a volume envelope (1VEN); operator 2 with self feedback (2FB) and its envelope (2ENV).
+- All three: the carrier at the note (note 60 = 261.6 Hz, as the other Monomachine machines), at twice
+  the rate, then the Monomachine's own decimator. TONE is a lowpass on the operators (STAT, PAR).
+- Built from the owner's Monomachine OS file at build time: its sine (the same 48-bit recursion,
+  word for word), its ratio, TONE and envelope tables.
+- How close: held to the Monomachine's own DSP code (an emulator) on 240 cases: within 60 dB
+  (69..99 dB), except high self feedback (STAT 1FB, DYN 2FB at 32 and up), which is chaotic on the
+  Monomachine itself: there the level and spectrum match.
+
+**MON** (the RECORDER's knob C; niko_24956's request): OFF / ON. With MON ON and SRC IN, you hear the
+input through the main out while the recorder is armed or recording, at the level it is recorded.
+"MON" shows in the top right of the record box when on. MAIN and TRK sources are already heard, so MON
+leaves them alone. OFF at power-on; FLEX REC is unchanged.
+
+**Gate (new checks):**
+- `unit`: every FM+ golden case (`test_mnm`), the chaotic-case rule with its negative control (6 dB
+  down is refused); FM+ costs (`test_perc_live`); MON (`test_mon`: heard armed, recording, any CHAN;
+  not heard OFF, MAIN, TRK1, idle, after STOP; the link's commands leave it).
+- `sharc:pvmix`: seven MON cases on the assembled code, bit for bit to the model, every other word as
+  stock's.
+- `recorder`: knob C turns MON on and off; the next command carries it.
+- `rectext`: "MON" inside its corner in every state of the box, over nothing else.
+
+**Tests**
+1. MACHINE SEL: FM+ Stat, FM+ Par, FM+ Dyn after VO-6. Each plays at its defaults, in tune with
+   another Monomachine machine at the same note.
+2. FM+ STAT: 1FB up to 127: noisier, harsher. 1ENV over 64: the modulation decays. TONE darkens it.
+3. FM+ PAR: turn 1ENV/2ENV/3ENV over 64: each operator decays at its own rate.
+4. FM+ DYN: 1FEN away from 64: a pitch sweep at the note's start. 1VEN: the brightness rises or falls.
+5. FUNC held on an FM+ page: the DSP load (each is lighter than SID).
+6. RECORDER, SRC IN, an instrument on the input, EXT MIX's input level down: MON OFF, ARM: silent;
+   MON ON: heard while armed and while recording; after the take: silent again.
+7. MON ON with SRC MAIN or a TRK: nothing changes.
+8. The regression check (top of this file).
+
+**Known issues**
+- Everything listed for v0.57.
+- FM+ at high self feedback is not sample for sample the Monomachine's (chaotic); it sounds the same.
+- MON is not saved; it is OFF after power-on.
+
+## v0.58 — SCALES — PULLED 2026-11-17
+
+**Pulled from the patcher (owner):** PR12/PM12 crash the unit in a chord MODE (zuzsw: EXCEPTION at P 40034BA6, a division by an empty chord list: the chord MODEs keep a sixth per-scale table, built in RAM at runtime, that v0.58 did not extend). v0.57 is the latest again; the scales' code is reverted on `main`. A fix (the chord lists extended, a chord-MODE gate test still to write) is on branch `scalefix`.
+
+### What it was
+
+`DN2mod_v0.58_SCALES_OS1.11.syx`
+sha256 `48923daf0c06b339501c77e1cba0d517578b9fd2b6c3f4aafc60a3b65f466d39`
+Gate: CLEARED TO FLASH, 2026-11-17 (57 gates; 53 reused, each a pass of this same build whose every input is byte-identical; the run spanned a container restart and the two-hour job limit, the last steps run one by one). Source: commit `46a0c3d` (branch `microtonal`). Docs: `docs/microtonal.md`.
+
+Everything in v0.57, plus:
+
+**Microtonal scales** (owner, 2026-11-16, his `poole-rod12tone.scl` and `poole12minor.scl`):
+- KB SETUP's SCALE goes on past Locr. bb3 bb7 to **Poole Rod12** (PR12) and **Poole12 Min** (PM12).
+- Poole Rod12 lays out and plays as Chromatic (12 notes); in a chord MODE it builds Ionian's chords.
+  Poole12 Min lays out and plays as Aeolian (1 2 b3 4 5 b6 b7).
+- A track on either plays every note (keyboard and sequencer) at the scale's tuning, by the note's
+  semitone above ROOT: Rod12 0, -46.7, +3.9, -33.1, +17.5, -2.0, -48.7, +2.0, -35.1, +5.9, -31.2,
+  -50.6 cents; Min12 the same on its degrees, other semitones at 12-TET.
+- How: stock's five scale tables copied with two rows more, its SCALE clamps raised to 36; the
+  voice's frame NOTE word moved by the cents (tune.c). Every other scale, track and voice is stock's.
+
+**Gate:** `tune` (ColdFire): stock's setter and getter at 35, 36, 40 (clamped to 36), -1, 34; the
+names; the keys, chord degrees and masks against Chromatic, Ionian and Aeolian; the retune at ROOT D
+on 16 voices (ROD12 every pitch class, MIN12 its degrees only, a stock scale none: the negative
+control); KB SETUP drawn at 34, 35 and 36 (screens checked: the names fit their places).
+
+**Tests**
+1. KEYBOARD, KB SETUP (FUNC + KEYBOARD), SCALE: turn past Locr. bb3 bb7: PR12, then PM12, then it stops.
+2. PR12, ROOT C: play C, C#, D... against a tuner: C in tune, C# about 47 cents flat, E about 17
+   cents sharp, B about 51 cents flat.
+3. PM12: the keyboard shows the minor scale's keys; its b3 and b7 sound noticeably flat.
+4. Back to any stock scale: everything in tune as before.
+5. A sequenced pattern on the track follows the tuning too.
+6. The regression check (top of this file).
+
+**Known issues**
+- A project saved with PR12 or PM12 opened on stock firmware shows Locr. bb3 bb7.
+- The per-track SCALE/ROOT setting path (when KB SETUP's settings are per track) could not be
+  exercised in the emulator; the keyboard-wide setting is tested.
+
+## v0.57 — FLEXMUTE (MUTE SRC follows the FLEX track's playing)
+
+`DN2mod_v0.57_FLEXMUTE_OS1.11.syx`
+sha256 `1da1cf2fe354464b83c90127bfb192d113d438f39600f79ddc065c5e2f75bcff`
+Gate: CLEARED TO FLASH, 2026-11-16 (56 gates; 50 reused, each a pass of this same build whose every input is byte-identical; the run spanned five jobs: two container restarts and the two-hour limit). Source: commit `f436d8c` (branch `flexmute`). Docs: `docs/flex-pool.md`.
+
+Everything in v0.56, plus:
+
+**MUTE SRC reworked** (NiKo, 2026-11-15:
+- "the mute function is activated immediately when recording, shouldn't it wait for the PLEN to cycle";
+- tracks he "can't unmute" until a power cycle.)
+
+The changes:
+- With MUTE ON, the SRC track is muted only while the FLEX track **plays** its take (a note on it,
+  heard), and comes back about 0.2 s after the FLEX note ends.
+- Stopping the FLEX track, muting it, or setting MUTE OFF gives the SRC back. Recording no longer
+  mutes anything by itself.
+- How it knows: the frame's own note-on / note-off trigger words, voice by voice, measured in the
+  coupled emulator. The DSP's play positions were tried first: a FLEX voice's take loops on
+  silently after the key, so they never end.
+
+**Tidier pool list and SAMP cell:**
+- The old REC 1 / REC 2 names at slots 124/125 are gone (shown as empty, ---). The FLEX buffers
+  are B1..B8 since v0.55.
+- A sample track on a FLEX buffer shows **F** as its bank letter (was A), beside B1..B8.
+
+**Gate:**
+- `mute` (coupled): links 1b..1e: no take, a take but not playing, playing, and stopped (past the
+  hold). Negative control `--break noplay`.
+- `flexplay` (coupled): M1..M3 with a real recorded take: silent, a note sounding it, note off.
+  Negative control `--break nohold` (MUTE OFF).
+- Screenshots checked for the list, page 1 and page 2: no text overlaps another element.
+
+**Tests**
+1. FLEX track with SRC TRK n and MUTE ON. Record a take. Track n is still heard while recording
+   and after, until the FLEX track plays the take.
+2. Play the FLEX track (a trig or the keyboard): track n drops out. Stop or mute the FLEX track:
+   track n comes back within about 0.2 s.
+3. MUTE OFF: track n back at once, as before.
+4. The sample list around 124..127 shows ---; a sample track on B1 shows F │ B1.
+5. The regression check (top of this file).
+
+**Known issues**
+- Everything listed for v0.56.
+- A FLEX trig with a long gap between notes un-mutes the SRC in the gap (after 0.2 s).
+- Take levels are still reported about 6 dB low against the source (NiKo, Error Kit): next build,
+  measured end to end first.
 
 ## v0.56 — DDRW (TIME glides, BR1/BR2 heard)
 

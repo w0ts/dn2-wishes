@@ -12,6 +12,8 @@ from dnfw.patch import area
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 BASE = platform.BASE
 STOCK_SYX = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.12_dist.zip"  # the shipping build targets 1.12 (docs/os112-port.md)
+STOCK_111 = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip"  # (PR #2: 1.11 kept working beside 1.12)
+STOCK_112 = STOCK_SYX
 
 pytestmark = pytest.mark.skipif(not STOCK_SYX.exists(), reason="no stock 1.12 image")
 
@@ -54,11 +56,12 @@ def test_installs_the_loader_lfo4_passed_with(stock):
 
 def test_lfo4_alone_is_the_gated_build(stock):
     """lfo4 on the platform: its edits, then its own two CODE chunks, as before (2026-11-14: but its two stored-sound
-    hooks, the wishes record's sites on our series: dnfw.mods.lfo4.STORE_SITES)."""
+    hooks, the wishes record's sites on our series: dnfw.mods.lfo4.STORE_SITES; 2026-11-16: and its memcpy / memset
+    entry hooks, dnfw.mods.lfo4.MEMORY_SITES, Overbridge's audio path)."""
     from dnfw.mods import lfo4
     spec = lfo4.SPEC
     image = bytearray(stock)
-    for e in (e for e in spec["edits"] if not lfo4._store_hook(e)):
+    for e in (e for e in spec["edits"] if not lfo4.series_hook(e)):
         at = e["va"] - BASE
         image[at:at + len(e["new"]) // 2] = bytes.fromhex(e["new"])
     blob = bytearray.fromhex(spec["blob"])
@@ -67,11 +70,22 @@ def test_lfo4_alone_is_the_gated_build(stock):
     assert lfo4.compose(stock) == bytes(image) + bytes(blob)
 
 
+def test_lfo4_leaves_memcpy_and_memset_stock(stock):
+    """2026-11-16 (ship_gate `overbridge`): memcpy is on Overbridge's audio path, so lfo4's entry hooks are left out on
+    our series; its carry is reached through the wishes record's stubs (csrc/wishes/hooks.S, DN2_LFO4)."""
+    from dnfw.mods import lfo4
+    out = lfo4.compose(stock)
+    for va, n in lfo4.MEMORY_SITES:
+        at = va - BASE
+        assert out[at:at + n] == stock[at:at + n], hex(va)
+    assert {"lfo4_memcpy_stub", "lfo4_memset_stub"} <= set(lfo4.SPEC["symbols"])
+
+
 def test_split_join_round_trip(stock):
     chunks = [(b"BOOT", b"abc"), (area.CODE, area.CodeChunk(0x46700000, b"\x4e\x75").pack())]
     out = platform.join(stock, chunks)
     base, back = platform.split(out)
-    assert base == platform.join(stock, [])[:platform.STOCK_LENGTH]
+    assert base == platform.join(stock, [])[:len(stock)]
     assert [c for c, _ in back] == [b"BOOT", area.CODE]
     assert platform.add(out, []) == out
 
@@ -153,3 +167,21 @@ def test_changes_nothing_outside_the_declared_extents(firmware, stock, order):
     for i, (a, b) in enumerate(zip(stock, out)):
         if a != b:
             assert any(x.start <= i < x.end for x in allowed), hex(BASE + i)
+
+
+@pytest.mark.skipif(not STOCK_111.exists(), reason="no stock 1.11 image")
+def test_each_stock_gets_its_own_platform(stock):
+    """1.11 keeps upstream's platform (lfo4, lfowaves, bootscreen); 1.12 gets the
+    port's. Stock, grown with the loader, and grown with an unknown tail.
+    (Integration: the `stock` fixture is 1.12 here, so 1.11 is loaded on its own.)"""
+    from dnfw.cli.files import read_image
+    from dnfw.firmware.load import load
+    stock_111 = load(read_image(STOCK_111)).container.find(3).unpack()
+    for image, spec in ((stock_111, platform.SPEC_111), (stock, platform.SPEC)):
+        assert len(image) == spec["stock_length"]
+        assert platform.spec_for(image) is spec
+        grown = platform.join(image, [(b"BOOT", b"abcd")])
+        assert platform.spec_for(grown) is spec
+        assert platform.split(grown)[0][:len(image)] == platform.join(image, [])[:len(image)]
+        assert platform.spec_for(image + bytes(4096 + 16)) is spec
+

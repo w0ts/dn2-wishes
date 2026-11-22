@@ -338,7 +338,7 @@ class ChannelSim:
         words = (n, CAP, period, int(pr["t0"] * BUS_HZ) & 0xFFFFFFFF, int(t_end * BUS_HZ) & 0xFFFFFFFF,
                  int(pr["t0"] * 1500), int(t_end * 1500), n * 140 if pr["source"] == P.PROF_TIMER else 0, n, 0,
                  1200, 0, dtmr << 16 | 2, 0xFFFFFFFF, (6 if running else 0) << 24 | (0 if running else 1) << 16 | pr["starts"],
-                 0x46A42000 if running else 0x40001252, 0x47100100)
+                 0x46A42000 if running else 0x40001252, 0x47700100)
         return bytes([pr["state"], pr["source"], pr["why"], P.PROF_RECORD]) + struct.pack(">17I", *words)
 
     def _profile(self, a: bytes) -> tuple[int, bytes]:

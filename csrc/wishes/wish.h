@@ -43,6 +43,7 @@ extern u8 wish_host_area[];
 extern u32 host_shift_moves;                                            /* keys table.c's shift() moved */
 #define WISH_AREA wish_host_area
 #define WISH_SHIFT_MOVED() (host_shift_moves++)
+#define WISH_DM_OK() 1                                                  /* (no +Drive moves on the host) */
 #elif !defined(WISH_AREA)
 #error "WISH_AREA: dnfw.waverider.pages.WISH_RAM, passed by cpage.compile_page"
 #endif
@@ -74,6 +75,8 @@ struct wish {
 #define W_WANT    0x04                  /* only the link is known: the record is read from the +Drive (store.c) */
 #define W_MISSING 0x08                  /* ... and no cell holds it: it plays stock, the link is kept */
 #define W_LOCKED  0x10                  /* a must-understand field this build does not know: no edits */
+#define W_ATT     0x20                  /* (2026-11-19, csrc/matrix/atten.c) RAM only: this live sound's DEPs are the LFOs'
+                                         * attenuverters (converted); the loader leaves a sound stored (DEP = C) */
 
 /* The link, in the stored sound: lane id k is stored bytes 28 + 2k, big-endian, at any alignment. */
 #define WL_MAGIC 0x57u                  /* 'W' */
@@ -90,10 +93,13 @@ struct wish {
 #define WT_MX_ROUTES 0x0010u           /* the matrix's routes (csrc/matrix/matrix.c, docs/matrix.md) */
 #define WT_MX_ENV 0x0011u              /* ENV2: ATK HOLD DEC SUS REL MODE RSET, a byte kept 0 (csrc/matrix/env2_page.c) */
 #define WT_LFO4 0x0012u                /* LFO4: SPD MULT FADE DEST WAVE SPH MODE DEP, 8 x u16 (csrc/wishes/lfo4.c) */
+#define WT_MX_LFO 0x0013u              /* LFO1-3 {u16 DEP as saved, u16 the first route's depth} (csrc/matrix/atten.c) */
+#define WT_AMP_SW 0x0014u              /* AMP ON/OFF on the drum machines: 1 byte, 1 = ON; no field = OFF (csrc/msel/ampsw.c) */
 
 /* table.c */
 extern u8 wish_busy;
 extern u32 wish_n, wish_ready, wish_reentered, wish_full;
+extern u32 wish_q_head, wish_q_tail, wish_queued, wish_q_max;   /* (2026-11-21) copies queued for the lock's holder */
 extern u32 wish_wants;
 extern u32 wish_loads, wish_links_in, wish_saves, wish_links_out, wish_copies, wish_carries, wish_clears;
 extern volatile u32 wish_edits;        /* any entry's record changed (made, copied, cleared, put, read): the matrix re-reads */
@@ -117,6 +123,7 @@ void wish_lfo4_load(u32 live, int linked);
 void wish_lfo4_poll(void);
 #endif
 void wish_save(u8 *stored, u32 live);
+void mxa_save(struct wish *w, u8 *stored, u32 live);                  /* csrc/matrix/atten.c */
 int wish_link_read(const u8 *stored, u32 *h0, u32 *h1, u32 *len);
 void wish_link_write(u8 *stored, u32 h0, u32 h1, u32 len);
 

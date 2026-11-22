@@ -10,16 +10,16 @@ A note has two roads, chosen per track by the kit's synth/MIDI mask (`+0x5cda`):
 
 | source | synth track | MIDI track | the fork |
 |---|---|---|---|
-| sequencer trig | `0x400d8654` makes an engine record | `0x400d8b5a` makes a MIDI record | `0x400d9062`, `0x400d9ee0` |
-| live key down | `0x40137d3c` (voice starter) | `0x4012b8b0` (MIDI sender) | `0x40121d5c` in `0x40121ad2` |
-| live key up | `0x40137d3c` | `0x4012b8b0` | `0x401218ec` in `0x4012182a` |
+| sequencer trig | `0x400d87b8` makes an engine record | `0x400d8cbe` makes a MIDI record | `0x400d91c6`, `0x400da044` |
+| live key down | `0x4013801c` (voice starter) | `0x4012bb90` (MIDI sender) | `0x4012203c` in `0x40121db2` |
+| live key up | `0x4013801c` | `0x4012bb90` | `0x40121bcc` in `0x40121b0a` |
 
 The synth road ends in the frame ISR `0x40025e36`. That is where the arp is: the
 note set `0x40029cd4`, the step `0x4002a0bc` (called at `0x400266e0` and
 `0x4002686e`), the step clock (type-9 records, the second sequencer fork
-schedules them), and finally the voice trigger `0x400db524`, called at
+schedules them), and finally the voice trigger `0x400db688`, called at
 `0x400268f8` for every note, arpeggiated or not. The MIDI road goes to the MIDI
-task `0x4012a9a8` and never meets the arp.
+task `0x4012ac88` and never meets the arp.
 
 The arp's settings are the track's sound, `kit + 52 + 1163*track`: MODE `+0x15f`
 (0 = off; [FUNC]+[ARP] parks it at `+0x176` and writes 0, `0x4004bea4`),
@@ -35,17 +35,17 @@ track's sound slot holds these bytes and keeps them.
    of a voice. Its note is the arp's step (offsets already applied by
    `0x4002a0bc`); velocity and length resolve through the sound at `+44` when
    negative, as the ISR and the MIDI task both do. While the arp runs the length
-   is N.LEN, converted from the arp's length table (`0x40287b08`) to the trig
-   table the MIDI task reads (`0x401d88d8`) by a lookup built from the image.
+   is N.LEN, converted from the arp's length table (`0x40288048`) to the trig
+   table the MIDI task reads (`0x401d8ce8`) by a lookup built from the image.
    Every record reaching the trigger is a note: `+56` bit 1 is not a gate, only
-   whether the track keeps a held copy (`0x400db4ac`); a record already voiced
+   whether the track keeps a held copy (`0x400db610`); a record already voiced
    (bit 20) is skipped. It is appended to the batch the ISR
    already hands the MIDI task once per frame (head `-180(%fp)`, tail `%a5`,
    posted at `0x40026f60`), so nothing new crosses a context boundary. The MIDI
    task then sends it on the track's channel and schedules its note-off from
    the length, exactly as for a trig.
 
-A key-down note carries a lock list from the MIDI pool when `0x4029f524` selects
+A key-down note carries a lock list from the MIDI pool when `0x4029fa64` selects
 one (0..127). The engine would free it into its own pool, so on the arp road it
 goes back to the MIDI pool first and the note plays without it.
 
@@ -95,8 +95,8 @@ MAIN_OS = 3
 BASE = 0x40000400
 
 # One of the three clean 896-byte runs (docs/code-caves.md). lfo-waves boots
-# from 0x402cf52c and lfo4-tick6a lives at 0x402dfa1c; this one is left.
-CAVE = 0x402D0664
+# from 0x402cfa6c and lfo4-tick6a lives at 0x402dff5c; this one is left.
+CAVE = 0x402D0BA4
 CAVE_CAP = 896
 
 KIT = 0x800052A0            # the ISR's kit pointer, also read at task level (0x40025bda)
@@ -105,22 +105,22 @@ SOUND_BASE = 52             # kit + 52 + 1163*track: the track's sound
 SOUND_STRIDE = 1163
 ARP_MODE = 0x15F
 ARP_NLEN = 0x162
-SOUND_VELOCITY = 0x480      # a trig's velocity when its own byte is negative (0x4012a9a8)
-SOUND_LENGTH = 0x481        # ...and its length (0x40026680, 0x4012a9a8)
+SOUND_VELOCITY = 0x480      # a trig's velocity when its own byte is negative (0x4012ac88)
+SOUND_LENGTH = 0x481        # ...and its length (0x40026680, 0x4012ac88)
 
-VOICE_START = 0x40137D3C    # synth road, live
-MIDI_SEND = 0x4012B8B0      # MIDI road, live
-VOICE_TRIGGER = 0x400DB524  # the ISR's per-note voice trigger
-MIDI_RECORD = 0x4012A408    # MIDI record pool, interrupts masked while taken
-MIDI_LOCKS_FREE = 0x4012A3B4  # returns a MIDI lock list to 0x4460fcbc
-TRIG_LENGTHS = 0x401D88D8   # duration per trig length index, 0..127 (0x4012a9a8, 0x40026a7e)
-ARP_LENGTHS = 0x40287B08    # duration per arp N.LEN index, 0..127, -1 = INF (0x40026a74)
+VOICE_START = 0x4013801C    # synth road, live
+MIDI_SEND = 0x4012BB90      # MIDI road, live
+VOICE_TRIGGER = 0x400DB688  # the ISR's per-note voice trigger
+MIDI_RECORD = 0x4012A6E8    # MIDI record pool, interrupts masked while taken
+MIDI_LOCKS_FREE = 0x4012A694  # returns a MIDI lock list to 0x44610cbc
+TRIG_LENGTHS = 0x401D8CE8   # duration per trig length index, 0..127 (0x4012ac88, 0x40026a7e)
+ARP_LENGTHS = 0x40288048    # duration per arp N.LEN index, 0..127, -1 = INF (0x40026a74)
 
 LABELS = ("seq_gate", "live_send", "voice_hook", "nlen_lut")
 
 
 # Bit 1 of +56 is not a gate: clear, the stock trigger only frees the track's
-# held copy (0x400db4ac); every record reaching it is a note (diag capture,
+# held copy (0x400db610); every record reaching it is a note (diag capture,
 # 466 of 466 arp steps had it clear). Bit 20 is set on a record once the ISR
 # has voiced it (0x40026948), so a record seen again is not sent twice.
 FILTER = """  move.l  56(%a0),%d1
@@ -192,7 +192,7 @@ live_send:
     add.l   %d1,%a1
     tst.b   {SOUND_BASE + ARP_MODE}(%a1)
     beq.s   2f
-    move.l  52(%a0),%d0                 | a lock list from the MIDI pool (0x40121d06)
+    move.l  52(%a0),%d0                 | a lock list from the MIDI pool (0x40121fe6)
     beq.s   11f
     clr.l   52(%a0)
     move.l  %d0,-(%sp)
@@ -292,11 +292,11 @@ nlen_lut:
 # (va, stock bytes, kind, label) -- each stock sequence is replaced by a call
 # to `label`, padded with NOPs.
 HOOKS = (
-    (0x400D905E, bytes.fromhex("73685cda0501"), "jsr", "seq_gate"),   # sequencer fork 1
-    (0x400D9EDC, bytes.fromhex("71685cda0500"), "jsr", "seq_gate"),   # sequencer fork 2
-    (0x40121D84, bytes.fromhex("4eb94012b8b0"), "jsr", "live_send"),  # key down, MIDI branch
-    (0x40121914, bytes.fromhex("4eb94012b8b0"), "jsr", "live_send"),  # key up, MIDI branch
-    (0x400268F8, bytes.fromhex("4eb9400db524"), "jsr", "voice_hook"), # ISR voice trigger
+    (0x400D91C2, bytes.fromhex("73685cda0501"), "jsr", "seq_gate"),   # sequencer fork 1
+    (0x400DA040, bytes.fromhex("71685cda0500"), "jsr", "seq_gate"),   # sequencer fork 2
+    (0x40122064, bytes.fromhex("4eb94012bb90"), "jsr", "live_send"),  # key down, MIDI branch
+    (0x40121bf4, bytes.fromhex("4eb94012bb90"), "jsr", "live_send"),  # key up, MIDI branch
+    (0x400268F8, bytes.fromhex("4eb9400db688"), "jsr", "voice_hook"), # ISR voice trigger
 )
 
 # The menu gate from arp-on-midi2, and the view's own MIDI test.
@@ -309,36 +309,36 @@ EDITS = (
 
 # Read, not written: the code the hooks rely on.
 CONTEXT = (
-    (0x400D9064, bytes.fromhex("6626"), "fork 1: bne to the MIDI producer"),
-    (0x400D9086, bytes.fromhex("4ebaf5cc"), "fork 1: jsr 0x400d8654, synth producer"),
-    (0x400D90CE, bytes.fromhex("4ebafa8a"), "fork 1: jsr 0x400d8b5a, MIDI producer"),
-    (0x400D9EE2, bytes.fromhex("6656"), "fork 2: bne to the MIDI producer"),
-    (0x400D9F50, bytes.fromhex("4ebaec08"), "fork 2: jsr 0x400d8b5a, MIDI producer"),
-    (0x40121D6C, bytes.fromhex("4a01"), "key down: synth test before the MIDI branch"),
-    (0x40121D72, bytes.fromhex("4eb940137d3c"), "key down: jsr the voice starter"),
-    (0x401218FC, bytes.fromhex("4eb940137d3c"), "key up: jsr the voice starter"),
+    (0x400D91C8, bytes.fromhex("6626"), "fork 1: bne to the MIDI producer"),
+    (0x400D91EA, bytes.fromhex("4ebaf5cc"), "fork 1: jsr 0x400d87b8, synth producer"),
+    (0x400D9232, bytes.fromhex("4ebafa8a"), "fork 1: jsr 0x400d8cbe, MIDI producer"),
+    (0x400DA046, bytes.fromhex("6656"), "fork 2: bne to the MIDI producer"),
+    (0x400DA0B4, bytes.fromhex("4ebaec08"), "fork 2: jsr 0x400d8cbe, MIDI producer"),
+    (0x4012204C, bytes.fromhex("4a01"), "key down: synth test before the MIDI branch"),
+    (0x40122052, bytes.fromhex("4eb94013801c"), "key down: jsr the voice starter"),
+    (0x40121BDC, bytes.fromhex("4eb94013801c"), "key up: jsr the voice starter"),
     (0x400266E0, bytes.fromhex("4eb94002a0bc"), "ISR: arp step"),
     (0x4002686E, bytes.fromhex("4eb94002a0bc"), "ISR: arp step on start"),
     (0x4002611C, bytes.fromhex("9bcd"), "ISR: batch tail %a5 cleared"),
     (0x40026128, bytes.fromhex("42aeff4c"), "ISR: batch head -180(%fp) cleared"),
     (0x40026E4C, bytes.fromhex("2d4dff4c"), "ISR: batch head set"),
-    (0x40026F5A, bytes.fromhex("4879445fe870"), "ISR: batch posted to the MIDI task's queue"),
+    (0x40026F5A, bytes.fromhex("4879445ff870"), "ISR: batch posted to the MIDI task's queue"),
     (0x4004BF0C, bytes.fromhex("1141015f"), "arp toggle writes MODE +0x15f"),
     (0x40025BE8, bytes.fromhex("068000000034"), "sound = kit + 52 + 1163*track"),
-    (0x40121D06, bytes.fromhex("4eb94012a394"), "key down: MIDI lock list taken"),
-    (0x40121D22, bytes.fromhex("2d40fff4"), "key down: ...and placed at event +52 (fp-12)"),
+    (0x40121FE6, bytes.fromhex("4eb94012a674"), "key down: MIDI lock list taken"),
+    (0x40122002, bytes.fromhex("2d40fff4"), "key down: ...and placed at event +52 (fp-12)"),
     (0x400192C2, bytes.fromhex("203c400187b4"), "ArpSetupMenuView ctor registers the callback"),
-    (0x400192FA, bytes.fromhex("49f9400f630a"), "...connected to the model's change signal"),
+    (0x400192FA, bytes.fromhex("49f9400f64d6"), "...connected to the model's change signal"),
     (0x400187EA, bytes.fromhex("4eb940031274"), "callback: is the active track MIDI"),
     (0x400187FE, bytes.fromhex("20690028"), "callback: yes -> owner vtable +40, close"),
-    (0x4012A3B4, bytes.fromhex("206f0004"), "the MIDI lock-list free"),
+    (0x4012A694, bytes.fromhex("206f0004"), "the MIDI lock-list free"),
     (0x4002672C, bytes.fromhex("2268002c"), "ISR: a note's default-giving sound is record +44"),
     (0x40026680, bytes.fromhex("2069002c"), "ISR: negative length -> sound +0x481 through +44"),
-    (0x40026A72, bytes.fromhex("41f940287b04"), "ISR: an arp note's N.LEN indexes ARP_LENGTHS"),
-    (0x40026A7C, bytes.fromhex("41f9401d88d4"), "ISR: any other note's length indexes TRIG_LENGTHS"),
+    (0x40026A72, bytes.fromhex("41f940288044"), "ISR: an arp note's N.LEN indexes ARP_LENGTHS"),
+    (0x40026A7C, bytes.fromhex("41f9401d8ce4"), "ISR: any other note's length indexes TRIG_LENGTHS"),
 )
 
-STOCK = pathlib.Path("00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
+STOCK = pathlib.Path("00_Resources/00_Firmware/Digitone_II_OS1.12_dist.zip")
 DIAG = "--diag" in sys.argv[1:]
 OUT = pathlib.Path("00_Resources/02_Builds/"
                    + ("arp-midi-diag" if DIAG else "arp-midi-play4") + "_DN2_1.11.syx")

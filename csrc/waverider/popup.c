@@ -35,7 +35,6 @@
 typedef unsigned int u32;
 typedef unsigned char u8;
 
-#define SET_PIXEL  ((void (*)(void *, int, int, int))0x40113E70)
 #define TEXT       ((void (*)(void *, u32, int, int, int, const char *, ...))0x4011573C)
 #define SET_DIRTY  ((void (*)(void *))0x4011D5DEu)
 #define FRAMES_NOW (*(volatile u32 *)0x4058F8D4u)       /* 1,500 a second */
@@ -150,23 +149,51 @@ int wpop_slot_of(int x0, int y0)
     return col + (y0 < 13 ? 4 : 0);
 }
 
+/* (2026-11-18, the User: "High cpu is bad"; scratch/unit-now/cpu-spikes.md: an insert pick's and LFO WAVE's list
+ * scrolling spent 0.7-0.9 % of the CPU in stock's SET_PIXEL, one call a pixel: 5,778 for the box alone) the box, its
+ * rule and the lit row a column word at a time: the same pixels as v1's SET_PIXEL loops (page.c cv_fill: clipped as
+ * SET_PIXEL clips) */
+extern void cv_fill(void *cv, int x0, int y0, int x1, int y1, int on);
+
 static void fill(void *c, int x0, int y0, int x1, int y1, int on)
 {
-    for (int x = x0; x <= x1; x++)
-        for (int y = y0; y <= y1; y++)
-            SET_PIXEL(c, x, y, on);
+    cv_fill(c, x0, y0, x1, y1, on);
 }
 
 /* the canvas, as 0x40113e70 reads it (md_page.c invert): +4 width, +8 height, +12 words a
- * column, +16 the bits (bit 31 - (y & 31) of word y >> 5 of the column) */
+ * column, +16 the bits (bit 31 - (y & 31) of word y >> 5 of the column); every pixel of the
+ * rectangle inside the canvas flipped, a column word at a time */
 static void invert(void *c, int x0, int y0, int x1, int y1)
 {
     const int *cv = (const int *)c;
     u32 *bits = (u32 *)cv[4];
-    for (int x = x0; x <= x1; x++)
-        for (int y = y0; y <= y1; y++)
-            if (x >= 0 && y >= 0 && x < cv[1] && y < cv[2])
-                bits[x * cv[3] + (y >> 5)] ^= 0x80000000u >> (y & 31);
+    int stride = cv[3];
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 >= cv[1]) x1 = cv[1] - 1;
+    if (y1 >= cv[2]) y1 = cv[2] - 1;
+    if (x0 > x1 || y0 > y1)
+        return;
+    for (int k = y0 >> 5; k <= y1 >> 5; k++) {
+        u32 lo = k == y0 >> 5 ? (u32)(y0 & 31) : 0u, hi = k == y1 >> 5 ? (u32)(y1 & 31) : 31u;
+        u32 m = (0xFFFFFFFFu >> lo) & ~(hi == 31u ? 0u : 0xFFFFFFFFu >> (hi + 1u));
+        u32 *q = bits + x0 * stride + k;
+        for (int x = x0; x <= x1; x++, q += stride)
+            *q ^= m;
+    }
+}
+
+/* the dotted rule: every second pixel of row Y from X0 to X1 */
+static void dotted(void *c, int x0, int x1, int y)
+{
+    const int *cv = (const int *)c;
+    u32 *bits = (u32 *)cv[4];
+    if (y < 0 || y >= cv[2])
+        return;
+    u32 bit = 0x80000000u >> (y & 31);
+    for (int x = x0; x <= x1 && x < cv[1]; x += 2)
+        if (x >= 0)
+            bits[x * cv[3] + (y >> 5)] |= bit;
 }
 
 /* the box, LABEL and the place in the list in its header, five rows round CUR (NAME_FMT: the
@@ -181,8 +208,7 @@ static void draw_list(void *c, const char *label, int n, int cur, wpop_name_fn n
     fill(c, BOX_X0, BOX_Y1, BOX_X1, BOX_Y1, 1);
     TEXT(c, FONT, NAME_X - 2, HEAD_Y, 0, "%.6s", label);
     TEXT(c, FONT, COUNT_X, HEAD_Y, 0, "%d/%d", cur + 1, n);
-    for (int x = BOX_X0 + 2; x <= BOX_X1 - 2; x += 2)   /* the rule under the header, dotted */
-        SET_PIXEL(c, x, RULE_Y, 1);
+    dotted(c, BOX_X0 + 2, BOX_X1 - 2, RULE_Y);          /* the rule under the header */
     for (int r = 0; r < 2 * POP_HALF + 1; r++) {
         int i = cur - POP_HALF + r;                     /* the top row first */
         int y = ROWS_Y0 + (2 * POP_HALF - r) * ROW_H;
@@ -233,6 +259,12 @@ void wpop_draw(void *c)
     if (!pop_shown)
         return;
     draw_list(c, pop.label, pop.n, pop.cur, pop.name, pop.tag, pop.arg, "%.8s");
+}
+
+/* the scope's frames alone (csrc/scope/scope.c): the popup drew over the page in the last draw */
+int wpop_shown(void)
+{
+    return modal.label != 0 || pop_shown;
 }
 
 /* page.c wr_poll, once a UI loop: a redraw on a knob's turn (so the popup opens even where the

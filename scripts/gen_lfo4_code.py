@@ -89,7 +89,13 @@ def main() -> int:
         "table_records": paramtable.COUNT + lfo4records.GROUP_SIZE,
         # 2026-11-14 (docs/lfo-112-port.md 4.1): what our code calls in lfo4's chunk with DN2_LFO4 -- LFO4's values
         # go to and from the sound's wishes record through lfo4's own table
-        "symbols": {k: int(built_syms[k], 16) for k in ("ext_find", "ext_set", "ext_drop", "ext_default", "lfo4_cascade")},
+        # 2026-11-16: and lfo4's memcpy / memset stubs, which the wishes record's stubs go on into (lfo4's entry hooks
+        # are left out on our series: dnfw.mods.lfo4 MEMORY_SITES, Overbridge's audio path)
+        "symbols": {k: int(built_syms[k], 16) for k in ("ext_find", "ext_set", "ext_drop", "ext_default", "lfo4_cascade",
+                                                        "lfo4_memcpy_stub", "lfo4_memset_stub",
+                                                        # 2026-11-17 (the User's CPU): the wishes record's memcpy stub
+                                                        # tests and calls lfo4's carry itself, then copies
+                                                        "ext_live", "lfo4_on_memcpy")},
         "edits": edits,
         "blob": bytes(blob).hex(),
     }
@@ -99,10 +105,11 @@ def main() -> int:
     lfo4.SPEC = code
     rebuilt = lfo4.compose(stock)
     # (2026-11-14: the mod leaves its two stored-sound hooks out, the wishes record's sites on our series: the build
-    # it must reproduce is this one with those two edits back to stock's bytes)
+    # it must reproduce is this one with those two edits back to stock's bytes; 2026-11-16: and its memcpy / memset
+    # entry hooks, lfo4.MEMORY_SITES)
     content = bytearray(content)
     for e in edits:
-        if lfo4._store_hook(e):
+        if lfo4.series_hook(e):
             pos = e["va"] - release.BASE
             content[pos:pos + len(e["stock"]) // 2] = bytes.fromhex(e["stock"])
     content = bytes(content)

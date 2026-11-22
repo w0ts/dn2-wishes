@@ -17,6 +17,10 @@ from dnfw.xdly import design as XD
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 HARNESS = r"""
+/* cv_fill lives in csrc/waverider/page.c (the firmware's one rectangle fill, 2026-11-17); the page's drawing is
+ * never run here, so a stand-in only links it (as test_inserts_c) */
+void cv_fill(void *cv, int x0, int y0, int x1, int y1, int on) { (void)cv; (void)x0; (void)y0; (void)x1; (void)y1; (void)on; }
+
 #include <stdio.h>
 typedef unsigned int u32;
 typedef unsigned char u8;
@@ -27,8 +31,15 @@ int wish_put(u32 item, u32 tag, const unsigned char *v, u32 vlen) { return 0; }
 u32 host_kit = 0x1000;
 
 int smp_overlay_dirty = 0;
+int dlt_state = -1, rvt_state = -1;     /* csrc/xdly/ui.c, csrc/fdn8/ui.c: the send pages' TYPE is ours (1) */
 u32 ins_edits = 0;
+u32 mtr_func_ended = 0;                 /* csrc/meter/meter.c: this FUNC release ended the system meter */
 int smp_values_held(void) { return 0; }
+/* (2026-11-21, fx-icons) the FX icons' neighbours (csrc/msel/msel.c): no icon, INSERT SEL never up here */
+const unsigned char *msel_icon_of(int kind, int type) { (void)kind; (void)type; return 0; }
+const unsigned char *msel_fx_icon(int type) { (void)type; return 0; }
+int isel_up(void) { return 0; }
+void isel_draw(void *c) { (void)c; }
 const char *mu_fxp(int page, int place, int k) { return 0; }
 extern u8 fxp_v[2][8];
 extern void fxp_set_record(const u8 *f);
@@ -60,6 +71,13 @@ def fbits(x) -> int:
     return struct.unpack("<I", struct.pack("<f", float(x)))[0]
 
 
+def _rec_base() -> str:
+    """-D for where our C reads stock's parameter records: the build's own value (dnfw.waverider.cpage passes
+    dnfw.waverider.pages.lfo4_moved(); lfo4 moves the table, 2026-11-16 lfo4112)"""
+    from dnfw.waverider import pages
+    return f"-DREC_BASE={pages.lfo4_moved()['REC_BASE']:#x}u"
+
+
 @pytest.fixture(scope="module")
 def exe(tmp_path_factory):
     cc = shutil.which("cc") or shutil.which("clang") or shutil.which("gcc")
@@ -69,7 +87,7 @@ def exe(tmp_path_factory):
     (d / "h.c").write_text(HARNESS)
     (d / "pre.h").write_text("extern unsigned int host_kit;\n")
     out = d / "h"
-    r = subprocess.run([cc, "-O1", "-w", "-ffp-contract=off", "-Dsection(x)=aligned(4)", "-DCHR_KIT=host_kit",
+    r = subprocess.run([cc, "-O1", "-w", "-ffp-contract=off", "-Dsection(x)=aligned(4)", _rec_base(), "-DCHR_KIT=host_kit",
                         "-include", str(d / "pre.h"), "-o", str(out), str(d / "h.c"),
                         str(ROOT / "csrc" / "fxpage" / "fxp.c")], capture_output=True, text=True)
     if r.returncode:
@@ -116,12 +134,23 @@ def test_a_project_that_never_touched_the_page_sends_the_constants(exe):
 
 
 TAP = r"""
+/* cv_fill lives in csrc/waverider/page.c (the firmware's one rectangle fill, 2026-11-17); the page's drawing is
+ * never run here, so a stand-in only links it (as test_inserts_c) */
+void cv_fill(void *cv, int x0, int y0, int x1, int y1, int on) { (void)cv; (void)x0; (void)y0; (void)x1; (void)y1; (void)on; }
+
 #include <stdio.h>
 typedef unsigned int u32;
 typedef unsigned char u8;
 int smp_overlay_dirty = 0;
+int dlt_state = -1, rvt_state = -1;     /* csrc/xdly/ui.c, csrc/fdn8/ui.c: the send pages' TYPE is ours (1) */
 u32 ins_edits = 0;
+u32 mtr_func_ended = 0;                 /* csrc/meter/meter.c: this FUNC release ended the system meter */
 int smp_values_held(void) { return 0; }
+/* (2026-11-21, fx-icons) the FX icons' neighbours (csrc/msel/msel.c): no icon, INSERT SEL never up here */
+const unsigned char *msel_icon_of(int kind, int type) { (void)kind; (void)type; return 0; }
+const unsigned char *msel_fx_icon(int type) { (void)type; return 0; }
+int isel_up(void) { return 0; }
+void isel_draw(void *c) { (void)c; }
 const char *mu_fxp(int page, int place, int k) { return 0; }
 int func_down = 0;
 /* the kit wishes record, faked (csrc/wishes): two kits, a field per kit, -1 when it has none */
@@ -177,6 +206,9 @@ int main(void)
         else if (c == 'w') { u32 w[12]; fxp_words(w); printf("w11=%u\n", w[11]); }
         else if (c == 'K') { scanf("%d", &a); host_kit = a ? 0x2000 : 0x1000; }   /* the playing kit: 0 or 1 */
         else if (c == 'f') { printf("f=%d,%d\n", kit_field[0], kit_field[1]); }
+        else if (c == 'M') { scanf("%d", &a); mtr_func_ended = (u32)a; }       /* the meter's word for the next release */
+        else if (c == 'S') { scanf("%d %d", &a, &b); dlt_state = a; rvt_state = b; }   /* the TYPEs: ours 1, stock 0 */
+        else if (c == 'a') { scanf("%d", &a); printf("took=%d ", item(0, a, 1, 0)); item(0, a, 0x10, 0); }   /* an arrow */
     }
     return 0;
 }
@@ -192,7 +224,7 @@ def tap(tmp_path_factory):
     (d / "h.c").write_text(TAP)
     (d / "pre.h").write_text("extern int host_key_held(unsigned int);\nextern unsigned int host_kit;\n")
     out = d / "h"
-    r = subprocess.run([cc, "-O1", "-w", "-ffp-contract=off", "-Dsection(x)=aligned(4)", "-DKEY_HELD=host_key_held",
+    r = subprocess.run([cc, "-O1", "-w", "-ffp-contract=off", "-Dsection(x)=aligned(4)", _rec_base(), "-DKEY_HELD=host_key_held",
                         "-DCHR_KIT=host_kit",
                         "-include", str(d / "pre.h"), "-o", str(out), str(d / "h.c"), str(ROOT / "csrc" / "fxpage" / "fxp.c")],
                        capture_output=True, text=True)
@@ -222,6 +254,13 @@ def test_the_tap_is_cancelled_by_anything_between(tap):
     assert feed(tap, f"{XDLY_PAGE} d 17 d 45 u 45 u 17 ? ") == ["up=0"]         # FUNC + a push: the mod popup
 
 
+def test_the_release_that_ends_the_system_meter_is_no_tap(tap):
+    """2026-11-19: FUNC tapped, then held again, shows the system meter (csrc/meter/meter.c); that hold's release ends it
+    and is not a tap of its own (mtr_func_ended): the gesture's first tap switches the page once, its release not"""
+    assert feed(tap, f"{XDLY_PAGE} d 17 u 17 {XDLY_PAGE} d 17 M 1 u 17 M 0 ? ") == ["up=1"]
+    assert feed(tap, f"{XDLY_PAGE} d 17 u 17 {XDLY_PAGE} d 17 u 17 ? ") == ["up=0"]     # (two plain taps: back)
+
+
 def test_no_page_2_on_a_stock_type_or_off_the_page(tap):
     assert feed(tap, "p 1 0 d 17 u 17 ? ") == ["up=0"]                          # the Delay page, STOCK type
     assert feed(tap, "p 0 0 d 17 u 17 ? ") == ["up=0"]                          # some other page
@@ -246,6 +285,22 @@ def test_the_reverb_page_takes_all_eight(tap):
     assert out == ["took=1", "took=1", "took=1", "v=66", "v=125", "v=4"]
 
 
+def test_arrows_on_a_page_2_stay_among_the_page_2s(tap):
+    """2026-11-20 (the User: "stays within the FUNC / no-FUNC pages: no mixing of groups"): on page 1 UP / DOWN are
+    stock's (Delay -> Reverb -> Chorus); on a page 2 they go on to stock (its step) only towards a send page whose TYPE
+    has a page 2 (fxp_draw then opens it), else they are taken (no step: never a page 1); FUNC + arrow stock's"""
+    UP, DOWN = 11, 14
+    d2, r2 = f"{XDLY_PAGE} d 17 u 17 {XDLY_PAGE}", f"{FDN_PAGE} d 17 u 17 {FDN_PAGE}"
+    assert feed(tap, f"S 1 1 {XDLY_PAGE} a {DOWN} a {UP} ? ") == ["took=0", "took=0", "up=0"]      # page 1: stock's
+    assert feed(tap, f"S 1 1 {d2} a {DOWN} ") == ["took=0"]                 # Delay 2 -> Reverb 2 (FDN8 / LONG)
+    assert feed(tap, f"S 1 0 {d2} a {DOWN} ? ") == ["took=1", "up=1"]       # Reverb STOCK: no page 2 there, stays
+    assert feed(tap, f"S 1 1 {d2} a {UP} ? ") == ["took=1", "up=1"]         # Delay is the first: stays
+    assert feed(tap, f"S 1 1 {r2} a {UP} ") == ["took=0"]                   # Reverb 2 -> Delay 2 (XDLY)
+    assert feed(tap, f"S 0 1 {r2} a {UP} ? ") == ["took=1", "up=2"]         # Delay STOCK: stays
+    assert feed(tap, f"S 1 1 {r2} a {DOWN} ? ") == ["took=1", "up=2"]       # the Chorus has no page 2: stays
+    assert feed(tap, f"S 1 1 {d2} d 17 a {DOWN} u 17 ") == ["took=0"]       # FUNC + DOWN: stock's
+
+
 def test_link_has_a_word_source_for_every_packet_kind():
     """smp_tdm (csrc/sampler/link.c): every kind of packet it sends (is_cmd, is_ins, is_fxp, is_blank) has its words
     in the word select; one without it sent job data (or NULL + 0..3) as that packet's words (326ff17f's bug)"""
@@ -255,10 +310,15 @@ def test_link_has_a_word_source_for_every_packet_kind():
     body = body[:body.index("smp_tdm_sent++;")]
     kinds = re.findall(r"\bint (is_\w+) = ", body)
     kinds = [k for k in kinds if k != "is_rt"]                  # (a kind of command: is_cmd := is_rt || ..., its words are cw[])
-    sel = re.search(r"u32 w = (.*?);", body, re.S).group(1)
-    assert "is_fxp" in kinds
+    # 2026-11-21 (cf-asm b2609b7b): the words are written by hooks.S tdm_units from one source picked per packet
+    # (`const u32 *src = ...`); a blank packet sends no words (`u32 nn = is_blank ? 0u : ...`)
+    sel = re.search(r"const u32 \*src = (.*?);", body, re.S).group(1)
+    nn = re.search(r"u32 nn = (.*?);", body, re.S).group(1)
+    assert "is_fxp" in kinds and "is_blank" in kinds
+    assert re.match(r"\s*is_blank \? 0u? :", nn), f"a blank packet sends words: {nn!r}"
     for k in kinds:
-        assert k in sel, f"{k}: no word source in {sel!r}"
+        if k != "is_blank":
+            assert k in sel, f"{k}: no word source in {sel!r}"
 
 
 def test_the_mirror_page_is_not_written_and_nothing_goes_at_power_on():
@@ -272,6 +332,10 @@ def test_the_mirror_page_is_not_written_and_nothing_goes_at_power_on():
 
 
 ACTIVE = r"""
+/* cv_fill lives in csrc/waverider/page.c (the firmware's one rectangle fill, 2026-11-17); the page's drawing is
+ * never run here, so a stand-in only links it (as test_inserts_c) */
+void cv_fill(void *cv, int x0, int y0, int x1, int y1, int on) { (void)cv; (void)x0; (void)y0; (void)x1; (void)y1; (void)on; }
+
 #include <stdio.h>
 typedef unsigned int u32;
 typedef unsigned char u8;
@@ -282,8 +346,15 @@ int wish_put(u32 item, u32 tag, const unsigned char *v, u32 vlen) { return 0; }
 u32 host_kit = 0x1000;
 
 int smp_overlay_dirty = 0;
+int dlt_state = -1, rvt_state = -1;     /* csrc/xdly/ui.c, csrc/fdn8/ui.c: the send pages' TYPE is ours (1) */
 u32 ins_edits = 0;
+u32 mtr_func_ended = 0;                 /* csrc/meter/meter.c: this FUNC release ended the system meter */
 int smp_values_held(void) { return 0; }
+/* (2026-11-21, fx-icons) the FX icons' neighbours (csrc/msel/msel.c): no icon, INSERT SEL never up here */
+const unsigned char *msel_icon_of(int kind, int type) { (void)kind; (void)type; return 0; }
+const unsigned char *msel_fx_icon(int type) { (void)type; return 0; }
+int isel_up(void) { return 0; }
+void isel_draw(void *c) { (void)c; }
 const char *mu_fxp(int page, int place, int k) { return 0; }
 extern void fxp_defaults(void);
 extern void fxp_set_record(const u8 *f);
@@ -312,7 +383,7 @@ def test_active_means_not_at_the_defaults(tmp_path):
         pytest.skip("no host C compiler")
     (tmp_path / "h.c").write_text(ACTIVE)
     (tmp_path / "pre.h").write_text("extern unsigned int host_kit;\n")
-    r = subprocess.run([cc, "-O1", "-w", "-Dsection(x)=aligned(4)", "-DCHR_KIT=host_kit", "-include", str(tmp_path / "pre.h"),
+    r = subprocess.run([cc, "-O1", "-w", "-Dsection(x)=aligned(4)", _rec_base(), "-DCHR_KIT=host_kit", "-include", str(tmp_path / "pre.h"),
                         "-o", str(tmp_path / "h"), str(tmp_path / "h.c"),
                         str(ROOT / "csrc" / "fxpage" / "fxp.c")], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr[-1500:]

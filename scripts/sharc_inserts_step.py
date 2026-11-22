@@ -204,11 +204,16 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
         if c.get("out") != [[fb(x) for x in bufs[t]] for t in range(16)]:
             exact = False
             first_bad = first_bad if first_bad is not None else b
-    ins = info.get("instructions") or [0]
-    early, late = sum(ins[5:25]) / 20, sum(ins[-20:]) / 20
+    ins = info.get("instructions") or [0, 0]
+    # 2026-11-21 (dist-onset: DIST has no gate fade-in, so the silent slots are marked after block 1 and skip from block
+    # 2, as test_inserts' test_silent_slots_skip_their_insert_bit_identically holds; before, ~250 blocks into silence):
+    # the block where all 14 run is block 1 (block 0 also builds the fresh instances); blocks 5..24 and the last 20
+    # must both be 20,000 under it (measured on v0.67.1 A 9cd23a57: 203,819; 177,934; 183,331)
+    every, early, late = ins[1], sum(ins[5:25]) / 20, sum(ins[-20:]) / 20
     zero_in = [sum(1 for s_ in range(16) if c["route"][s_] == 9 and not any(w & 0xFFFFFFFF for w in c["in"][s_]))
                for c in caps[-3:]]
-    print(f"    quiet: instructions a block {round(early)} (blocks 5..24), {round(late)} (the last 20); slots on track "
+    print(f"    quiet: instructions a block {round(every)} (block 1, every slot runs), {round(early)} (blocks 5..24), "
+          f"{round(late)} (the last 20); slots on track "
           f"10 with all-zero input in the last 3 blocks {zero_in}; first mismatch {first_bad}", flush=True)
     for s_ in (2, 3, 7, 15):                     # what a silent slot's buffer holds: its size, and whether it is the
         c0, c1 = caps[-2], caps[-1]              # last block's output (a buffer no voice rewrites)
@@ -218,8 +223,11 @@ def run(M5, snap, m2mach, m5img, sound, machines) -> dict:
     mapped = sum(1 for s_ in range(16) if caps and caps[-1]["route"][s_] == 9)
     checks["14 slots on one DIST track, one sounding: every buffer as dnfw.inserts.ref's (300 blocks; the silent "
            "slots skip DIST once at rest)"] = exact and mapped == 14
-    checks["14 slots on one DIST track: the block's instructions fall once the silent slots are at rest"] = late < early - 20_000
-    numbers["quiet: instructions a block, blocks 5..24 and the last 20; first mismatch"] = (round(early), round(late), first_bad)
+    checks["14 slots on one DIST track: the block's instructions fall once the silent slots are at rest (blocks 5..24 "
+           "and the last 20, against block 1 where every slot runs)"] = (
+        early < every - 20_000 and late < every - 20_000)
+    numbers["quiet: instructions a block, block 1, blocks 5..24 and the last 20; first mismatch"] = (
+        round(every), round(early), round(late), first_bad)
 
     # 2b. voices moving: the frame's slot map (0xa5a + 2 s) rotating tracks 1, 2, 5, 16 (and 2 twice)
     # over five slots with different inserts; each slot gets the insert of the track it plays

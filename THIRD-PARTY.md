@@ -182,16 +182,12 @@ this project. Those parts remain under the GPL-3.0's terms.
 
 > Copyright (C) 2026 irpina and contributors
 
-## selache's selas (GPL-3.0), a tool the builder page serves
+## selache's selas (GPL-3.0), a build tool
 
 <https://github.com/js216/selache> -- Jakob Kastelic. Its SHARC+ assembler, selas, assembles our
 SHARC sources (`scripts/gen_waverider_sharc.py`); it is a tool, and nothing of it is copied into
-the firmware (an assembler's output is not a work derived from the assembler). The modular
-builder's page (`docs/builder.md`) runs it in the browser as `selas.wasm`: selache at commit
-2b26d3b75c53063575bc5c820fa0d38879335187, unmodified, compiled to WebAssembly through the small
-wrapper in `tools/selas-wasm/` (GPL-3.0, like selas). The page serves that wrapper's source beside
-`selas.wasm` (`selas-wasm-source.zip`) and links selache's source at that commit, as GPL-3.0
-section 6 asks of whoever conveys the binary.
+the firmware (an assembler's output is not a work derived from the assembler). Nothing of selas is
+served by the builder page: the page builds from the already assembled sources.
 
 > selache. Copyright (c) 2026 Jakob Kastelic. Licensed under the GNU General Public License,
 > version 3.

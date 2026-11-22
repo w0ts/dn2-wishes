@@ -37,7 +37,7 @@ sys.path.insert(0, str(HERE.parent / "src"))
 SNAP = str(HERE.parent.parent / "digikit/out/snapshots/dn2-1.11/ui800M-v014.snap")
 KIT, STRIDE = 0x800052A0, 1163
 UI_TRACK = 0x42432A6C
-REC = lambda i: 0x401F83A4 + 60 * i            # noqa: E731
+REC_STOCK = 0x401F83A4                          # stock's table base (pre-biased: record i at + 60 * i)
 ENT = lambda i: 0x4243425C + 68 * i            # noqa: E731
 IDS = (239, 258, 257)                           # STRT, LEN, LOOP
 SLOTS = {239: 26, 258: 45, 257: 44}
@@ -69,10 +69,21 @@ def main() -> int:
              for va, b in differences(stock, open(a.snapshot + ".section_3_MAIN_OS.bin", "rb").read())
              if va + len(b) <= 0x40000400 + len(stock)])
     sec3 = load(read_image(pathlib.Path(a.build))).container.find(3).unpack()
+    # 2026-11-16 (v0.56.2): lfo4 moves the 60-byte table (dnfw.patch.paramtable, 0x468fffcc) and every stock
+    # accessor with it; the stock copy stays in the image unread. The records are read where the build reads them.
+    from dnfw.patch import paramtable
+    rec_base = paramtable.live_base(stock, sec3, 0x40000400)
+    print(f"records at {rec_base:#010x} (the build's accessors; stock's {REC_STOCK:#010x})", flush=True)
+
+    def REC(i):
+        return rec_base + 60 * i
     m.apply(differences(stock, sec3))
     for va, blob in platform.runtime(sec3):
         m.write(va, blob)
-    for pg in range(SMx.MIRROR, SMx.MIRROR + 0x500000, 0x100000):
+    from emulib import attkit
+    attkit.store_kit(m)  # (2026-11-21) a converted kit stored back: converted once
+    for pg in [*range(SMx.MIRROR, SMx.MIRROR + 0x500000, 0x100000),   # (v0.65: and the banks' RAM)
+            *range(SMx.BANK_RAM & ~0xFFFFF, SMx.BANK_RAM + SMx.BANK_RAM_BYTES + 0xFFFFF & ~0xFFFFF, 0x100000)]:
         try:
             m.uc.mem_map(pg, 0x100000, UC_PROT_ALL)
         except UcError:
@@ -146,6 +157,7 @@ def main() -> int:
     base = {i: rec_bytes(i) for i in IDS}
     report["baseline"] = {i: words(i) for i in IDS}
     report["freq"] = fine
+    report["rec_base"] = rec_base
 
     def unswapped(i, allow_fmt=False):
         now = rec_bytes(i)

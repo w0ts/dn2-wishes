@@ -23,15 +23,29 @@ RAM_SLD, RAM_SLEN = 0x50, 0x51          # RAM header byte 0 (kept inside 0..100,
 # same kind of record as SLD/SLEN, kept, copied and cleared with them
 ID_REC, RAM_REC = 202, 0x52
 # 2026-11-12: ENV2's six knobs, lockable (csrc/matrix, docs/matrix.md): ATK DEC SUS REL MODE RSET, ids 203..208, heads
-# 0x53..0x58; their values 0..127 (MODE, RSET 0 / 1)
-ID_E2, RAM_E2, E2_KINDS = 203, 0x53, 6
+# 0x53..0x58; their values 0..127 (MODE, RSET 0 / 1). 2026-11-19 (the User): ENV2's H, its attenuverter (DEP), id 209,
+# head 0x59, 0..127 (-64..+63). 2026-11-20 (the User): ENV2's HOLD (AHD), id 210, head 0x5A, 0..127
+ID_E2, RAM_E2, E2_KINDS = 203, 0x53, 8
+# 2026-11-20 (the User, 16a): the per-track inserts' knobs, lockable (csrc/inserts, docs/inserts.md): K1..K6 and MIX, ids
+# 211..217, heads 0x5B..0x61; a step's u16 holds INSERT 1's value in its low byte and INSERT 2's in its high byte
+# (0..127, 0xff none for that slot; 0xffff none)
+ID_INS, RAM_INS, INS_KINDS = 211, 0x5B, 7
+assert RAM_INS == RAM_E2 + E2_KINDS and RAM_INS + INS_KINDS - 1 <= 100 and ID_INS == ID_E2 + E2_KINDS
 RAM_TAG = 0x20                          # RAM header byte 1: track | RAM_TAG (stock's track loops skip it)
-EXT_OFFSET = 1600                       # in a lock list (20 + 202 x 8 = 1636 bytes): our 28 bytes (v0.41: 16, ENV2 2026-11-12)
+EXT_OFFSET = 1584                       # in a lock list (20 + 202 x 8 = 1636 bytes; stock writes at most 828): our 48 bytes
+                                        # (v0.41: 16, ENV2 2026-11-12, HOLD 2026-11-20; the inserts' 7 + a pad 2026-11-20,
+                                        # from 1600)
 
 # SLEN: the slide's length, in 1/24 of a track step (the track's own scale followed).
 SLEN_UNITS = (3, 6, 12, 18, 24, 36, 48, 72, 96, 144, 192, 288, 384, 768, 1536)
-SLEN_TEXT = ("1/8", "1/4", "1/2", "3/4", "1", "1.5", "2", "3", "4", "6", "8", "12", "16", "32", "64")
-SLEN_DEFAULT = 4                        # 1 step: a slide trig with no SLEN lock
+SLEN_TEXT = ("1/8", "1/4", "1/2", "3/4", "1", "1.5", "2", "3", "4", "6", "8", "12", "16", "32", "64", "NXT")
+# v0.66 (the owner, 2026-11-20, the Analog Four's rule: "the slide is completed when the next
+# trig is reached"): NXT, the slide lasts until the track's next trig (note or lock trig; the
+# track's length wrapped; no other trig: the whole length). It is the value with no SLEN lock,
+# and the knob's first choice; 0..14 keep their lengths (a project's explicit SLENs unchanged).
+SLEN_NXT = len(SLEN_UNITS)              # 15: stored as a lock value too (old firmware: 1 step)
+SLEN_DEFAULT = SLEN_NXT                 # a slide trig with no SLEN lock (v0.41..v0.65: 1 step)
+NXT_MAX_STEPS = 128                     # the longest NXT slide: a track's whole length
 
 # Hooked stock sites (Digitone II 1.11), each with the bytes it replaces.
 PRE_SITE, PRE_STOCK = 0x40026BAC, "284220280040"            # a note's voice: movea.l %d2,%a4 ; move.l 64(%a0),%d0
@@ -177,8 +191,9 @@ def c_header(stock: bytes) -> str:
             f"#define SL_RAM_SLD {RAM_SLD}\n#define SL_RAM_SLEN {RAM_SLEN}\n#define SL_TAG {RAM_TAG}\n"
             f"#define SL_ID_REC {ID_REC}\n#define SL_RAM_REC {RAM_REC}\n"
             f"#define SL_ID_E2 {ID_E2}\n#define SL_RAM_E2 {RAM_E2}\n#define SL_E2N {E2_KINDS}\n"
+            f"#define SL_ID_INS {ID_INS}\n#define SL_RAM_INS {RAM_INS}\n#define SL_INSN {INS_KINDS}\n"
             f"#define SL_EXT {EXT_OFFSET}\n#define SL_NLEN {len(SLEN_UNITS)}\n"
-            f"#define SL_LEN_DEFAULT {SLEN_DEFAULT}\n"
+            f"#define SL_LEN_DEFAULT {SLEN_DEFAULT}\n#define SL_NXT {SLEN_NXT}\n"
             f"static const unsigned int sl_shared[4] = {words(shared)};\n"
             f"static const unsigned int sl_machine[4][4] = {{\n {rows}}};\n"
             f"static const unsigned short sl_units[{len(SLEN_UNITS)}] = {{{units}}};\n"

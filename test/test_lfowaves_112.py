@@ -2,7 +2,7 @@
 
 lfowaves was ported with scripts/port_os112.py (its sources and generator chain) and regenerated against stock 1.12
 (scripts/gen_lfo_waves_code.py); the shipped build applies it after waverider (dnfw.mods.SHIPPED). lfo4 waits:
-our code's side of it is behind DN2_LFO4, off by default."""
+our code's side of it is behind DN2_LFO4, on by default since v0.56.2 (DN2_LFO4=0 turns it off)."""
 
 from __future__ import annotations
 
@@ -51,7 +51,7 @@ def test_its_hand_written_addresses_are_1_12s():
 
 def test_the_shipped_build_applies_lfowaves_after_waverider():
     from dnfw.mods import shipped
-    assert shipped({}) == shipped({"DN2_LFO4": "0"}) == ("waverider", "lfowaves")
+    assert shipped({"DN2_LFO4": "0"}) == shipped({"DN2_LFO4": ""}) == ("waverider", "lfowaves", "safemode")
     patcher = (ROOT / "tools/patcher/dn2patch.py").read_text()
     assert "for mid in SHIPPED" in patcher and '"--mod", "waverider", "-o"' not in patcher
     gate = (ROOT / "scripts/ship_gate.py").read_text()
@@ -59,7 +59,9 @@ def test_the_shipped_build_applies_lfowaves_after_waverider():
     assert "for mid in SHIPPED" in (ROOT / "scripts/web_bundle.py").read_text()
 
 
-def test_dn2_lfo4_is_off_unless_asked(monkeypatch):
+def test_dn2_lfo4_is_off_unless_turned_on(monkeypatch):
+    # 2026-11-16 (v0.56.2, the User: "now"): on by default; 2026-11-19 (the User: "lfo4 i think we can drop behind a
+    # build flag"): off by default, DN2_LFO4=1 turns it on
     from dnfw.waverider import pages
     monkeypatch.delenv("DN2_LFO4", raising=False)
     assert not pages.lfo4_on()
@@ -73,6 +75,7 @@ def test_dn2_lfo4_is_off_unless_asked(monkeypatch):
 
 def test_dn2_lfo4_on_adds_lfo4_and_its_gate_step():
     from dnfw.mods import shipped
-    assert shipped({"DN2_LFO4": "1"}) == ("waverider", "lfowaves", "lfo4")
+    assert shipped({"DN2_LFO4": "1"}) == ("waverider", "lfowaves", "lfo4", "safemode")   # (safemode last, 2026-11-21)
+    assert shipped({}) == ("waverider", "lfowaves", "safemode")     # (off by default since 2026-11-19)
     gate = (ROOT / "scripts/ship_gate.py").read_text()
     assert '("lfo4", "LFO4: modulating' in gate and "scripts/emu_lfo4.py" in gate

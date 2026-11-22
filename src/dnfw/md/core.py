@@ -46,6 +46,12 @@ VW = dict(pos=228, mach=229, live=230, inp=231, trg=232, last=233, want=234, dir
           trk=227)                       # the voice's own (trk, 2026-11-14: the track its last note played; 227, after
                                          # the stream and before pos, is used by no machine: dnfw.mnm.core has 246..254)
 INP0 = 236                               # the eight 14-bit inputs (ints), 236..243
+# 2026-11-20 (live knobs, scratch/mod-live-design.md "D (sound)"): VW['live'] (230, unused until then) is set by
+# `voice.advance` every block it runs: 0 when the voice re-reads its note-start knobs this block (a trig, or its turn:
+# one voice slot a DN2 block, each slot every 16 blocks, ~94 Hz), nonzero otherwise. The turn: block_count.asm's
+# running count (BLOCKS_WORD, every DN2 block) minus the slot's words' address >> 10 (the slot + a constant), & 15.
+BLOCKS_WORD = 0x2DE118                   # csrc/waverider/sharc/block_count.asm: blocks, cumulative
+LIVE_EVERY = 16                          # blocks between a voice's re-reads
 MD_WORDS = 256
 MD_STRIDE = 4 * MD_WORDS                 # 1 KB a slot
 
@@ -59,6 +65,9 @@ def _s24(v: int) -> int:
 
 PI_DELAY_STRIDE = 8192                   # v0.24: a slot's P-I delay lines, 2048 words (floats)
 PI_DELAY_WORDS = PI_DELAY_STRIDE // 4
+PI_LINES_STRIDE = 6144                   # 2026-11-16: the lines alone (words 0..1535: P-I's three 512-word lines,
+                                         # PI-RC's four 288-word lines and its noise words to ~1442, VO-6's 64-float
+                                         # ring), when the block scratch (1536..) is in L1 (Layout.pi_scr)
 
 
 # 2026-11-14 (opt-md; main as the memory arbiter): P-I tables read every sample (PI-RS's strike, two words) or
@@ -72,9 +81,15 @@ class Layout:
     P-I machines' delay lines, PI_DELAY_STRIDE a slot (default 1 MB past the state)."""
 
     def __init__(self, state: int, scratch: int, tables: int, delay: int | None = None,
-                 shipped: int | None = None, ready: int | None = None):
+                 shipped: int | None = None, ready: int | None = None, delay_stride: int = PI_DELAY_STRIDE):
         self.state, self.tables = state, tables
         self.delay = state + 0x100000 if delay is None else delay
+        # 2026-11-16 (the User's option A: the P-I delay lines in L1 block 2): a slot's delay area, DELAY_STRIDE
+        # bytes. PI_DELAY_STRIDE (8 KB) holds the lines (words 0..1535) and the block scratch (1536..); with the
+        # scratch in L1 (pi_scr set: every PERC layout) the lines alone need PI_LINES_STRIDE (6 KB)
+        assert delay_stride in (PI_DELAY_STRIDE, PI_LINES_STRIDE), delay_stride
+        self.delay_stride = delay_stride
+        self.delay_words = delay_stride // 4
         self.T = {name: tables + off for name, (off, _n) in TABLE_LAYOUT.items()}
         self.T_src: dict[str, int] = {}        # tables_in_l2: each moved table's decoded place
         # v0.26: what ships (the host's pitch table, zpack) arrives over the fast link at
@@ -108,11 +123,17 @@ SC_WORDS = ("n1", "n2", "n3", "a", "b", "c", "d", "e", "f", "g", "h", "k", "fill
 
 
 def delay_base(p: Prog, L: Layout, d: int) -> None:
-    """Rd = this slot's P-I delay lines (L.delay + PI_DELAY_STRIDE x the slot). Clobbers R12."""
+    """Rd = this slot's P-I delay lines (L.delay + L.delay_stride x the slot). Clobbers R12."""
     p.ld(d, L.C["mdb"])
     p.iconst(12, -L.state)
     p.iop(d, 12, "+", d)                       # slot x 1 KB
-    p.lsh(d, d, 3)                             # x 8 KB
+    if L.delay_stride == PI_DELAY_STRIDE:
+        p.lsh(d, d, 3)                         # x 8 KB
+    else:                                      # 2026-11-16: x 6 KB (the lines alone; their scratch is in L1)
+        assert L.pi_scr is not None, "6 KB delay areas need the block scratch in L1 (Layout.pi_scr)"
+        p.lsh(12, d, 1)                        # slot x 2 KB
+        p.lsh(d, d, 2)                         # slot x 4 KB
+        p.iop(d, 12, "+", d)
     p.iconst(12, L.delay)
     p.iop(d, 12, "+", d)
 
@@ -136,6 +157,32 @@ def ss(p: Prog, k: int, r: int) -> None:
     p.sti(S0 + k, 3, r)
 
 
+ZERO_LOOP_MIN = 16                      # 2026-11-20: a run of this many zero words or more is a loop
+
+
+def zero_words(p: Prog, k0: int, n: int) -> None:
+    """state words k0 .. k0 + n - 1 = 0 (code only an event runs: a machine's init). N >= ZERO_LOOP_MIN: by a loop
+    (2026-11-12 plaits-opt's; 2026-11-20, CLAP and the cymbals' room: every init's long run, n stores in a row 4 B
+    each), which leaves R0 = 0 and clobbers R8, R12, I1; else n stores of R0 = 0."""
+    if n < ZERO_LOOP_MIN:
+        p.iconst(0, 0)
+        for k in range(k0, k0 + n):
+            ss(p, k, 0)
+        return
+    zero_loop(p, k0, n)
+
+
+def zero_loop(p: Prog, k0: int, n: int) -> None:
+    """state words k0 .. k0 + n - 1 = 0 by a loop (dnfw.engines.plaits.plk zero_state's). Leaves R0 = 0; clobbers R8,
+    R12, I1."""
+    p.iconst(8, p.ioff(3, 4 * (S0 + k0)))
+    p.geti(12, 3)
+    p.iop(8, 12, "+", 8)
+    p.seti(1, 8)
+    p.iconst(0, 0)
+    p.loop_r(12, n, lambda: p.stpost(1, 0))
+
+
 def vw(p: Prog, d: int, name: str) -> None:
     p.ldi(d, VW[name], 3)
 
@@ -151,7 +198,9 @@ def inp(p: Prog, d: int, k: int) -> None:
 
 # -- arithmetic --------------------------------------------------------------------------
 def sat(p: Prog, x: int, t: int = 12) -> None:
-    """Fx = the 56300 limiter: clamp to [-1, TOP]. Clobbers Rt."""
+    """Fx = the 56300 limiter: clamp to [-1, TOP]. Clobbers Rt. (2026-11-20, clip-inner: a word the machine's output
+    holds at either end lights CLIP: dnfw.md.voice._resample reads the stream; a flag at each of the ~120 limiter
+    sites did not fit the DSP upload)"""
     p.fconst(t, TOP)
     p.fop(x, x, "MIN", t)
     p.fconst(t, -1.0)

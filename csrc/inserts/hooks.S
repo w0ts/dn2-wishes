@@ -35,3 +35,77 @@ ins_pj_write_hook:
         move.l  %d0, (%a0,%d1.l*4)
         addq.l  #1, ins_wr_head
         jmp     0x40040198
+
+| ---- the inserts' live words (2026-11-21, the User's CPU: "assembly for the most host CPU code") ----------------
+| ins_live4(c, o, zero, f0, rmask, v): ins.c live_words for the four records of one group, as the C did it (gcc made
+| clamp7 a call a routed knob, and its index arithmetic mulsl): v[2k], v[2k + 1] for record k (0..3) from its 7 cells
+| c[14 k ..] (u16: SET << 8), the routes' offsets o[14 k ..] (s16), zero[k] (MIX's OFF: both words 0), f0[k] (field 0)
+| and rmask[k] (bit i: knob i routed). A knob routed: clamp7(c + o) (<= 0: 0, >= 0x7f00: 0x7f, else >> 8); not
+| routed: c >> 8. Word a = f0 | MIX << 7 | K1 << 14 | K2 << 21, word b = K3 | K4 << 7 | K5 << 14 | K6 << 21.
+| C ABI: d0, d1, a0, a1 scratch; the rest kept.
+        .macro  LIVE i
+        mvz.w   2*\i(%a0), %d0
+        btst    #\i, %d3
+        beq.s   1f
+        mvs.w   2*\i(%a1), %d1
+        add.l   %d1, %d0
+        ble.s   2f
+        cmpi.l  #0x7F00, %d0
+        blt.s   1f
+        moveq   #0x7F, %d0
+        bra.s   3f
+2:      moveq   #0, %d0
+        bra.s   3f
+1:      lsr.l   #8, %d0
+3:
+        .endm
+        .globl  ins_live4
+ins_live4:
+        lea     -28(%sp), %sp
+        movem.l %d2-%d6/%a2-%a3, (%sp)
+        movem.l 32(%sp), %a0-%a1                | c, o
+        movea.l 52(%sp), %a2                    | v
+        movea.l 40(%sp), %a3                    | zero
+        moveq   #14, %d5
+        moveq   #21, %d6
+        moveq   #0, %d2                         | k
+4:      tst.b   (%a3,%d2.l)
+        beq.s   5f
+        clr.l   (%a2)+                          | MIX's OFF: every field 0
+        clr.l   (%a2)+
+        bra.w   6f
+5:      movea.l 48(%sp), %a3                    | rmask[k]
+        mvz.b   (%a3,%d2.l), %d3
+        movea.l 44(%sp), %a3                    | f0[k]
+        mvz.b   (%a3,%d2.l), %d4
+        movea.l 40(%sp), %a3
+        LIVE    6
+        lsl.l   #7, %d0
+        or.l    %d0, %d4
+        LIVE    0
+        lsl.l   %d5, %d0
+        or.l    %d0, %d4
+        LIVE    1
+        lsl.l   %d6, %d0
+        or.l    %d0, %d4
+        move.l  %d4, (%a2)+
+        LIVE    2
+        move.l  %d0, %d4
+        LIVE    3
+        lsl.l   #7, %d0
+        or.l    %d0, %d4
+        LIVE    4
+        lsl.l   %d5, %d0
+        or.l    %d0, %d4
+        LIVE    5
+        lsl.l   %d6, %d0
+        or.l    %d0, %d4
+        move.l  %d4, (%a2)+
+6:      lea     14(%a0), %a0
+        lea     14(%a1), %a1
+        addq.l  #1, %d2
+        cmpi.l  #4, %d2
+        bne.w   4b
+        movem.l (%sp), %d2-%d6/%a2-%a3
+        lea     28(%sp), %sp
+        rts

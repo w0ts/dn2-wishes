@@ -25,7 +25,7 @@ def _render(p2, wdth, blocks=6):
     h = PL.Harness()
     h.words[h.L.md.C["fill"]] = MDK.Z_N
     for k, v in enumerate(A2.table_words()):
-        h.words[h.L.md.mnm.scratch + A2.TABLES_OFF + 4 * k] = bits(v)
+        h.words[A2.tables_at() + 4 * k] = bits(v)
     h.set_mnm(TYPE, list(A2.DEFAULTS))
     for (_r, slot, lo, top), x in zip(PM.FX_PARAMS, p2):
         h._half(PM.frame_offset(slot), PL.knob_word(x, top, lo))

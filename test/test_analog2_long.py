@@ -1,4 +1,4 @@
-"""ANALOG2 (machine 22) held for 3 s (4,500 blocks) in the model (the program the SHARC runs bit for bit):
+"""ANALOG2 (machine 51; 22 until 2026-11-18) held for 3 s (4,500 blocks) in the model (the program the SHARC runs bit for bit):
 finite and audible to the end, at the defaults and on each of its 25 filter choices at three notes
 (2026-11-10: the User: ANALOG 2 works badly on the unit; the runner's steps run tens of blocks)."""
 
@@ -23,7 +23,7 @@ def _held(blocks, note=60.0, flt=0):
     h = PL.Harness()
     h.words[h.L.md.C["fill"]] = MDK.Z_N
     for k, v in enumerate(A2.table_words()):             # the coordinator loads the filters' mix tables
-        h.words[h.L.md.mnm.scratch + A2.TABLES_OFF + 4 * k] = bits(v)
+        h.words[A2.tables_at() + 4 * k] = bits(v)
     h.set_mnm(TYPE, list(A2.DEFAULTS))
     p2 = list(A2.DEFAULTS2)
     p2[6] = flt

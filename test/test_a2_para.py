@@ -1,18 +1,21 @@
-"""ANALOG 2's PARA (dnfw.engines.analog2.para) in the model (the program the SHARC runs): several voice slots in one
-memory, run as the DSP runs them each block (mnm_ages, the PARA pass, each slot newest first).
+"""PARA as one voice (dnfw.engines.analog2.para, 2026-11-16, the User: "one bigger voice") in the model (the program
+the SHARC runs): the chord on ONE slot, its joined notes in the ColdFire's row (csrc/para/one.c, here written into the
+rows, since 2026-11-17 in the voice's own frame words as csrc/para/one.c pv_out writes them), each rendered from a pool block (a shadow) inside the leader's voice.
 
-- A chord is its members' post-drive halves (oscillators, noise, drive per note: the User's "per note, before the
-  sum"), added at full level to the leader's after its drive, one member at a time in slot order, then the leader's
-  filter and knee: bit for bit against that sum made from today's own pieces (the engine with its filter and knee
-  taken out on the members, their halves added to an unchanged leader's).
-- Members and dropped notes play exact silence; PARA off, and a chord of one, play as today, bit for bit.
-- A member the frame guard refused this block is left out of the leader's sum (its words are an earlier pass).
-- The chords' rules: a note joins its track's chord while one of the chord's notes is held, else starts one; the
-  oldest N play (N the PARA value + 1), the rest are dropped; a chord releasing keeps its leader while a new chord
-  starts on the track; a leader's slot taken by another note hands the chord to its oldest member.
+- A chord is its notes' post-drive halves (oscillators, noise, drive per note), added at full level to the leader's
+  after its drive, then the leader's filter and knee: bit for bit against that sum made from today's own pieces (the
+  engine with its shared stage taken out on each joined note, run alone at the leader's pitch plus its offset, its
+  halves added to an unchanged leader's).
+- PARA off, and a chord of one, play as today, bit for bit; no shadow, no role.
+- A dropped place fades out over FADE_HALVES halves and its block is freed; a new note on the slot (a new chord)
+  frees the old chord's blocks and waits for a new row (the row still showing the old chord is not taken again).
+- More places than the pool holds: the rest are left out (LOST), nothing else changes.
+- The first block after a DSP load zeroes the rows (DDR keeps an earlier boot's).
 """
 
 from __future__ import annotations
+
+import pathlib
 
 import pytest
 
@@ -26,6 +29,8 @@ from dnfw.perc import live as PL
 from dnfw.perc import machines as PM
 from dnfw.perc import program as PP
 from dnfw.perc.dsl import Prog, bits, flt
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 # the engines PARA plays (para.ENGINES), each with its per-note step (the last before the shared stage) and its shared
 # stage's steps (taken out on a member in the reference): ANALOG 2 drive | filter, out; JUNO DCO | ladder, post
@@ -50,7 +55,7 @@ def setup(slots, para, knobs=None, page2=None, track=0, engine="ANALOG2"):
     h = PL.Harness()
     h.words[h.L.md.C["fill"]] = MDK.Z_N
     for k, v in enumerate(A2.table_words()):
-        h.words[h.L.md.mnm.scratch + A2.TABLES_OFF + 4 * k] = bits(v)
+        h.words[A2.tables_at() + 4 * k] = bits(v)
     for u in slots:
         h.t = u
         mod = ENGINE[engine][0]
@@ -63,9 +68,11 @@ def setup(slots, para, knobs=None, page2=None, track=0, engine="ANALOG2"):
     return h
 
 
-def block(h, slots, notes, on=0, off=0, skip=()):
+def block(h, slots, notes, on=0, off=0, skip=(), closed=()):
     """one block: notes[u] in slot u's cell, ON / OFF the note-on and note-off masks -> ({u: 32 floats}, roles).
-    SKIP: slots the frame guard refuses this block (not run; their buffer stays zero, as the guard's)"""
+    SKIP: slots the frame guard refuses this block (not run; their buffer stays zero, as the guard's). CLOSED: slots
+    whose DN2 AMP (the track chain's, after PERC) has closed: their buffer, which the next block's quiet test reads as
+    "the block the chain left", is silence (2026-11-18)"""
     L = h.L
     for u in slots:
         h.mem.put(PP.NOTE_CELLS + 4 * u, bits(notes[u]))
@@ -85,7 +92,11 @@ def block(h, slots, notes, on=0, off=0, skip=()):
         if u in slots and u not in skip:
             PP.run_voice(L, None, u, mem=h.mem)
     roles = {u: h.mem.get(PARA.ROLE + 4 * u) for u in slots}
-    return {u: [h.mem.get(BUFS + 0x100 * u + 4 * k) for k in range(32)] for u in slots}, roles
+    out = {u: [h.mem.get(BUFS + 0x100 * u + 4 * k) for k in range(32)] for u in slots}
+    for u in closed:
+        for k in range(32):
+            h.mem.put(BUFS + 0x100 * u + 4 * k, bits(0.0))
+    return out, roles
 
 
 def role_of(r):
@@ -155,239 +166,190 @@ def reference(notes, lead, members, blocks, engine="ANALOG2"):
     return out
 
 
+
+def write_row(h, s, places, seq=1, live=True, lead_note=60):
+    """slot S's row (one.h): PLACES {k: (offset, sounding, place seq)} (k 0 the leader's own note)"""
+    hw = [0] * (2 * PARA.row_words())
+    hw[0] = (0x8000 if live else 0) | (seq << 8) | (lead_note & 0x7F)
+    for k, (off, sounding, q) in places.items():
+        hw[1 + k] = (off & 0xFF) | 0x100 | (PARA.P_SOUND if sounding else 0) | PARA.P_USED | (q << 12)
+    t = h.t                                  # (2026-11-17) in the voice's own frame words, as csrc/para/one.c pv_out
+    h.t = s
+    for i, x in enumerate(hw):
+        h._half(PM.frame_offset(PARA.ROW_SLOT + i), x)
+    h.t = t
+
+
+def ready(h):
+    """the DSP has run since its load (its first block zeroed the rows, the pool free): the ColdFire's rows come after"""
+    h.mem.put(PARA.INIT, 1)
+    h.mem.put(PARA.FREE, (1 << PARA.POOL_N) - 1)
+
+
+CHORD = {0: (0, True, 1), 1: (4, True, 1), 2: (7, True, 1), 3: (11, True, 1)}   # 60: +4 +7 +11
+LEAD = 3
+
+
+def chord_run(engine, blocks, rows=None, para=3, extra=()):
+    """slot LEAD on ENGINE, note 60 on at block 0; ROWS {block: places} written before that block's pass ->
+    [({u: 32 words}, roles)]"""
+    slots = [LEAD, *extra]
+    h = setup(slots, para=para, engine=engine)
+    ready(h)
+    out = []
+    for b in range(blocks):
+        if rows and b in rows:
+            write_row(h, LEAD, rows[b])
+        out.append(block(h, slots, {u: 60.0 for u in slots}, on=(1 << LEAD) if b == 0 else 0))
+    return h, out
+
+
 @pytest.mark.parametrize("engine", ENGINES)
-def test_a_chord_is_its_members_post_drive_halves_under_the_leaders_filter(engine):
-    slots = [0, 1, 2, 3]
-    h = setup(slots, para=3, engine=engine)
-    outs = [block(h, slots, CHORD4, on=0xF if b == 0 else 0) for b in range(24)]
-    assert {u: role_of(r) for u, r in outs[0][1].items()} == {0: PARA.MEMBER, 1: PARA.MEMBER, 2: PARA.MEMBER,
-                                                               3: PARA.LEADER}
-    assert outs[0][1][3] & 0xFFFF == 0b0111
-    for o, _r in outs:
-        assert all(o[u] == [0] * 32 for u in (0, 1, 2))                   # members: exact zeros
-    want = reference(CHORD4, 3, [0, 1, 2], len(outs), engine)
-    assert [o[3] for o, _r in outs] == want
-    assert max(abs(flt(w)) for o, _r in outs for w in o[3]) > 0.5
+def test_a_chord_on_one_slot_is_its_notes_halves_under_the_leaders_filter(engine):
+    h, out = chord_run(engine, 24, rows={0: CHORD})
+    assert role_of(out[0][1][LEAD]) == PARA.LEADER
+    want = reference({LEAD: 60.0, 10: 64.0, 11: 67.0, 12: 71.0}, LEAD, [10, 11, 12], len(out), engine)
+    assert [o[LEAD] for o, _r in out] == want
+    assert max(abs(flt(w)) for o, _r in out for w in o[LEAD]) > 0.5
+    assert h.mem.get(PARA.FREE) == (1 << PARA.POOL_N) - 1 - 0b111 and h.mem.get(PARA.LOST) == 0
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize("late", [1, 3])
+def test_the_chords_row_after_the_note_on_still_makes_the_chord(engine, late):
+    # 2026-11-17 (v0.57.1 on the unit: only the chord's lowest note sounded): the TDM link brought the chord's row a
+    # period or more after the leader's note-on frame, so at the note-on the slot's row showed no chord, its chord word
+    # was zeroed and it was never looked at again. The row now rides in the voice's own frame (the same frame as the
+    # note-on); should it ever come later, the slot stays watched until it does
+    h, out = chord_run(engine, late + 8, rows={late: CHORD})
+    assert role_of(out[late][1][LEAD]) == PARA.LEADER
+    assert h.mem.get(PARA.FREE) == (1 << PARA.POOL_N) - 1 - 0b111 and h.mem.get(PARA.LOST) == 0
+
+
+def test_the_row_is_read_from_the_voices_own_frame_words():
+    # 2026-11-17 (the User: one voice, its pitches with it): the pass copies a looked-at slot's frame words ROW_SLOT..+11
+    # into its row; none of our machines reads those frame slots (FM TONE's)
+    used = {PM.TYPE_REC[1], PM.VEL_SLOT} | {x[1] for x in PM.PARAMS + PM.FX_PARAMS + PM.P3_RECS}
+    assert not used & set(range(PARA.ROW_SLOT, PARA.ROW_SLOT + 2 * PARA.row_words()))
+    one = (ROOT / "csrc/para/one.c").read_text()
+    assert "#define PV_ROW_SLOT 50u" in one and PARA.ROW_SLOT == 50
+    assert "pv_out(OUT);" in (ROOT / "csrc/slides/slide.c").read_text()
+    assert "pv_row" not in (ROOT / "csrc/sampler/link.c").read_text()
 
 
 @pytest.mark.parametrize("engine", ENGINES)
 def test_para_off_and_a_chord_of_one_play_as_today(engine):
-    slots = [0, 1, 2]
-    notes = {0: 48.0, 1: 55.0, 2: 62.0}
-    off = setup(slots, para=0, engine=engine)
-    alone = {u: setup(slots, para=0, engine=engine) for u in slots}
-    for b in range(16):
-        o, roles = block(off, slots, notes, on=0b111 if b == 0 else 0)
-        assert not any(roles.values())
-        for u in slots:                                                     # each slot as if it played alone
-            a, _ = block(alone[u], slots, notes, on=(1 << u) if b == 0 else 0)
-            assert o[u] == a[u]
-    one_on, one_off = setup([2], para=3, engine=engine), setup([2], para=0, engine=engine)
-    for b in range(16):
-        x, r = block(one_on, [2], notes, on=0b100 if b == 0 else 0)
-        y, _ = block(one_off, [2], notes, on=0b100 if b == 0 else 0)
-        assert x == y and r[2] == 0                                         # a chord of one: no role, today's
-
-
-def _fade(r):
-    return (r >> PARA.FADE_SHIFT) & 7
-
-
-NOTES10 = {u: 48.0 + 3 * u for u in range(10)}
-NINTH, TENTH = 24, 60                     # the blocks the 9th and 10th notes come
-
-
-def _full_chord(engine, blocks=100, at=None):
-    """AT: slot -> the block its note comes (held). Default: slots 0..7 a chord of 8 in block 0 (slot 7 leads), the 9th
-    note on slot 8 at NINTH, the 10th on slot 9 at TENTH"""
-    at = at or ({u: 0 for u in range(8)} | {8: NINTH, 9: TENTH})
-    slots = list(range(10))
-    h = setup(slots, para=PARA.ON_VALUE, engine=engine)
-    out = []
-    for b in range(blocks):
-        on = sum(1 << u for u, t in at.items() if t == b)
-        notes = {u: NOTES10[u] for u in slots}
-        out.append(block(h, [u for u, t in at.items() if b >= t], notes, on=on))
-    return out
-
-
-def _steps(out, lead, b0, b1):
-    """the largest sample-to-sample step of slot LEAD's output over blocks B0..B1"""
-    x = [flt(w) for o, _r in out[b0:b1] for w in o[lead]]
-    return max(abs(x[k] - x[k - 1]) for k in range(1, len(x)))
+    _h, on = chord_run(engine, 16, rows={0: {0: (0, True, 1)}})
+    _h, off = chord_run(engine, 16, para=0)
+    _h, bare = chord_run(engine, 16)
+    for (x, rx), (y, ry), (z, _rz) in zip(on, off, bare):
+        assert x[LEAD] == y[LEAD] == z[LEAD] and role_of(rx[LEAD]) == 0 and role_of(ry[LEAD]) == 0
 
 
 @pytest.mark.parametrize("engine", ENGINES)
-def test_a_full_chord_drops_its_oldest_note_with_a_fade(engine):
-    """2026-11-15 (the User: "Up to 8", "Drop the oldest"): a chord plays PITCHES (8) notes; a 9th note plays and the
-    chord's oldest note (its leader's own) fades out over FADE_HALVES halves, then is silent, the leader still leading
-    (its filter and envelope play the chord); a 10th: the oldest member fades, then is DROPPED. The members are silent
-    throughout; the leader's output has no step larger than the 8-note chord's own"""
-    assert PARA.PITCHES == 8
-    out = _full_chord(engine)
-    r = out[NINTH - 1][1]
-    assert role_of(r[7]) == PARA.LEADER and r[7] & 0xFFFF == 0x7F and _fade(r[7]) == 0
-    assert all(role_of(r[u]) == PARA.MEMBER and _fade(r[u]) == 0 for u in range(7))
-    r = out[NINTH][1]
-    assert role_of(r[8]) == PARA.MEMBER and role_of(r[7]) == PARA.LEADER
-    lead_fades = [_fade(o[1][7]) for o in out[NINTH:TENTH]]
-    assert lead_fades[-1] == PARA.FADE_OUT and all(0 < x <= PARA.FADE_HALVES or x == PARA.FADE_OUT for x in lead_fades)
-    assert lead_fades.index(PARA.FADE_OUT) <= 6                      # out within a few blocks (6 halves)
-    r = out[-1][1]
-    assert role_of(r[6]) == PARA.DROPPED and _fade(r[6]) == PARA.FADE_OUT          # the oldest member, out
-    assert all(role_of(r[u]) == PARA.MEMBER and _fade(r[u]) == 0 for u in (0, 1, 2, 3, 4, 5, 8, 9))
-    assert role_of(r[7]) == PARA.LEADER and r[7] & 0xFFFF == 0x33F       # 0..5, 8, 9
-    for o, _r in out:
-        assert all(o.get(u, [0] * 32) == [0] * 32 for u in range(10) if u != 7)
-    lead = [flt(w) for o, _r in out for w in o[7]]
-    assert min(max(abs(x) for x in lead[32 * b:32 * b + 32]) for b in range(4, len(out))) > 0.05
-    # no click: around each note joining the full chord (its oldest fading out: blocks e - 1 .. e + 8), no step larger
-    # than the chord's own waveform gives, before and after (a saw chord's edges are steep: JUNO's reach ~1.0 a sample)
-    for e, before, after in ((NINTH, (8, NINTH - 1), (NINTH + 9, TENTH - 1)),
-                             (TENTH, (NINTH + 9, TENTH - 1), (TENTH + 9, len(out)))):
-        own = max(_steps(out, 7, *before), _steps(out, 7, *after))
-        around = _steps(out, 7, e - 1, e + 8)
-        assert around <= 1.2 * own + 0.05, (e, around, own)
+def test_a_dropped_place_fades_out_and_frees_its_block(engine):
+    dropped = dict(CHORD)
+    dropped[1] = (4, False, 1)
+    h, out = chord_run(engine, 30, rows={0: CHORD, 12: dropped})
+    assert h.mem.get(PARA.FREE) == (1 << PARA.POOL_N) - 1 - 0b110        # block 0 (place 1) back
+    x = [flt(w) for o, _r in out[8:20] for w in o[LEAD]]
+    steady = [flt(w) for o, _r in out[4:12] for w in o[LEAD]]
+    jump = max(abs(x[k] - x[k - 1]) for k in range(1, len(x)))
+    assert jump <= 1.5 * max(abs(steady[k] - steady[k - 1]) for k in range(1, len(steady)))
 
 
 @pytest.mark.parametrize("engine", ENGINES)
-@pytest.mark.parametrize("old", [1, 2])
-def test_an_older_projects_para_value_plays_as_on(engine, old):
-    """an older project's PARA 2 or 3 pitches (stored 1, 2) plays as ON (stored PARA.ON_VALUE), every block"""
-    slots = [0, 1, 2, 3, 4]
-    notes = {0: 48.0, 1: 55.0, 2: 62.0, 3: 65.0, 4: 69.0}
-    runs = {}
-    for v in (old, PARA.ON_VALUE):
-        h = setup(slots, para=v, engine=engine)
-        runs[v] = [block(h, slots, notes, on=0b11111 if b == 0 else 0) for b in range(12)]
-    assert runs[old] == runs[PARA.ON_VALUE]
+def test_the_leaders_own_note_dropped_fades_and_the_chord_plays_on(engine):
+    own_out = dict(CHORD)
+    own_out[0] = (0, False, 1)
+    h, out = chord_run(engine, 30, rows={0: CHORD, 12: own_out})
+    r = out[-1][1][LEAD]
+    assert role_of(r) == PARA.LEADER and (r >> PARA.FADE_SHIFT) & 7 == PARA.FADE_OUT
+    assert max(abs(flt(w)) for w in out[-1][0][LEAD]) > 0.05
 
 
 @pytest.mark.parametrize("engine", ENGINES)
-def test_a_releasing_chord_keeps_its_leader_while_a_new_one_starts(engine):
-    slots = [0, 1, 2]
-    notes = {0: 48.0, 1: 55.0, 2: 62.0}
+def test_a_new_note_on_the_slot_waits_for_a_new_chord(engine):
+    slots = [LEAD]
     h = setup(slots, para=3, engine=engine)
+    ready(h)
+    write_row(h, LEAD, CHORD)
+    for b in range(12):
+        block(h, slots, {LEAD: 60.0}, on=(1 << LEAD) if b == 0 else 0)
+    o, r = block(h, slots, {LEAD: 62.0}, on=1 << LEAD)                  # a new note: the row still the old chord
+    for b in range(10):                                                   # its shadows fade out and go
+        o, r = block(h, slots, {LEAD: 62.0})
+    assert h.mem.get(PARA.FREE) == (1 << PARA.POOL_N) - 1 and role_of(r[LEAD]) == 0
+    write_row(h, LEAD, {0: (0, True, 2), 1: (3, True, 2)}, seq=2)        # the new chord's row
+    o, r = block(h, slots, {LEAD: 62.0})
+    assert role_of(r[LEAD]) == PARA.LEADER and h.mem.get(PARA.FREE) == (1 << PARA.POOL_N) - 2
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_more_places_than_the_pool_are_left_out(engine):
+    slots = [1, 2, 3]
+    h = setup(slots, para=3, engine=engine)
+    ready(h)
+    full = {k: (k, True, 1) for k in range(PARA.PLACES)}
+    for s in slots:
+        write_row(h, s, full)
     for b in range(6):
-        _o, r = block(h, slots, notes, on=0b011 if b == 0 else 0)
-    assert role_of(r[1]) == PARA.LEADER and r[1] & 0xFFFF == 0b001
-    _o, r = block(h, slots, notes, off=0b011)                              # both released
-    o, r = block(h, slots, notes, on=0b100)                                # a new note: a new chord
-    assert role_of(r[1]) == PARA.LEADER and r[1] & 0xFFFF == 0b001         # the old one releases on
-    assert r[2] == 0                                                        # the new one, a chord of one
-    assert h.mem.get(PARA.CUR) == 3                                         # track 0's chord: slot 2 + 1
-    o, r = block(h, slots, notes, on=0b001)                                # slot 0 taken by a new note: it joins
-    assert r[1] == 0 and role_of(r[2]) == PARA.LEADER and r[2] & 0xFFFF == 0b001
+        o, r = block(h, slots, {s: 50.0 + s for s in slots}, on=0b1110 if b == 0 else 0)
+    assert h.mem.get(PARA.FREE) == 0 and h.mem.get(PARA.LOST) > 0
+    # the slots in order: slot 1 takes 9 blocks, slot 2 the other 7, slot 3 none (it plays its own note alone)
+    assert [role_of(r[s]) for s in slots] == [PARA.LEADER, PARA.LEADER, 0]
+    assert all(abs(flt(w)) < 8.0 for s in slots for w in o[s])
 
 
 @pytest.mark.parametrize("engine", ENGINES)
-def test_a_taken_leader_hands_its_chord_to_its_oldest_member(engine):
-    slots = [0, 1, 2]
-    notes = {0: 48.0, 1: 55.0, 2: 62.0}
+def test_chord_after_chord_each_released_to_rest_renders_every_member(engine):
+    """2026-11-18 (v0.59.2 on the unit: chords played fewer notes than the keys held; every member joined and held on
+    the ColdFire, the slot's DSP cost the same for 1 and 5 notes): 24 chords of 3..6 notes, each on the next of 8
+    slots as stock's allocator hands them out, each held, let go (the frame's note-off), its DN2 AMP closed, the voice
+    left to rest (MNM_QUIET_BLOCKS of silence: no render at all), then its row ended by the ColdFire (csrc/para/one.c:
+    once the DSP reports the slot quiet). Every chord's every joined note has a shadow while held, none is LOST, and
+    the pool is whole between chords. Until the fix a shadow's fade moved on only in its leader's render: a resting
+    leader never moved it, so its block stayed taken until that slot's next note, and the pool ran dry"""
+    slots = list(range(8))
     h = setup(slots, para=3, engine=engine)
-    for b in range(4):
-        _o, r = block(h, slots, notes, on=0b111 if b == 0 else 0)
-    assert role_of(r[2]) == PARA.LEADER and r[2] & 0xFFFF == 0b011
-    _route(h, 2, 5)                                                         # slot 2's next note: another track
-    _o, r = block(h, slots, notes, on=0b100)
-    assert role_of(r[1]) == PARA.LEADER and r[1] & 0xFFFF == 0b001         # slot 1 (the older key) leads on
-    assert role_of(r[0]) == PARA.MEMBER and r[2] == 0
-    assert h.mem.get(PARA.CUR) == 2 and h.mem.get(PARA.CUR + 4 * 5) == 3
+    ready(h)
+    full = (1 << PARA.POOL_N) - 1
+    lost0 = h.mem.get(PARA.LOST)
+    notes = {u: 60.0 for u in slots}
+    seen = []
+    for i in range(24):
+        u, n, seq = i % 8, 3 + i % 4, 1 + (i // 8) % 15                 # 3, 4, 5, 6 notes; a new seq on the slot
+        rests = h.L.md.mnm.scratch + PP.RESTS_OFF + 4 * u
+        write_row(h, u, {k: (2 * k + i % 3, True, seq) for k in range(n)}, seq=seq)
+        others = [x for x in slots if x != u]
+        for b in range(8):
+            block(h, slots, notes, on=(1 << u) if b == 0 else 0, closed=others)
+        own = h.mem.get(PARA.OWN + 4 * u)
+        block(h, slots, notes, off=1 << u, closed=slots)                  # let go; the AMP closes
+        quiet = 0
+        while h.mem.get(rests) < PP.MNM_QUIET_BLOCKS + 2 and quiet < 4 * PP.MNM_QUIET_BLOCKS:
+            block(h, slots, notes, closed=slots)
+            quiet += 1
+        write_row(h, u, {}, live=False)                                   # the ColdFire ends the chord: its row zero
+        for _ in range(12):
+            block(h, slots, notes, closed=slots)
+        seen.append((u, n, bin(own).count("1"), h.mem.get(rests), h.mem.get(PARA.FREE)))
+    assert all(r >= PP.MNM_QUIET_BLOCKS for *_x, r, _f in seen), f"the voice rests between chords: {seen}"
+    assert all(o == n - 1 for _u, n, o, _r, _f in seen), f"every member a shadow (slot, notes, shadows, rests, free): {seen}"
+    assert all(f == full for *_x, f in seen) and h.mem.get(PARA.LOST) == lost0, f"the pool whole: {seen}"
 
 
-@pytest.mark.parametrize("engine", ENGINES)
-def test_a_member_the_guard_refused_is_left_out_of_its_chord(engine):
-    """the frame guard refuses a member (or it rests): its stream words hold an earlier pass, so the leader must not
-    add them. The leader's block is the same whatever those words hold, and differs from the whole chord's"""
-    slots = [0, 1, 2, 3]
-    runs = {k: setup(slots, para=3, engine=engine) for k in ("whole", "stale", "junk")}
-    for b in range(6):
-        for h in runs.values():
-            o, r = block(h, slots, CHORD4, on=0xF if b == 0 else 0)
-    assert all(r[u] & PARA.RENDERED for u in (0, 1, 2)) and not r[3] & PARA.RENDERED
-    junk = runs["junk"]
-    for k in range(256):                                                    # member 1's words: junk
-        junk.mem.put(junk.L.md.state + 1024 + 4 * k, bits(1000.0))
-    whole, _ = block(runs["whole"], slots, CHORD4)
-    stale, rs = block(runs["stale"], slots, CHORD4, skip=(1,))
-    bad, rj = block(junk, slots, CHORD4, skip=(1,))
-    assert not rs[1] & PARA.RENDERED and rs[0] & PARA.RENDERED and rs[2] & PARA.RENDERED
-    assert stale[3] == bad[3]                                               # nothing of member 1's words added
-    assert stale[3] != whole[3]                                             # (and member 1 was in the chord)
-    assert stale[1] == [0] * 32 and max(abs(flt(w)) for w in stale[3]) > 0.01
+def test_the_first_block_zeroes_the_rows():
+    h = setup([LEAD], para=3)
+    for j in range(16 * PARA.row_words()):
+        h.mem.put(PARA.rows() + 4 * j, 0xDEADBEEF)
+    block(h, [LEAD], {LEAD: 60.0})
+    assert all(h.mem.get(PARA.rows() + 4 * j) == 0 for j in range(16 * PARA.row_words()))
+    assert h.mem.get(PARA.FREE) == (1 << PARA.POOL_N) - 1
 
 
-@pytest.mark.parametrize("engine", ENGINES)
-def test_a_held_chord_keeps_its_members_past_the_quiet_test(engine):
-    """a member writes silence to its own buffer; mnm_ages' quiet test (QUIET_BLOCKS of silence, no note: rest) must
-    not rest it while its chord sounds: it takes its leader's count"""
-    slots = [0, 1, 2, 3]
-    h = setup(slots, para=3, engine=engine)
-    n = PP.MNM_QUIET_BLOCKS + 16
-    outs = [block(h, slots, CHORD4, on=0xF if b == 0 else 0) for b in range(n)]
-    last, roles = outs[-1]
-    assert all(roles[u] & PARA.RENDERED for u in (0, 1, 2))
-    assert all(h.mem.get(h.L.md.mnm.scratch + PP.RESTS_OFF + 4 * u) < PP.MNM_QUIET_BLOCKS for u in slots)
-    assert max(abs(flt(w)) for w in last[3]) > 0.1
-
-
-def _chord_run(engine, design_b, blocks, off_at=None):
-    """a 4-note chord (PARA 3) held, then released at OFF_AT: each block's buffers and roles, each slot's words (its
-    1 KB of voice state) after the last block, and each slot's model instructions summed. DESIGN_B False: the members
-    resampled and their silence guarded, as before 2026-11-15"""
-    slots = [0, 1, 2, 3]
-    saved = PARA.is_member, PARA.silent_role
-    if not design_b:
-        PARA.is_member = lambda p, d, t_word: p.iconst(d, 0)
-        PARA.silent_role = lambda p, d, t_word: p.iconst(d, 0)
-    try:
-        h = setup(slots, para=3, engine=engine)
-        L = h.L
-        outs, steps = [], {u: 0 for u in slots}
-        for b in range(blocks):
-            for u in slots:
-                h.mem.put(PP.NOTE_CELLS + 4 * u, bits(CHORD4[u]))
-                h.mem.put(PP.BUFFERS + 4 * u, BUFS + 0x100 * u)
-            h.mem.put(PP.TRIG_WORD, (h.mem.get(PP.TRIG_WORD) & 0xFFFF) | ((0xF if b == 0 else 0) << 16))
-            w = h.mem.get(PM.FRAME + PARA.NOTE_OFF)
-            h.mem.put(PM.FRAME + PARA.NOTE_OFF, (w & 0xFFFF0000) | (0xF if b == off_at else 0))
-            h.mem.put(L.C["mcost"], 0)
-            p = Prog("run", mem=h.mem)
-            p.spill = L.md.C["ash"]
-            PP.mnm_ages(p, L)
-            PP.para_prepass(p, L)
-            for u in [h.mem.get(L.md.mnm.scratch + PP.ORDER_OFF + 4 * k) for k in range(16)]:
-                if u in slots:
-                    q, _ = PP.run_voice(L, None, u, mem=h.mem)
-                    steps[u] += q.steps
-            outs.append(({u: [h.mem.get(BUFS + 0x100 * u + 4 * k) for k in range(32)] for u in slots},
-                         {u: h.mem.get(PARA.ROLE + 4 * u) for u in slots}))
-        words = {u: [h.mem.get(L.md.state + 1024 * u + 4 * k) for k in range(256)] for u in slots}
-        rests = [h.mem.get(L.md.mnm.scratch + PP.RESTS_OFF + 4 * u) for u in slots]
-        return outs, words, rests, steps
-    finally:
-        PARA.is_member, PARA.silent_role = saved
-
-
-@pytest.mark.parametrize("engine", ENGINES)
-def test_design_b_members_skip_the_resampler_and_the_guard_with_the_same_sound(engine):
-    """2026-11-15 (PARA design B, the User: "Do that"): a member is not resampled (its read position moves on the same)
-    and its silence is not guarded: every slot's buffer, role and voice words, and the quiet counts, are those of the
-    members resampled and guarded, every block of a held chord past the quiet test and its release; the members cost
-    less"""
-    n = PP.MNM_QUIET_BLOCKS + 16
-    old = _chord_run(engine, False, n, off_at=n - 12)
-    new = _chord_run(engine, True, n, off_at=n - 12)
-    assert new[0] == old[0]
-    assert new[1] == old[1] and new[2] == old[2]
-    assert role_of(new[0][5][1][1]) == PARA.MEMBER
-    assert all(new[3][u] < old[3][u] - 500 * n for u in (0, 1, 2))           # the members: the resampler gone
-    assert abs(new[3][3] - old[3][3]) <= 20 * n                               # the leader: its two role tests only
-    assert max(abs(flt(w)) for o, _r in new[0][1:] for w in o[3]) > 0.1
-
-
-@pytest.mark.parametrize("name", ["HELD", "CUR", "MEM", "ROLE"])
+@pytest.mark.parametrize("name", ["ROLE", "CSEQ", "OWN", "RROLE", "INIT", "FREE", "LOST", "SH_N", "SH_NOTE", "WATCH"])
 def test_the_words_fit_the_area(name):
     at = getattr(PARA, name)
     assert PARA.AREA <= at < PARA.AREA + 4 * PARA.WORDS
-    assert PARA.ROLE + 64 == PARA.AREA + 4 * PARA.WORDS
+    assert PARA.WATCH + 4 == PARA.AREA + 4 * PARA.WORDS

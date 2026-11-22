@@ -62,6 +62,7 @@ sys.path.insert(0, str(HERE))
 
 from emulib.image import differences                           # noqa: E402
 from emulib import bounded                                      # noqa: E402
+from emulib.cpu import kept                                       # noqa: E402
 from emulib.machine import Machine                             # noqa: E402
 
 BLK_READ, BLK_WRITE, BLK_TRIM = 0x4012C87A, 0x4012CA60, 0x4012C792
@@ -70,14 +71,23 @@ SYSEX_ROUTER, SYSEX_SENDER = 0x4012194E, 0x401236D2
 KIT, SOUND_STRIDE = 0x4210D08C, 1163
 DEVICE = 48_340_992                     # the Kingston 32 GB part, reconfigured (docs/drive-storage-research.md)
 POOL0, POOL_END = 0x600000, 0x6C8001
+FLOOR = 0x5D8000                                # erase.c ER_FLOOR (v0.69.2: the wishes record; 0x5E0000, 0x600000 before)
 PL0, PL_END = 0x6D0000, 0x6E0300
 SET = 0x6FF000
 HI, HI_END = 0x6FF800, 0x6FF805                 # v0.43: the library's folders 64..127 (lib.c)
 LIB0, LIB_DATA = 0x700000, 0x700105
 XA, XA_END = 0x6F0000, 0x6F0701                 # v0.45: the library's entries 2,048..16,383 (lib.c LIB_X_AT)
-INS0, INS_END = 0x6E0400, 0x6E0502             # 2026-11-11: the inserts' records (inserts/store.c), 129 x 2 copies
-DN7C, DN7C_END = 0x6E8000, 0x6E8801            # 2026-11-11: the DSP program's copy (waverider/lzma7cache.c)
-WS, WS_END = 0x6F0800, 0x6FF000                 # 2026-11-11: the wishes record's cells (csrc/wishes/store.c)
+INS0, INS_END = 0x5FF000, 0x5FF102             # 2026-11-11: the inserts' records (inserts/store.c), 129 x 2 copies
+# v0.69.2 (csrc/include/dmove.h): SAFE MODE's record, the DSP copy and the wishes record below the pool image, the
+# bank lists back at upstream's places; the move record DM (never erased)
+SB = 0x5FFB00                                  # 2026-11-21: SAFE MODE's boot record, one sector
+DN7C, DN7C_END = 0x5FF200, 0x5FFA01            # 2026-11-11: the DSP program's copy (waverider/lzma7cache.c)
+WS, WS_END = 0x5D8000, 0x5EE800                 # 2026-11-11: the wishes record's cells (csrc/wishes/store.c), 92,160
+BLA, BLA_END = 0x6E0600, 0x6E0600 + 2 * 64 * 464   # v0.65: the bank lists, projects 0..63 (pools.c: upstream's place)
+BLB, BLB_END = 0x6F0800, 0x6F0800 + 2 * 64 * 464   # .. and 64..127
+DM = 0x5FFC00                                  # v0.69.2: the move record (dmove.c), never erased
+OLD = ((0x6E0300, 0x6E0301), (0x6E8000, 0x6E8801), (0x6E0600, 0x6E0700), (0x5E0000, 0x5EE800), (0x6F0800, 0x6FF000),
+       (0x5F0000, 0x5FE800), (0x6E0400, 0x6E0502))   # v0.69.2: the places the moves read from (once)
 STACK_TOP, SENTINEL = 0x46A20000, 0x46A20400
 RESULT = SENTINEL + 0x800               # what a stubbed driver entry returns (the hook sets it)
 PRSSTAT = 0xFC0CC024                    # the eSDHC's present state: bit 24 DAT0 (v0.41)
@@ -93,15 +103,21 @@ def check(name, ok, detail=""):
         failures.append(name)
 
 
+def ins_move(k, s, n):
+    """2026-11-22 (inserts/store.c move_once, v0.69.2 dmove.c): the moves read the old places once and write their
+    marks (the inserts' mark at INS_END, the move record DM)"""
+    return (s in (INS_END, DM) and n == 1) or (k == "R" and any(a <= s and s + n <= b for a, b in OLD))
+
+
 def regions(dev):
-    return [(POOL0, POOL_END), (PL0, PL_END), (INS0, INS_END), (DN7C, DN7C_END), (XA, XA_END), (WS, WS_END), (SET, SET + 1), (HI, HI_END), (LIB0, dev)]
+    return [(POOL0, POOL_END), (PL0, PL_END), (SB, SB + 1), (INS0, INS_END), (DN7C, DN7C_END), (XA, XA_END), (WS, WS_END), (BLA, BLA_END), (BLB, BLB_END), (SET, SET + 1), (HI, HI_END), (LIB0, dev)]
 
 
 def joined(regs):
     """REGS with the ones that touch as one range, as the TRIMs' cover is merged (2026-11-12: the wishes
     record's cells end where the settings sector starts, 0x6FF000)"""
     out = []
-    for a, b in regs:
+    for a, b in sorted(regs):                   # (v0.65.1: the bank lists lie below the pool image)
         if out and out[-1][1] == a:
             out[-1][1] = b
         else:
@@ -193,11 +209,14 @@ def install(a, machine):
     from dnfw.mods import platform                         # noqa: PLC0415
     for va, blob in platform.runtime(image):
         machine.write(va, blob)
+    from emulib import attkit
+    attkit.store_kit(machine)  # (2026-11-21) a converted kit stored back: converted once
     # the sample link's 5 MB RAM window (SMP_MIRROR) is DDR on the unit; the snapshot maps
     # only the pages stock touched (as emu_slides.py)
     from unicorn import UC_PROT_ALL, UcError
     from dnfw.sampler import machines as SMx                # noqa: PLC0415
-    for page in range(SMx.MIRROR, SMx.MIRROR + 0x500000, 0x100000):
+    for page in [*range(SMx.MIRROR, SMx.MIRROR + 0x500000, 0x100000),   # (v0.65: and the banks' RAM)
+            *range(SMx.BANK_RAM & ~0xFFFFF, SMx.BANK_RAM + SMx.BANK_RAM_BYTES + 0xFFFFF & ~0xFFFFF, 0x100000)]:
         try:
             machine.uc.mem_map(page, 0x100000, UC_PROT_ALL)
         except UcError:
@@ -297,12 +316,13 @@ def fill(disk, rng):
     def junk():
         return bytes(rng.randrange(1, 255) for _ in range(512))
     mod = [POOL0, POOL0 + 1, POOL0 + 2, POOL0 + 777, 0x6C8000, PL0, PL0 + 1, PL0 + 2, 0x6D00FF, 0x6D0100, 0x6D0101,
-           0x6D0100 + 256 * 7, 0x6D0100 + 256 * 257, 0x6E02FF, INS0, INS0 + 1, INS0 + 256, INS_END - 1, DN7C, DN7C + 1, DN7C_END - 1, XA, XA + 1, XA + 1792, WS, WS + 1, WS + 0x7777, WS_END - 1, SET, HI, HI + 4, LIB0, LIB0 + 1, LIB0 + 256, 0x700104, LIB_DATA,
+           0x6D0100 + 256 * 7, 0x6D0100 + 256 * 257, 0x6E02FF, SB, INS0, INS0 + 1, INS0 + 256, INS_END - 1, DN7C, DN7C + 1, DN7C_END - 1, XA, XA + 1, XA + 1792, WS, WS + 1, WS + 0x7777, WS_END - 1, BLA, BLA + 1, BLA + 464, BLA_END - 1, BLB, BLB + 465, BLB_END - 1, SET, HI, HI + 4, LIB0, LIB0 + 1, LIB0 + 256, 0x700104, LIB_DATA,
            LIB_DATA + 1, disk.dev - 2049, disk.dev - 1] + [s for s in (0x800000, 0x1000000) if s < disk.dev]
     mod += [rng.randrange(POOL0, POOL_END) for _ in range(60)] + [rng.randrange(LIB0, disk.dev) for _ in range(60)]
-    other = [0x0, 0x800, 0x1000, 0x2000, 0x58000, 0x457FFF, 0x458000, 0x500000, 0x5D7FFF, 0x5D8000, 0x5FFFFF,
-             0x6C8001, 0x6CFFFF, 0x6E0300, 0x6E03FF, INS_END, DN7C - 1, DN7C_END, 0x6EFFFF, 0x6F0701, 0x6F07FF, 0x6FF001, 0x6FF7FF, 0x6FF805, 0x6FFFFF]
-    other += [rng.randrange(0, 0x600000) for _ in range(60)]
+    other = [0x0, 0x800, 0x1000, 0x2000, 0x58000, 0x457FFF, 0x458000, 0x500000, 0x5D7FFF, WS_END, 0x5F0000, 0x5FE7FF, INS0 - 1,
+             INS_END, DN7C - 1, DN7C_END, SB - 1, SB + 1, DM, 0x5FFFFF, 0x6C8001, 0x6CFFFF, 0x6E0300, 0x6E03FF, 0x6E0400, 0x6E04FF,
+             0x6E0500, BLA - 1, BLA_END, 0x6EFFFF, 0x6F0701, 0x6F07FF, 0x6FF001, 0x6FF7FF, 0x6FF805, 0x6FFFFF]
+    other += [rng.randrange(0, FLOOR) for _ in range(60)]
     for s in mod + other:
         disk.put(s, junk())
     return sorted(set(mod)), sorted(set(other))
@@ -313,20 +333,13 @@ def guest_call(machine, fn, *args, limit=50_000_000):
     guest_call); the fast stepper's budget lifted for the call. -> d0"""
     from unicorn import m68k_const as K
     uc = machine.uc
-    regs = [getattr(K, f"UC_M68K_REG_{r}{i}") for r in "DA" for i in range(8)]
-    saved = [uc.reg_read(r) for r in regs]
-    saved_pc = uc.reg_read(K.UC_M68K_REG_PC)
-    sp = STACK_TOP - 0x100
-    machine.write(sp, struct.pack(">I", SENTINEL) + b"".join(struct.pack(">I", x & 0xFFFFFFFF) for x in args))
-    machine.write(SENTINEL, bytes.fromhex("4e714e71"))
-    uc.reg_write(K.UC_M68K_REG_A7, sp)
-    try:
+    with kept(uc):                              # D0-A7, PC and SR put back (emulib/cpu.py)
+        sp = STACK_TOP - 0x100
+        machine.write(sp, struct.pack(">I", SENTINEL) + b"".join(struct.pack(">I", x & 0xFFFFFFFF) for x in args))
+        machine.write(SENTINEL, bytes.fromhex("4e714e71"))
+        uc.reg_write(K.UC_M68K_REG_A7, sp)
         bounded.run(uc, machine.m, fn, SENTINEL, limit)
-    finally:
         d0 = uc.reg_read(K.UC_M68K_REG_D0)
-        for r, v in zip(regs, saved):
-            uc.reg_write(r, v)
-        uc.reg_write(K.UC_M68K_REG_PC, saved_pc)
     return d0
 
 
@@ -465,8 +478,8 @@ def run_ui(a, lay, SMx):
     report["commands"] = {"trims": len(trims), "writes": len(writes), "reads": len(reads),
                           "cmd35": sum(1 for c, _ in disk.cmds if c == 35), "cmd38": sum(1 for c, _ in disk.cmds if c == 38),
                           "first_trims": [f"{s:#x}+{n}" for s, n in trims[:6]], "last_trim": f"{trims[-1][0]:#x}+{trims[-1][1]}" if trims else None}
-    check("every TRIM inside one of the regions, never below 0x600000, at most 2,048 sectors",
-          trims and all(in_regions(s, n, DEVICE) and s >= POOL0 and 1 <= n <= 2048 for s, n in trims),
+    check("every TRIM inside one of the regions, never below 0x5D8000 (ER_FLOOR), at most 2,048 sectors",
+          trims and all(in_regions(s, n, DEVICE) and s >= FLOOR and 1 <= n <= 2048 for s, n in trims),
           f"{len(trims)} TRIM calls")
     cover = sorted(trims)
     merged = []
@@ -477,17 +490,20 @@ def run_ui(a, lay, SMx):
             merged.append(["OVERLAP", s])
         else:
             merged.append([s, s + n])
-    want = [[POOL0, POOL_END], [PL0, PL_END], [INS0, INS_END], [DN7C, DN7C_END], [XA, XA_END], [WS, WS_END], [SET, SET + 1], [HI, HI_END], [LIB0, DEVICE]]
-    check("the TRIMs cover exactly the nine regions (v0.43: folders 64..127's; v0.45: the library's extension; 2026-11-11: the inserts' records, the DSP program's copy, the wishes record's cells), each sector once",
+    want = [[POOL0, POOL_END], [PL0, PL_END], [SB, SB + 1], [INS0, INS_END], [DN7C, DN7C_END], [XA, XA_END], [WS, WS_END], [BLA, BLA_END], [BLB, BLB_END], [SET, SET + 1], [HI, HI_END], [LIB0, DEVICE]]
+    check("the TRIMs cover exactly the eleven regions (v0.43: folders 64..127's; v0.45: the library's extension; 2026-11-11: the inserts' records, the DSP program's copy, the wishes record's cells; v0.65 the bank lists), each sector once",
           merged == joined(want), f"{[[hex(x) if isinstance(x, int) else x for x in m] for m in merged]}")
     order = [s for s, _ in trims[:36]]
+    nws = (WS_END - WS + 2047) // 2048                  # v0.69.2: the wishes record's calls (45 for 92,160 cells)
     check("headers first: the pool's, the lists' region, the settings, the library's headers, the inserts' records, "
           "the DSP program's copy, the wishes record's cells (2026-11-11), then the frames",
           order[0] == POOL0 and order[1] == PL0 and SET in order[:36] and LIB0 in order[:36]
           and trims[35] == (LIB0, LIB_DATA - LIB0) and trims[36] == (HI, HI_END - HI)
           and trims[37] == (XA, XA_END - XA) and trims[38] == (INS0, INS_END - INS0)
           and trims[39] == (DN7C, 2048) and trims[40] == (DN7C + 2048, DN7C_END - DN7C - 2048)
-          and [s for s, _ in trims[41:70]] == list(range(WS, WS_END, 2048)) and trims[70][0] == POOL0 + 1,
+          and [s for s, _ in trims[41:41 + nws]] == list(range(WS, WS_END, 2048))
+          and [s for s, _ in trims[41 + nws:41 + nws + 29]] == list(range(BLA, BLA_END, 2048))
+          and [s for s, _ in trims[70 + nws:99 + nws]] == list(range(BLB, BLB_END, 2048)) and trims[99 + nws][0] == POOL0 + 1,
           str([hex(x) for x in order[:3]]))
     check("not one write from the first TRIM on", first_t is not None and not [x for x in log[first_t:] if x[0] == "W"],
           f"{len(writes)} write(s) in all")
@@ -702,8 +718,8 @@ def boot_once(a, lay, disk):
            "jmp_on": machine.read(lay["jmp_on"], 1)[0], "faults": len(faults(machine)) - f0,
            "errors": st.get("errors"),
            "writes": [(s, n, disk.get(s).hex()[:16]) for k, s, n in log if k == "W"],
-           "outside": [(k, hex(s), n) for k, s, n in log if not in_regions(s, n, disk.dev) and s >= 0x600000],
-           "low_writes": [(k, hex(s), n) for k, s, n in log if k != "R" and s < 0x600000]}
+           "outside": [(k, hex(s), n) for k, s, n in log if not in_regions(s, n, disk.dev) and s >= FLOOR and not ins_move(k, s, n)],
+           "low_writes": [(k, hex(s), n) for k, s, n in log if k != "R" and s < FLOOR]}
     return res
 
 

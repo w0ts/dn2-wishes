@@ -86,6 +86,7 @@ class Counter:
         self.c = collections.defaultdict(lambda: [0, 0, 0])
         self.prog = None
         self.last = 0
+        self.multi = None                      # (2026-11-22, dsp_cost_fx) {id: [prog, last]}: every run Prog's own steps
 
     def tag(self) -> tuple[str, str]:
         if self.force:
@@ -106,7 +107,18 @@ class Counter:
 
     def steps(self, p) -> None:
         """put the steps P took since the last event down to the current tag"""
-        if not self.on or p is not self.prog:
+        if not self.on:
+            return
+        if self.multi is not None:             # each Prog from its own last count (a pass that calls an engine's
+            e = self.multi.get(id(p))          # Prog keeps counting its own steps after the engine returns)
+            if e is None or e[0] is not p:
+                return
+            d = p.steps - e[1]
+            e[1] = p.steps
+            if d:
+                self.c[self.tag()][0] += d
+            return
+        if p is not self.prog:
             return
         d = p.steps - self.last
         self.last = p.steps
@@ -147,7 +159,9 @@ class ZeroScale:
         if e is not None and e[1] and not e[3]:
             p.steps -= 1                       # dropped: its step back, to where it was counted
             CNT.last -= 1
-            if e[2] is not None and CNT.on and p is CNT.prog:
+            if CNT.multi is not None and id(p) in CNT.multi:
+                CNT.multi[id(p)][1] -= 1
+            if e[2] is not None and CNT.on and (p is CNT.prog or (CNT.multi is not None and id(p) in CNT.multi)):
                 CNT.c[e[2]][0] -= 1
 
     def text(self, p, text: str) -> None:
@@ -408,6 +422,8 @@ def cases():
                     slot, w = plaits_word(mi)
                     h._half(PMx.frame_offset(slot), w)
                 yield "PLAITS-" + (m or "?"), "PLAITS", pl
+        elif n == "DRUM":                      # 2026-11-20: each type at its start and at its dearest setting
+            yield from _drum_cases(k)
         elif n in VARIANTS:                    # 2026-11-12 (the load check): each choice of the cost-changing control
             names, rec, kind = VARIANTS[n]()
             for c, cname in enumerate(names):
@@ -420,6 +436,23 @@ def cases():
         else:
             fam = "MONOMACHINE" if n in MM.MONO_ENGINES else n
             yield n, fam, (lambda h, k=k: _mnm_setup(h, k))
+
+
+def _drum_cases(k: int):
+    """DRUM-<TYPE> at its start, DRUM-<TYPE>-WORST at the dearest setting (scripts/sharc_drum_step.py cost_cases)"""
+    import sharc_drum_step as DS
+    from dnfw.mnm import machines as MM
+    from dnfw.perc import live as PL
+    from dnfw.perc import machines as PMx
+
+    def setup(h, t, p1, p2):
+        k1, k2 = DS.knobs_of(t, p1, p2)
+        h.set_mnm(MM.TYPES[k], k1)
+        for j, x in enumerate(k2.values()):
+            _rid, slot, lo, top = DS.rec2(j)                   # (stage 3: page 2 H, SNARE's WCHR, PERC's TYPE record)
+            h._half(PMx.frame_offset(slot), PL.knob_word(x, top, lo))
+    for name, case in DS.cost_cases().items():
+        yield name, "DRUM", (lambda h, case=case: setup(h, *case))
 
 
 def _sophie_models():

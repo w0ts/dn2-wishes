@@ -32,8 +32,11 @@ class Op:
 
 
 class Sched:
-    def __init__(self) -> None:
+    def __init__(self, pairs: bool = True) -> None:
+        """PAIRS False (2026-11-21, a2-juno-fast): no multifunction pairs, only the memory moves ride on the computes
+        (code that must not depend on the multifunction encoding yet)"""
         self.ops: list[Op] = []
+        self.pairs = pairs
 
     # -- the operations, in program order ---------------------------------------------
     def mul(self, d: int, a: int, b: int) -> None:
@@ -159,7 +162,7 @@ class Sched:
                     if comp is None:
                         # a compute: look for a partner among the ready ones for the multifunction form
                         partner = None
-                        for q in cand:
+                        for q in (cand if self.pairs else ()):
                             if q == j or q in at or ops[q].kind == "k" or not ok(q) or set(ops[q].writes) & (writes | set(o.writes)):
                                 continue
                             pr = (self._pairable(o, ops[q]) if o.kind == "*" else

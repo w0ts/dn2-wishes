@@ -15,12 +15,33 @@ import pytest
 SCRIPTS = pathlib.Path(__file__).resolve().parents[1] / "scripts"
 
 
+HOSTS_TOML = """
+[farm]
+host = "testfarm"
+bench = "/srv/bench"
+load_max = 60
+cpus = 50
+[farm.window]
+days = [0, 1, 2, 3, 4]
+start = 8
+end = 17
+cpus = 32
+"""
+
+
 @pytest.fixture
 def runq(tmp_path, monkeypatch):
+    hosts = tmp_path / "hosts.toml"                         # never this machine's own settings
+    hosts.write_text(HOSTS_TOML)
+    monkeypatch.setenv("DN2_HOSTS_FILE", str(hosts))
+    for v in ("RUNQ_FARM_HOST", "RUNQ_FARM_BENCH", "RUNQ_FARM_CPUS", "RUNQ_FARM_LOAD"):
+        monkeypatch.delenv(v, raising=False)
     monkeypatch.setenv("RUNQ_DIR", str(tmp_path / "q"))
     monkeypatch.setenv("RUNQ_NO_DISPATCHER", "1")
     monkeypatch.setenv("RUNQ_MAC_CORES", "100000")         # the test must not wait on the Mac's load
     sys.path.insert(0, str(SCRIPTS))
+    import hostcfg
+    importlib.reload(hostcfg)
     import runq_hosts
     importlib.reload(runq_hosts)
     import runq as R
@@ -38,7 +59,8 @@ SATURDAY = time.mktime((2026, 11, 14, 12, 0, 0, 0, 0, -1))
 WEEKDAY_EVENING = time.mktime((2026, 11, 12, 17, 0, 0, 0, 0, -1))
 
 
-def test_farm_cap_is_32_in_office_hours_50_otherwise(runq):
+def test_farm_cap_follows_the_settings_window(runq):
+    assert runq.H.FARM == "testfarm" and runq.H.FARM_ROOT == "/srv/bench/runq"
     assert runq.H.farm_cpu_max(WEEKDAY_NOON) == 32
     assert runq.H.farm_cpu_max(SATURDAY) == 50
     assert runq.H.farm_cpu_max(WEEKDAY_EVENING) == 50
@@ -59,7 +81,7 @@ def test_farm_counts_cpus_ours_and_ramping(runq):
 
 
 def test_mac_counts_jobs_and_load(runq, monkeypatch):
-    # the User's rule (2026-11-13): half of the free cores (cores - load1), a job's CPUs within it
+    # half of the free cores (cores - load1), a job's CPUs within it
     monkeypatch.setattr(runq.H, "MAC_CORES", 16)
     two = [_job(host="mac"), _job(host="mac")]
     assert runq.H.can_start(_job(host="mac"), "mac", two[:1], 3.0, 1000)

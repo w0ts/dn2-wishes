@@ -16,7 +16,7 @@ lines read).
 
 from __future__ import annotations
 
-from ..fdn8 import ref as FR
+from ..fdn8 import lite as LT
 from ..fdn8.ref import F
 from ..xdly import ref as XR
 from . import bus as B
@@ -26,7 +26,7 @@ from . import ref as R
 
 class BusRef:
     def __init__(self):
-        self.fd = [FR.Ref() for _ in range(D.FDN8_INSTANCES)]
+        self.fd = [LT.BusRef() for _ in range(D.FDN8_INSTANCES)]
         self.xd = [XR.Ref() for _ in range(D.XDLY_INSTANCES)]
         self.owner = [0] * (D.FDN8_INSTANCES + D.XDLY_INSTANCES)
         self.last = [0] * (D.FDN8_INSTANCES + D.XDLY_INSTANCES)   # the pass that last claimed it (bus.LAST)
@@ -67,7 +67,7 @@ class BusRef:
             key = (i + 1) | sel << 8
             if self.owner[slot] != key:           # fresh: a new engine (its switch to its type comes next)
                 self.owner[slot] = key
-                eng = (FR.Ref if sel == D.FDN8 else XR.Ref)()
+                eng = (LT.BusRef if sel == D.FDN8 else XR.Ref)()   # (HALF, 2026-11-22)
                 if sel == D.FDN8:
                     self.fd[inst] = eng
                 else:

@@ -283,9 +283,8 @@ class _Cym:
     @classmethod
     def init(cls, p: Prog, L: K.Layout) -> None:
         k = cls.KIND
-        p.iconst(0, 0)
-        for j in range(K.NS):                 # the struct words the firmware leaves are 0
-            ss(p, j, 0)                       # in the golden runs (Y20 as the harness had it)
+        K.zero_words(p, 0, K.NS)              # the struct words the firmware leaves are 0
+                                              # in the golden runs (Y20 as the harness had it)
         p.iconst(0, 0x7FDF3B)
         ws(p, 2, 0)
         p.iconst(0, 10)

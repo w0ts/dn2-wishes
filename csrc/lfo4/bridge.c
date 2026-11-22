@@ -337,9 +337,14 @@ u32 lfo4_row_for_block(u32 block, u32 frame)
         lfo4_block_base = block;
     lfo4_block_ptr = block;
     lfo4_frame = frame;               /* the stub's %sp: a window into the caller */
-    track = (block - lfo4_block_base) / MIRROR_STRIDE;
-    if (track >= TRACKS)
-        track = 0;
+    /* 2026-11-18 (the User's CPU, once a voice in the audio interrupt): the block's distance / 202 without the
+     * divide (remul, the slowest instruction here): (d * 649) >> 17 is d / 202 for every d below 16 * 202
+     * (checked, all 3,232), the only distances that give a track; every other one gives 0, as before. */
+    {
+        u32 d = block - lfo4_block_base;
+
+        track = d < TRACKS * MIRROR_STRIDE ? (d * 649u) >> 17 : 0u;
+    }
     lfo4_block_track = track;
 #ifdef LFO4_TELEMETRY
     /* **The first thing this channel ever sends, and it is built to be read

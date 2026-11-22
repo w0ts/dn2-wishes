@@ -44,7 +44,7 @@ KIT, STRIDE, STORED = 0x4210D08C, 1163, 359
 FRAMES = 0x4058F8D4
 SCRATCH = 0x46A30000                    # (below the C renderer at 0x46a40000) our buffers: four stored sounds, a value, a three-sound block
 WISH_RAM, WISH_MAP = 0x47280000, 0x500000
-CELL0, CELLS = 0x6F0800, 59392
+CELL0, CELLS = 0x5D8000, 92160   # v0.69.2 (csrc/include/dmove.h)
 LANE = [b for at in (36, 44, 52, 60, 68, 76, 84) for b in (at, at + 1)]
 TAG, VALUE = 0x0101, b"MATRIX v1"
 
@@ -113,6 +113,8 @@ def main() -> int:
     def call(fn, *args):
         return count.run(lambda: guest_call(machine, fn, *args))
 
+    if "dm_bits" in lay:                        # v0.69.2: a unit whose +Drive moves are done (dmove.c: the record waits for them)
+        uc.mem_write(lay["dm_bits"], struct.pack(">I", 0x3F))
     MEMCPY, MEMSET = lay["wish_memcpy_stub"], lay["wish_memset_stub"]   # what every caller but Overbridge's calls
 
     def mem(va, n):
@@ -183,7 +185,8 @@ def main() -> int:
     _, cost_poll = call(lay["wish_poll"])
     check("the UI pass 0.5 s on writes the cell where this script spells it", disk.get(sector) == cell,
           f"sector {sector:#x}")
-    check("... and nothing outside the cells", all(CELL0 <= s < CELL0 + CELLS for k, s, n in disk.log if k == "W"))
+    check("... and nothing outside the cells (v0.69.2: but the moves' marks)",
+          all(CELL0 <= s < CELL0 + CELLS or s in (0x5FF102, 0x5FFC00) for k, s, n in disk.log if k == "W"))
     report["cost"]["UI pass writing one cell (instructions, the driver stubbed)"] = cost_poll
 
     # 6. a cell from elsewhere, found through its link

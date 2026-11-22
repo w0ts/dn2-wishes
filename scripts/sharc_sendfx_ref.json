@@ -1,0 +1,1768 @@
+{
+"336e340aa0cdcd34e314cfa44849f709a3134f6bd4cd57dfc7e15702c83115e2": {
+"blocks": 176,
+"made_by": "v0.67.1 c67-vA 9cd23a57 (DN2_ROUTE_PROBE=1, claude/combined-67-nosm f6404350), 2026-11-21",
+"digests": [
+{
+"chorus in": "5341e6b2646979a70e576530",
+"chorus out": "5341e6b2646979a70e576530",
+"delay in": "5341e6b2646979a70e576530",
+"delay out": "5341e6b2646979a70e576530",
+"reverb in": "5341e6b2646979a70e576530",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "0949b956851fba80df08c375",
+"FX returns": "e5a00aa9991ac8a5ee310984"
+},
+{
+"chorus in": "5341e6b2646979a70e576530",
+"chorus out": "5341e6b2646979a70e576530",
+"delay in": "5341e6b2646979a70e576530",
+"delay out": "5341e6b2646979a70e576530",
+"reverb in": "5341e6b2646979a70e576530",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "a792e88b65431db495a0015d",
+"FX returns": "e5a00aa9991ac8a5ee310984"
+},
+{
+"chorus in": "e9b760d1a37f16eeceb60a2a",
+"chorus out": "a2c35687c2ba6c8db4570ca1",
+"delay in": "551e717f4b1a34377a7d3f15",
+"delay out": "5341e6b2646979a70e576530",
+"reverb in": "981d3f8cacd426b4f88a0557",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "fb3b6842114df2a9a39cfe00",
+"FX returns": "87b702d26be7d7065ac2a433"
+},
+{
+"chorus in": "ac05df894b938ad594cad603",
+"chorus out": "2e9411c45754f82d15790e06",
+"delay in": "260fb0448ff0459cab0228cb",
+"delay out": "5341e6b2646979a70e576530",
+"reverb in": "121716732c65cc653609c5ba",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "2845455d0ed3f83339c3ff4e",
+"FX returns": "36a4e280f2fcfbb042c6581f"
+},
+{
+"chorus in": "46d0040bdcb92ddb1ccf4fb0",
+"chorus out": "3a5e99dbe6b7117874133a70",
+"delay in": "1de72f9f1275078170dc3e5e",
+"delay out": "5341e6b2646979a70e576530",
+"reverb in": "c13a692f436bf3288a203298",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "266abd37bd03f0f30d15634c",
+"FX returns": "eb48bc2440c9ef6bd6aaccd2"
+},
+{
+"chorus in": "817a8f59f4707c1ed3a456de",
+"chorus out": "0844a0284245074881454694",
+"delay in": "d5da44fbc607cc7a52c1fe98",
+"delay out": "5341e6b2646979a70e576530",
+"reverb in": "c96b851e46849c3b74ea8603",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "af3bb760bee1059d2ac170ab",
+"FX returns": "3161425e519ab371980350b0"
+},
+{
+"chorus in": "9a048cf0ead9fafd408166f8",
+"chorus out": "e72af63b38798a95c90bc847",
+"delay in": "d798d3187abeaa82dcc8e61f",
+"delay out": "5341e6b2646979a70e576530",
+"reverb in": "d0395286a1ee68d9f8d26afe",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "0c84ade6d3c676de442ebe70",
+"FX returns": "48156272460381132b0f212e"
+},
+{
+"chorus in": "c8b9ad2879a92c989977c628",
+"chorus out": "316838b9a4b33e3ba767f952",
+"delay in": "e5790686923a8fe212696dba",
+"delay out": "5341e6b2646979a70e576530",
+"reverb in": "69c1efcaad8dc258993ba4b7",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "91b799a487f23dba65f62caa",
+"FX returns": "7fc39f5907015b43e676358b"
+},
+{
+"chorus in": "9cb0e39ddc71c9fc862709bd",
+"chorus out": "e9f375b37938f0d7a16db3d0",
+"delay in": "d484661bf4aaee434e9f66f2",
+"delay out": "5341e6b2646979a70e576530",
+"reverb in": "434d26d389a95ab40b662ebd",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "35ce1bf4776d205b2dd7750f",
+"FX returns": "cdbaa6aec46268756c99d0e4"
+},
+{
+"chorus in": "08ed9b42596fa8fbbcd3b353",
+"chorus out": "1c5227c149c10f39af469fe5",
+"delay in": "b1952bf131171c0b56b81881",
+"delay out": "5341e6b2646979a70e576530",
+"reverb in": "17866f12d1eed28f908036a4",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "66c7b855fda9979d0ea5136b",
+"FX returns": "52ddb8b7c75bc0bd658b174b"
+},
+{
+"chorus in": "277401aa526122b39823ec56",
+"chorus out": "b00189c35ca92851a4312693",
+"delay in": "779774ed5bbe76045866890f",
+"delay out": "5341e6b2646979a70e576530",
+"reverb in": "5b77b968b11878242f2738a7",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "90331b143a9e9b2f490d7dc0",
+"FX returns": "32e0bc998443c50d5443a9fb"
+},
+{
+"chorus in": "d245719cbae8f1bce0d4e40a",
+"chorus out": "65c64fc98da737fbcdbdc6af",
+"delay in": "56751b9c6b904a8b76ac1277",
+"delay out": "5341e6b2646979a70e576530",
+"reverb in": "b3612f0a61b69d78b93c4c41",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "b62a820d337b38211153c5a6",
+"FX returns": "d36aeb706c8831bae1bb4c6f"
+},
+{
+"chorus in": "3edae19de91c4563090e463c",
+"chorus out": "99a3884b654e26e3c81a4ce9",
+"delay in": "340b901ae49c59bafe3fe0e4",
+"delay out": "5341e6b2646979a70e576530",
+"reverb in": "7550ad79746c11b3d78835eb",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "ba1f2bc2a63f0f968314f14f",
+"FX returns": "3fc2ccd5d1099b3808250e6b"
+},
+{
+"chorus in": "6c174b7431bbf5d71d0d9964",
+"chorus out": "700e6d372feaf008355cf1ca",
+"delay in": "5059fb00f6ca288468c1e61f",
+"delay out": "5341e6b2646979a70e576530",
+"reverb in": "9f16ffade362ef755bbd911f",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "36acc3b329ac149562a657ac",
+"FX returns": "c5eaef14aa5ec08d06adab94"
+},
+{
+"chorus in": "5a711ad906302b5feb7eb77f",
+"chorus out": "f50cd5817d08054ded404b39",
+"delay in": "2b9074edc1d4de47f816ea3d",
+"delay out": "5341e6b2646979a70e576530",
+"reverb in": "ba7254271fa918e00e8abd4c",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "431d7170a176776f6d514ff8",
+"FX returns": "07796d372466b87bf1594f46"
+},
+{
+"chorus in": "483e4335bc4fdb8b8ed6e445",
+"chorus out": "efe98e77d2b48e6862b3a9d8",
+"delay in": "7c3e3e6b1115cd4f885311c5",
+"delay out": "5341e6b2646979a70e576530",
+"reverb in": "728ab253a8415257ce076dd6",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "2025fae5aa1141e80671ebdf",
+"FX returns": "897bc5c23a44d5c0394cabc0"
+},
+{
+"chorus in": "b562c4c8de615312e9077c7e",
+"chorus out": "dd66faf0b6e14f753f8a5bda",
+"delay in": "7b3f3aebc60a17bf00eeb292",
+"delay out": "5341e6b2646979a70e576530",
+"reverb in": "6ddeab141c78f73d8c8b870b",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "576d22676337b8d66419a896",
+"FX returns": "983600080394a17131f86d59"
+},
+{
+"chorus in": "c6d5ef3428e8cd5f6e050c50",
+"chorus out": "a882c849c525ec373054aeb7",
+"delay in": "5f5eb1932c58330deea04613",
+"delay out": "5341e6b2646979a70e576530",
+"reverb in": "c26cb5e9233bf81a33de31f5",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "4ce32cc8d326eaf1521ca21c",
+"FX returns": "a94e33a4c38291858a47c942"
+},
+{
+"chorus in": "0aa4f4159ddff689f31c0266",
+"chorus out": "60118049ce11b98291ed9517",
+"delay in": "f2b5d357f51edfa62c68ff9b",
+"delay out": "7576b5859d72897c26bb69c1",
+"reverb in": "df9b3a473993ec8d5d7ce24b",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "19d1cd7192270fbc878a2220",
+"FX returns": "9337f6e6683044a2047d2488"
+},
+{
+"chorus in": "bfdb3cf452adcad2d244804f",
+"chorus out": "767b42240295a358f2cd0150",
+"delay in": "ccdffb7a2aa7f8be6fab723d",
+"delay out": "253e0eb5585a8eb1802eb351",
+"reverb in": "e80ced993317f77a86705ba1",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "07492e3c3af2ee5f0b69a291",
+"FX returns": "b3b15391f7d4651aaab6854f"
+},
+{
+"chorus in": "10ee4866ddd8833768c66867",
+"chorus out": "8c85915260fd508b9530305d",
+"delay in": "12aaace55bed0ffb80a016d4",
+"delay out": "3c84cfff33ccb9462d6d0724",
+"reverb in": "73a17b4a5b8e4477cb2b89f4",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "dd38ed7575fc5fdf0136484c",
+"FX returns": "087284c43306d1a2066fcdd5"
+},
+{
+"chorus in": "1a7f951d504bc9d224157a64",
+"chorus out": "680ac16d74b5cc57a828075b",
+"delay in": "4680f4e4eba13eb36b17153c",
+"delay out": "790d7a145ff61b56e03ca84e",
+"reverb in": "9ef964a7956e0d92b61de7c6",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "5027b0fd500c22813a0083d5",
+"FX returns": "9af5f60733a1420df107e87b"
+},
+{
+"chorus in": "0d4804bc293f6f6682fd57aa",
+"chorus out": "ef03b54f8f86174bb2a97df4",
+"delay in": "8c5648fcdba711ee005878d9",
+"delay out": "3818de396172b08edb1581b8",
+"reverb in": "f44a1f98a15f7246e00307f3",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "67643fc9d9a029d45aa40b9d",
+"FX returns": "37c9d9b06ee6493c17bfb303"
+},
+{
+"chorus in": "1a843ec88fb0639a282ff17f",
+"chorus out": "8b225950b4f035e010d7c626",
+"delay in": "fd4c883d50ba61587b1d8a64",
+"delay out": "c301393ac5c347f19581f85e",
+"reverb in": "71748325bc9ae78af26ceebd",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "2da54a1f81e154a28d797e89",
+"FX returns": "910df7397b307864dcb2a059"
+},
+{
+"chorus in": "9351c9a838960c2cc3dd5075",
+"chorus out": "23071f3365fb90feee30602c",
+"delay in": "35239b8aa19ee95b20c3d4fa",
+"delay out": "82087c3b005f753f25f40e0f",
+"reverb in": "01100e067f24460a57f689de",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "0acf33bb7aae9991f180fb24",
+"FX returns": "661090963ae63ad95100867f"
+},
+{
+"chorus in": "1ad3a72c150fbc72c8b05ca7",
+"chorus out": "c0338d28a4d36d967fbd5864",
+"delay in": "34a18c63b00d9101782f03be",
+"delay out": "7c4bc36ea5bf0734d3fbc192",
+"reverb in": "f181781f76cdfe3eeb233382",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "b4fd583a665b93a6144b3fa2",
+"FX returns": "fbca7686b36ddfba5872dff8"
+},
+{
+"chorus in": "bacf27c6b894e84b70a0fdd1",
+"chorus out": "081cb907a58d3062140faa79",
+"delay in": "54034840e30c0def1190523d",
+"delay out": "4af742d417adc1b488be1bde",
+"reverb in": "f54d214bbfe9f8eb58c62ae6",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "9f3ac48b1f6798aa7341cd40",
+"FX returns": "32128f8557c03b5f23a12335"
+},
+{
+"chorus in": "622ce4b471e022d25d2d542f",
+"chorus out": "19a4022aafcd60fd586117c2",
+"delay in": "f5a6d9eddaca16ab533613d8",
+"delay out": "8e27952728c8ed2f8134c2d5",
+"reverb in": "b0e28bb0f3a3da22264e0d7f",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "dbd8dd13bb566b08d1e2342a",
+"FX returns": "2bd0bc37b4db6ec885ae6919"
+},
+{
+"chorus in": "37ff5e1aef783b2e29a85912",
+"chorus out": "77362aabda359220bbce82fa",
+"delay in": "68970c3c150fb2578a925588",
+"delay out": "c64801f19c5358a04abdd04b",
+"reverb in": "0d73cca3d964940a6765b653",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "40c81babd480fee060f940ca",
+"FX returns": "d31fbbf5986f0f57ee77491a"
+},
+{
+"chorus in": "95c79cbc67ec6dfd1ba9a9d5",
+"chorus out": "7a79021bfd2b1b172fc7ee76",
+"delay in": "7eb25c5768f40aca3c770c66",
+"delay out": "555e0ce7fdf32eb91e47054c",
+"reverb in": "9d796cd67e02913f16138e01",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "fba87329f26237a84ff12647",
+"FX returns": "a993274bbf703f579b5790b1"
+},
+{
+"chorus in": "ff21e383def1b6eee4b045ad",
+"chorus out": "bb4830a51e39e46ddcb8fcb3",
+"delay in": "d4160e406ebb76f6ac738ab4",
+"delay out": "7f9d6030a253d1ceb92e80ce",
+"reverb in": "c7c4b05740dd007b179a471c",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "6d45d90ba27dd812667335ec",
+"FX returns": "8f997868bf7d5a9ae70664ff"
+},
+{
+"chorus in": "0a683c45ab5958548c97ce40",
+"chorus out": "2312607163fa7164f12c66c6",
+"delay in": "9062dc3eee5607a03d6091cd",
+"delay out": "7efb59458de5d5b8f8b0112f",
+"reverb in": "aa774492a7ce03f16e65e463",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "300509637992672ed2e65c21",
+"FX returns": "c74a2a14984468e763fe90d6"
+},
+{
+"chorus in": "f5af36b03241fd09a1a07032",
+"chorus out": "0ab5aacd53ffd5c011f2dadb",
+"delay in": "4ec05e186b6ed157accce450",
+"delay out": "bd94889914297d4ee1e0555a",
+"reverb in": "73ee0d8e008c55efecf73cd5",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "e13d5f070ab1937a46a8402b",
+"FX returns": "3f13eabc449d4d2587d61c4e"
+},
+{
+"chorus in": "5e4cdd939575933eca4f8c7a",
+"chorus out": "649184d5215c74c28c017a7e",
+"delay in": "41b538d5cf82e28da59b42d1",
+"delay out": "aa9e3e56cd8df018a2d931aa",
+"reverb in": "05f00f0432cc0f59939e69f5",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "ed92d02c78b27d5a4f92ecb8",
+"FX returns": "f11fca2b4acc0c66d8b79cce"
+},
+{
+"chorus in": "67195b1994aadcfd10a06b6f",
+"chorus out": "7f9ef2fb0dd08d1cb323351c",
+"delay in": "e9200b54d8eb51f85255cb93",
+"delay out": "02e05bb5d22bb8bc8d7f55b4",
+"reverb in": "0d42e1d28433076528ce3a55",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "f827a209a692814cb775b2c8",
+"FX returns": "7b0ecad6e815931fb6d1b15a"
+},
+{
+"chorus in": "9414b04d4559cf6b6893da1e",
+"chorus out": "5e9eba2d7cf94a62ae87ddfa",
+"delay in": "963c6a729805c1c0f1807066",
+"delay out": "c7eaf811c07d5ce34a4f90d5",
+"reverb in": "45cf8140cfe774f2347683c3",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "5ab5fd5d4399c1fd3e5dd898",
+"FX returns": "05c939d781ced2567b89e9ec"
+},
+{
+"chorus in": "c89f7d4aab8cece16aebe5b3",
+"chorus out": "c63066d966466c034e2db309",
+"delay in": "204ffffbcee9b624f0605b15",
+"delay out": "ba8653afd31ee96456c1cb8d",
+"reverb in": "851fa51429c3900ac5fbeed2",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "413cba3ee2c9515e791bcedd",
+"FX returns": "acc358c7f8d94c1ca4a9442e"
+},
+{
+"chorus in": "39b7aa8e068808655322387f",
+"chorus out": "182e6140713b51d417dd44dc",
+"delay in": "75ca41a8edb09770d0af6704",
+"delay out": "558785a4eb1f8d11daeeceb5",
+"reverb in": "efc72456b1e93607068b5111",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "5a07fbd32338416316032f30",
+"FX returns": "5a6da1369b2c6c0ae13e23ed"
+},
+{
+"chorus in": "4945f34dd6f7e50aeb71e631",
+"chorus out": "8fc6a1778a3d1a1012ce41c1",
+"delay in": "e25e38b77ca89e8ea5b94458",
+"delay out": "6a8a1154e6354da64551d336",
+"reverb in": "27e21aeddc06be76e976b907",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "e19e28fc8f4d135eb61487f7",
+"FX returns": "cf2560aa97c1ee3a15e4d3da"
+},
+{
+"chorus in": "4fd3e49739ab107db5be7383",
+"chorus out": "3d9596b2bdf741ae15d33ad1",
+"delay in": "7613305abb09240ee3945098",
+"delay out": "977eff9876dccbef51e3ae73",
+"reverb in": "3137d4411ebdcc1704f71bfd",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "8de9a37fcbba62ecc1785c97",
+"FX returns": "8874528b9c8f52c703db9e25"
+},
+{
+"chorus in": "aa584c2e03c352bb8bdb1fc9",
+"chorus out": "e424c6b0c21019c061feef2a",
+"delay in": "464c1142ad8297437b4223de",
+"delay out": "ddd7e4ea0736dff0d54d7987",
+"reverb in": "6d22cafe29f9a2e81e269d9e",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "5bab61cfbac686857139cda8",
+"FX returns": "2015378ef7a0b845c0161282"
+},
+{
+"chorus in": "33682e1d58ecdfa147ee20a0",
+"chorus out": "d17fdd94aa9a145e5335814e",
+"delay in": "877768bccbc1179f52f80022",
+"delay out": "3bc51f0334c9127689fe4a5b",
+"reverb in": "cfb6358ad842d13ffd526cbe",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "45cd30452281d2ea550572d4",
+"FX returns": "6c7caca7cba03dec23c1c11f"
+},
+{
+"chorus in": "3ea5d6cef53d8e00f13dea28",
+"chorus out": "0826c4207562186de38019e0",
+"delay in": "e9b02ffa51bbdaaab3010ea9",
+"delay out": "e2d4a9e2c93b4fda4316fb1d",
+"reverb in": "0dba63c4902f30be1ad44a65",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "307d4e1a84cc14f2740fd262",
+"FX returns": "a05525ed27c1c8e195034b4f"
+},
+{
+"chorus in": "18b072dd65e70cd2a8c33a97",
+"chorus out": "6c758d82af64c07974ef132a",
+"delay in": "dfc297a5564c7f692cfeff32",
+"delay out": "6740f1f68e49b6ed9c11d318",
+"reverb in": "b13b787f1b2fb1cc42bb007a",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "d987a41d695812fc9190bcad",
+"FX returns": "d542f4ef519c4c48b28ea764"
+},
+{
+"chorus in": "2e58bce12ee689578725e9fc",
+"chorus out": "fe616d8663320d2a90bb55d3",
+"delay in": "e0528aa12df2c23d20524aaa",
+"delay out": "04717be1998c0b756b63b8cb",
+"reverb in": "ac8138fe8d1c283dbe39e20e",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "aba1e792a867a8a8776cd174",
+"FX returns": "5abe76ded97a6a5b42d3f3fb"
+},
+{
+"chorus in": "52e171b09453f4ffebd0261c",
+"chorus out": "d9a9c94c02826bbb00d7efbd",
+"delay in": "347eb484f9f57c15ccfca2fb",
+"delay out": "7d4f7f3f2748344eff8eb5a0",
+"reverb in": "975b4c1a787ec62ce3ac5a93",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "033df9ed94a3bdf6c938f9ec",
+"FX returns": "de902e9a523fb8bd2fc5593b"
+},
+{
+"chorus in": "848eb825ebba968cf0c8be08",
+"chorus out": "3876fbce7cfa2abd2db4e07a",
+"delay in": "ad6fbd6e7cb17b7d8cd02cbe",
+"delay out": "48c2f3e79971f7d878c1d98e",
+"reverb in": "16b6e9a1fa2f98a2a0ab849b",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "93e398f7e4c62f0bfedc3d40",
+"FX returns": "eab97ccaaf129a09b031e4c7"
+},
+{
+"chorus in": "c3223c395a3e11b46eb269d7",
+"chorus out": "6f72d99d5296d30db2cb1843",
+"delay in": "947a4144053a6055f1d594f2",
+"delay out": "41dd43967d7bf0742b15b94c",
+"reverb in": "9c4dbbe98c0c1c3172d40788",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "48f5055c4e50f661c0925159",
+"FX returns": "c5876bb016a60ee2b320099c"
+},
+{
+"chorus in": "fea52951a5603b8c2af2adf7",
+"chorus out": "f865eb5763740c07f640b0e4",
+"delay in": "eda9a521621b0200e2deacac",
+"delay out": "106ceb38a5866ff01ad040cc",
+"reverb in": "d47c5a7773c896fe888498e1",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "9375e898258ed982402cdcb3",
+"FX returns": "b10c6d0ebfb8c62eb607d03f"
+},
+{
+"chorus in": "a5a7779a6010dca1262c3bac",
+"chorus out": "8e5e440d03863ac0761cad96",
+"delay in": "65d7b10725273f3ffdd73d9d",
+"delay out": "81a6e56253890a50fb84aa77",
+"reverb in": "cde40d08485779a3d03737c6",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "5f65c40c44b189a98a359003",
+"FX returns": "3a88ab91488904d78eb7174d"
+},
+{
+"chorus in": "1dc8dc4d98e322329f16de36",
+"chorus out": "4894537f02ea25fcfe476909",
+"delay in": "7f119cd6e6cf448edc67b8f6",
+"delay out": "52d34eea7ad9f28369ed2ceb",
+"reverb in": "dcf278b5739a6daafb10272a",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "8812d83076e3d36c5e19dfe3",
+"FX returns": "910ba4776f182ea8ba77921f"
+},
+{
+"chorus in": "166d8eab827a7cc97d2bdac3",
+"chorus out": "f3a4685a4e3dba8f3c7c6af0",
+"delay in": "20c30fe0b59fa2a260b3da68",
+"delay out": "ed663972bf8ea100d5b3bb37",
+"reverb in": "6cf06696a088368bd986c2d1",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "4fd883c0dfc84d81e638f7ec",
+"FX returns": "854d0ff13a4a64b9c0602263"
+},
+{
+"chorus in": "48aa7f971159f0d4a2938c8f",
+"chorus out": "23d9e3bd78573b4c373f795e",
+"delay in": "7ecd8014cb94c072d00847a3",
+"delay out": "2ee949e24c7f3d28a61c341a",
+"reverb in": "9d1e5925e5a2d43e07ff3192",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "8293788f2fcb4ea964c85fa6",
+"FX returns": "6deb461af1f5a14dfd135ea2"
+},
+{
+"chorus in": "70d1e44a82b2a668db2c9288",
+"chorus out": "b40a9e4a80205e02b9b9ff32",
+"delay in": "93ea229aa7a0f91811d18455",
+"delay out": "5dcac1a5e884b375e8f10782",
+"reverb in": "7117d7a123b51548fbf98476",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "1bb93bb28fdedb4a28c73463",
+"FX returns": "19026eb9dc1596d69e41aed3"
+},
+{
+"chorus in": "04bb3b03335a1e0c36b8ea10",
+"chorus out": "914326da469f2debe36b92d8",
+"delay in": "12d72759eb78f58bf155d59f",
+"delay out": "1c83602f0b900a151b1720ad",
+"reverb in": "2a6a19731a0669c753bf65ab",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "b0dc8322b51692441b021870",
+"FX returns": "496fcde40d156b5d796ff76a"
+},
+{
+"chorus in": "547b008ff4d67de14b16b22b",
+"chorus out": "a6aff1f1436dbebfef777435",
+"delay in": "4cf64046525c11d5a2d85d93",
+"delay out": "ef86b2d3277acbda1d48a045",
+"reverb in": "b2c76da692dfe7d14d6bf3ec",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "f81d9ffea7bf86e7575f91aa",
+"FX returns": "54f5527086f25396bc290472"
+},
+{
+"chorus in": "038e6b5fc183776e4524bde9",
+"chorus out": "ef5441802f2d7687dec007d8",
+"delay in": "ead01e3ceb49be292a74de60",
+"delay out": "c66dde9ecd1eaf36e5add972",
+"reverb in": "d9f07b1fbcaba274b924b21e",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "4613f22680f1212a03533e39",
+"FX returns": "ed5ad50a6510b26da32bb18d"
+},
+{
+"chorus in": "312dce33b9142c395c615549",
+"chorus out": "fb6d78b1997dd9dfa9120348",
+"delay in": "25ee2f681f1b55080100de06",
+"delay out": "66e18c6f75531ca6e38dfe63",
+"reverb in": "ceec6578b2d5469c5c5490eb",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "9d722720ffea0ae9972002d2",
+"FX returns": "95f421750e8e049ea8c0a4bb"
+},
+{
+"chorus in": "405380aefd5de13180eba10a",
+"chorus out": "4f786736b43d8c00c79b8e54",
+"delay in": "72889c4d1560174c23f038bd",
+"delay out": "98bbde95442c251c0ca5ebe4",
+"reverb in": "a7cd5795c11aa360c98d1522",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "a27bd8557bfffba397eac66a",
+"FX returns": "9103d65ded71d12d9ca83cbf"
+},
+{
+"chorus in": "9841e45f725aea7e8ca6b1b2",
+"chorus out": "4d5e3b78806beab0cf29c496",
+"delay in": "c99d3dd8c3da7429cd0a403d",
+"delay out": "37d8be0d48831d77b85169a9",
+"reverb in": "864cb92756987cc56f2c3b57",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "e0bd13b4d9441fb403b1e22e",
+"FX returns": "fc1fab3147a436db93a5555a"
+},
+{
+"chorus in": "73a1180611ccee889fc0f93c",
+"chorus out": "33fd38829bf7aa54fea6a0a0",
+"delay in": "173b7850ffaa5a01227fbde7",
+"delay out": "1fef9475b45f79330603e057",
+"reverb in": "8058648931a3edbee0e49c2c",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "808db2420ba52ec074e41182",
+"FX returns": "e85fe833a6cf43ef6fb12564"
+},
+{
+"chorus in": "9b73d398b7a38151c46f8ee6",
+"chorus out": "ff34e1538a269259cb0e6c2e",
+"delay in": "d63b3c1db04d0cd52682a67d",
+"delay out": "8ff90ea25e0e67f0b2978b50",
+"reverb in": "541259eb89f788c62054c656",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "76f9a11cf5092e6b370ff595",
+"FX returns": "78f1714455e7c23febdedb61"
+},
+{
+"chorus in": "4041f9786b1091df3b8f1937",
+"chorus out": "c04c55618f7600cd4fb16817",
+"delay in": "1f3c497672b58208ac13c091",
+"delay out": "38fa326ca651d4cda0cf9381",
+"reverb in": "206d586e6c1e3ce58d449336",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "74dc65786341e4a0d4ccff59",
+"FX returns": "056ccdb06591cb356999ce46"
+},
+{
+"chorus in": "99db409515fc5c6e4f928ee5",
+"chorus out": "7b8c40a5e24f1bf35c5bb9ee",
+"delay in": "4b02f1ff9d36d137342b2423",
+"delay out": "c62f3d9eea5cf2d05f918ee6",
+"reverb in": "0dc6932ee0883b8d37338872",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "e9b545ff4c3deb47b3099119",
+"FX returns": "31aadd1f28d271584c355345"
+},
+{
+"chorus in": "5818194a89b81d90f3a9c4af",
+"chorus out": "c9c3c11126482a314bb14190",
+"delay in": "93e202d3124ff01cf9606fa3",
+"delay out": "32ae1bb8fde4f9d55b70a089",
+"reverb in": "80fbc558bfa79404e575df49",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "9d4b40587ccb1bf7e80a8440",
+"FX returns": "5ae6d3a8cefa007c2c28b36b"
+},
+{
+"chorus in": "a786a0f23205b22a24f70a72",
+"chorus out": "864cc1a5066e4c90d513ecf7",
+"delay in": "bd773a508a5a7ab29e1985e8",
+"delay out": "278478b0be6086fa706e1d98",
+"reverb in": "b93f5c5c64060db16a6c7bf2",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "5244b282ebdce4493d2ac471",
+"FX returns": "36c4a5b64550aa1b921f57ca"
+},
+{
+"chorus in": "05bca447ae69c8fd7ba3f181",
+"chorus out": "788d8d9def9fcc6e4542c8bd",
+"delay in": "76c0f58b8ef1abf3f44ffe87",
+"delay out": "10d9a89c95ce54c8a775c116",
+"reverb in": "517706d18dae1a33ec5c9d31",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "ea3342bad0c1dec1874412ce",
+"FX returns": "633f703342a6103d0591028c"
+},
+{
+"chorus in": "a7dcc06a4c83932a1fe2fa06",
+"chorus out": "f0dd0c679370b5083f1331e7",
+"delay in": "ab2f95a259e16a047606196e",
+"delay out": "d7551dc9094d52adb5cf9613",
+"reverb in": "3bfee7b73c012ff795062883",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "6801066d3b55563fbcb8bef7",
+"FX returns": "606ee99014b71d94123085ce"
+},
+{
+"chorus in": "8acf9a62cc5b3ce156aefd6b",
+"chorus out": "7c5d84cf19bc7639e2fe5de0",
+"delay in": "5472cdeba1d7820d034a4d90",
+"delay out": "5d05ef5a0ae0754ee585d354",
+"reverb in": "3aac2b55c9eb2b3bd32deef0",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "5b82e8788ce66966f537e869",
+"FX returns": "19aeab2e66f66f128a9cd726"
+},
+{
+"chorus in": "fcd583a8a9178b0c1c5c2f9e",
+"chorus out": "9d3954fcfca1429ef702c329",
+"delay in": "a08a744dcdd5f8ea826d0dcc",
+"delay out": "a336f7e46cb7dc09c8107a02",
+"reverb in": "3f31a14a49a37f727663b047",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "c0db70d071edf0801653962d",
+"FX returns": "a3441d84d0b395ad34985104"
+},
+{
+"chorus in": "a814921414b426470b9542c1",
+"chorus out": "95b9f7b3ec57863fd76d842e",
+"delay in": "368c73ff818f0bc65f73dcf9",
+"delay out": "4af17a35416437d02e47a980",
+"reverb in": "b1c7351d7811bc6b892c1bd0",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "91051b3f92fb2bc13ec1c175",
+"FX returns": "18200f1000554b603ec72759"
+},
+{
+"chorus in": "f1e8f1cca4bd5ba9ee60dd7a",
+"chorus out": "1a75afe2efac3603ffa5ad2d",
+"delay in": "b18bb84a865b6890e820e131",
+"delay out": "20ccbb42783cbef261302010",
+"reverb in": "b8184d38651a9bdbde97405a",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "0e166274f1668316c9e96f6c",
+"FX returns": "b7137fe5d87f90554a1e871a"
+},
+{
+"chorus in": "cff1e9eb9162bd1064b5bfa3",
+"chorus out": "fa82f3cfd74fea9ecb5842db",
+"delay in": "ef176709b42ec0330aeee7b7",
+"delay out": "2c93ac367384e3d466d382ff",
+"reverb in": "b3695c50ead7d7b4f4973791",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "75ee093e8840e8c7ff99d847",
+"FX returns": "1b7ffbad936c8dab6341061c"
+},
+{
+"chorus in": "f2eac30183b6ffb320458202",
+"chorus out": "2a998cf7ec86a0440c94ec0a",
+"delay in": "af0418b998955ea843e8e592",
+"delay out": "11f8e6ce5dfd3fa769a01d33",
+"reverb in": "88ffeb0ec13757ee8597fcbc",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "d9e9f6dad1c9709e8c58df55",
+"FX returns": "c697d1ac2d852a377a6c7b11"
+},
+{
+"chorus in": "c3605fe9fe0a70df8e74d2a8",
+"chorus out": "4d1522938179d4a85620ec2e",
+"delay in": "cfb1ef38309a39736302d52a",
+"delay out": "b7261f27580e7b2468587afa",
+"reverb in": "cea3b71c2ee1a16104041ab7",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "51b5cc8c378483cdb6f0eda8",
+"FX returns": "b511ec60db26dfdf8ccc6a96"
+},
+{
+"chorus in": "a27d7b57c165f3fa253f8736",
+"chorus out": "314bd12d4954778d3fa80eb6",
+"delay in": "4611b13b3685557b6d01b23e",
+"delay out": "acd6b233ab4db6d6e9e28d17",
+"reverb in": "4c87c7dee9617aa77fe6d678",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "d38befdba10d57277e72a571",
+"FX returns": "a99e0a14badadd9e7120b94b"
+},
+{
+"chorus in": "06c8b38bd82797c442190531",
+"chorus out": "9c06669937f80602bf1c666d",
+"delay in": "f13d1b38f91d10201f75250d",
+"delay out": "2bd2c80554c1c8ec2f532cc9",
+"reverb in": "21bc7a39c68d85c55b863b6f",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "dda71d803b29c7cd11398b4c",
+"FX returns": "bb028a78c8f6f0bbc72fa800"
+},
+{
+"chorus in": "ab411dcac3d249589911e766",
+"chorus out": "33a2d98f61de1014d38a2ffc",
+"delay in": "3f8a2aac4ede294479f5abba",
+"delay out": "cf52fe1bb99b5722e7520a8a",
+"reverb in": "e4128b4a1c27f294ce76a26b",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "b0308d0b40472df5424275e0",
+"FX returns": "410374a08e84ce4ce0fa02a0"
+},
+{
+"chorus in": "0651d0e63a230c1bf433e1ba",
+"chorus out": "002e960d4ccc3c65687b92aa",
+"delay in": "36fc691d385cf477258018da",
+"delay out": "42778869d3beefbdee1d040f",
+"reverb in": "d58d05afeee3028089c2fa9e",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "9d86625950712c9b46fa42ad",
+"FX returns": "647b1765267baaa901b84886"
+},
+{
+"chorus in": "3712c45f34db7434813b0a67",
+"chorus out": "6324188e02f53199b55d57ff",
+"delay in": "dcea6f88150943bdb8cb5d50",
+"delay out": "374c6a45dce45c2fe74d6bb5",
+"reverb in": "cd8cf5fddd766c73cc3720a7",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "fdded97f552334b6be726145",
+"FX returns": "101561073dc062c6460bd9a0"
+},
+{
+"chorus in": "7b65a3cc03c4a2a4d2650a26",
+"chorus out": "a520270942a40613f6e5a557",
+"delay in": "07e2dc21300028645fe0ea44",
+"delay out": "a4010c6f895e1ebb7300a1c0",
+"reverb in": "d348467d60c250afc52c0256",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "4ccc88a6e4151e17c7fa9d32",
+"FX returns": "c41e663c799289a4c68081c6"
+},
+{
+"chorus in": "7d59a515207025ada6145eab",
+"chorus out": "7b717c81bfb1addc25086588",
+"delay in": "570441949bb7af6ef1b289ab",
+"delay out": "b5e1f87bb6c0c13b1923abfe",
+"reverb in": "ee52ea568dcf06fba9b9c222",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "95bd8fbc07fa795b69c691f5",
+"FX returns": "5a0a948ffaca9e29e313b326"
+},
+{
+"chorus in": "9738a9a0b7a5c1888270ea75",
+"chorus out": "b0b23436a0cd5d687f8ca61b",
+"delay in": "ca13386f17147749d6e6d8e8",
+"delay out": "117dd1206d40e7dd7954ce44",
+"reverb in": "d90544e47b8b0b0208a790f5",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "0a5978fcf0b86d9f8f9e8076",
+"FX returns": "a859fcd5645d7ecb25d87127"
+},
+{
+"chorus in": "0ac7f29f3f075574fe92b7db",
+"chorus out": "5b9122e280e3b8f827636947",
+"delay in": "6a47efba6eae3189ce0e83f4",
+"delay out": "219bea9e316b21dee64e98bf",
+"reverb in": "b63804acccf34a25d65cd884",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "77a2a39ce42cd8930f09b870",
+"FX returns": "aa6d0f21f851a8b40e8a2507"
+},
+{
+"chorus in": "43157eb531f73f41ca010dba",
+"chorus out": "b7405fecd492bc0e0576a4d7",
+"delay in": "b81b51eb6c37041bc5bec644",
+"delay out": "7f21f3fb5486808789c9610f",
+"reverb in": "6bd4911111ffc7c164b03715",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "766d4008749c501b113c7d79",
+"FX returns": "77637b944f24668f7b4b186e"
+},
+{
+"chorus in": "098c5a41b775eee52e5da0bd",
+"chorus out": "63c7c20f0e7726cf1880cc4e",
+"delay in": "cb0452c5d9a673d496732786",
+"delay out": "ad3dd650268418c633e59fd0",
+"reverb in": "57d8fb6aae758aaecee8affe",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "b5defbe9550b55d31b042f6d",
+"FX returns": "8eb5b194acb16c83b286bcda"
+},
+{
+"chorus in": "646de3379b544b36f39f85fb",
+"chorus out": "e36eb07eaa98c3ef0740aa0c",
+"delay in": "8009d0e5818919ae0e60665c",
+"delay out": "69e36f1193aa164e0269dce8",
+"reverb in": "f2dd6697a69d8092577d2178",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "3d4812d895313a60dbb8fa2c",
+"FX returns": "4130bbeef5394e1616d56707"
+},
+{
+"chorus in": "b717316652842543db415ff7",
+"chorus out": "37479cd847954ab1ef9abd18",
+"delay in": "b1ac58d159dfb75051610bd5",
+"delay out": "ddd6e25b9408509fa76d694c",
+"reverb in": "313a232a7f4a91c9e1196e7d",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "b4219fd867fb81653f2ae664",
+"FX returns": "e0c838744f1220dc0b03c0e6"
+},
+{
+"chorus in": "2b2baeb53a28f43ad61816f5",
+"chorus out": "8998baec483712f537e98fe6",
+"delay in": "36ddb526ada3b3289f69ae4f",
+"delay out": "f8b94f0261483b37dd1efc67",
+"reverb in": "335f158bf28381f0ed4744de",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "9f5f9e3b553e2cbb8f6cc064",
+"FX returns": "3753861cba33d214a84eba74"
+},
+{
+"chorus in": "5b35456d988f2978a7cdd353",
+"chorus out": "21e22f5585e1d07c4ea2f733",
+"delay in": "c6a34106e173316a59ea5e37",
+"delay out": "0b215bdeab125faa400f84c9",
+"reverb in": "2eb340927fa7c4295ba70ade",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "9c89e46a93d64070e9da9319",
+"FX returns": "466549f59d140ab45f646092"
+},
+{
+"chorus in": "22296476023855fc4187f308",
+"chorus out": "b36d1b3e6410963639b166c4",
+"delay in": "1694c1154256b384b7e055ba",
+"delay out": "eb6cb004caaf2fe095f82961",
+"reverb in": "d0ebf47e0ab4c626d45c23f0",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "33d006294cce33c4ece6ba1d",
+"FX returns": "83062e1dff1229fbd4d45d65"
+},
+{
+"chorus in": "7bd54f139aa6b539d0b36bfe",
+"chorus out": "6524f8365823fe4e906c350b",
+"delay in": "29d8106f2cabfef6cc341680",
+"delay out": "73be6c35e05cbd2a09367fc4",
+"reverb in": "ac9d2511d9d315ee60408bf0",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "c6c1dfcd85d19e849258274c",
+"FX returns": "d97ad2bedf556ce4b3751cbc"
+},
+{
+"chorus in": "6baab893229eb40b979ee84d",
+"chorus out": "e2246071971e0567eea0cbb9",
+"delay in": "d46607bde7749b20e1a8990c",
+"delay out": "c7edc0f3f537858082a4fad5",
+"reverb in": "98777d5f0a482d4c79ad8af8",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "f19089cb3c9d4c4aa1c064ee",
+"FX returns": "26ce3b248d9baa4bed09c45d"
+},
+{
+"chorus in": "98fdfe387369542ade24abcd",
+"chorus out": "ffd434ee4dc88f5738a69d33",
+"delay in": "ba518786e8963d2ed95fd4bb",
+"delay out": "ffd218f749ba9a47af0ed130",
+"reverb in": "fe41263d506c4412f879db7f",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "1c7ae92d006de45ef12b6943",
+"FX returns": "77ef4906af14da660a0f8fa9"
+},
+{
+"chorus in": "d15eed2190ea2b118dd05aa2",
+"chorus out": "f78c4289aff17631d009548f",
+"delay in": "385897be466e2a29b9087f22",
+"delay out": "67607ffb54f22c4e7eb5d0ee",
+"reverb in": "e585fbba0cc9c2c1947b2bd2",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "ae352d8ee035516129890137",
+"FX returns": "5bd276772d93ec9a4659fe02"
+},
+{
+"chorus in": "b66a0d903d4ac4d85444fe9d",
+"chorus out": "7e8a74334e4593d2fb4af40f",
+"delay in": "89f37c3e42d1f9aa593fa24d",
+"delay out": "af7e475a47e3daedb78b1f52",
+"reverb in": "5a9a341cea419097af1ba734",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "9413503f12c0e6ad58611f3f",
+"FX returns": "b052204eb8375045e609a45e"
+},
+{
+"chorus in": "9a62690d601c97c784733e65",
+"chorus out": "2bec9b194a6b713d5bd6a2ef",
+"delay in": "76c1a7eb221e0da40b118543",
+"delay out": "39553291b23a85ec3a7ab8df",
+"reverb in": "4b51cbc84b4324177660309e",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "ab1f64fee9ae3e44b611750c",
+"FX returns": "2987d21bf229f20187b2849e"
+},
+{
+"chorus in": "444776c71856966401d6f2d2",
+"chorus out": "f0771a76a9c3670ad5456a11",
+"delay in": "a6a95a3b8e20295b768b985f",
+"delay out": "969219c9751153ed0ae3a021",
+"reverb in": "4ae5385bffaa6472d7615f74",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "1e4107b5766981638a6052ba",
+"FX returns": "48765fba7098de886bc493a8"
+},
+{
+"chorus in": "f326c64d182297a03b7ab44c",
+"chorus out": "752950c2e04d7ad39ab219f0",
+"delay in": "2b6db5c6c08a158752a552a2",
+"delay out": "b20812ce71cccd81cc8c14b1",
+"reverb in": "9a13fa66d5a97e4b887923af",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "d646b00a553a75281d9d48a1",
+"FX returns": "ed59c61aaa6702ffb264d5ed"
+},
+{
+"chorus in": "368d415cb5311fee5e20364b",
+"chorus out": "82c032d98a503e9505a697fa",
+"delay in": "ffbe849aa2c4c4269d4aa2ee",
+"delay out": "99cdfee65345f26cf9d73705",
+"reverb in": "069db0d091b780a99355037f",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "8a4c1a3eb07061bff47193bf",
+"FX returns": "b171f0aac926833d7d8b5357"
+},
+{
+"chorus in": "889146c6c6632a55d286f7e7",
+"chorus out": "f68cc7221966279676544e7d",
+"delay in": "0a83ce77230a07fc468d9e8b",
+"delay out": "0dee8a1f5db583ea2c3117b4",
+"reverb in": "b34b714cffccc26c835a8040",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "ac94e5e7b6dbce34f1074c69",
+"FX returns": "87f2436314bf3af50e857194"
+},
+{
+"chorus in": "1232b3aa8e55a3742479a7d9",
+"chorus out": "075ede70b3db79a7d9b19b47",
+"delay in": "c6d91056fbaff310b4de3786",
+"delay out": "d4df631b8bc48b88a2eb1e1b",
+"reverb in": "7a3aa8c2faf2f74e029315d7",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "ed63875c38c39939156f81d0",
+"FX returns": "a3809f83d6e5eb3daca6e417"
+},
+{
+"chorus in": "760fae4f7c5ad10d1cf2d22d",
+"chorus out": "514031cc539aadb599ea7612",
+"delay in": "a35182fa9d4698a6b1b26890",
+"delay out": "68cf5bdcedd25155b6ce5a7e",
+"reverb in": "364c9b890d672e9d84dfbe42",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "caf00cec707693c1d889dc52",
+"FX returns": "b03ce0fcbe02f8e00acc6d64"
+},
+{
+"chorus in": "50bf17b3e704076f5e94c988",
+"chorus out": "f0dd03599e10580026a9d25d",
+"delay in": "b26213c95da49130983bb3cd",
+"delay out": "12826718d290d7cbb2d0a74a",
+"reverb in": "e98dba85e2b49ed698dc6203",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "ca3c34338464710e2e756cb9",
+"FX returns": "5b731122e23030f614d7d106"
+},
+{
+"chorus in": "b22761c448cd92acaece5e2f",
+"chorus out": "347d21d0503f65e8424e3ae0",
+"delay in": "71caf225b6fc831047aec88f",
+"delay out": "1a77cb92d52a1d9a94562992",
+"reverb in": "75eba407fe4f517d5dad22d9",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "9ef51dc6afd3f643d9f1fb62",
+"FX returns": "100aa58393c57bd4d6aa52ee"
+},
+{
+"chorus in": "878bedb0a70f02921f668ec1",
+"chorus out": "3c228acc3d0b692777ff2e97",
+"delay in": "950b14309553c671ffedea5a",
+"delay out": "d2d68c645ec89595b91334a3",
+"reverb in": "e5bbc00dcd243ac2a1b907df",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "e497e822162eee1e510f8be3",
+"FX returns": "66d634b208dc7149fe4e7b0d"
+},
+{
+"chorus in": "0d487b6823ee888cfb3983af",
+"chorus out": "2c2abbb10fd106c20a0dff8c",
+"delay in": "e6e2982d3da85335d7a25d7a",
+"delay out": "03476052f712484a2a137869",
+"reverb in": "1eba25ce6ce9cbb4eb1a5c73",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "531e19d0645f7966e383d513",
+"FX returns": "222842b365631f90ec1581e2"
+},
+{
+"chorus in": "5557ca1aa0999f0b6856fa16",
+"chorus out": "877c51fe1ff7b8a5008f3014",
+"delay in": "698e4b2077684654603c0bb0",
+"delay out": "d24298ecd2e8cabf44296228",
+"reverb in": "1414d87513e7adb0d0e2acae",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "f7dcbbd88efc0a92a2db4d5a",
+"FX returns": "e4baee4b23431aea634e6413"
+},
+{
+"chorus in": "49abe1e6669080a9fa15c306",
+"chorus out": "615a5cc76d7f79ac82d14906",
+"delay in": "e57269b1a232ba6912770614",
+"delay out": "c7a184ebd81886476f23c84f",
+"reverb in": "4db3703ed2e04055c6426cf4",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "f699be0de00cc007df91c767",
+"FX returns": "7322380e53899d4ec7569b9d"
+},
+{
+"chorus in": "e124797cbc0531f8cc246fa6",
+"chorus out": "0d1848329b7f639d977b6669",
+"delay in": "5890c3bdbc74e1c5a3a93f1d",
+"delay out": "92e45a3f4672b840a316753a",
+"reverb in": "162b59f0c21c1f0407220caa",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "75caecbe54a7084a6307c2d7",
+"FX returns": "1be91d41ab420832b5f36300"
+},
+{
+"chorus in": "6a5aca17fd013c069fb412f0",
+"chorus out": "625ffcb85b5a77d31c71b05d",
+"delay in": "b9ffe9675701ddde01b606d7",
+"delay out": "ab6a87802285bbdfd1c14153",
+"reverb in": "0a684f510e5092525a5d0d95",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "da994e3e2b0700c1b72dcb92",
+"FX returns": "3cf9db1c3bad246474a9e361"
+},
+{
+"chorus in": "fe95c4951a5db5d4809a8238",
+"chorus out": "0df8e8e0dcbf36b94985babe",
+"delay in": "2c4c1ae670414874f2625ff2",
+"delay out": "507fdbc5f25feaa71676f7d6",
+"reverb in": "02f3427aa3c16303480f4088",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "1b345e66cbffdd0512e2725d",
+"FX returns": "a3579ca89de86dad4f152765"
+},
+{
+"chorus in": "2e8d4c49adf741561c3015c3",
+"chorus out": "cd7f23b29ca285120b9a4337",
+"delay in": "b43231ec2e155d4a3b1486c5",
+"delay out": "6367129d8b1688e281f7ce30",
+"reverb in": "d1f6e53fd420ea6d49cd0ffd",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "c130f5fe8ba917cad9a7f37d",
+"FX returns": "02c411e64b3b53f9f0400141"
+},
+{
+"chorus in": "605b719edcb23f78afd23478",
+"chorus out": "2d8d9f171e3a23528d295459",
+"delay in": "06ed697c2d8afa82dff5e333",
+"delay out": "727c375a71da2d9b02c00780",
+"reverb in": "bc730f230d265ed02fbcf234",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "e6340c24da8021427598119e",
+"FX returns": "245d0c5de06c41d541c29ed1"
+},
+{
+"chorus in": "d606093d6abf858c18e3e1d3",
+"chorus out": "b8027682804b1c8c11d8a9b9",
+"delay in": "ad99082ef8aea8a037ff2c66",
+"delay out": "04e05ea9a0439683c1ab5d21",
+"reverb in": "98950b60b30380fd2ab11139",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "635eec49507c812b43a93225",
+"FX returns": "cc9999b3c96118de54a7aa75"
+},
+{
+"chorus in": "5a0880d36a7508074b301676",
+"chorus out": "b4511936d59e248a20a85d6c",
+"delay in": "875aa8d0b0735b2c248037b5",
+"delay out": "1e7362f34a8e6d0b46902b84",
+"reverb in": "a0ff01a8069d61d882d99ba7",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "988f808783d3ee03be758472",
+"FX returns": "7a6ff4ae3425e81cbedf61c2"
+},
+{
+"chorus in": "ea209a8b8e4f6fd70b25b485",
+"chorus out": "b8970183244d6733d8afe026",
+"delay in": "573308c455ee73271b205b0d",
+"delay out": "47f5ef7407f5f2270521d630",
+"reverb in": "b779385d7899d088098f0fda",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "a961c62b67478904ebab8e8b",
+"FX returns": "58f748357fe3b6a8cc9f703e"
+},
+{
+"chorus in": "884af05926f1999118e1692d",
+"chorus out": "0999544aaed09f815f1be323",
+"delay in": "e25845b7279b331f5b8b3d7a",
+"delay out": "56ff45467f316a19531fc38d",
+"reverb in": "00f017b3da6b0433d6365490",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "64dafff7cedab0aae932cd70",
+"FX returns": "5eea8d0d0f2b1219c80db522"
+},
+{
+"chorus in": "2909186fffcda3c0a1779729",
+"chorus out": "2b2700c014e5c0c57f76a3c4",
+"delay in": "4a9470f3f9e79e97eeead0e6",
+"delay out": "323fb75b0ae9c76d506f59ff",
+"reverb in": "4b0b19038f02df67701bc658",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "2fb92b7b60f6738450fa1018",
+"FX returns": "4f1738455c2055e79adeca92"
+},
+{
+"chorus in": "878366fe2481e810ac86580e",
+"chorus out": "cc91c67d0b46528db15ea7b1",
+"delay in": "15d6cd8eee22822e2bf7e2ba",
+"delay out": "eec21774cadb39f82f0994de",
+"reverb in": "96bf4637f6fd22b1d12fde39",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "95904f97a39462604e76a507",
+"FX returns": "5864120679ebe10a889d34ff"
+},
+{
+"chorus in": "2b4e87a5a288949ef75cde82",
+"chorus out": "1fa9581662c7487b81649d7c",
+"delay in": "ff04eeee301d86f689fd1b06",
+"delay out": "f15e6fbe550d12879fbb5d56",
+"reverb in": "55449d505a8847b84b1bb17f",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "9846f7aab07ab715e400b012",
+"FX returns": "dda0a85c48744fb1c7b1f297"
+},
+{
+"chorus in": "edc3dcb9af9183cf71ff0173",
+"chorus out": "6580be0ba4dbfdaa50b9cd4b",
+"delay in": "4957850ad7738948a19499cd",
+"delay out": "286fd1a5780d1ba7c1d83c04",
+"reverb in": "de50a7eb6c94e4af978d370c",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "020a4acebdf0bfabfaf06bc9",
+"FX returns": "cea0fb1f9e27dbbd0b741c8b"
+},
+{
+"chorus in": "58e578b1da6bd75e974b3e62",
+"chorus out": "a21ccafdfc5094f5721dcceb",
+"delay in": "0da65025749d63474969a5de",
+"delay out": "b9bb7457801ec7c2f9333244",
+"reverb in": "6f6555852052ce812bf02282",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "8616d45408b915933e245ce0",
+"FX returns": "fd838adc8b74762479d4c36b"
+},
+{
+"chorus in": "8f151d262b542f4894aafafc",
+"chorus out": "8d52b55c857efc0b3e4167df",
+"delay in": "6ec34e7570ac0eb8f3b68bb9",
+"delay out": "f312ae2228834a7ff91b68fb",
+"reverb in": "e52e7718cde2cb2b2aeba6df",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "6be95a739ee0f06536e188e3",
+"FX returns": "1bbba5d95546fbb3dc248fe7"
+},
+{
+"chorus in": "10e574f167f4c5c40a319e50",
+"chorus out": "429a9d1c6e8d5175cf8a9fe0",
+"delay in": "ef077518174ae5c2ae9c8ed0",
+"delay out": "af3e3d608995d91d442ce845",
+"reverb in": "5a9b1800ab632288ca9720a6",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "4676accdcab0fe148fa8ff7e",
+"FX returns": "227799f2e103207ced99c415"
+},
+{
+"chorus in": "99c73c074b0b2edf6e5a9f87",
+"chorus out": "58ea9360bc5cee96160873f3",
+"delay in": "697289dab7345903fbea584b",
+"delay out": "721a75e9dbcd2c8ec7b18096",
+"reverb in": "9de4078ec76071e6f0666f34",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "09f8de4df791bf329c9c010e",
+"FX returns": "a3a9ddfde4131984b6619ce6"
+},
+{
+"chorus in": "47702f1a6fb9f9110a3c0f49",
+"chorus out": "eca5c72bb78651418f0430aa",
+"delay in": "8bd7d7ff17e35ee7a45bbe02",
+"delay out": "0d53f9e9cd0e87757500e9df",
+"reverb in": "684b605e24122c3da9991c0c",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "d70e680ca1b4258a38ebd8dd",
+"FX returns": "af1e66c23f81eadcf9212583"
+},
+{
+"chorus in": "8070e811d8150b145202ac78",
+"chorus out": "abaf79b956e0218507713c13",
+"delay in": "622ec662edd92f377f4e52ca",
+"delay out": "6d15046bd45aed28ed9f4063",
+"reverb in": "77a45f863341d83305f8227d",
+"reverb out": "5341e6b2646979a70e576530",
+"main": "957e87b3ef608271c5116925",
+"FX returns": "f3acdd79125ed4491d1472fc"
+},
+{
+"chorus in": "44afe11ab4c513bac0e8f8af",
+"chorus out": "277d520fcfb6ae328d217de4",
+"delay in": "4a8a9409e375953b317a83c3",
+"delay out": "d44b6cbdfaf0e4341c9d3ce9",
+"reverb in": "00e111168bfe5676dff848da",
+"reverb out": "ae62ff0df2e3f2f75306dba8",
+"main": "53bd29a8d340f3387fcfafe1",
+"FX returns": "dd6e4b58cc294f04015dbc8e"
+},
+{
+"chorus in": "944d8bab5ace5d60b0e2bc78",
+"chorus out": "3d93d3053afaf472d07fc4ce",
+"delay in": "33e8ee7ad2cd4a318300a257",
+"delay out": "422b35b115fff859884ee885",
+"reverb in": "423417cd54bc1ac8f72829ee",
+"reverb out": "5eb2ad96d40b67e1482624dd",
+"main": "e192be4763f4798eb16b8f8e",
+"FX returns": "84c4f80a7e06357a3c917466"
+},
+{
+"chorus in": "441edf310d2792f07395da60",
+"chorus out": "385b67d429efd9c097271ea6",
+"delay in": "bb0c5b74259a9e32ca90f588",
+"delay out": "03b60a34cb4dc7e1eaf91a0e",
+"reverb in": "afd0c9e2390c1fc42651e916",
+"reverb out": "46217d630040618e8b2b26ba",
+"main": "bb6d5c017759b76365ea6a3d",
+"FX returns": "b42f75db3851f0c8d96ebdd2"
+},
+{
+"chorus in": "a9af3dc80219f47d69829147",
+"chorus out": "6a67e2610c39f1918089a7a0",
+"delay in": "5506eafcfe5d2892adeadbb0",
+"delay out": "54820b3695af626d54032a5a",
+"reverb in": "0b028292467391e07e358c34",
+"reverb out": "ddca41e2b46a933506fdd1aa",
+"main": "34c63d9159bff6ef8af06ea7",
+"FX returns": "256f48c3316f0069de70d9aa"
+},
+{
+"chorus in": "ae931923cc0d8df566a36032",
+"chorus out": "f9815df55923412e0c3134f1",
+"delay in": "1ffe16a1c5e08553db14aa78",
+"delay out": "90e374aac9e17b4eb3c24141",
+"reverb in": "bcd48a3a5c109318e453ee98",
+"reverb out": "5e438f647f2a648c73435481",
+"main": "574c26bf9a78c022d5db0788",
+"FX returns": "337f0391b09ab3cbbe976106"
+},
+{
+"chorus in": "55771ee056abea66de523c49",
+"chorus out": "03c34f1ce51af28db1e17773",
+"delay in": "5b231cc61597bb9be6a6643d",
+"delay out": "d99c715c1561bc2f17b6af64",
+"reverb in": "8759b6c82fb92f956e368b8a",
+"reverb out": "f73fdf23928d38efccdf128c",
+"main": "5872b839a9aab7bb78372af2",
+"FX returns": "2559df90de4705a4a9ca9d42"
+},
+{
+"chorus in": "330b893544c6fc3ee0c47180",
+"chorus out": "02333eb2e00f80ed3539504e",
+"delay in": "1aed2578d773505cc8a0551a",
+"delay out": "853c616ef7b43d3d53befb62",
+"reverb in": "c90f040eec4bc6b2ff40624e",
+"reverb out": "321d09d720ecc54d17af43ef",
+"main": "f3ae998bef376bb5ad9bcfba",
+"FX returns": "9101d00b2dc243db1cd304ab"
+},
+{
+"chorus in": "882024f39a048422498c8d90",
+"chorus out": "488c2c36a04638fb22dd9925",
+"delay in": "8d4f44d2dc09eb179d0211b1",
+"delay out": "ae5d63fb893da76f27d8c150",
+"reverb in": "947a846ed68410943581e841",
+"reverb out": "b5487200804d478ad8004472",
+"main": "eee0e87bb62c5648df65ac19",
+"FX returns": "3bebc5fac2eb67dd72b49c0b"
+},
+{
+"chorus in": "f66d88a635fa01828b31b507",
+"chorus out": "f6e04a6a01798f66381abf08",
+"delay in": "1d58c38a1f281b5fc58b5ef9",
+"delay out": "1f8d0258ec8ce3bec106cfe0",
+"reverb in": "1858fde8f7aa55aa00d3ce84",
+"reverb out": "124a06833d439738886c8115",
+"main": "69dd6e4bae58338aedcbe423",
+"FX returns": "3d1720c54d2fddb83ac3aec3"
+},
+{
+"chorus in": "0e1c9d895ec2531cb8452c56",
+"chorus out": "85b9234fd541d710fb4e3aec",
+"delay in": "b7cc65a09bc18fd46190de52",
+"delay out": "df967226115c8e157528e478",
+"reverb in": "95d5fa086de894d0172d2a80",
+"reverb out": "06c9f4dd9d542cf314f9112a",
+"main": "4fbf6d8cb7bc51c7d0998fc6",
+"FX returns": "0ed23858185b47236bc804a9"
+},
+{
+"chorus in": "93a019723e1ac156b809b870",
+"chorus out": "12eee0c6c100aba34a93d1eb",
+"delay in": "dda0d90ff4c5b30783dc3db8",
+"delay out": "740b4775f42b51ded4ae4d5b",
+"reverb in": "9b133d95f49f6f309d3da4c2",
+"reverb out": "82dbb5341db16b9e17e84aad",
+"main": "5815bce4ac5fae9a96b25590",
+"FX returns": "6b6cfa1c3390cf899ffa89a0"
+},
+{
+"chorus in": "0b50bbcd84eefdacf6e5b8d7",
+"chorus out": "32176d6eeb5907e604d88931",
+"delay in": "c10840320f923e3a88557b43",
+"delay out": "4bdec5926f3d103b58704a5c",
+"reverb in": "98b1590c48a8536f41757f9d",
+"reverb out": "7b97b4a9ac128af93ed34a04",
+"main": "2f3af4231084ee51e29490dd",
+"FX returns": "2ef1c69fbd7667e9c77fb06f"
+},
+{
+"chorus in": "08f6621d85a52a2d4bf964d6",
+"chorus out": "a173ae206bebebf9ae9a1713",
+"delay in": "6c9135aef6f4c28c6c93c319",
+"delay out": "9f36ad4935966fde9d76ca84",
+"reverb in": "a3c6d3755b833a868bb8f4ee",
+"reverb out": "382b009b8018146a7ea59eb3",
+"main": "00246c50450175a76759e47b",
+"FX returns": "0e240704bd2b73d07fa23fa5"
+},
+{
+"chorus in": "90b783e9c8d7af082db2e86c",
+"chorus out": "cf7c50dee2fa63ad93c58594",
+"delay in": "d8b4c0a2f0ec35fbfd65f9ea",
+"delay out": "97e4c248aa1ff58a14cd285f",
+"reverb in": "137e289e4a5dab7ca0274bf1",
+"reverb out": "1e476b37a4ec19baced0d2d9",
+"main": "9d5c82504d3f396a0d056f08",
+"FX returns": "08d092f6b5872edd23a3ad2c"
+},
+{
+"chorus in": "2ab5d1c1a250b6f7c48a2c6b",
+"chorus out": "3a5b9fed6dccb79bc5c285b6",
+"delay in": "1aa668736fa4265b985d5546",
+"delay out": "741fb28f79f4b5f5b1ed96b1",
+"reverb in": "4a6bb2bb28d21ec74b04d858",
+"reverb out": "a23896266ff09119e4da1587",
+"main": "c78a02e75ce690df84103f8d",
+"FX returns": "12c42be054254e556403456c"
+},
+{
+"chorus in": "bd4388b737836d7b0920eddb",
+"chorus out": "147f06fc9d4084c8e11341c3",
+"delay in": "aaf31bbfd2df4ce77df68c32",
+"delay out": "4fc16c88bd230096f7eb410c",
+"reverb in": "bf33ef1e43ea0d194f05f43a",
+"reverb out": "6e829992ff7c6aa52b26db78",
+"main": "60a2c275c5b0cb5fe1535503",
+"FX returns": "62a25a0e0b28430b07eaff2b"
+},
+{
+"chorus in": "b7bd1f9a6fd12a1d7a11d8d6",
+"chorus out": "8f5324d6e57b248736708256",
+"delay in": "dc4e5a9b77d3fe7e37b8b7dd",
+"delay out": "4f7ff21a993eed0bf7b8a219",
+"reverb in": "67b41e9b58d79f2646636149",
+"reverb out": "b6761496b6c59701c964fe88",
+"main": "9e2f578fd828292cc48a78c5",
+"FX returns": "375e7d9e2ef7832c733bf21d"
+},
+{
+"chorus in": "bf1e0abc0589d68cb73fc6ca",
+"chorus out": "f7bbd030043730e25b770017",
+"delay in": "a314ebf4c4b3233948d1e127",
+"delay out": "0e22cedf08e87b05c4a5d286",
+"reverb in": "af02853717f72294185f5a59",
+"reverb out": "14b8269cb7ee97a0635fb139",
+"main": "032f66cd7787d25d5e81f2c3",
+"FX returns": "6a22db217d828c1659ed122b"
+},
+{
+"chorus in": "ecdc17cd850322c732fd58c8",
+"chorus out": "9e7a8096df6d9f0aa7f50f53",
+"delay in": "50763c899cc29a87472889a0",
+"delay out": "503cc1eeb059d47de265b9fb",
+"reverb in": "6a7431076e915af94c0a7724",
+"reverb out": "991d69630edb8f847d0472c7",
+"main": "2a6502229e4c5a9ddc8b6386",
+"FX returns": "ba5b1679c608584630e6e4fb"
+},
+{
+"chorus in": "2a386bba15101d01b23b9d9e",
+"chorus out": "7fa84a4bd654578b05afae26",
+"delay in": "dedc2edc0d5ba953c7011542",
+"delay out": "ee02eb0dd037bce4fbd3e24e",
+"reverb in": "9e0a5fd68fa17f3f0040fd71",
+"reverb out": "bb10cefd24a8163b4532827b",
+"main": "7bc0453056aaf112d72d8fb3",
+"FX returns": "24a680b9474af2e7501b772e"
+},
+{
+"chorus in": "abbeee33f40cd669015221dd",
+"chorus out": "d925cc16091bb141c8d20d41",
+"delay in": "3d499e28bcd12810cb1b1ca8",
+"delay out": "011ef43d77f5f7a63e06889a",
+"reverb in": "9086a1821d4cdf051c97ee93",
+"reverb out": "358744e7d9038b009cd9d90e",
+"main": "0e82b846074105b79a9b7940",
+"FX returns": "dbc1656393ffcb4c2ff4bd8c"
+},
+{
+"chorus in": "2b1fc8859b3390d289e7ea88",
+"chorus out": "2e857a66d63e04169814e204",
+"delay in": "14eb0fd6d56494d8c9855bae",
+"delay out": "122248c11530ba2e735022ad",
+"reverb in": "28cfc9a64de290a3bb732778",
+"reverb out": "0c201f96cd99287d1462c380",
+"main": "68bccce9f789ff3638048877",
+"FX returns": "79c71ebf6423977f00168fe2"
+},
+{
+"chorus in": "06b183a930239a860a6661f1",
+"chorus out": "276dfec0e55ca35c855819ce",
+"delay in": "c707488fcfadd49c51dc3aba",
+"delay out": "d7986e50a009051e80517271",
+"reverb in": "7686d0ea36a2d08be0d4a078",
+"reverb out": "2e2570fbdd21bb7d1f5d6958",
+"main": "7e6f13c9a743ecefce2d3c21",
+"FX returns": "86d5af14e28f2030b9ef033d"
+},
+{
+"chorus in": "9093801bf162216dcfe4410a",
+"chorus out": "bd858d0f0653fc9c9451b83e",
+"delay in": "b32edb051b7e865b1b294b69",
+"delay out": "3cad0202956bae8e771761e0",
+"reverb in": "d487cd25bbc4bb7ebfafd1b7",
+"reverb out": "20a5643824a20747bcd4b09b",
+"main": "adddef8345f54ad0018b0657",
+"FX returns": "749de6260eb6652b8c0a37f7"
+},
+{
+"chorus in": "482407dec3b0dafe4dedb904",
+"chorus out": "5964d6e76e2fed899ecfb545",
+"delay in": "87f8e47aec94ffc7e982dbcd",
+"delay out": "0b4f546adb2421906153e30e",
+"reverb in": "86983dd56183b0acb7760c32",
+"reverb out": "71d1da595c053cd2f8b45514",
+"main": "7a023ba32106455fe046f794",
+"FX returns": "678bff1b240a25f0576b0d84"
+},
+{
+"chorus in": "2a58a9ff6fb9d7e25cd518f5",
+"chorus out": "cffc2fb33d0730c85a60e4e4",
+"delay in": "7732e02ab7a9b62bcc258797",
+"delay out": "cb2dd8ca7a7ce2d99c76ce4c",
+"reverb in": "8b1feae769b641de98195049",
+"reverb out": "74b3596d5ba645920bcec1a2",
+"main": "bc62c1389865fbf98a1c3394",
+"FX returns": "f8a94baa485064db01414747"
+},
+{
+"chorus in": "53e847189d9f1fd8b88015d9",
+"chorus out": "d7c614cb286886d11227ba0b",
+"delay in": "4ed3a5b3457a7b9ce93b4952",
+"delay out": "7670118e7315a6ba5a992ced",
+"reverb in": "7a8ae6ec2c7cfe4bc0925e09",
+"reverb out": "c8dd2f95880c191ffcebb71f",
+"main": "28b83e2ecc0d4aeeba66e7b5",
+"FX returns": "22ed9aad54e2fcd5a2e56c0b"
+},
+{
+"chorus in": "3e59281fd09894a2b7771793",
+"chorus out": "2272b12207bdf86de5624df8",
+"delay in": "45e5a27de9eaeac93e60368f",
+"delay out": "a569e9c66219457600b5e7ea",
+"reverb in": "0526e889fceb67512c14e114",
+"reverb out": "21559535feded9e33340e84a",
+"main": "ed93c111b4b2490a39a8e433",
+"FX returns": "ba20721d62bfb3e47d534ab9"
+},
+{
+"chorus in": "dd95ad813ddfe8b676a8352b",
+"chorus out": "cde425d754600873679ed637",
+"delay in": "b8cc6112005ef813e14e34f7",
+"delay out": "d7a3fb93bc55be8836657a21",
+"reverb in": "7e832f2effed9b224f36591a",
+"reverb out": "48efda3d434f120798704bd7",
+"main": "f5b58f6e4e96ce65de03fb91",
+"FX returns": "1a118e3ea15f821f64cf7caf"
+},
+{
+"chorus in": "b13e85646ff09290593476fd",
+"chorus out": "b4f16e022b469775ae633e54",
+"delay in": "a072c4a1793d1c2afac87c2b",
+"delay out": "a5f7a815935e82177e298347",
+"reverb in": "c4a7f32420ca27ab587c1559",
+"reverb out": "912f32c035dc37618522a8ac",
+"main": "9dd87b3ff2261f5548ccfadf",
+"FX returns": "41aa96a26966b4106fe30b32"
+},
+{
+"chorus in": "713a08eef554f0d7ed53d5fe",
+"chorus out": "c8e70fa3c68bce79e198c64d",
+"delay in": "5eb2a6fe0153de2cb3d3e1bc",
+"delay out": "e3984fed328066e05958922d",
+"reverb in": "e76c5e1ae0edbff16f7c71c3",
+"reverb out": "b8afa1479f1ff736fa33e5c9",
+"main": "f5e0ff055c7007ce37a5fde9",
+"FX returns": "2a0975a7a1b96da023bbe8d5"
+},
+{
+"chorus in": "2afcda7e32d30a62920e8d53",
+"chorus out": "e9340625fb4d13f184a53e71",
+"delay in": "879c0a4927d216da3510306a",
+"delay out": "bac9369c8ff73f1ccef1a2fe",
+"reverb in": "ade03c1904a4411dfa340c7d",
+"reverb out": "59b7c6322f6bebaf92ab8ab0",
+"main": "0ac71ff9abc73187489dc103",
+"FX returns": "ecff57ef14a5a4b066c93ae4"
+},
+{
+"chorus in": "8440b5de74d1824def3fac4c",
+"chorus out": "d7940ab6110042834169b2bc",
+"delay in": "46847dd83ab1333873d15df5",
+"delay out": "3aec87fa43974e78feabb7b2",
+"reverb in": "55f739dfecbd9f7c52caeba2",
+"reverb out": "bce10a37698dc737525b6ae4",
+"main": "3ba365d434807e6d9404d3e8",
+"FX returns": "0873fd9285ac892b2aca2f53"
+},
+{
+"chorus in": "cf2cad3eb352f9fe639d0efd",
+"chorus out": "99d851544a94eed22e6e7619",
+"delay in": "3a627a2f58a7131fefe05c7b",
+"delay out": "7fbb1d73ef1db0c8b94f863e",
+"reverb in": "eb677dddf21c0fc0f972832d",
+"reverb out": "895ac37e13ea65a8be50d7e4",
+"main": "9523b442d4c46fbc1d98615c",
+"FX returns": "a5c8e3d2740285831c8c4ccf"
+},
+{
+"chorus in": "67733c56e8ad8d4b0c670f2d",
+"chorus out": "39871f296c82a774393e2bcc",
+"delay in": "6de5cfcb944042cf9dbc0160",
+"delay out": "3011aa9728c4f5a2b7bbc8af",
+"reverb in": "ebcff1cfcb57b5ccb0128130",
+"reverb out": "4836f59864702df29de7efe6",
+"main": "d1dcc4820b829d0a7e388cbc",
+"FX returns": "a725e18905a8c8edada561ac"
+},
+{
+"chorus in": "5363f812715c6e09ef3ba3bc",
+"chorus out": "16f4a0c65d1bdb714513de09",
+"delay in": "802826e4990bba4cf14d2156",
+"delay out": "4709c027a4d01d5594e1c606",
+"reverb in": "a1e413a89c2f77481d8be0ce",
+"reverb out": "47a608f0a818f39848270da3",
+"main": "57692f1c5195c8a527558c80",
+"FX returns": "2b6dfb81c22b400131817326"
+},
+{
+"chorus in": "f739e1c603338e58ed9978a0",
+"chorus out": "a1ca949737f745a733530486",
+"delay in": "1456376ec0b0c7434a8ed231",
+"delay out": "c6db9cc9218d583c39eb30c1",
+"reverb in": "fc3942a17cb292cab47dd492",
+"reverb out": "6fb2da7ad987765b759274d1",
+"main": "780a7e8fdef565fd69c3805d",
+"FX returns": "c4f77755bc43513dc017c782"
+},
+{
+"chorus in": "f94e739447f130070f02f27b",
+"chorus out": "90096ad17074fc750c005b57",
+"delay in": "dd5e79387dc3218c2dc9135f",
+"delay out": "69f8f9b029ec91b33afd4c56",
+"reverb in": "5f85c4d80781d1593b3de706",
+"reverb out": "7ef54013fb75215b5a740d4a",
+"main": "a3571ba6046840a345764724",
+"FX returns": "ed96a7050dc76c7f3a3ea496"
+},
+{
+"chorus in": "540b9030b07aa7ff8d2aeb4c",
+"chorus out": "b0c77b06e5a4901996d54243",
+"delay in": "e83e949df5928e3cb82bef87",
+"delay out": "b60da5602212f1df48e085bb",
+"reverb in": "7582ea3c76f24ab5f4792089",
+"reverb out": "b756a1dfc9de67f079e56fe6",
+"main": "4d33056cc7605a477ef69a85",
+"FX returns": "65e9b44e28f42bcc2cfa99bd"
+},
+{
+"chorus in": "9f6db971fad65a564cb63b03",
+"chorus out": "af848f89cee4646386541fa6",
+"delay in": "67e9127ae7b7369024312bf7",
+"delay out": "83dc370fa60d34d16efb3acd",
+"reverb in": "a4b05b9909dacd97f98a204f",
+"reverb out": "1a115a2e901cddf7023f9f8c",
+"main": "e85b17e7152a352e3eb17ec2",
+"FX returns": "2ca853c336960cd5c08c5191"
+},
+{
+"chorus in": "1046f595dd0da65ffcd5ea47",
+"chorus out": "c94cf10b3d1c004064ab92b1",
+"delay in": "5d9f4945cac93f5000759edc",
+"delay out": "b77eb5823ef37ce25603c559",
+"reverb in": "8e78cfdba2f7fd7b099105cb",
+"reverb out": "09da410c0caeb469e9242bef",
+"main": "959972c2f2ddfa0c832c7491",
+"FX returns": "368ce42bb4a53f762f2026df"
+},
+{
+"chorus in": "01c3c2e6c837bb15abcfa2da",
+"chorus out": "5bc12caa91c02de821ea9818",
+"delay in": "a2333a896f9cad3b4faa19b2",
+"delay out": "f6a42bbf6679fe08d48abd0a",
+"reverb in": "265822048e42f31a88168789",
+"reverb out": "bdc4b955bd936f1400eb9978",
+"main": "f2671f2d33120c860ea78d99",
+"FX returns": "6f5a565283b9883745bf022c"
+},
+{
+"chorus in": "23aa530c451d4030366d82dd",
+"chorus out": "b2a1f2e0a8b4ef52388edaa0",
+"delay in": "7c8b9dcaddb04546e7ec9d39",
+"delay out": "24f6738f79c129b33f4da84e",
+"reverb in": "5ccaef26fae028b1598f1fcd",
+"reverb out": "a4e3f53905474b5ce55c2798",
+"main": "9084439835d394d4cc2c7333",
+"FX returns": "4dc5c30030c2eb148c1ec9f4"
+},
+{
+"chorus in": "698cd17f08aaae5a32ee4f44",
+"chorus out": "49a2bca3ef9664d4b81b1a3e",
+"delay in": "bad1db930a088963ec4b485f",
+"delay out": "4e7242ea8162d7f9f8549f10",
+"reverb in": "1b71db946f173a71ae3668bf",
+"reverb out": "06c7bae205d8519b4f8ea77a",
+"main": "771876b964287a6490d15d80",
+"FX returns": "04dc0289d06aa2eb47020daf"
+},
+{
+"chorus in": "6b38cbe030df4fc61c75dd53",
+"chorus out": "316c457e3c3f2410bdc878bf",
+"delay in": "0954145258d93b8aac40b2c5",
+"delay out": "729cde18541123917e77457b",
+"reverb in": "4bf95a571985d7db6e8defca",
+"reverb out": "928cfb974af3149740bde51d",
+"main": "fbd9b409d9a582c91e2fdcbd",
+"FX returns": "16194a0d6fc8a2a64f867ab5"
+},
+{
+"chorus in": "d9fd279155320fde02abe11d",
+"chorus out": "f7447863196a788c15e51656",
+"delay in": "8c6513d8cfd6c477a6fedc8a",
+"delay out": "c9aea869ad554c0995e5df69",
+"reverb in": "f8b2fe75f9b326a3b46d59ff",
+"reverb out": "01851059f93b59b9a38826e4",
+"main": "5882bfaf6b04a71c925813ac",
+"FX returns": "4751b26912b4463180e9c095"
+},
+{
+"chorus in": "4533177d36026be7aca1bc4d",
+"chorus out": "dd9351967ffb205d6bd58c41",
+"delay in": "42a8bf9ea7662dc3d8b7dd29",
+"delay out": "7d7afabb970d99cea215edbd",
+"reverb in": "b6330591e976d43af8369dff",
+"reverb out": "b2f8d20c48525de15bdf9d2b",
+"main": "675e04f07f04bc35fb80a5f2",
+"FX returns": "76b5fbef345a0c3a87a135e5"
+},
+{
+"chorus in": "8a6b85c4b0f340005873eba7",
+"chorus out": "018f6699f4a254cf0597c734",
+"delay in": "f60956e71a8b6e9f30ee5e93",
+"delay out": "d24587e3ed0e64800b85829a",
+"reverb in": "0a450b7994f8ad2a005a6a65",
+"reverb out": "164e3e4977ec525042a96557",
+"main": "dc7a52681a146ae951447ad4",
+"FX returns": "1d4368be6a6feef4ed3f7109"
+}
+]
+}
+}

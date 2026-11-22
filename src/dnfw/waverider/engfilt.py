@@ -26,7 +26,8 @@ def engine_types() -> list[int]:
 def c_header() -> str:
     types = engine_types()
     names = _msel.machine_names()
-    assert len(types) <= 32 and max(types) < 32, "the engine set is one 32-bit mask by type"
+    assert len(types) <= 32, "the engine set is one 32-bit mask by row (2026-11-18: by row, not by type: ours on 50..55)"
+    assert max(types) < 256, "eng_types is a byte table"
     assert all(len(names[t]) <= LABEL_MAX for t in types)
     return ("/* the preset browser's ENGINE filter (dnfw.waverider.engfilt) */\n"
             f"#define ENG_N {len(types)}\n"

@@ -196,8 +196,8 @@ def test_ddr_spans_are_clear_of_the_stock_image_and_the_engine():
     # v0.45: PING's tables went with PING
     # 2026-11-10 (shrink): AMD's sine (v0.31) ships over the link now, with PERC's tan
     # 2026-11-12: the DT2 reader's coefficients (v0.18) went to L2 and L1
-    assert [a for _, a, _ in ddr] == [dsp.PERC_TABLES_DDR,
-                                      dsp.MD_TABLES_DDR,
+    # 2026-11-20 (DRUM's room): PERC's DDR exp2 went (the program and the sample machines read its L1 copy)
+    assert [a for _, a, _ in ddr] == [dsp.MD_TABLES_DDR,
                                       dsp.MD_DELAY_DDR,                         # v0.32: P-I's lines, zeroed
                                       dsp.FDN8_RING_DDR,                        # FDN8's ring, zeroed
                                       0x82500000,                               # the inserts' TAPE rings, zeroed
@@ -207,34 +207,38 @@ def test_ddr_spans_are_clear_of_the_stock_image_and_the_engine():
     assert not any(ddr[-1][2])
     # v0.45: PING's tables went: every index one lower than b4's; 2026-11-10: the sine's, one more;
     # 2026-11-12: the DT2 reader's coefficients, one more
-    assert not any(ddr[3][2]) and len(ddr[3][2]) == dsp.FDN8_RING_BYTES       # FDN8: zeros at power-on
-    assert dsp.MD_DELAY_DDR + len(ddr[2][2]) <= dsp.FDN8_RING_DDR
+    # 2026-11-20: PERC's exp2, one more
+    assert not any(ddr[2][2]) and len(ddr[2][2]) == dsp.FDN8_RING_BYTES       # FDN8: zeros at power-on
+    assert dsp.MD_DELAY_DDR + len(ddr[1][2]) <= dsp.FDN8_RING_DDR
     assert dsp.FDN8_RING_DDR + 0x80000 <= 0x82500000                         # (FDN8 LONG's 512 KB too)
-    assert not any(ddr[4][2]) and 0x82500000 + len(ddr[4][2]) <= 0x82510000
+    assert not any(ddr[3][2]) and 0x82500000 + len(ddr[3][2]) <= 0x82510000
     from dnfw.engines.plaits import plk                                              # PLAITS' per-voice DDR
-    assert not any(ddr[5][2]) and 0x82510000 + len(ddr[5][2]) <= plk.BIG_DDR <= dsp.SMP_POOL_DDR
-    assert not any(ddr[1][2]) and not any(ddr[2][2])      # the MD's tables (the DSP fills them), P-I's lines
-    assert dsp.MD_TABLES_DDR + len(ddr[1][2]) <= dsp.MD_DELAY_DDR
+    assert not any(ddr[4][2]) and 0x82510000 + len(ddr[4][2]) <= plk.BIG_DDR <= dsp.SMP_POOL_DDR
+    assert not any(ddr[0][2]) and not any(ddr[1][2])      # the MD's tables (the DSP fills them), P-I's lines
+    assert dsp.MD_TABLES_DDR + len(ddr[0][2]) <= dsp.MD_DELAY_DDR
     # v0.32: the voices' working state in L2 (zeros), inside the room proven on units
     from dnfw.perc import live as PL
     L = PL.layout()
     l2 = {a: p for _, a, p in dsp.l2_spans()}
     assert L.md.state == dsp.MD_STATE_DM and L.md.mnm.scratch == dsp.MNM_SCRATCH_L2
-    assert L.md.delay == dsp.MD_DELAY_DDR                 # not state + 1 MB: L2 has no room for it
+    assert L.md.delay == dsp.MD_DELAY_L1                  # not state + 1 MB; 2026-11-16: L1 block 2, 6 KB a slot
+    assert L.md.delay_stride == dsp.MD_DELAY_STRIDE
     l1 = {a: p for _, a, p in dsp.spans()}                # 2026-11-10: the slots in L1 block 1 (zeros)
     at = dsp.dm_to_load(dsp.MD_STATE_DM)
     assert not any(l1[at]) and len(l1[at]) >= 16 * MDK.MD_STRIDE
     assert dsp.MD_STATE_DM + 16 * MDK.MD_STRIDE <= dsp.REGION[1] <= dsp.DM_CACHE_16K - 0x1000
-    # 2026-11-11: zeros but for ANALOG2's filter mix tables (dsp._mnm_scratch, 2026-11-09), exactly those floats
+    # 2026-11-21 (DSP room): all zeros; ANALOG2's filter mix tables (here 2026-11-09..11-21) are read from the A2
+    # filter pass's L1 copy (analog2.tables_at), which the L1 span loads: exactly those floats
     scratch = bytearray(l2[dsp.MNM_SCRATCH_L2])
     from dnfw.mnm import machines as MMx
-    if "ANALOG2" in MMx.NAMES:
+    if "ANALOG2" in MMx.NAMES or "JUNO" in MMx.NAMES:
         import struct as _st
         from dnfw.engines.analog2 import analog2 as A2
         words = A2.table_words()
         n = 4 * len(words)
-        assert bytes(scratch[A2.TABLES_OFF:A2.TABLES_OFF + n]) == _st.pack(f"<{len(words)}f", *words)
-        scratch[A2.TABLES_OFF:A2.TABLES_OFF + n] = bytes(n)
+        at = dsp.dm_to_load(A2.tables_at())
+        span = next((a, p) for _w, a, p in dsp.spans() if a <= at < a + len(p))
+        assert bytes(span[1][at - span[0]:at - span[0] + n]) == _st.pack(f"<{len(words)}f", *words)
     assert not any(scratch) and dsp.MD_STATE_L2 + 16 * MDK.MD_STRIDE <= dsp.MNM_SCRATCH_L2
     assert 0x20088400 <= dsp.MD_STATE_L2 and dsp.MNM_SCRATCH_L2 + dsp.MNM_SCRATCH_BYTES <= 0x200B0000
     # v0.43: the Monomachine render scratch in L1, after GRAN's state, inside the region (zeros
@@ -284,6 +288,8 @@ def test_the_sample_readers_coefficients_are_loaded_where_it_reads_them():
     l2 = {a: p for _, a, p in dsp.l2_spans()}
     assert l2[dsp.SMP_TABLES_L2] == tb[:SP.POLY_BYTES]
     assert 0x20088400 <= dsp.SMP_TABLES_L2 and dsp.SMP_TABLES_L2 + SP.POLY_BYTES <= dsp.MNM_SCRATCH_L2
+    l2s = sorted((a, a + len(p)) for _, a, p in dsp.l2_spans())
+    assert all(hi <= lo for (_, hi), (lo, _) in zip(l2s, l2s[1:]))   # no two L2 spans overlap (upstream PR 3811c0b8)
     l1 = {a: p for _, a, p in dsp.spans()}
     dec = l1[dsp.dm_to_load(dsp.SMP_DEC_DM)]
     off = dsp.SMP_DTAB_DM - dsp.SMP_DEC_DM
@@ -526,22 +532,32 @@ def test_the_sends_call_gets_wr_inpost_as_its_target():
 
 def test_perc_saves_what_ping_restores_and_hands_on_to_resonator():
     lines = _code_lines("perc")
-    regs = [f"R{k}" for k in range(16)] + ["I0", "I1", "I2", "I3", "I4", "I5", "I12", "M0", "M1", "M2", "M3", "M4"]
+    regs = [f"R{k}" for k in range(16)] + ["I0", "I1", "I2", "I3", "I4", "I5", "I12", "M0", "M1", "M2", "M3", "M4",
+                                           "I6"]
     assert lines[:len(regs)] == [f"DM({0x2DDE00 + 4 * k:#x}) = {r};" for k, r in enumerate(regs)]
     assert f"JUMP {dsp.SMP_SW:#x};" in lines
+    # 2026-11-21 (the constant pool, dnfw.perc.cpool): I6 is the pool's while PERC runs: set once after the saves,
+    # and the caller's again (from its save word) right before the one JUMP on to smp.asm, which PING follows
+    from dnfw.perc import cpool as CP
+    i6 = [ln for ln in lines if ln.startswith("I6 =")]
+    restore = f"I6 = DM({0x2DDE00 + 4 * regs.index('I6'):#x});"
+    assert i6 == [f"I6 = {CP.POOL_I6:#x};", restore], i6
+    assert lines[len(regs)] == i6[0] and lines[lines.index(f"JUMP {dsp.SMP_SW:#x};") - 1] == restore
     # only the registers saved there are written (and no M, L, B or DAG2 other than I12)
     import re
     for ln in lines:
         m = re.match(r"(I|M|L|B)(\d+) =", ln)
-        if m:
+        if m and ln not in i6:
             # v0.17: I3 (a slot's Machinedrum words) and I5 (a machine's output), both saved
             # (v0.24: and I0, the P-I machines', saved with the rest)
             assert f"{m.group(1)}{m.group(2)}" in ("I0", "I1", "I2", "I3", "I4", "I5", "I12"), ln
     # 2026-11-12 (day2, opt-md: PI-BD and PI-ML): eleven hardware loops, the firmware's own form (12a_ureg,
     # docs/dsp-perf.md), which scripts/gate_hwrules.py holds to the PRM's loop rules; on the unit 2026-11-14
-    # (r5, 16 MACHINEDRUM notes: every note sounds, guard 0). Those only: any other DO, CALL or RTS still fails
+    # (r5, 16 MACHINEDRUM notes: every note sounds, guard 0). 2026-11-21 (eng-simd aaba2848, FM+'s operator,
+    # feedback and carrier loops re-coded): six more in the same form, held by gate_hwrules.py as the others.
+    # Those 17 only: any other DO, CALL or RTS still fails
     loops = [ln for ln in lines if re.search(r"\bDO\b", ln)]
-    assert len(loops) == 11 and all(re.fullmatch(r"LCNTR = R\d+, DO wr_pk_hwend_\d+\. UNTIL LCE;", ln) for ln in loops), loops
+    assert len(loops) == 17 and all(re.fullmatch(r"LCNTR = R\d+, DO wr_pk_hwend_\d+\. UNTIL LCE;", ln) for ln in loops), loops
     assert not any(re.search(r"\bCALL\b|\bRTS\b", ln) for ln in lines)
 
 
@@ -600,7 +616,7 @@ def test_every_table_perc_reads_is_loaded_by_a_span():
                 return b[lo - a:lo - a + len(data)] == data
         return False
     # 2026-11-10 (shrink): tan and AMD's sine ship over the link with the Machinedrum's tables
-    # (the voices wait for them: C['fill']); exp2 stays in the stream (the sample machines read it)
+    # (the voices wait for them: C['fill']); exp2 is read from its L1 copy (2026-11-20: the DDR one no longer loaded)
     from dnfw.md import core as MDK
     shipped, base = MDK.tables_bytes(), L.md.T[MDK.SHIPPED]
 
@@ -623,7 +639,9 @@ def test_every_table_perc_reads_is_loaded_by_a_span():
     base_sin = base + len(shipped) - len(sine)
     assert sent(base_sin, sine), "PERC's sine (AMD) is not shipped"
     assert sent(base_sin - len(tan), tan), "PERC's tan is not shipped"
-    assert loaded(L.tables, exp2), "PERC's exp2 is not loaded"
+    # 2026-11-20 (DRUM's room): the DDR original is no longer loaded: nothing reads it (the model holds no words there)
+    assert not loaded(L.tables, exp2) and L.tables not in PL.table_words(L), "PERC's DDR exp2 is loaded or modelled"
+    assert L.T["exp2"] == dsp.PERC_EXP2_DM != L.tables
     assert L.sin == dsp.STOCK_SINE_DM and len(dsp.stock_sine()) == 4 * 257, "PERC's sine is not stock's S1"
     s1 = struct.unpack("<257f", dsp.stock_sine())
     assert max(abs(x - math.sin(2 * math.pi * k / 256)) for k, x in enumerate(s1)) < 1e-6, "S1 is not a sine"

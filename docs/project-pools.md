@@ -74,7 +74,7 @@ superblock names the new owner; (7) the loader sends the DSP what it needs.
 | `0x6D0000`, `0x6D0001` | the **superblock**, two copies written in turn |
 | `0x6D0100 + 256 x (2p + c)` | **list p** copy c: p = 0..127 the projects, **128 the legacy list**; c = 0, 1 |
 | `.. 0x6E02FF` | the lists' end (`PL_END = 0x6E0300`) |
-| `0x6E0300 .. 0x6FEFFF` | free |
+| `0x6E0300 .. 0x6FEFFF` | others' (`docs/memory-map.md`) |
 | `0x6FF000` | Direct Jump's global settings sector (`DN2S`, branch `jump`): not ours; a `_Static_assert` keeps the lists below it |
 
 Every read and write goes through `pl_rd` / `pl_wr`, which refuse anything outside

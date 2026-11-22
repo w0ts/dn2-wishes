@@ -3,7 +3,7 @@ reads as `if gt i7=modify (i0,m1)`: docs/selas-encoding.md)
 
     python scripts/selas_form_check.py STOCK.syx [--selas PATH] [--json OUT]
 
-Two checks, on the farm bench (selas and selmap are there):
+Two checks, on the farm's bench (selas and selmap are there):
 
 (a) **ours, read back**: every object of ours (csrc/waverider/sharc/*.json), decoded by selmap (selache's own
     SHARC+ disassembler), against its source line -- the runner's decode step, which covers only PERC, the sample

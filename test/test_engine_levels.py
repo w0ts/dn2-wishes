@@ -43,13 +43,27 @@ PERCUSSION = ("SOPHIE", "PLAITS BD", "PLAITS SD", "PLAITS HH")
 MD_THEN = 1.4
 LEVELS_THEN = {"DRONE": 0.7, "SID 6581": 5.4, "DPRO-WAVE": 11.5, "DPRO-DDRW": 0.95, "DPRO-DENS": 2.0, "VO-6": 16.5}
 UNIT_THEN = {"JUNO": MD_THEN}                    # the level JUNO had when the unit measured it (r5: MD_LEVEL)
+# 2026-11-21: DDRW's MIX gain 4 -> 1.5 inside the machine (mnm.ddrw MIX_GAIN) took 6.0 dB off its RMS at its defaults,
+# which its level gives back: the measurement above is from before both
+MAKEUP = {"DPRO-DDRW": 6.0}
 
 
 def _now(name: str) -> float:
+    """the engine's level now, without its HEADROOM_DB (2026-11-21: the cut for its loudest setting, below its band)"""
     if name.startswith("PLAITS "):
         model = name.split()[1]
         return P.MD_LEVEL * P._db(P.PLAITS_LEVEL_DB.get(model, 0.0))
-    return P.MNM_LEVELS.get(name, P.MD_LEVEL)
+    return P.MNM_LEVELS.get(name, P.MD_LEVEL) / P._db(P.HEADROOM_DB.get(name, 0.0)) / P._db(MAKEUP.get(name, 0.0))
+
+
+def test_headroom_only_lowers_and_is_applied():
+    """2026-11-21 (the User: "just make it quieter! not a limiter"): HEADROOM_DB lowers an engine, never raises it, and
+    is in the level the DSP plays (MNM_LEVELS)"""
+    for name, d in P.HEADROOM_DB.items():
+        assert d < 0.0, name
+        band = P.MNM_LEVELS[name] / P._db(d)
+        assert P.MNM_LEVELS[name] == pytest.approx(band * P._db(d), rel=1e-12)
+        assert P.MNM_LEVELS[name] < band
 
 
 def _then(name: str) -> float:
@@ -127,7 +141,7 @@ def _juno(blocks: int = 40) -> list[float]:
     h = PL.Harness()
     h.words[h.L.md.C["fill"]] = MDK.Z_N
     for k, v in enumerate(A2.table_words()):
-        h.words[h.L.md.mnm.scratch + A2.TABLES_OFF + 4 * k] = bits(v)
+        h.words[A2.tables_at() + 4 * k] = bits(v)
     h.set_mnm(next(t for t, k in P.MNM_TYPES.items() if MM.NAMES[k] == "JUNO"), list(J.DEFAULTS))
     for (_r, slot, lo, top), x in zip(PM.FX_PARAMS, J.DEFAULTS2):
         h._half(PM.frame_offset(slot), PL.knob_word(x, top, lo))
@@ -138,11 +152,12 @@ def _juno(blocks: int = 40) -> list[float]:
 
 
 def test_the_juno_level_is_a_pure_scale(monkeypatch):
-    """2026-11-14: JUNO's -4.0 dB (LEVEL_DB) scales its output and changes nothing else"""
+    """2026-11-14: JUNO's -4.0 dB (LEVEL_DB) and its -3.0 dB headroom (HEADROOM_DB, 2026-11-21) scale its output
+    and change nothing else"""
     now = _juno()
     monkeypatch.setitem(P.MNM_LEVELS, "JUNO", P.MD_LEVEL)
     then = _juno()
-    g = P._db(P.LEVEL_DB["JUNO"])
+    g = P._db(P.LEVEL_DB["JUNO"] + P.HEADROOM_DB["JUNO"])
     assert P.LEVEL_DB["JUNO"] == -4.0
     assert max(abs(x) for x in then) > 1e-4, "JUNO: silent"
     for x, y in zip(then, now):

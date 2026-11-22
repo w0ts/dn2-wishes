@@ -1,4 +1,4 @@
-"""JUNO (machine type 23, dnfw.engines.juno.juno) in the model (the program the SHARC runs bit for bit): its tables, its
+"""JUNO (machine type 50; 23 until 2026-11-18, dnfw.engines.juno.juno) in the model (the program the SHARC runs bit for bit): its tables, its
 place in the registry and on the pages, every WAVE x HPF choice finite and audible, its pitch, the VCF envelope's
 release; and ANALOG2 unchanged by the ladder core JUNO shares (2026-11-12: dnfw.engines.analog2.filters.models.ladder_core)."""
 
@@ -33,7 +33,7 @@ def _harness(name: str, knobs, knobs2):
     h = PL.Harness()
     h.words[h.L.md.C["fill"]] = MDK.Z_N
     for k, v in enumerate(A2.table_words()):             # the coordinator loads the filters' mix tables
-        h.words[h.L.md.mnm.scratch + A2.TABLES_OFF + 4 * k] = bits(v)
+        h.words[A2.tables_at() + 4 * k] = bits(v)
     h.set_mnm(_type(name), list(knobs))
     for (_r, slot, lo, top), x in zip(PM.FX_PARAMS, knobs2):
         h._half(PM.frame_offset(slot), PL.knob_word(x, top, lo))
@@ -61,7 +61,7 @@ def test_tables():
 
 def test_registry_and_pages():
     k = MM.NAMES.index("JUNO")
-    assert MM.TYPES[k] == 23 and 23 not in MM.RESERVED
+    assert MM.TYPES[k] == 50 and 50 not in MM.RESERVED
     assert MM.MACHINES[k].PNAMES == J.PNAMES and MM.MACHINES[k].PNAMES2[:7] == J.PNAMES2
     ch = WP.MNM_CHOICES["JUNO"]
     assert len(ch["WAVE"]) == len(J.WAVES) and len(ch["HPF"]) == len(J.HPFS)
@@ -109,9 +109,20 @@ def test_the_release_closes_the_filter():
 
 
 # ANALOG2's output before the shared core (the pre-JUNO source, 8 blocks, RES 120, DRV 60, note 60; same hashes
-# from the source after it: scratch/juno-engine/a2pin.py)
-A2_PIN = {"SVF LP12": "333b2ab24832187f", "LADR LP24": "ef9b827338a5120d", "OTA LP24": "ed53a4ea4757c535",
-          "OTA BP": "ef462cf3406ae185", "DIOD LP24": "9df57ab811d2517c"}
+# from the source after it: scratch/juno-engine/a2pin.py), at ANALOG2's level since the engine levels (2026-11-12,
+# dnfw.perc.program LEVEL_DB "ANALOG2": -3.2 dB, docs/levels.md). The pins before that level were 333b2ab24832187f,
+# ef9b827338a5120d, ed53a4ea4757c535, ef462cf3406ae185, 9df57ab811d2517c; measured 2026-11-17 (test triage): every
+# sample of these is that render's x 10^(-3.2/20) within float32 rounding (relative 2.4e-6 at most). The -3.2 dB pins
+# were 3de49bb64dc2ad6c, 6ec6ca4d9afd0260, d742af33f1c02161, 4cde1cbcc2ee35ab, 83916fc0d79bf4f5 (same order as below).
+# 2026-11-21 (combined-67): re-pinned after 9ebf1e59 "fix(clip-levels): no limiter, levels instead" (ANALOG 2 -4.0 dB,
+# its knees gone; a declared change): they pass at its parent 62d08d1f and change at 9ebf1e59; 9ebf1e59, af8f1787,
+# up-v067 79295df4 and combined-67 after a2-juno-fast (bit-exact) gave 437f8b5841355551, 331446feaf996c50,
+# 1c9a59057131890b, b447a6082de6b126, bf17f24004a85fc7 (same order as below).
+# 2026-11-21 (combined-67, merge of claude/a2-sound-pick 4a69e567): the User's three picks change ANALOG 2's sound on
+# purpose (SQR from one BLEP, DRV tanh degree 4 one-sided, the WDTH side through a linear SVF at 0.97, trimmed at low RES
+# for LADR/OTA/DIOD; docs/dsp-perf.md): the pins are its new references, measured on the merged tree
+A2_PIN = {"SVF LP12": "6618174fa54b28d3", "LADR LP24": "c01d822acecae1bb", "OTA LP24": "cbed781e83cc75e5",
+          "OTA BP": "e60dff31159d6b9e", "DIOD LP24": "4c534e3167a91cf3"}
 
 
 @pytest.mark.parametrize("name", sorted(A2_PIN))

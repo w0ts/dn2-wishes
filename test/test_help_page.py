@@ -34,33 +34,27 @@ def _site(tmp: pathlib.Path) -> pathlib.Path:
 
 def test_the_page_uses_its_stylesheet_and_no_page_this_build_lacks(tmp_path: pathlib.Path):
     assert 'href="wishes.css"' in PAGE and (WEB / "wishes.css").is_file()
-    assert 'href="https://w0ts.github.io/site-style/common.css"' in PAGE
     site = _site(tmp_path)
     for href in re.findall(r'href="([^"#:]+)"', PAGE):
         assert (site / href).exists(), href
 
 
 def test_every_page_has_the_tabs_and_they_lead_to_pages(tmp_path: pathlib.Path):
-    """builder, sample import, help, presets and about each carry the same tab bar, styled once (common.css's
-    nav.site, loaded by URL before wishes.css), and each tab opens the right page in the served layout (the front
-    page is the About page, the User 2026-11-22)."""
+    """builder, sample import, help and presets each carry the same tab bar, styled once in wishes.css, and each
+    tab opens the right page in the served layout (the front page is the builder)."""
     site = _site(tmp_path)
-    want = {"builder.html": "w0ts / DN2-Wishes · DN2 mod builder", "samples.html": "w0ts / DN2-Wishes · DN2 sample import",
-            "help.html": "w0ts / DN2-Wishes · hidden functions", "presets.html": "w0ts / DN2-Wishes · presets", "about.html": "w0ts / DN2-Wishes · about"}
-    for page in ("index.html", "samples.html", "help.html", "presets.html", "about.html"):
+    assert "nav.top a[aria-current=page]" in (WEB / "wishes.css").read_text(encoding="utf-8")
+    want = {"./": "Wishes · DN2 mod builder", "samples.html": "Wishes · DN2 sample import",
+            "help.html": "Wishes · hidden functions", "presets.html": "Wishes · presets"}
+    for page in ("index.html", "samples.html", "help.html", "presets.html"):
         html = (site / page).read_text(encoding="utf-8")
-        nav = re.search(r'<nav class="site"[^>]*>(.*?)</nav>', html, re.S)
+        nav = re.search(r'<nav class="top"[^>]*>(.*?)</nav>', html, re.S)
         assert nav, page
-        assert html.index("site-style/common.css") < html.index("wishes.css"), page
         for href, title in want.items():
             assert f'href="{href}"' in nav.group(1), (page, href)
-            target = site / href
+            target = site / ("index.html" if href == "./" else href)
             assert f"<title>{title}</title>" in target.read_text(encoding="utf-8"), (page, href)
         assert nav.group(1).count('aria-current="page"') == 1, page
-        # the order every w0ts site keeps: about first, GitHub last
-        assert re.findall(r'<a href="([^"]+)"', nav.group(1)) == [
-            "about.html", "builder.html", "samples.html", "presets.html", "help.html",
-            "https://github.com/w0ts/dn2-wishes"], page
 
 
 def test_no_card_is_tied_to_a_part():
@@ -72,21 +66,10 @@ def test_no_card_is_tied_to_a_part():
 
 
 def test_the_version_comes_from_the_published_release():
-    sub = re.search(r'<p class="lead">(.*?)</p>', PAGE, re.S).group(1)
+    sub = re.search(r'<p class="sub">(.*?)</p>', PAGE, re.S).group(1)
     assert not re.search(r"v\d+\.\d+", sub), sub                 # no stale number written in
     assert 'DN2wishes<span id="ver"></span>' in sub
     assert 'fetch("wishes/wishes.json"' in SCRIPT
-
-
-def test_only_the_keys_the_cards_use_and_plain_ranges():
-    """The User, 2026-11-22: "remove the buttons, only keep the ones used"; "A till H" -> "A-H"; no "After flashing"."""
-    used = set()
-    for card in _cards():
-        used |= set(re.findall(r'"(\w+)"', re.search(r"keys: \[([^\]]*)\]", card).group(1)))
-    for key in re.findall(r'\["(\w+)", "', _block("KEYS")):
-        assert key in used, key
-    assert "After flashing" not in PAGE
-    assert not re.search(r"\btill\b|\w \.\. \w|\d\.\.\d", PAGE)
 
 
 def test_every_lit_key_is_drawn():

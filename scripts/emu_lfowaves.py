@@ -82,6 +82,20 @@ def run_wave(build, snapshot, sym, wave, frames, dest=DEST_SLOT):
     return out, bad
 
 
+# (2026-11-19, DN2_LFO_HALFRATE on by default, the User's choice, agreed with main) with half-rate LFOs voice 0's LFOs step
+# every second frame (frames 1, 3, 5, ...: the even voices' turns) and LFO1's DEST is written every frame from its last
+# output: "the same with and without lfowaves" is then checked at those turn frames (exactly: the turn lands where a
+# frame-by-frame run lands), and between turns the value must hold. Without half-rate: every frame, as before.
+def turns_of(seq):
+    """the frames compared with the build without lfowaves: every frame, or with half-rate LFOs voice 0's turns"""
+    return seq[1::2] if M.halfrate_in() else seq
+
+
+def held_between_turns(seq):
+    """with half-rate LFOs: each frame between turns (2, 4, ...) holds the turn before's value"""
+    return all(seq[k] == seq[k - 1] for k in range(2, len(seq), 2)) if M.halfrate_in() else True
+
+
 def scenario_modulating(a, sym, rep):
     seqs = {}
     for label, build in (("build", a.build), ("without", a.before)):
@@ -90,8 +104,11 @@ def scenario_modulating(a, sym, rep):
             seqs[(label, w)] = out
             if bad:
                 check(f"{label} WAVE {w}: every value in 0..0x7f00", False, f"{bad[:3]}")
-    same_stock = [w for w in range(7) if seqs[("build", w)] == seqs[("without", w)]]
-    check("waves 0..6: the same values with and without lfowaves", len(same_stock) == 7, f"same for {same_stock}")
+    same_stock = [w for w in range(7) if turns_of(seqs[("build", w)]) == turns_of(seqs[("without", w)])]
+    check("waves 0..6: the same values with and without lfowaves" + (" (at each turn)" if M.halfrate_in() else ""),
+          len(same_stock) == 7, f"same for {same_stock}")
+    held = [w for w in range(WAVES) if not held_between_turns(seqs[("build", w)])]
+    check("half-rate LFOs: between turns every wave's value holds", not held, f"moved for {held}")
     moving = {w: (min(seqs[("build", w)]), max(seqs[("build", w)])) for w in range(7, WAVES)}
     check("each new wave 7..13 moves FREQ", all(hi - lo > 0x800 for lo, hi in moving.values()),
           ", ".join(f"{w}: {lo:#06x}..{hi:#06x}" for w, (lo, hi) in moving.items()))
@@ -104,8 +121,47 @@ def scenario_modulating(a, sym, rep):
                          "frames": a.frames}
 
 
-def run_cascade(build, snapshot, sym, frames, dep1):
-    """LFO2 on RAND (WAVE 6) into FREQ; LFO1 at DEP1 into LFO2's WAVE (our cascade, cascade.c) -> FREQ a frame"""
+LFO_STATE = 0x44640C18                   # stock's LFO state, 120 B a voice (lfo4 off): voice 0's three LFOs
+MIRROR = (M.OUT, 34 + 16 * 202)          # the voice rows the evaluator writes its DESTs into
+MOD_RAM = (0x46AF8000, 0x800)            # the cascade's shadow cells and carries (csrc/modulation/cascade.c)
+
+
+def half_rate_model(m, sym, rate, o1, o2, frame):
+    """one frame of the half-rate model (2026-11-19, agreed with main), on the build WITHOUT lfowaves (stock's
+    evaluator, every voice every frame), for voice 0 as DN2_LFO_HALFRATE runs it: its turn is every second frame from
+    frame 1 (the even voices'). At a turn the evaluator runs twice with this frame's cells: the skipped frame (no trig, no
+    copies; its DEST writes, cascade shadows and carries discarded: the mirror and MOD_RAM put back) and this frame (the
+    call's own arguments). Between turns voice 0's LFOs do not step: the evaluator runs with their SPD at 0x4000 (none:
+    the phase stays) so each LFO writes its DEST from its last output, then their state is put back. The carry
+    (mod_eval_pre) and the matrix (mx_eval) once a frame, as mod_eval runs them"""
+    ff = m.alloc(16)
+    m.write(ff, b"\xff" * 16)
+    m.call(sym["mod_eval_pre"])
+    if frame % 2:
+        mirror, modram = bytes(m.read(*MIRROR)), bytes(m.read(*MOD_RAM))
+        m.call(M.EVAL_A, M.OUT, rate, 0, 0, ff, ff, 0, limit=2_000_000)
+        m.write(MIRROR[0], mirror)
+        m.write(MOD_RAM[0], modram)
+        m.flush()
+        m.call(M.EVAL_A, M.OUT, rate, 1, 1, o1, o2, 0, limit=2_000_000)
+    else:
+        state = bytes(m.read(LFO_STATE, 120))
+        spd = [M.OUT + 2 * M.idx(0, M.slot(k, "SPD")) for k in (1, 2, 3)]
+        kept = [M.u16(m, a) for a in spd]
+        for a in spd:
+            M.w16(m, a, 0x4000)
+        m.flush()
+        m.call(M.EVAL_A, M.OUT, rate, 0, 0, ff, ff, 0, limit=2_000_000)
+        for a, v in zip(spd, kept):
+            M.w16(m, a, v)
+        m.write(LFO_STATE, state)
+        m.flush()
+    m.call(sym["mx_eval"], M.OUT)
+
+
+def run_cascade(build, snapshot, sym, frames, dep1, model=False):
+    """LFO2 on RAND (WAVE 6) into FREQ; LFO1 at DEP1 into LFO2's WAVE (our cascade, cascade.c) -> FREQ a frame.
+    MODEL: BUILD is the build without lfowaves, run as the half-rate model (half_rate_model)"""
     m = M.machine(build, snapshot)
     frac = m.alloc(len(M.SET_FRAC))
     m.write(frac, M.SET_FRAC)
@@ -124,18 +180,39 @@ def run_cascade(build, snapshot, sym, frames, dep1):
     rate = m.long(M.RATE)
     o1, o2 = m.alloc(256), m.alloc(256)
     out = []
-    for _ in range(frames):
+    for f in range(frames):
         m.call(M.SMOOTHER, M.SRC)
-        m.call(sym["mod_eval"], M.OUT, rate, 1, 1, o1, o2, 0, limit=2_000_000)
+        if model:
+            half_rate_model(m, sym, rate, o1, o2, f)
+        else:
+            m.call(sym["mod_eval"], M.OUT, rate, 1, 1, o1, o2, 0, limit=2_000_000)
         out.append(M.u16(m, M.OUT + 2 * M.idx(v, DEST_SLOT)))
     return out
 
 
+# (2026-11-19, agreed with main) with half-rate LFOs, LFO1 (at DEP 0x0000: full negative depth) moves LFO2's WAVE every
+# frame through the cascade and LFO2 reads its WAVE only at its turn, stepping both frames with that shape: no
+# full-rate run gives the same FREQ, even at the turns. The build is then compared at every turn, exactly, with the
+# half-rate model of the same run without lfowaves (half_rate_model: stock's evaluator, voice 0 stepped twice at its
+# turns with the turn's cells, held between). Negative control: the full-rate run without lfowaves differs from that
+# model at the turns (the comparison means something). Without half-rate: as before.
 def scenario_cascade(a, sym, rep):
     got = {(label, dep): run_cascade(build, a.snapshot, sym, a.frames, dep)
            for label, build in (("build", a.build), ("without", a.before)) for dep in (0, M.TOP)}
-    check("LFO1's depth 0: LFO2 on RAND gives the same FREQ with and without lfowaves",
-          got[("build", 0)] == got[("without", 0)])
+    if M.halfrate_in():
+        model = run_cascade(a.before, a.snapshot, sym, a.frames, 0, model=True)
+        diff = [k for k in range(1, a.frames, 2) if got[("build", 0)][k] != model[k]]
+        check("LFO1's depth 0: LFO2 on RAND gives the same FREQ with lfowaves (half-rate) as the half-rate model "
+              "without it, at every turn", not diff, f"{len(diff)} turns differ, first {diff[:6]}")
+        neg = sum(model[k] != got[("without", 0)][k] for k in range(1, a.frames, 2))
+        check("... the model is not the full-rate run without lfowaves at the turns (the comparison means something)",
+              neg > 0, f"{neg} turns differ")
+        rep["cascade_model_turns_differing_from_full_rate"] = neg
+    else:
+        check("LFO1's depth 0: LFO2 on RAND gives the same FREQ with and without lfowaves",
+              got[("build", 0)] == got[("without", 0)])
+    check("half-rate LFOs: between turns FREQ holds", held_between_turns(got[("build", 0)])
+          and held_between_turns(got[("build", M.TOP)]))
     check("LFO1 into LFO2's WAVE at full depth: FREQ differs from the build without lfowaves "
           "(LFO2 runs waves past 6: the cascade does not cut the new waves off)",
           got[("build", M.TOP)] != got[("without", M.TOP)],
@@ -182,7 +259,8 @@ def scenario_drawn(a, sym, rep, names):
 
 def without_lfowaves(build: str, out: pathlib.Path) -> str:
     """BUILD with lfowaves taken out, for the emulator only (never a unit): its edits back to stock 1.12's bytes,
-    its CODE chunk at 0x46780000 and its displaced-instruction record (getShortName) gone; the rest as built"""
+    its CODE chunk at 0x46780000 and its displaced-instruction record (getShortName) gone, and lfo_fast's jmp (which
+    runs lfowaves' stubs inline) back to stock's evaluator entry; the rest as built"""
     from dnfw.cli.files import read_image
     from dnfw.firmware.build import build as rebuild
     from dnfw.firmware.build import replacement
@@ -196,6 +274,10 @@ def without_lfowaves(build: str, out: pathlib.Path) -> str:
         if bytes(content[at:at + len(new)]) != new:
             raise SystemExit(f"{e['va']:#010x}: not lfowaves' bytes: is lfowaves in this build?")
         content[at:at + len(stock)] = stock
+    from dnfw.waverider import lfofast        # 2026-11-17: lfo_fast is the evaluator with lfowaves' stubs inline:
+    at = lfofast.EVAL_VA - lfowaves.BASE      # without lfowaves, stock's (lfo4's) evaluator runs, its jmp put back
+    if bytes(content[at:at + 2]) == bytes.fromhex("4ef9"):
+        content[at:at + len(lfofast.EVAL_ENTRY)] = lfofast.EVAL_ENTRY
     kept = []
     for cid, data in chunks:
         if cid == platform.area.CODE and platform.area.CodeChunk.unpack(data).load == lfowaves.RUNTIME_VA:

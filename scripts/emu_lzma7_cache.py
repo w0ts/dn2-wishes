@@ -47,7 +47,8 @@ PUSHR = 0xEC038034
 REPORTER = 0x4011ED4A                                     # the fault reporter (boot112own.py)
 RESULT = 0x46A20C00                                       # what a played driver entry returns (emu_erase.py's)
 DEVICE = 48_340_992                                       # the owner's Kingston, reconfigured (emu_erase.py)
-C_HDR = 0x6E8000
+C_HDR = 0x5FF200                                # v0.69.2: the copy's new place (csrc/include/dmove.h)
+DM = 0x5FFC00                                   # the move record (lzma7cache.c sets its DSP bit at the first boot)
 
 failures: list[str] = []
 
@@ -114,7 +115,8 @@ def boot(build: pathlib.Path, image: bytes, lay: dict, disk: dict, *, limit: int
                     return
                 sp = uc.reg_read(UC_M68K_REG_A7)
                 sector, nbytes, buf = (be32(uc, sp + 4 * k) for k in (1, 2, 3))
-                ok = 0 < nbytes <= 0x10000 and sector >= C_HDR and sector + (nbytes + 511) // 512 <= C_HDR + 1 + 2048
+                ok = 0 < nbytes <= 0x10000 and ((sector >= C_HDR and sector + (nbytes + 511) // 512 <= C_HDR + 1 + 2048)
+                                                or (sector == DM and nbytes == 512) or (sector == 0x6E8000 and nbytes == 512))
                 rc = 0
                 if not ok or (write and write_fail):
                     rc = -1
@@ -199,7 +201,7 @@ def main() -> int:
     r = boot(a.build, image, lay, disk, limit=a.limit)
     out["boots"]["first"] = summary(r)
     common("first", r, want)
-    writes = [x for x in r["io"] if x[0] == "W"]
+    writes = [x for x in r["io"] if x[0] == "W" and x[1] != DM]   # (v0.69.2: the move record's write is the move's)
     check("first: decoded, the copy written", (r["dn7_status"], r["dn7c_state"]) == (2, 3),
           f"status {r['dn7_status']}, state {r['dn7c_state']}")
     check("first: header cleared first, program in 64 KB calls, header last",

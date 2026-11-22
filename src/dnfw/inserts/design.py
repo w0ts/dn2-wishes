@@ -80,7 +80,7 @@ assert FLAGS + 4 * FLAG_WORDS <= 0x2E3A40
 # the pre pass leaves it out and the bus pass runs it on the track's block (L and R, each its own state)
 # after slot 1, so it acts on the summed voices after the filter, amp and pan. Every other pair as before.
 MOVERS = POST + BUS                              # slot 1's types that move a BUILT slot 2 to the bus
-INS_ONE_SW = 0xBD6D03                            # the pre pass's one insert (dnfw.inserts.program.one), after
+INS_ONE_SW = 0xBD6C03                            # the pre pass's one insert (dnfw.inserts.program.one), after
                                                  # its entry's 48-bit JUMP (dnfw.waverider.dsp.INS_SW + 3)
 MV_RING_DDR = 0x82540000                         # a moved TAPE's rings: 32 x 2 KB (track t, L 2 t, R 2 t + 1),
                                                  # after the post rings (0x82510000 + 32 x 4,104 B)
@@ -107,7 +107,7 @@ def flags(table: bytes | list[int]) -> list[int]:
 # block, x 14.125, into the block of the track the slot plays): L 32 floats at + 0x100 t, R at + 0x80
 BUS_BLOCKS = 0x258F68
 BUS_R = 0x80
-FDN8_SW, XDLY_SW = 0xBD5000, 0xBD6200                 # the engines' entries (dnfw.waverider.dsp FDN8_SW, XDLY_SW)
+FDN8_SW, XDLY_SW = 0xBD5000, 0xBD9F00                 # the engines' entries (dnfw.waverider.dsp FDN8_SW, XDLY_SW)
 BUFFERS = 0x254A60                                # the 16 voice slots' buffers (dnfw.perc.program.BUFFERS)
 ROUTE = 0x257898                                  # 16 x s16: the track each voice slot plays (the frame's
                                                   # 0xa5a + 2 s, from the ColdFire's slot map 0x80005308;
@@ -183,7 +183,8 @@ SB_UP, SB_DN = 1.0 / 8, 1.0 / 1024                # the envelope: ~0.2 ms up, ~2
 SB_THR = 1.0 / 8                                  # the trigger's threshold, of the envelope
 
 # DIST: K1 DRIV, K2 TONE, K3 BIAS, K4 LOW, K5 LEV. Optimist's DIST: the drive relative to the voice's peak
-# (a follower, instant up, ~0.35 s down: DRIV means the same clipping on a quiet and a loud note), 0.5x ..
+# (a follower, instant up, ~0.35 s down, and since 2026-11-21 the block's own largest |x|, program.fz_peak: DRIV means
+# the same clipping on a quiet and a loud note, from a hit's first block on), 0.5x ..
 # 48x into FUZZ's clip (its bias, DC blocker and TONE), the band under LOW (a one-pole, 20 Hz x 16^p) kept
 # out of the clip and added back dry, then back to the peak's level with a make-up (/ 1.5 min(G, 1)),
 # x LEV x 2. It runs FUZZ's sample loop (program.fz_loop) with its own block values.
@@ -311,7 +312,17 @@ CH_DEP_MAX = 192.0                                # DPTH: up to 4 ms either way 
 CH_RATE_LO, CH_RATE_SPAN = 0.05, 100.0            # RATE: 0.05 .. 5 Hz
 LOG2_CR_SPAN = math.log2(CH_RATE_SPAN)
 CH_VOICES_K = 3.99                                # VOIC: 1 + trunc(3.99 p) voices
-CH_FB_MAX = 0.7
+# FDBK (2026-11-16, the User: "why chor feed back goes only to 70 %", then "as high as safe"): 1 - (1 - CH_FB_MAX)^p, so
+# the feedback's decay time doubles every ~25 steps and the top is fine-grained (FDN8 SIZE's idea); FDBK 0 is exactly 0.
+# The loop's gain is at most FDBK at every setting (each voice's read is a convex mix of two ring words, the voices'
+# L + R gains sum to 2 / voices: the wet's mid is their mean), so any top under 1 is stable; the top is set by level.
+# The sweep (64 corners: 1..4 voices, DPTH RATE DLY WDTH 0 / 127; a sine on the comb's resonance, a chirp, noise, a
+# square, all full scale): no runaway up to 0.99. At 0.97: worst peak +31.6 dB over the input's (that sine; chirp
+# +22.9, noise +21.9; 0.7 gave +13.0 / +12.0 / +11.7), slowest decay -15.4 dB/s (-60 dB in 3.9 s). 0.7 until then,
+# linear in the knob.
+CH_FB_MAX = 0.97
+CH_FB_LOG2 = math.log2(1.0 - CH_FB_MAX)              # FDBK = c0 - 2^(p CH_FB_LOG2)
+CH_FB_C0 = 0.9999998807907104                     # c0: the DSP's exp2(0) (fdn8.ref EXP2_C[0], 1 - 2^-23), so FDBK 0 is 0.0
 assert CH_DLY_MIN - CH_DEP_MAX >= BLOCK + 2       # every read is of an earlier block's samples
 assert CH_DLY_MIN + CH_DLY_SPAN + CH_DEP_MAX + BLOCK + 2 < POST_RING
 assert WD_D_MIN + WD_D_SPAN < POST_RING
@@ -440,7 +451,15 @@ COST = {FUZZ: 4_800, TAPE: 7_300, FOLD: 5_800, HARM: 4_300, CHOR: 11_400, WIDE: 
         # 512 KB ring for 32 blocks, 4,096 DDR writes each (FDN8_MEASURED). The bound must never be under a
         # block's cost, or the guard lets it run past the deadline: 1.2 x the clearing block (64,000, r11f). Since
         # 2026-11-12 a steady block's (1.2 x FDN8_MEASURED steady); a clearing block is charged FDN8_COST_CLEAR
-        FDN8: 23_400, XDLY: 19_100,                # (34,700 until 2026-11-14, the staged tank; 34,200 until lever 5,
+        FDN8: 18_500, XDLY: 19_100,                # 2026-11-22 (the User: fix the guard now): the DN2's own cost,
+                                                   # not the model's. The ladder on test file 0cd88167 (INSERT FDN8 on
+                                                   # T1..T8, chords, the system meter's D a rung) measured one playing
+                                                   # bus FDN8 at ~17.8-18.4k cycles a block, ~17.9k typical: 18,500 is
+                                                   # that plus a small margin (the model's 12,585 dearest block
+                                                   # charges DDR like L2, the unit does not; with 15,200 the ladder
+                                                   # admitted 4 at once, D 84.4 %). 15,200 = 1.2 x FDN8_STEADY_MAX
+                                                   # 12,585 from the HALF commit until then (23,400 before HALF);
+                                                   # (34,700 until 2026-11-14, the staged tank; 34,200 until lever 5,
                                                    # 2026-11-13: + 139 a block, the diffusers' ring swapped in and out)
         # SUB DIST GATER RING (2026-11-10, ins47): not run on the runner yet, so the model's steps of one
         # unit (2,143 / 2,946 / 1,610 / 1,836) x 1.2 (the runner read up to 20 % over the model) x 1.5
@@ -452,12 +471,21 @@ COST = {FUZZ: 4_800, TAPE: 7_300, FOLD: 5_800, HARM: 4_300, CHOR: 11_400, WIDE: 
 # docs/dsp-cost.md), one instance less the pass with none: a clearing block (its first 32) and a steady one.
 # test_inserts_bus measures the clearing block again and holds COST[FDN8] >= 1.2 x it (53,073 / 32,606 until the bus
 # pass's scratch, own words and send set-aside moved to L1, 2026-11-12; the bound is left as it was)
-FDN8_MEASURED = {"clearing": 54_965, "steady": 19_334}   # (lever 5, 2026-11-13: the clearing block zeros instance 0's L2
+FDN8_MEASURED = {"clearing": 16_678, "steady": 12_440}   # 2026-11-22: HALF (dnfw.fdn8.lite: the tank at 24 kHz, two
+                                                         # diffusers, the instance's words alone swapped; 24,069 / 17,843
+                                                         # until then, the whole pass counted)
+                                                         # (lever 5, 2026-11-13: the clearing block zeros instance 0's L2
                                                          # diffuser ring, 1,024 words; 49,433 / 28,410 before)
+# (2026-11-21, fx-fast: the clearing block clears only the ring's window, fdn8.ref.WINDOW_CLEAR, 1,264 DDR writes, not
+# 4,096: 54,965 until then; FDN8_COST_CLEAR left as it was, now about 2.8 x the block). Steady 19,334 until 2026-11-21
+# too: the bus instances 1..7's diffusers moved to L2 (fdn8.program.DIFF_BUSK_L2), so instance 1 costs what 0 does (17,911;
+# measured 19,362 before). COST[FDN8] and FDN8_STEADY_MAX are the guard's and stay until the costs are updated together
 # (2026-11-14, the staged tank, dnfw.fdn8.stages: steady 28,874 until then, instance 1, the dearer (its diffusers in DDR);
 # the dearest of 4,300 steady blocks, every place of the ring's start under every tap, 19,490: the bound is 1.2 x that;
 # 19,614 / 19,770 before two lines' writes a loop)
-FDN8_STEADY_MAX = 19_490
+FDN8_STEADY_MAX = 12_585                          # 2026-11-22 (HALF): the dearest of 8,300 steady blocks (every place of the
+                                                  # ring's start, p 16 a block); 19,490 until then (17,997 measured the
+                                                  # same way on v0.69.1)
 # 2026-11-12 (main: on the unit the skips rose 1,579 -> 40,041 a minute with 64,000 on every block): the bus pass
 # charges a block by what it will run (bus.fdn8_bound): COST[FDN8] a steady block, FDN8_COST_CLEAR one that clears
 # the ring (its first 32), each 1.2 x its measure

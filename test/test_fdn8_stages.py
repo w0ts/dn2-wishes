@@ -126,4 +126,4 @@ def test_second_page_width():
 
 
 def test_buffers_inside_the_state():
-    assert _X >= P.VT2 + 4 * P.NV and _X + S.BUF_BYTES <= P.STATE + P.STATE_BYTES
+    assert _X >= P.BUF_L1 and _X + S.BUF_BYTES <= P.BUF_L1_END       # (2026-11-22: after the bus instances' stores)

@@ -41,6 +41,15 @@ YES, NO = (1, 1), (1, 3)            # codes 10 and 12, from the firmware's own t
 LEFT, RIGHT = (1, 4), (1, 6)
 ENCODER_PUSH = [(5, b) for b in range(8)]      # A..H, codes 41..48
 
+# 2026-11-18: time as the unit keeps it. Stock's panel tick (0..4095, wraps) is the key task's clock (0x4011f8bc): a
+# held key's repeats come from it (the first REPEAT_FIRST ticks after the press, then one every REPEAT_EVERY; on the
+# unit 24 and 8, read there by PEEK), each an item with bit 3 set beside the press's own bits (bit 0). The unit runs
+# UNIT_TICKS of them and UNIT_FRAMES audio frames (FRAMES_NOW) a second.
+TICK_VA = 0x466768B0
+REPEAT_FIRST_VA, REPEAT_EVERY_VA = 0x4029F0C8, 0x4029F0C4
+UNIT_TICKS, UNIT_FRAMES = 121, 1500
+F_REPEAT = 0x08
+
 
 class Panel:
     """A `Machine` driven through its front panel."""
@@ -64,6 +73,7 @@ class Panel:
         self.png_dir = pathlib.Path(png_dir)
         self.ran = 0                # instructions run since the snapshot resumed (every settle)
         self.clock = None           # frame_clock(): (FRAMES's address, its value at the resume, frames a second)
+        self.tclock = None          # tick_clock(): [FRAMES's address, its value at tick 0, last tick read, ticks run]
         # v0.34 (docs/timing-model.md): the audio interrupt at its real cadence, when the
         # machine was built with digikit's SSI0/eDMA event source (Machine(ssi0_request_hz=..))
         ssi = machine.ev.get("ssi0_dma") if hasattr(machine, "ev") else None
@@ -89,12 +99,14 @@ class Panel:
 
         done = 0
         while done < instructions:
-            budget = min(CLOCK_CHUNK if self.clock else CHUNK, instructions - done)
+            budget = min(CLOCK_CHUNK if self.clock or self.tclock else CHUNK, instructions - done)
             self.m.pc, ran, _stop = longrun.spin(self.m.m, self.m.pc, budget,
                                                  pits=self.timers, fast=True, async_events=self.events)
             done += ran
             if self.clock:
                 self._tick(self.ran + done)
+            if self.tclock:
+                self._tock()
             if ran == 0:
                 break
         self.ran += done
@@ -114,6 +126,56 @@ class Panel:
         va, f0, per_sec = self.clock
         self.m.write(va, struct.pack(">I", (f0 + ran * per_sec // INSTR_PER_SEC) & 0xFFFFFFFF))
 
+    def tick_clock(self, frames_va):
+        """2026-11-18: the audio frame counter (FRAMES) follows stock's panel tick at the unit's rate (UNIT_FRAMES to
+        UNIT_TICKS), written after each CLOCK_CHUNK. What the firmware times by FRAMES (a held NO's 0.6 s) then runs
+        against the key repeats stock's key task sends by the tick, as on the unit. Replaces frame_clock"""
+        self.clock = None
+        self.tclock = [frames_va, self.m.long(frames_va), self.m.long(TICK_VA) & 0xFFF, 0]
+
+    def _tock(self):
+        t = self.m.long(TICK_VA) & 0xFFF
+        c = self.tclock
+        c[3] += (t - c[2]) & 0xFFF                  # (the tick wraps at 4,096: a chunk is far less than that)
+        c[2] = t
+        self.m.write(c[0], struct.pack(">I", (c[1] + c[3] * UNIT_FRAMES // UNIT_TICKS) & 0xFFFFFFFF))
+
+    def ticks(self):
+        """panel ticks run since tick_clock()"""
+        return self.tclock[3]
+
+    def skip_frames(self, n):
+        """FRAMES moved on by N with no ticks run (a word's 1 s on screen let pass)"""
+        self.tclock[1] += n
+        self._tock()
+
+    def run_ticks(self, n):
+        """run until N more panel ticks have gone (tick_clock first) -> the ticks run"""
+        t0 = self.ticks()
+        for _ in range(4 * n + 40):                 # (a tick is ~1.1 M instructions, two CLOCK_CHUNKs)
+            if self.ticks() - t0 >= n:
+                break
+            self.settle(CLOCK_CHUNK)
+        return self.ticks() - t0
+
+    def repeat_timing(self):
+        """-> (the first repeat, then every): stock's key task's ticks, as the snapshot holds them (24, 8 on the unit)"""
+        return self.m.long(REPEAT_FIRST_VA), self.m.long(REPEAT_EVERY_VA)
+
+    def watch_items(self, entry_va):
+        """the UI items a routine taking (u8 *item) is called with, each with the panel tick it came at:
+        -> a list filled as the machine runs, of (tick, type, code, flags); a held key's repeats show bit 3"""
+        from unicorn import UC_HOOK_CODE, m68k_const
+        seen = []
+
+        def on(uc, ad, sz, us):
+            sp = uc.reg_read(m68k_const.UC_M68K_REG_A7)
+            it = bytes(uc.mem_read(struct.unpack(">I", bytes(uc.mem_read(sp + 4, 4)))[0], 12))
+            code, flags = struct.unpack(">II", it[4:12])
+            seen.append(((self.tclock[3] if self.tclock else 0), it[0], code, flags))
+        self.m.uc.hook_add(UC_HOOK_CODE, on, begin=entry_va, end=entry_va)
+        return seen
+
     # --- input --------------------------------------------------------------
     def tap(self, key, after=SETTLE):
         channel, bit = key
@@ -131,6 +193,19 @@ class Panel:
         channel, bit = key
         self.m.pc = self.panelin.release(self.m.m, self.profile, channel, bit)
         return self.settle(after)
+
+    def press_for(self, key, ticks):
+        """KEY pressed, then N panel ticks run with it down (stock's key task sends its repeats meanwhile, as on the
+        unit; tick_clock first) -> the ticks run"""
+        channel, bit = key
+        self.m.pc = self.panelin.press(self.m.m, self.profile, channel, bit)
+        return self.run_ticks(ticks)
+
+    def release_for(self, key, ticks):
+        """KEY let go, then N panel ticks run"""
+        channel, bit = key
+        self.m.pc = self.panelin.release(self.m.m, self.profile, channel, bit)
+        return self.run_ticks(ticks)
 
     def push_and_turn(self, encoder, delta, times=2, dwell=SETTLE // 2):
         """Hold the encoder's push and turn it -- the only thing that moves a

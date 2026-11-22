@@ -192,8 +192,10 @@ def comeback(M5, snap, m2mach, m5img) -> tuple[dict, dict]:
     numbers["back on STOCK: largest difference over 40 blocks"] = f"{max(diff):.3g}"
     numbers["the note after: largest difference from the never-fed path; words not bit for bit"] = (
         f"{max(ndiff):.3g}", sum(x != y for o, q in zip(sung, sung_n) for cx, cy in zip(o, q) for x, y in zip(cx, cy)))
-    heard = sum(1 for o in sung for w in o[0] + o[1] if w & 0x7FFFFFFF and w != MARK)
-    numbers["the note after: output words heard (of 1,920)"] = heard
+    # through F32.Ear (test_sharc_f32: no bare-mask "it sounds" test): MARK, the words the run never wrote, left out
+    # as before; any other NaN or infinity fails the check instead of counting as heard
+    heard = F32.Ear().hear(w for o in sung for w in o[0] + o[1] if w != MARK)
+    numbers["the note after: output words heard (of 1,920)"] = repr(heard)
     checks["STOCK -> JUNO -> STOCK: the calls come back to the bus"] = ok and ok2
     checks["STOCK -> JUNO -> STOCK: the clear is exactly the stock chorus's words the noise left different"] = (
         held == cleared)
@@ -202,7 +204,7 @@ def comeback(M5, snap, m2mach, m5img) -> tuple[dict, dict]:
     checks["STOCK -> JUNO -> STOCK: back on STOCK on silence, within 1e-6 of a stock chorus never fed the noise "
            "(40 blocks: not the ring or filter states it held before JUNO)"] = max(diff) <= 1e-6
     checks["STOCK -> JUNO -> STOCK: a note after, within 1e-6 of the never-fed chorus fed the same note, and "
-           "heard (30 blocks)"] = max(ndiff) <= 1e-6 and heard > 1000
+           "heard (30 blocks)"] = max(ndiff) <= 1e-6 and heard.ok(1000)
     return checks, numbers
 
 

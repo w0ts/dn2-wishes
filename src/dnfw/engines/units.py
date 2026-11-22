@@ -8,7 +8,7 @@ page code interpolates between them).
 Kinds: pct (0..100 %), spct (-100..+99 %, 64 is 0), c (cents, the knob itself), c10 (tenths of a cent
 from the curve), hz (Hz from the curve), hz100 (hundredths of a Hz from the curve), ms (milliseconds from
 the curve), st10 (signed semitones in tenths from the curve: +1.5, then +12). `off` after a kind: the
-knob 0 reads OFF.
+knob 0 reads OFF. bal (2026-11-20, DRUM's balance knobs): -64 .. +63, the knob - 64 (C: both parts at 100 %).
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ import math
 import pathlib
 
 KINDS = ("raw", "pct", "spct", "hz", "hz100", "ms", "c10", "c", "db", "oct", "patn", "rate", "pctc", "mode", "ms10", "voic",
-         "glid", "st10", "juno", "onoff")
+         "glid", "st10", "juno", "onoff", "bal")
 # 2026-11-11: GLID up to 5 minutes (dnfw.engines.analog2.a2glide.ms_of): too steep for a 17-point curve, so read exactly a knob
 # from its own table (`glid_table`), one a record span: ANALOG 2's LEV2 0..127, DRONE's AMD 0..120
 GLID_TOPS = (127, 120)
@@ -37,6 +37,21 @@ def _tune10(k: int) -> float:
     return (k * 48.0 / 128.0 - 24.0) * 10.0
 
 
+def _st_whole(k: int, span: int) -> float:
+    """DRUM's TUNE on SNARE, the hats, TOM: +-SPAN whole semitones (knob 64: 0), in tenths"""
+    return (math.trunc(k * 2.0 * span / 127.0 + 0.5) - span) * 10.0
+
+
+def _drive_db(k: int) -> float:
+    """DRUM's DRIV on SNARE, the hats, TOM: the soft clip's gain 1 + 20 k^2 (1 .. 21), in dB"""
+    return 20.0 * math.log10(1.0 + 20.0 * (k / 127.0) ** 2)
+
+
+def _hat_hz(k: int) -> float:
+    """the hats' TONE: the band-pass at 7.1 kHz x 2^((k - 0.5) 3)"""
+    return 7100.0 * 2.0 ** ((k / 127.0 - 0.5) * 3.0)
+
+
 # machine -> control -> (kind, function of the knob 0..127 or None, off at 0)
 UNITS: dict[str, dict[str, tuple]] = {
     # 2026-11-11 (units session), from the DSP programs (dnfw.engines.plaits.plaits, tb303, sophie): `_unit` is knob / 127
@@ -50,6 +65,98 @@ UNITS: dict[str, dict[str, tuple]] = {
         "SLID": ("ms", lambda k: 2.0 + 358.0 * k / 127.0, True),                    # 2 .. 360 ms, 0: no slide
         "WAVE": ("pct", None, False),                                               # saw 0 % .. square 100 %
         "TUNE": ("st10", _tune10, False),
+    },
+    # 2026-11-20: DRUM's KICK (dnfw.engines.drum.ref Kick.knobs; page 1 knob / 127, page 2 its 0..1); each DRUM type
+    # is its own place, keyed by the place's name (dnfw.engines.drum.drum PLACES: "DRUM KICK" ..)
+    "DRUM KICK": {
+        "TUNE": ("st10", lambda k: (math.trunc(k * 60.0 / 127.0 + 0.5) - 24) * 10.0, False),   # -24 .. +36 st
+        "DCAY": ("ms", lambda k: 5.0 * 1600.0 ** (k / 127.0), False),              # 5 ms .. 8 s
+        "SWEP": ("pct", None, False),                                               # 0 .. 7 octaves
+        "SWTM": ("ms", lambda k: 1.0 * 150.0 ** (k / 127.0), False),               # 1 .. 150 ms
+        "CLIK": ("bal", None, False),                                             # stage 5: body+noise / the click
+        "CLKT": ("hz", lambda k: (400.0 * 40.0 ** (min(k / 127.0, 0.75) / 0.75) if k / 127.0 <= 0.75
+                                  else 1500.0 * 6.0 ** ((k / 127.0 - 0.75) / 0.25)), False),
+        "DRIV": ("db", lambda k: 20.0 * math.log10(1.0 + 30.0 * (k / 127.0) ** 2), False),
+        "SHAP": ("pct", None, False),
+        "HOLD": ("ms", lambda k: 250.0 * (k / 127.0) ** 2, True),                  # 0 .. 250 ms
+        "SIGH": ("pct", None, True),
+        "CLKL": ("ms", lambda k: 0.2 * 100.0 ** (k / 127.0), False),               # 0.2 .. 20 ms
+        "NOIS": ("pct", None, True),
+        "VEL": ("pct", None, True),
+        "SWHD": ("ms", lambda k: 30.0 * k / 127.0, True),                         # stage 3: 0 .. 30 ms, 0 OFF
+        "CURV": ("spct", None, False),            # stage 5: -100 % a line, 0 the exponential, +99 % the concave
+    },
+    # 2026-11-20: DRUM's other types (scratch/drum-engine/design.md section 2; k = knob / 127): SNARE
+    "DRUM SNAR": {
+        "TUNE": ("st10", lambda k: _st_whole(k, 24), False),                        # +-24 st, whole semitones
+        "DCAY": ("ms", lambda k: 30.0 * (2000.0 / 30.0) ** (k / 127.0), False),    # 30 ms .. 2 s
+        "TONE": ("pct", None, False), "MODE": ("pct", None, False),                 # analog .. membrane
+        "SNAP": ("pct", None, True), "NOIS": ("bal", None, False),                 # stage 5: NOIS body / wires
+        "DRIV": ("db", _drive_db, False),                                           # soft clip, gain 1 .. 21
+        "WIRE": ("pct", None, False),                                               # x 0.25 .. 6 the body's decay
+        "GLID": ("pct", None, True), "BUZZ": ("pct", None, True),
+        "WTON": ("hz", lambda k: 1500.0 * 6.0 ** (k / 127.0), False),              # 1.5 .. 9 kHz
+        # the wires' rise 0.3 .. 8 ms to 0.7 of the knob (knob 88; ref.Snare: WATK_SPLIT); from knob 89 1..4 clap bursts
+        # before them (no unit of their own yet: the readout holds 8 ms there)
+        "WATK": ("ms10", lambda k: 3.0 * (80.0 / 3.0) ** (min(k / 127.0, 0.7) / 0.7), False),
+        "SIZZ": ("pct", None, True), "VEL": ("pct", None, True),
+        # stage 3: WCHR, the wires' circuit: -100 % the 909's band, hold and close; 0 the wires as before (64);
+        # +99 % the 808's high-pass
+        "WCHR": ("spct", None, False),
+    },
+    # the hats: CLOSED and OPEN, one page (their decays' spans apart)
+    "DRUM CLHH": {
+        "TUNE": ("st10", lambda k: _st_whole(k, 24), False),
+        "DCAY": ("ms", lambda k: 8.0 * (600.0 / 8.0) ** (k / 127.0), False),       # 8 ms .. 0.6 s
+        "TONE": ("hz", lambda k: _hat_hz(k), False),                                # 7.1 kHz +-1.5 octaves
+        "NOIS": ("bal", None, False), "COLR": ("pct", None, False), "SNAP": ("pct", None, True),
+        "DRIV": ("db", _drive_db, False),
+        "HPF": ("pct", None, False), "Q": ("pct", None, False), "LOWB": ("pct", None, True), "VEL": ("pct", None, True),
+        "TOP": ("pct", None, True), "DRFT": ("pct", None, True),                    # stage 3 (DRFT 64: the 808's)
+    },
+    "DRUM OPHH": {
+        "TUNE": ("st10", lambda k: _st_whole(k, 24), False),
+        "DCAY": ("ms", lambda k: 80.0 * (4000.0 / 80.0) ** (k / 127.0), False),   # 80 ms .. 4 s
+        "TONE": ("hz", lambda k: _hat_hz(k), False),
+        "NOIS": ("bal", None, False), "COLR": ("pct", None, False), "SNAP": ("pct", None, True),
+        "DRIV": ("db", _drive_db, False),
+        "HPF": ("pct", None, False), "Q": ("pct", None, False), "LOWB": ("pct", None, True), "VEL": ("pct", None, True),
+        "TOP": ("pct", None, True), "DRFT": ("pct", None, True),                    # stage 3 (DRFT 64: the 808's)
+    },
+    # TOM (RNGE: a choice, dnfw.waverider.pages MNM_CHOICES)
+    "DRUM TOM": {
+        "TUNE": ("st10", lambda k: _st_whole(k, 24), False),
+        "DCAY": ("ms", lambda k: 40.0 * (3000.0 / 40.0) ** (k / 127.0), False),    # 40 ms .. 3 s
+        "SWEP": ("pct", None, True), "TONE": ("pct", None, False), "SNAP": ("pct", None, True),
+        "NOIS": ("bal", None, False), "DRIV": ("db", _drive_db, False),            # stage 5: NOIS body / noise
+        "SWTM": ("ms", lambda k: 5.0 * (400.0 / 5.0) ** (k / 127.0), False),       # 5 .. 400 ms
+        "MODE": ("pct", None, False), "SHAP": ("pct", None, False), "VEL": ("pct", None, True),
+    },
+    # stage 4 (2026-11-20): CLAP (CNT: a choice, dnfw.waverider.pages MNM_CHOICES)
+    "DRUM CLAP": {
+        "TUNE": ("st10", lambda k: _st_whole(k, 24), False),
+        "DCAY": ("ms", lambda k: 50.0 * (4000.0 / 50.0) ** (k / 127.0), False),    # the tail's T60 50 ms .. 4 s
+        "TONE": ("spct", None, False),                                              # low-pass share .. high-pass share
+        "SPRD": ("ms10", lambda k: 30.0 * (300.0 / 30.0) ** (k / 127.0), False),   # 3 .. 30 ms apart
+        "TAIL": ("bal", None, False), "DRIV": ("db", _drive_db, False),            # stage 5: TAIL bursts / tail
+        "SNAP": ("ms10", lambda k: 8.0 * (150.0 / 8.0) ** (1.0 - k / 127.0), False),   # a burst's tau 15 .. 0.8 ms
+        "Q": ("pct", None, False), "HUMN": ("pct", None, True), "GRP": ("pct", None, True),
+        "TLTN": ("spct", None, False),                                              # the tail's band x 0.5 .. 2
+        "TATK": ("ms10", lambda k: 3.0 * (800.0 / 3.0) ** (k / 127.0), False),     # the tail's rise 0.3 .. 80 ms
+        "RAMP": ("spct", None, False), "VEL": ("pct", None, True),
+    },
+    # RIDE and CRASH (one code; SET: a choice)
+    "DRUM RIDE": {
+        "TUNE": ("st10", lambda k: _st_whole(k, 24), False),
+        "DCAY": ("ms", lambda k: 150.0 * (12000.0 / 150.0) ** (k / 127.0), False),  # the body's T60 0.15 .. 12 s
+        "TONE": ("hz", lambda k: 7150.0 * 2.0 ** ((k / 127.0 - 0.5) * 3.0), False),  # the body 2.5 .. 20 kHz
+        "BELL": ("bal", None, False), "COLR": ("pct", None, False),                # stage 5: BELL bell / wash
+        "HIT": ("ms", lambda k: 20.0 * (3000.0 / 20.0) ** (k / 127.0), False),      # the top's T60 20 ms .. 3 s
+        "DRIV": ("db", _drive_db, False),
+        "SWEL": ("pct", None, True),
+        "ATK": ("ms", lambda k: 5.0 * (2000.0 / 5.0) ** (k / 127.0), True),         # a swell 5 ms .. 2 s, 0 none
+        "SNAP": ("pct", None, True), "NOIS": ("bal", None, False), "DRFT": ("pct", None, True),   # NOIS: metal / noise
+        "RIVT": ("pct", None, True), "VEL": ("pct", None, True),
     },
     "SOPHIE": {
         "DCAY": ("ms", lambda k: 30.0 * (4.0 / 0.03) ** (k / 127.0), False),       # 30 ms .. 4 s
@@ -86,6 +193,7 @@ UNITS: dict[str, dict[str, tuple]] = {
         "REL": ("ms", lambda k: 1.5 * 8000.0 ** (k / 127.0), False),
     },
 }
+UNITS["DRUM CRSH"] = UNITS["DRUM RIDE"]          # (stage 4: one code, one page)
 
 
 def _juno_hz(k: int) -> float:
@@ -122,7 +230,7 @@ INS_UNITS: dict[str, dict[int, tuple]] = {
              3: ("pct", None, False), 4: ("pct", None, False), 5: ("onoff", None, False)},
     "CHOR": {0: ("ms10", lambda k: 40.0 * k / 127.0, False), 1: ("hz100", lambda k: 5.0 * 100.0 ** (k / 127.0), False),
              2: ("ms", lambda k: 5.0 + 10.0 * k / 127.0, False), 3: ("voic", None, False), 4: ("pct", None, False),
-             5: ("pctc", lambda k: 70.0 * k / 127.0, False)},
+             5: ("pctc", lambda k: 100.0 * (1.0 - 0.03 ** (k / 127.0)), False)},   # FDBK: inserts.design CH_FB_*
     "WIDE": {0: ("pct", None, False), 1: ("ms10", lambda k: (24.0 + 936.0 * k / 127.0) / 48.0 * 10.0, False),
              2: ("hz", lambda k: 40.0 * 16.0 ** (k / 127.0), False), 3: ("pct", None, False)},
     "HARM": {0: ("pct", None, False), 1: ("hz", lambda k: 500.0 * 16.0 ** (k / 127.0), False),

@@ -5,8 +5,9 @@ to this queue instead of starting them themselves. A job is the caller's tree as
 (snapshotted at submit), a kind and a command. The same tree, kind and command run once: a
 second submitter joins the job that is queued or running, and a later one gets its stored
 result (a passing one: a failure runs again). One dispatcher starts jobs on the Mac or on
-the farm within the User's limits (scripts/runq_hosts.py): on the farm at most 32 CPUs of ours
-at any time, all our processes counted, and its load watched; on the Mac at most two jobs,
+the farm within the limits (scripts/runq_hosts.py; the farm's host and caps are this machine's
+settings, scripts/hostcfg.py): on the farm at most its cap of our CPUs at any time, all our
+processes counted, and its load watched; on the Mac at most two jobs,
 and none while its load is high.
 
     runq.py submit [--kind K] [--host H] [--cpus N] [--prio P] [--env K=V] [--collect GLOB]

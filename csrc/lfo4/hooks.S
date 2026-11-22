@@ -13,6 +13,15 @@
  *   memset  0x401347b8  moveal 8(%sp),%a0 ; mvzb 11(%sp),%d0
  * `scripts/build_lfo4_ext.py` checks both against the image before patching,
  * and checks that this file assembles back to exactly those bytes.
+ *
+ * **On our series the two entry jumps are left out (2026-11-16, v0.56.2).**
+ * memcpy is on Overbridge's audio path (`scripts/gate_overbridge.py`), which
+ * must stay stock byte for byte, so `dnfw.mods.lfo4` drops both edits
+ * (MEMORY_SITES) and the stubs below are entered from the wishes record's
+ * memcpy / memset stubs instead (`csrc/wishes/hooks.S`, DN2_LFO4), which every
+ * reference outside Overbridge's own code already names. Entered that way
+ * they are what the jump made them: the caller's stack untouched, the test,
+ * the carry, the displaced pair, entry + 8.
  */
 #include "dn2_111.h"
 #include "slots.h"

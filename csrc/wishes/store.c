@@ -1,7 +1,8 @@
 /* The wishes record on the +Drive (wish.h): one cell per record, filed under the record's hash.
  *
- *   0x6F0800 .. 0x6FEFFF   59,392 cells of one sector, between the library's extension (lib.c LIB_X, to
- *                          0x6F0700) and the settings sector (jump.c, 0x6FF000), sectors nothing else uses
+ *   0x5D8000 .. 0x5EE7FF   92,160 cells of one sector (v0.69.2; 59,392 at 0x6F0800.. until v0.69.1, upstream's bank
+ *                          lists' place: filed again here by dmove.c, once), below the pool image, past the
+ *                          factory buffer: sectors upstream never names (csrc/include/dmove.h)
  *
  *   a cell:  +0 'DN2W'  +4 version  +5 kind (1 a sound's record, 2 a kit's, 3 a pattern's: item.c)  +6 length  +8 h0  +12 h1  +16 generation (0)
  *            +20 the record (up to 488 B)  +508 its check
@@ -37,11 +38,11 @@
 #define WISH_FRAMES (*(volatile u32 *)0x4058F8D4u)                                       /* 1,500 a second */
 #endif
 
-#define CELL0 0x6F0800u
-#define CELLS 59392u
+#define CELL0 0x5D8000u
+#define CELLS 92160u
 #define CELL_END (CELL0 + CELLS)
-_Static_assert(CELL0 >= 0x6F0000u + 1u + 1792u && CELL_END <= 0x6FF000u,
-               "the cells lie between the library's extension (lib.c) and the settings sector (jump.c)");
+_Static_assert(CELL0 >= 0x5D8000u && CELL_END <= 0x5EE800u,
+               "the cells lie past the factory buffer, where the old bank lists A were (csrc/include/dmove.h)");
 #define MAGIC 0x444E3257u                       /* 'DN2W' */
 #define VERSION 1u
 #define KIND_SOUND 1u
@@ -92,9 +93,14 @@ static u32 check(const u8 *p)
     return (b << 16 ^ a) ^ CHECK_XOR;
 }
 
+#ifndef WISH_DM_OK
+extern int dm_ok(void);                         /* csrc/sampler/dmove.c: every +Drive move done (v0.69.2) */
+#define WISH_DM_OK() dm_ok()
+#endif
+
 static int ok(void)
 {
-    return WISH_BLK_READY && WISH_BLK_SECTORS >= CELL_END && !smp_er_lock;
+    return WISH_BLK_READY && WISH_BLK_SECTORS >= CELL_END && !smp_er_lock && WISH_DM_OK();
 }
 
 /* -> 1 when P is a whole cell of a version this build reads */
@@ -174,6 +180,17 @@ static int write_cell(const u8 *p)
     }
     wish_pend_lost++;                           /* PROBE full cells in a row: the store wants collecting */
     return 1;
+}
+
+/* 2026-11-22 (dmove.c): a cell of the old table, filed into this one by its hash -> 1 filed (or already here),
+ * 0 not a whole cell (skipped), -1 a read or write failed */
+int wish_file_cell(const u8 *p)
+{
+    if (!cell_valid(p))
+        return 0;
+    u32 w0 = wish_io_fails;
+    write_cell(p);
+    return wish_io_fails != w0 ? -1 : 1;
 }
 
 /* every entry waiting for H0:H1 gets the record in IO (or, when FOUND is 0, is marked missing); under the lock,

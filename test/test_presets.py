@@ -178,17 +178,20 @@ def _built(src: pathlib.Path, out: pathlib.Path) -> pathlib.Path:
     return out
 
 
-def test_the_zip_holds_every_set_exactly(tmp_path):
+def test_each_zip_holds_its_set_exactly(tmp_path):
     out = _built(PRESETS, tmp_path / "out")
     listing = json.loads((out / "presets.json").read_text(encoding="utf-8"))
-    assert sorted(p.name for p in out.glob("*.zip")) == [f"{Z.STEM}.zip"]
-    z = zipfile.ZipFile(out / listing["zip"])
-    want = {f"{Z.STEM}/README.md": (PRESETS / "README.md").read_bytes()}
-    for r in listing["sets"]:
-        for p in r["presets"]:
-            want[f"{Z.STEM}/{p['file']}"] = (PRESETS / p["file"]).read_bytes()
-    assert {n: z.read(n) for n in z.namelist()} == want
-    assert listing["count"] == sum(len(r["presets"]) for r in listing["sets"]) == len(S.published(PRESETS))
+    every = zipfile.ZipFile(out / listing[0]["zip"])
+    want_all = {f"{Z.STEM}/README.md": (PRESETS / "README.md").read_bytes()}
+    for e in listing[1:]:
+        folder = e["zip"][len(Z.STEM) + 1:-len(".zip")]
+        files = sorted((PRESETS / folder).glob("*.dn2pst"))
+        z = zipfile.ZipFile(out / e["zip"])
+        assert {n: z.read(n) for n in z.namelist()} == {f"{Z.STEM}-{folder}/{f.name}": f.read_bytes() for f in files}
+        assert e["count"] == len(files) == len(e["presets"])
+        want_all |= {f"{Z.STEM}/{folder}/{f.name}": f.read_bytes() for f in files}
+    assert {n: every.read(n) for n in every.namelist()} == want_all
+    assert listing[0]["count"] == len(S.published(PRESETS))
 
 
 # -- the page -----------------------------------------------------------------------------------------------------
@@ -199,11 +202,11 @@ def test_the_page_lists_only_what_the_site_serves(tmp_path):
     page = (site / "presets.html").read_text(encoding="utf-8")
     assert 'fetch("presets/presets.json"' in page
     listing = json.loads((site / "presets" / "presets.json").read_text(encoding="utf-8"))
-    assert listing["zip"] == f"{Z.STEM}.zip"
-    data = (site / "presets" / listing["zip"]).read_bytes()
-    assert len(data) == listing["bytes"] and hashlib.sha256(data).hexdigest() == listing["sha256"]
-    for r in listing["sets"]:
-        for p in r["presets"]:
+    assert listing and listing[0]["zip"] == f"{Z.STEM}.zip"
+    for e in listing:
+        data = (site / "presets" / e["zip"]).read_bytes()
+        assert len(data) == e["bytes"] and hashlib.sha256(data).hexdigest() == e["sha256"]
+        for p in e["presets"]:
             assert (site / "presets" / p["file"]).read_bytes() == (PRESETS / p["file"]).read_bytes()
 
 

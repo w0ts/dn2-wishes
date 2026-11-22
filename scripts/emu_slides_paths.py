@@ -59,6 +59,14 @@ def key(code):
 
 
 PASTE_REST = 60_000_000                 # instructions after a paste before its UNDO (see combo)
+# 2026-11-19: instructions after the checks' own edits before the paste. Stock's lock setter (SET_LOCK) tells the
+# pattern's observers through another task (the dispatcher at 0x400f614c, the task entry's return 0x40001344,
+# measured: the clear's call chain), and one observer clears the undo slot (the manager [0x44648928] + 12, through
+# 0x4005e1b0): an edit ends the undo. Measured on 1.12: that clear comes 4..6 panel ticks after the edits, the paste's
+# press 5 M (about 6 ticks) after the combo's start. When it came after the paste it cleared the paste's own undo, and
+# the paste again pasted (the track UNDO's site never ran; a run 14 ticks later from the TRIG page's turn wait). 20 M
+# (about 23 ticks): every edit told before the paste, as a person's edit is long before their paste
+EDITS_TOLD = 20_000_000
 
 class Paths:
     def __init__(self, machine, panel, lay, check, report):
@@ -249,6 +257,7 @@ class Paths:
         self.set_stock(90, 50, 0x2222)
         self.set_stock(90, 5, 0x3333)
         changed = self.now()
+        self.panel.settle(EDITS_TOLD)                           # the edits told (the undo slot cleared) before the paste
         hp, hu, n0 = self.hits["track paste"], self.hits["track undo"], pasted()
         self.combo(FUNC, STOP)                                  # paste
         got_paste, n1 = self.now(), pasted()
@@ -279,6 +288,7 @@ class Paths:
         self.set_ours(60, 1, 11)                                # ... and a step past it
         self.set_stock(90, 60, 0x0606)
         changed = self.now()
+        self.panel.settle(EDITS_TOLD)                           # the edits told (the undo slot cleared) before the paste
         want = {}
         for h in set(copied) | set(changed):
             if h[1] & 0x0F == 0 and (h[1] == 0 or self.ours(h)):
@@ -543,8 +553,11 @@ def main() -> int:
     from dnfw.mods import platform
     for va, blob in platform.runtime(image):
         machine.write(va, blob)
+    from emulib import attkit
+    attkit.store_kit(machine)  # (2026-11-21) a converted kit stored back: converted once
     from dnfw.sampler import machines as SMx
-    for page in range(SMx.MIRROR, SMx.MIRROR + 0x500000, 0x100000):
+    for page in [*range(SMx.MIRROR, SMx.MIRROR + 0x500000, 0x100000),   # (v0.65: and the banks' RAM)
+            *range(SMx.BANK_RAM & ~0xFFFFF, SMx.BANK_RAM + SMx.BANK_RAM_BYTES + 0xFFFFF & ~0xFFFFF, 0x100000)]:
         try:
             machine.uc.mem_map(page, 0x100000, UC_PROT_ALL)
         except UcError:

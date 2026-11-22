@@ -129,6 +129,9 @@ class Prog:
         self.prefix = prefix
         self.steps = 0
         self.subs: dict[str, object] = {}       # name -> body, emitted once by emit_subs()
+        # 2026-11-18 (the v0.59 merge): name -> the I registers' biases (seti BIAS) at its calls, each distinct set
+        # once: its body's offsets are emitted against them (run mode runs the body at the call, under those biases)
+        self.sub_bias: dict[str, list[dict[int, int]]] = {}
         self.in_sub = False
         self.spill: int | None = None           # a DM word `ash` may use (see ash)
         self.known: dict[int, int] = {}         # emit mode: register -> the constant it holds
@@ -389,6 +392,7 @@ class Prog:
         if self.run:
             x, y = self.r[a], self.r[b]
             v = {"+": lambda: x + y, "-": lambda: x - y, "AND": lambda: x & y, "OR": lambda: x | y,
+                 "XOR": lambda: x ^ y,
                  "MIN": lambda: min(s32(x), s32(y)), "MAX": lambda: max(s32(x), s32(y))}[op]()
             self.setR(d, v)
 
@@ -460,6 +464,12 @@ class Prog:
             self.steps += 1
         if self.run:
             self.setR(d, x)
+
+    def xor1(self, d: int, a: int, b: int) -> None:
+        """Rd = Ra XOR Rb, the native ALU op (2026-11-21: stock 1.12 has 69 of them; selas, selmap and digikit read
+        and run them alike, measured by the multifunction session). One instruction; xor's three where no proof is
+        wanted yet."""
+        self.iop(d, a, "XOR", b)
 
     def xor(self, d: int, a: int, b: int, t: int) -> None:
         """Rd = Ra ^ Rb as (Ra | Rb) - (Ra & Rb) (no XOR form in the stock corpus).
@@ -656,11 +666,12 @@ class Prog:
                                    Fd2 = a - b): the multifunction forms, the multiplier's
                                    operands F0-F3 x F4-F7 and the ALU's F8-F11, F12-F15
                                    (selas does NOT check these: it encodes garbage);
-          ("*", ...) or ("+", ...) alone is a single op (any registers).
+          ("*", ...) or ("+", ...) alone is a single op (any registers);
+          ("abs", d, a): Fd = ABS Fa alone (2026-11-21, dist-onset: fabs_'s, with a move).
         Move (at most one, I0-I7): ("ld", d, i) Fd = DM(Ii, M6), Ii one word on; ("st", i, s)
           DM(Ii, M6) = Fs; ("ldk", d, k, i) Fd = DM(k, Ii); ("stk", k, i, s) DM(k, Ii) = Fs,
           -32 <= k < 32."""
-        comp = [o for o in ops if o[0] in ("op", "*", "+", "-", "+-")]
+        comp = [o for o in ops if o[0] in ("op", "*", "+", "-", "+-", "abs")]
         moves = [o for o in ops if o[0] in ("ld", "st", "ldk", "stk")]
         assert len(comp) + len(moves) == len(ops), ops
         assert len(moves) <= 1, "one memory move a compute (no PM bus here)"
@@ -678,7 +689,13 @@ class Prog:
                 return 0xFFFFFFFF
             return bits(f32(ops_f[op](x, y)))
         single = len(comp) == 1 and comp[0][0] in ("op", "*", "+", "-")
-        if single:
+        if len(comp) == 1 and comp[0][0] == "abs":
+            _, d, a = comp[0]
+            texts.append(f"F{d} = ABS F{a}")
+            writes.append(d)
+            if self.run:
+                results.append((d, 0xFFFFFFFF if math.isnan(self.F(a)) else self.r[a] & 0x7FFFFFFF))
+        elif single:
             c = comp[0]
             d, a, op, b = (c[1], c[2], c[3], c[4]) if c[0] == "op" else (c[1], c[2], c[0], c[3])
             assert op in ops_f
@@ -751,7 +768,7 @@ class Prog:
                         self.mem.put(self.i[i] + 4 * k, self.r[m[3]])
         assert len(writes) == len(set(writes)), f"two results in one register: {texts}"
         self.e(", ".join(texts) + ";")
-        if comp and not single and not self.run:
+        if comp and not single and comp[0][0] != "abs" and not self.run:
             from . import mf                    # (a multifunction line must be one selas and mf.verify can check)
             assert mf.parse(self.lines[-1]) is not None, self.lines[-1]
         if self.run:
@@ -994,12 +1011,36 @@ class Prog:
             self.in_sub = False
             return
         self.subs.setdefault(name, body)
+        # 2026-11-18 (the v0.59 merge, FM+'s carrier read VW i1 through I3 at offset 250, not 250 - I3_BIAS: its body
+        # was emitted at the program's end, under the biases left there, while run mode ran it at the call, under
+        # I3_BIAS; sharc:mnm-mb, FM+ not bit-exact): the body is emitted under the biases its calls have (emit_subs:
+        # calls under different biases must give the same code)
+        bias = dict(self.ibias)
+        seen = self.sub_bias.setdefault(name, [])
+        if bias not in seen:
+            seen.append(bias)
         ret = self.label("ret")
         self.known.clear()
         self.lines.append("      R12 = 0x0;".ljust(40) + f"// return address - 1: {ret}. - 1")
         self.e("I12 = R12;")
         self.jump("", f"wr_{self.prefix}_sub_{name}")
         self.place(ret)
+
+    def tail(self, name: str, body) -> None:
+        """2026-11-20 (CLAP and the cymbals' room): inside a leaf subroutine's body, its last act on this path: emit mode
+        jumps to leaf subroutine NAME's one copy, whose return is this one's (I12 still holds this one's caller); run
+        mode runs BODY here. NAME must be called elsewhere too (its copy is emitted with the subroutines then)."""
+        assert self.in_sub, f"{name}: a tail jump is from inside a subroutine"
+        if self.run:
+            body()
+            return
+        self.subs.setdefault(name, body)
+        bias = dict(self.ibias)
+        seen = self.sub_bias.setdefault(name, [])
+        if bias not in seen:
+            seen.append(bias)
+        self.known.clear()
+        self.jump("", f"wr_{self.prefix}_sub_{name}")
 
     def ret_addr(self, d: int, label: str) -> None:
         """2026-11-10 (shrink): Rd = LABEL's address - 1 (filled in by the jump resolver, like a
@@ -1010,13 +1051,33 @@ class Prog:
         self.lines.append(f"      R{d} = 0x0;".ljust(40) + f"// return address - 1: {label}. - 1")
 
     def emit_subs(self, spans: dict[str, str] | None = None) -> None:
-        """every subroutine called, once; SPANS: subroutine -> the span() it goes in (else the main one)"""
-        for name, body in list(self.subs.items()):
+        """every subroutine called, once; SPANS: subroutine -> the span() it goes in (else the main one). 2026-11-20: a
+        subroutine first named by a tail jump in another's body is emitted too (the loop runs until none is new)"""
+        done: set[str] = set()
+        while len(done) < len(self.subs):
+            self._emit_subs_once(spans, done)
+
+    def _emit_subs_once(self, spans, done: set) -> None:
+        for name, body in [(n, b) for n, b in self.subs.items() if n not in done]:
+            done.add(name)
             with self.span((spans or {}).get(name)):
                 self.place(f"wr_{self.prefix}_sub_{name}")
                 self.in_sub = True
                 at = len(self.lines)
+                outer = self.ibias
+                biases = self.sub_bias.get(name) or [{}]
+                self.ibias = dict(biases[0])        # its calls' biases (call())
                 body()
+                for other in biases[1:]:            # every other call's: the same code, or no one copy serves both
+                    mark = len(self.lines)
+                    self.ibias = dict(other)
+                    body()
+                    again = self.lines[mark:]
+                    del self.lines[mark:]
+                    norm = re.compile(r"wr_\w+?_\d+")
+                    assert [norm.sub("L", x) for x in self.lines[at:mark]] == [norm.sub("L", x) for x in again], \
+                        f"{name}: its calls' I-register biases {biases[0]} and {other} give different code"
+                self.ibias = outer
                 self.in_sub = False
                 for ln in self.lines[at:]:
                     assert not (name in self.loop0_subs and re.search(r"\b[RF]0\b", ln.split("//")[0])), \

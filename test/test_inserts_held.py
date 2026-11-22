@@ -14,11 +14,16 @@ import sys
 
 from dnfw.inserts import design as D
 from dnfw.inserts import program as P
+from dnfw.perc import guard as G
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 T = importlib.import_module("test_inserts")
 
-SCRATCH = {P.C["k"], P.C["thr"]}
+# (2026-11-21, fx-opt2) guard.CLIPTRK too: the clip alerts (clip-inner, 2026-11-20) were added to the held loops only,
+# never to the sample loops this test holds them to (it failed on combined-67 for that word alone); the TAPE_MF test
+# below compares the alerts block by block; C['y0'] too: the held loops' dead per-sample store, which the msched loops
+# (FOLD_MF) leave out (every reader of the word writes it first)
+SCRATCH = {P.C["k"], P.C["thr"], P.C["y0"], G.CLIPTRK}
 
 
 def _script(blocks: int, seed: int):
@@ -71,3 +76,84 @@ def test_held_loops_are_the_sample_loops():
     keys = (set(ma.w) | set(mb.w)) - SCRATCH
     bad = sorted(hex(k) for k in keys if ma.get(k) != mb.get(k))
     assert not bad, bad[:8]
+
+
+def _run_flags(flags: dict, script):
+    old = {k: getattr(P, k) for k in flags}
+    for k, v in flags.items():
+        setattr(P, k, v)
+    T._GEN[0] = 0
+    try:
+        m = T.mem0()
+        out = []
+        for par, bufs in script:                 # each block's outputs and its clip alerts (CLIPTRK read, then cleared)
+            out.append((T.call(m, par, bufs), m.get(G.CLIPTRK), m.get(G.CLIP_HIT)))
+            m.put(G.CLIPTRK, 0)
+        return out, m
+    finally:
+        for k, v in old.items():
+            setattr(P, k, v)
+
+
+def _odd_script(blocks: int, seed: int):
+    """_script's, with +-inf and NaN samples in a few blocks (every track) and a silent stretch"""
+    out = []
+    for b, (par, bufs) in enumerate(_script(blocks, seed)):
+        if b in (12, 31, 47):
+            bufs = [list(x) for x in bufs]
+            for t in range(D.TRACKS):
+                bufs[t][3 + t % 7] = float("inf")
+                bufs[t][11] = float("-inf")
+                bufs[t][20 + t % 5] = float("nan")
+        if 60 <= b < 64:
+            bufs = [[0.0] * 32 for _ in range(D.TRACKS)]
+        out.append((par, bufs))
+    return out
+
+
+def _same(a, b, scratch=frozenset()):
+    (oa, ma), (ob, mb) = a, b
+    for k, (x, y) in enumerate(zip(oa, ob)):
+        assert x == y, f"block {k}"
+    keys = (set(ma.w) | set(mb.w)) - set(scratch)
+    bad = sorted(hex(k) for k in keys if ma.get(k) != mb.get(k))
+    assert not bad, bad[:8]
+
+
+def test_tape_multifunction_is_the_sample_loop():
+    """2026-11-21 (fx-opt2): program.TAPE_MF (both stages as msched code, stage 1's clips once a block) against
+    _tape_sat / _tape_read: every buffer, each block's clip alerts and every memory word, inf / NaN inputs included"""
+    script = _odd_script(80, 9)
+    a = _run_flags({"TAPE_STAGED": True, "TAPE_MF": False}, script)
+    assert any(c for _o, c, _h in a[0]), "the script must make TAPE clip"
+    _same(a, _run_flags({"TAPE_STAGED": True, "TAPE_MF": True}, script))
+
+
+def test_fold_multifunction_is_the_held_loop():
+    """2026-11-21 (fx-opt2): program.FOLD_MF (FOLD's held sample as msched code, two a pass, the sine branch-free, the
+    input clip once a block) against _fold_sample: every buffer, each block's clip alerts and every memory word but the
+    held loop's dead per-sample stores (C['k'], C['y0'], C['thr'], never read before the next writer sets them)"""
+    script = _odd_script(80, 11)
+    a = _run_flags({"FOLD_MF": False}, script)
+    _same(a, _run_flags({"FOLD_MF": True}, script), SCRATCH)
+
+
+def test_harm_multifunction_is_the_held_loop():
+    """2026-11-21 (fx-opt2): program.HARM_MF against _harm_sample, as the FOLD test"""
+    script = _odd_script(80, 13)
+    a = _run_flags({"HARM_MF": False}, script)
+    _same(a, _run_flags({"HARM_MF": True}, script), SCRATCH)
+
+
+def test_ring_multifunction_is_the_held_loop():
+    """2026-11-21 (fx-opt2): program.RING_MF against _ring_sample, as the FOLD test"""
+    script = _odd_script(80, 17)
+    a = _run_flags({"RING_MF": False}, script)
+    _same(a, _run_flags({"RING_MF": True}, script), SCRATCH)
+
+
+def test_the_multifunction_maps_give_no_live_value_a_shared_register():
+    for sym, regs, carried in ((P.FOLD_SYM, P.FD, P.FOLD_CARRIED), (P.HARM_SYM, P.HD, P.HARM_CARRIED),
+                               (P.RING_SYM, P.RD, P.RING_CARRIED)):
+        assert not P.mf_conflicts(sym, regs, carried)
+        assert "F11" not in {regs[v] for o in sym for v in o[2] + o[3] if not v.startswith("I")}   # the loop's count

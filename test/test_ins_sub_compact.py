@@ -20,13 +20,36 @@ static void rec_label(int s, const char *t);
 static void wg_choice(void *c, int s, const char *t) {}
 static void wg_knob(void *c, int s, int v) { rec_knob(s, v); }
 static void wg_label(void *c, int s, const char *t) { rec_label(s, t); }
+/* (2026-11-21, fx-icons) the choice popup's icon draws through widgets.h's places and stock's rectangle and text: the
+ * places as widgets.h has them (wg_x, wg_y below), the drawing a stand-in (never run here) */
+static void WG_RECT(void *c, int x0, int y0, int x1, int y1, int on) {}
+static void WG_TEXT(void *c, unsigned int f, int x, int y, int a, const char *fmt, ...) {}
+static const unsigned int wg_font_choice[2] = {0, 0};
+const u8 *msel_icon_of(int kind, int type) { return 0; }             /* csrc/msel/msel.c: no icon here */
+const u8 *msel_fx_icon(int type) { return 0; }
+int isel_up(void) { return 0; }                                      /* INSERT SEL never up here */
+void isel_draw(void *c) {}
 int smp_values_held(void) { return 0; }
+int ovw_fx_held(void) { return 0; }                                 /* csrc/inserts/ovw.c (the FX key held) */
+unsigned int ovw_pass = 0;
 const char *mu_ins(int type, int knob, int k) { static char b[32]; sprintf(b, "u%d.%d=%d", type, knob, k); return b; }
 const char *const amp_title1 = "ENV1/AMP";
 void wpop_offer_mv(int a, const char *b, int c, int d, const char *(*e)(int, int), const char *(*f)(int, int), int g, void (*m)(int, int)) {}
 void wpop_offer(int a, const char *b, int c, int d, const char *(*e)(int, int), const char *(*f)(int, int), int g) {}
 int smp_overlay_dirty; void *wr_screen_obj;
+/* cv_fill lives in csrc/waverider/page.c (the firmware's one rectangle fill, 2026-11-17); the page's drawing is
+ * never run here, so a stand-in only links it (as test_inserts_c.py) */
+void cv_fill(void *cv, int x0, int y0, int x1, int y1, int on) { (void)cv; (void)x0; (void)y0; (void)x1; (void)y1; (void)on; }
 static u8 ui_track;
+/* (2026-11-20) the live values' neighbours: no trig held, no lock pool, no route, no line */
+unsigned int sl_ins_held(unsigned int k, unsigned int j) { (void)k; (void)j; return 0x10000u; }
+int sl_ins_set(unsigned int k, unsigned int j, unsigned int v) { (void)k; (void)j; (void)v; return 0; }
+unsigned int mx_ins_routes(unsigned int t) { (void)t; return 0; }
+unsigned char *sl_ui_pool(void) { return 0; }
+const unsigned char *sl_ins_record(const unsigned char *tb, unsigned int t, unsigned int k) { (void)tb; (void)t; (void)k; return 0; }
+void mv_own_knob(void *c, int x, int y, int w, unsigned int key, unsigned int slot) { (void)c; (void)x; (void)y; (void)w; (void)key; (void)slot; }
+static inline int wg_x(int s) { return 24 + 26 * (s & 3); }
+static inline int wg_y(int s) { return s < 4 ? 27 : 0; }
 static int cell_v[8]; static char cell_l[8][32];
 static void rec_knob(int s, int v) { cell_v[s] = v; }
 static void rec_label(int s, const char *t) { strncpy(cell_l[s], t, 31); }

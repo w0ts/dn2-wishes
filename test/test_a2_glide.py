@@ -47,7 +47,8 @@ def test_the_page_shows_the_dsp_choice(v):
 
 def test_three_pages_for_analog2_only():
     for M in MM.CF_ALL:                         # 2026-11-11: MONOMACHINE's places: two (its engine's TUNE on page 2 H)
-        want = 3 if M.NAME == "ANALOG2" else 2 if M.NAME == "DRONE" or hasattr(M, "HOST") else 1
+        # JUNO: two (its page 2, ENV ATK DEC SUS REL PWM RNGE: dnfw.engines.juno.juno PNAMES2, engfolders1 2026-11-16)
+        want = 3 if M.NAME == "ANALOG2" else 2 if M.NAME in ("DRONE", "JUNO", "DRUM") or hasattr(M, "HOST") else 1   # DRUM: 2026-11-20
         assert WP.mnm_pages(M) == want, M.NAME
     hdr = WP.mnm_c_header()
     assert "#define MNM_J 24" in hdr

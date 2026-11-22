@@ -19,7 +19,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 SRC = ROOT / "csrc" / "wishes"
 SOURCES = [SRC / "table.c", SRC / "tlv.c", SRC / "store.c"]
 
-CELL0, CELLS = 0x6F0800, 59392
+CELL0, CELLS = 0x5D8000, 92160   # v0.69.2 (csrc/include/dmove.h)
 SOUND = 1163
 W_DIRTY, W_DISK, W_WANT, W_MISSING, W_LOCKED = 1, 2, 4, 8, 16
 LANE = {4: 36, 8: 44, 12: 52, 16: 60, 20: 68, 24: 76, 28: 84}     # lane id -> stored byte
@@ -44,21 +44,21 @@ volatile u32 ins_wr_head = 0;
 unsigned host_ready = 1, host_sectors = 0x800000, host_frames = 0;
 unsigned host_reads = 0, host_writes = 0, host_fail = 0;
 u32 host_shift_moves = 0;
-static u8 disk[59392u * 512u];
+static u8 disk[92160u * 512u];
 int host_blk_read(unsigned s, unsigned n, void *p)
 {
     if (host_fail) return -1;
     host_reads++;
-    if (n != 512u || s < 0x6F0800u || s >= 0x6F0800u + 59392u) { memset(p, 0, n); return 0; }
-    memcpy(p, disk + 512u * (s - 0x6F0800u), 512u);
+    if (n != 512u || s < 0x5D8000u || s >= 0x5D8000u + 92160u) { memset(p, 0, n); return 0; }
+    memcpy(p, disk + 512u * (s - 0x5D8000u), 512u);
     return 0;
 }
 int host_blk_write(unsigned s, unsigned n, const void *p)
 {
     if (host_fail) return -1;
     host_writes++;
-    if (n != 512u || s < 0x6F0800u || s >= 0x6F0800u + 59392u) return -2;
-    memcpy(disk + 512u * (s - 0x6F0800u), p, 512u);
+    if (n != 512u || s < 0x5D8000u || s >= 0x5D8000u + 92160u) return -2;
+    memcpy(disk + 512u * (s - 0x5D8000u), p, 512u);
     return 0;
 }
 u8 *host_disk(void) { return disk; }
@@ -67,6 +67,7 @@ void host_reboot(void)              /* RAM is lost; the +Drive stays */
     wish_ready = 0;
     wish_pend_head = wish_pend_tail = 0;
     wish_busy = 0;
+    wish_q_head = wish_q_tail = 0;
     wish_wants = 0;
     wish_init();
 }
@@ -77,25 +78,31 @@ void host_zero(void)                /* every counter, between tests */
     wish_loads = wish_links_in = wish_saves = wish_links_out = wish_copies = wish_carries = wish_clears = 0;
     wish_cells_written = wish_cells_found = wish_cells_read = wish_resolved = wish_missing = 0;
     wish_pend_lost = wish_io_fails = 0;
+    wish_queued = wish_q_max = 0;
     host_reads = host_writes = 0;
     ins_wr_head = 0;
 }
 """
 
 
-@pytest.fixture(scope="module")
-def lib(tmp_path_factory):
+def _build(tmp_path_factory, name, extra=()):
     cc = shutil.which("cc") or shutil.which("gcc") or shutil.which("clang")
     if cc is None:
         pytest.skip("no host C compiler")
-    d = tmp_path_factory.mktemp("wishes")
+    d = tmp_path_factory.mktemp(name)
     (d / "host.h").write_text(HOST_H)
     (d / "harness.c").write_text(HARNESS)
     out = d / "libwishes.so"
     r = subprocess.run([cc, "-shared", "-fPIC", "-O1", "-std=gnu11", "-Wall", "-Wextra", "-Werror",
-                        "-DWISH_HOST", "-include", str(d / "host.h"), f"-I{SRC}",
+                        "-DWISH_HOST", *extra, "-include", str(d / "host.h"), f"-I{SRC}",
                         *map(str, SOURCES), str(d / "harness.c"), "-o", str(out)],
                        capture_output=True, text=True)
+    return r, out
+
+
+@pytest.fixture(scope="module")
+def lib(tmp_path_factory):
+    r, out = _build(tmp_path_factory, "wishes")
     if r.returncode:
         pytest.fail(r.stderr)
     L = ctypes.CDLL(str(out))
@@ -443,11 +450,79 @@ def test_the_table_full_is_counted_and_nothing_is_corrupted(w):
 
 
 def test_a_mutator_that_finds_the_lock_taken_does_nothing_and_counts(w):
+    """wish_add / wish_drop (the loader's and the editors' own calls) still give up and count"""
     put(w, 0x3000, 1, b"a")
     ctypes.c_uint8.in_dll(w, "wish_busy").value = 0x80
-    w.wish_on_memcpy(0x3000 + SOUND, 0x3000, SOUND)
+    w.wish_drop(ctypes.c_uint32(0x3000))
+    assert not w.wish_add(ctypes.c_uint32(0x5000))
     ctypes.c_uint8.in_dll(w, "wish_busy").value = 0
-    assert get(w, 0x3000 + SOUND, 1) is None and u32(w, "wish_reentered") >= 1
+    assert get(w, 0x3000, 1) == b"a" and get(w, 0x5000, 1) is None and u32(w, "wish_reentered") == 2
+
+
+# (2026-11-21) a copy, carry or clear that finds the lock taken is queued and done by the holder before it lets go
+# (table.c op_locked, wish_give). Before, it was dropped: a kit sound copied then had no record (no W_ATT either, so
+# the attenuverter converted it a second time, csrc/matrix/atten.c)
+
+def held(w):
+    ctypes.c_uint8.in_dll(w, "wish_busy").value = 0x80          # another caller holds the lock (wish_take)
+
+
+def test_a_copy_that_finds_the_lock_taken_is_done_by_the_holder(w):
+    put(w, 0x3000, 1, b"a")
+    held(w)
+    w.wish_on_memcpy(0x3000 + SOUND, 0x3000, SOUND)
+    assert get(w, 0x3000 + SOUND, 1) is None and u32(w, "wish_queued") == 1     # waiting: the holder is mid-edit
+    w.wish_give()                                                               # the holder lets go
+    assert get(w, 0x3000 + SOUND, 1) == b"a"
+    assert u32(w, "wish_reentered") == 0 and ctypes.c_uint8.in_dll(w, "wish_busy").value == 0
+    assert u32(w, "wish_q_head") == u32(w, "wish_q_tail")
+
+
+def test_queued_ops_run_in_the_order_they_came(w):
+    put(w, 0x3000, 1, b"a")
+    put(w, 0x9000, 1, b"z")
+    held(w)
+    w.wish_on_memcpy(0x9000, 0x3000, SOUND)                    # z's place gets a's record ...
+    w.wish_on_memset(0x9000, 0, SOUND)                         # ... then is overwritten: nothing
+    w.wish_on_memcpy(0x6000, 0x3000, SOUND)
+    w.wish_on_memcpy(0x20000, 0x3000 - 0x100, 4 * SOUND)       # a block holding a's sound: carried
+    w.wish_give()
+    assert get(w, 0x9000, 1) is None and get(w, 0x6000, 1) == b"a" and get(w, 0x20100, 1) == b"a"
+    assert u32(w, "wish_queued") == 4 and u32(w, "wish_reentered") == 0
+
+
+def test_a_full_queue_drops_and_counts_the_rest(w):
+    put(w, 0x3000, 1, b"a")
+    held(w)
+    for k in range(17):
+        w.wish_on_memcpy(0x100000 + 0x1000 * k, 0x3000, SOUND)
+    w.wish_give()
+    got = [get(w, 0x100000 + 0x1000 * k, 1) for k in range(17)]
+    assert got[:16] == [b"a"] * 16 and got[16] is None
+    assert u32(w, "wish_reentered") == 1 and u32(w, "wish_q_max") == 16
+
+
+def test_a_copy_without_contention_is_done_at_once(w):
+    put(w, 0x3000, 1, b"a")
+    w.wish_on_memcpy(0x3000 + SOUND, 0x3000, SOUND)
+    assert get(w, 0x3000 + SOUND, 1) == b"a" and u32(w, "wish_queued") == 0
+
+
+def test_negative_control_the_build_before_drops_the_copy(tmp_path_factory):
+    """the same scenario on the table as it was (-DWISH_NO_QUEUE): the copy is lost, so the check above can fail"""
+    r, out = _build(tmp_path_factory, "wishes-noqueue", ("-DWISH_NO_QUEUE",))
+    assert r.returncode == 0, r.stderr
+    L = ctypes.CDLL(str(out))
+    L.wish_find.restype = ctypes.c_void_p
+    L.wish_add.restype = ctypes.c_void_p
+    L.host_erase()
+    L.host_reboot()
+    L.host_zero()
+    put(L, 0x3000, 1, b"a")
+    held(L)
+    L.wish_on_memcpy(0x3000 + SOUND, 0x3000, SOUND)
+    L.wish_give()
+    assert get(L, 0x3000 + SOUND, 1) is None and u32(L, "wish_reentered") == 1
 
 
 # -- load, save, the +Drive -----------------------------------------------------------------------------------

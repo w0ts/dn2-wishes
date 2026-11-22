@@ -183,12 +183,29 @@ static void say(void *view, const char *text)
     STR_FREE(s);
 }
 
+/* v0.64 KEYBOARD HOLD (rec.c smp_ui_pop catches PTN + KEYBOARD: stock takes KEYBOARD before
+ * any view): its message on the PTN view's line, that view found in the screen's list by its
+ * class (0x40200cd4, measured: put at the list's end when PTN goes down; rec.c smp_view_of) */
+#define PTN_VIEW_VT 0x40200CD4u
+u32 kh_close __attribute__((section(".data"))) = 0;
+void jmp_hold_say(u32 on)
+{
+    extern u32 smp_view_of(u32 want);
+    u32 v = smp_view_of(PTN_VIEW_VT);
+    if (v)
+        say((void *)v, on ? "KB HOLD ON" : "KB HOLD OFF");
+}
+
 /* the PTN view's key handler (its vtable slot 0x40200cdc points here): PTN held, a fresh
  * YES or NO without FUNC sets DIRECT JUMP on or off (stock: either closes the PTN view);
  * everything else is stock's */
 int jmp_key(void *view, void *ev)
 {
     u32 code = *(u32 *)((u8 *)ev + 12);
+    if (kh_close == 2) {                        /* v0.64: rec.c's NO after PTN + KEYBOARD: stock's */
+        kh_close = 0;
+        return PTN_VIEW_KEY(view, ev);
+    }
     if ((code == K_YES || code == K_NO) && EV_PRESSED(ev) && !EV_FUNC(ev)
         && KEY_HELD(K_PTN) && !KEY_HELD(K_FUNC)) {
         jmp_on = code == K_YES;

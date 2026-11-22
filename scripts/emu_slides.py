@@ -34,7 +34,9 @@ sys.path.insert(0, str(HERE))
 
 from emulib.image import differences                           # noqa: E402
 from emulib import bounded                                      # noqa: E402
+from emulib.cpu import kept                                       # noqa: E402
 from emulib.machine import Machine                             # noqa: E402
+import slides_stock as SS                                        # noqa: E402
 
 ISR, ISR_RTE = 0x40025E36, 0x40027BC6
 STATE, SRC, OUT = 0x8000DE60, 0x80003AF0, 0x800068E4
@@ -51,6 +53,7 @@ REC, RECS, INDEX, COUNTS, TABLE_BYTES = 258, 80, 20640, 22256, 22256 + 2048
 LIST_BYTES = 20 + 202 * 8
 FREQ, FDBK = 67, 31                     # FILTER FREQ (shared), FM TONE's FEEDBACK (a machine param)
 UNITS = (3, 6, 12, 18, 24, 36, 48, 72, 96, 144, 192, 288, 384, 768, 1536)
+NXT = 15                                # v0.66: SLEN NXT, to the track's next trig (dnfw.slides.SLEN_NXT)
 STACK_TOP, SENTINEL = 0x46A20000, 0x46A20400
 
 failures: list[str] = []
@@ -243,13 +246,16 @@ def main() -> int:
         from dnfw.mods import platform                         # noqa: PLC0415
         for va, blob in platform.runtime(image):
             machine.write(va, blob)
+        from emulib import attkit
+        attkit.store_kit(machine)  # (2026-11-21) a converted kit stored back: converted once
         # v0.39 (the merge with v0.38): the sample link's RAM window (SMP_MIRROR, 5 MB above
         # BSS, docs/memory-map.md) is DDR on the unit; the snapshot maps only the pages stock
         # touched, and since v0.38 the mod's power-on writes there (link.c's per-slot sums at
         # SMP_MIRROR + 0x22C000) while this check runs the UI. Mapped here as the unit has it
         from unicorn import UC_PROT_ALL, UcError
         from dnfw.sampler import machines as SMx              # noqa: PLC0415
-        for page in range(SMx.MIRROR, SMx.MIRROR + 0x500000, 0x100000):
+        for page in [*range(SMx.MIRROR, SMx.MIRROR + 0x500000, 0x100000),   # (v0.65: and the banks' RAM)
+            *range(SMx.BANK_RAM & ~0xFFFFF, SMx.BANK_RAM + SMx.BANK_RAM_BYTES + 0xFFFFF & ~0xFFFFF, 0x100000)]:
             try:
                 uc.mem_map(page, 0x100000, UC_PROT_ALL)
             except UcError:
@@ -271,22 +277,19 @@ def main() -> int:
         print("  stock: nothing installed (the control)")
     build = not a.stock
 
-    regs = [getattr(K, f"UC_M68K_REG_{r}{i}") for r in "DA" for i in range(8)]
 
     def call(fn, *args, until=None, set_regs=None, limit=20_000_000):
-        saved = [uc.reg_read(r) for r in regs]
-        sp = STACK_TOP - 0x200
-        machine.write(sp, struct.pack(">I", SENTINEL) + b"".join(struct.pack(">I", x & 0xFFFFFFFF) for x in args))
-        machine.write(SENTINEL, bytes.fromhex("4e714e71"))
-        uc.reg_write(K.UC_M68K_REG_A7, sp)
-        for r, v in (set_regs or {}).items():
-            uc.reg_write(getattr(K, f"UC_M68K_REG_{r}"), v & 0xFFFFFFFF)
-        bounded.run(uc, machine.m, fn, until if until is not None else SENTINEL, limit)
-        out = {r: uc.reg_read(getattr(K, f"UC_M68K_REG_{r}")) for r in
-               ("D0", "D1", "D2", "D3", "D4", "D5", "D6", "D7", "A0", "A1", "A2", "A3", "A4", "A5", "A6")}
-        pc = uc.reg_read(K.UC_M68K_REG_PC)
-        for r, v in zip(regs, saved):
-            uc.reg_write(r, v)
+        with kept(uc):                          # D0-A7, PC and SR put back (emulib/cpu.py: PC left at SENTINEL crashed rectext)
+            sp = STACK_TOP - 0x200
+            machine.write(sp, struct.pack(">I", SENTINEL) + b"".join(struct.pack(">I", x & 0xFFFFFFFF) for x in args))
+            machine.write(SENTINEL, bytes.fromhex("4e714e71"))
+            uc.reg_write(K.UC_M68K_REG_A7, sp)
+            for r, v in (set_regs or {}).items():
+                uc.reg_write(getattr(K, f"UC_M68K_REG_{r}"), v & 0xFFFFFFFF)
+            bounded.run(uc, machine.m, fn, until if until is not None else SENTINEL, limit)
+            out = {r: uc.reg_read(getattr(K, f"UC_M68K_REG_{r}")) for r in
+                   ("D0", "D1", "D2", "D3", "D4", "D5", "D6", "D7", "A0", "A1", "A2", "A3", "A4", "A5", "A6")}
+            pc = uc.reg_read(K.UC_M68K_REG_PC)
         out["PC"] = pc
         return out
 
@@ -388,7 +391,10 @@ def main() -> int:
             out = {s: machine.word(OUT + 2 * idx(V, s)) for s in read}
             whole = machine.read(STATE, 4 * 1734) + machine.read(OUT, 2 * 1734)
             rows.append({"ok": ok, "state": st, "out": out,
-                         "sha": hashlib.sha256(whole).hexdigest()[:16]})
+                         "sha": hashlib.sha256(whole).hexdigest()[:16], "arr": SS.pack(whole),
+                         # 2026-11-20: half-rate LFOs, this frame's voice turns (scripts/slides_stock.py)
+                         "turns": (list(struct.unpack(">16H", machine.read(lay["lh_selw"], 32)))
+                                   if build and "lh_selw" in lay else None)})
         trace.append((tag, rows))
         return rows
 
@@ -440,6 +446,8 @@ def main() -> int:
     trig(4, f0 + 100)
     off_b = run(40, "off trig 4 (emulated EMAC)")
     report["off_shas_emac"] = [r["sha"] for r in off_a + off_b]
+    report["off_shas_emac_frames"] = [r["arr"] for r in off_a + off_b]          # (the gate compares them: slides_stock)
+    report["off_shas_emac_turns"] = [r["turns"] for r in off_a + off_b] if off_a[0]["turns"] is not None else None
     model["on"] = True
     for s_ in range(101):
         put32(STATE + 4 * idx(V, s_), u16(SRC + 2 * idx(V, s_)) << 16)
@@ -448,6 +456,8 @@ def main() -> int:
     trig(4, f0 + 250)
     off_b = run(40, "off trig 4")
     report["off_shas"] = [r["sha"] for r in off_a + off_b]
+    report["off_shas_frames"] = [r["arr"] for r in off_a + off_b]          # (the gate compares them: slides_stock)
+    report["off_shas_turns"] = [r["turns"] for r in off_a + off_b] if off_a[0]["turns"] is not None else None
     report["off_freq"] = [r["out"][FREQ] for r in off_a + off_b]
     # stock: the lock jumps the smoother; FREQ is 0x6000 from the first frame after the trig
     check("OFF: the lock jumps (as stock)", off_b[0]["out"][FREQ] == 0x6000 and off_a[-1]["out"][FREQ] == 0x1000,
@@ -719,6 +729,95 @@ def main() -> int:
         machine.write(snd + 222, bytes([0]))
         call(SYNC, snd, V)
 
+        # ---- 10. v0.66: NXT (no SLEN lock): the slide ends at the track's next trig -----------
+        # (the owner, 2026-11-20, the Analog Four's manual: "the slide is completed when the
+        # next trig is reached"). Last of the slide checks, so the ones before run frame for frame as
+        # on v0.65 (their LFO phases included). First the layout the code reads: for every track, stock's own
+        # track object (the UI's pattern, 0x4003b2ea) hands its step flags (vtable +40, what
+        # stock's step test 0x4004e95a reads) at pattern + 1701 x track, the pattern the
+        # sequencer plays (0x42C5B9A0, 1.12)
+        sys.path.insert(0, str(HERE.parent / "src"))
+        from dnfw import slides as DSL                          # noqa: PLC0415
+        check("v0.66: the harness's SLEN table is dnfw.slides' (NXT 15)",
+              DSL.SLEN_NXT == NXT and tuple(DSL.SLEN_UNITS) == UNITS and DSL.SLEN_DEFAULT == NXT)
+        P = machine.long(0x42C5B9A0)
+        owner = call(0x4018AC5A)["D0"]
+        upat = call(0x4003EFA8, owner)["D0"] if owner else 0
+        ptrs = []
+        for tt in range(16):
+            tr = call(0x4003B2EA, upat, tt)["D0"] if upat else 0
+            fn = machine.long(machine.long(tr) + 40) if tr else 0
+            ptrs.append(call(fn, tr)["D0"] if fn else 0)
+        check("v0.66: each track's step flags are at the playing pattern + 1701 x track (stock's own "
+              "track objects, all 16)", P != 0 and upat != 0 and ptrs == [P + 1701 * k for k in range(16)],
+              f"pattern {P:#x}, the UI's {upat:#x}, flags {[hex(x) for x in ptrs[:3]]}...")
+        # stock's step test on a flag we set: bit 0 is what it calls a trig (both kinds)
+        keep_flags = machine.read(P, 2 * 128)
+        keep_mode, keep_len = machine.read(P + 122201, 1), machine.read(P + 122196, 2)
+        machine.write(P + 122201, b"\x00")                    # per pattern, 16 steps
+        put16(P + 122196, 16)
+
+        def flags_on(steps):
+            for k in range(128):
+                put16(P + 2 * k, 0x0381 if k in steps else 0)
+
+        flags_on({4, 7})
+        tr0 = call(0x4003B2EA, upat, 0)["D0"]
+        seen = [call(0x4004E95A, tr0, k, 1)["D0"] & 0xFF for k in (3, 4, 7)]
+        check("v0.66: stock's step test sees the trigs the slide counts", [bool(x) for x in seen] == [False, True, True],
+              f"{seen}")
+
+        def nxt_case(name, steps, at, want_steps, slen=None, want_units=None):
+            flags_on(steps)
+            call(sl_set, table, T, at, 1, 0xFFFF if slen is None else slen)
+            call(SYNC, snd, V)
+            for s in range(101):
+                put32(STATE + 4 * idx(V, s), u16(SRC + 2 * idx(V, s)) << 16)
+            call(BITMAP_CLEAR, V)
+            trig(0, f0 + 1550)
+            run(10, f"nxt {name} 0")
+            put32(lay["sl_nxt_last"], 0)
+            trig(at, f0 + 1560)
+            units_now = struct.unpack(">H", machine.read(lay["sl_v"] + 2, 2))[0]
+            u = want_units if want_units is not None else 24 * want_steps
+            rows = run(40, f"nxt {name}")
+            prog, want = 0, []
+            for _ in range(40):
+                prog += (inc * mul) >> 8
+                frac = min(prog // (2 * u), 32768)
+                want.append(0x1000 + (((0x6000 - 0x1000) * frac) >> 15))
+            got = [r["state"][FREQ] >> 16 for r in rows]
+            found = machine.long(lay["sl_nxt_last"])
+            check(f"v0.66: {name}", units_now == u and got == want
+                  and (slen is not None or found == want_steps),
+                  f"units {units_now} (want {u}), next trig {found} steps, FREQ {got[:3]}..{got[-2:]}")
+
+        call(sl_set, table, T, 4, 0, 1)                         # step 4: SLIDE on, FREQ 0x6000
+        nxt_case("NXT: trigs on 4 and 7, a slide on 4 lasts 3 steps", {0, 4, 7}, 4, 3)
+        nxt_case("NXT: the only other trig before it, round the length (4 -> 0: 12 of 16)", {0, 4}, 4, 12)
+        nxt_case("NXT: no other trig: the whole length (16 steps)", {4}, 4, 16)
+        nxt_case("NXT: the next step's trig: one step", {4, 5}, 4, 1)
+        put16(P + 122196, 64)
+        nxt_case("NXT: steps past 16 count (64 steps, next trig on 40: 36)", {4, 40}, 4, 36)
+        put16(P + 122196, 16)
+        nxt_case("an explicit SLEN still wins (1/2 step, trigs on 4 and 7)", {4, 7}, 4, 0, slen=2,
+                 want_units=UNITS[2])
+        nxt_case("an explicit NXT lock (15) is NXT", {4, 9}, 4, 5, slen=NXT)
+        # per track: the track's own length and flags
+        machine.write(P + 122201, b"\x01")
+        tl = P + 1164
+        keep_tl, keep_ts = machine.read(tl, 2), machine.read(P + 1167, 1)
+        put16(tl, 8)
+        machine.write(P + 1167, machine.read(P + 122202, 1))   # the track's scale: the pattern's (1x)
+        nxt_case("NXT per track: the track's own length (8; 4 -> 0 round it: 4)", {0, 4}, 4, 4)
+        machine.write(tl, keep_tl)
+        machine.write(P + 1167, keep_ts)
+        call(sl_set, table, T, 4, 1, 4)                         # step 4 back to SLEN 1 step
+        machine.write(P, keep_flags)
+        machine.write(P + 122201, keep_mode)
+        machine.write(P + 122196, keep_len)
+
+
     # ---- v0.40: TRIG page 2's frame on stock 1.11 (the control: our two places aside, the
     # build's page must be stock's pixel for pixel) ----------------------------------------
     if not build:
@@ -780,7 +879,8 @@ def main() -> int:
 
     # ---- the TRIG page, driven as a person would (the build only, last: it changes the UI) ---
     if build and a.png_dir:
-        from emulib.panel import Panel                         # noqa: PLC0415
+        from emulib.panel import TICK_VA, Panel                # noqa: PLC0415
+        TURN_STALE = 10                                         # csrc/waverider/page.c: ticks, a turn's redraw held at most
         model["on"] = False
         panel = Panel(machine, png_dir=a.png_dir)
 
@@ -800,9 +900,32 @@ def main() -> int:
                 panel.settle(1_000_000)
             return False
 
+        last_turn = {}
+
         def turn(enc, delta):
+            last_turn.update(tick=machine.long(TICK_VA) & 0xFFF, frames=panel.frames(),
+                             held=machine.long(lay["wr_turn_held"]) if "wr_turn_held" in lay else None)
             machine.pc = panel.panelin.encoder(machine.m, panel.profile, enc, delta)
             panel.settle(5_000_000)
+
+        def turn_drawn(name):
+            """the last turn's redraw on the screen: TURN_STALE panel ticks after that turn (page.c turn_hold holds a
+            turn's full redraw at most that long after the last draw, which came before the turn), then the panel's
+            settle for the UI to compose; a full draw must have come after the turn. NAME: the screen before that
+            wait (the redraw held or not)"""
+            panel.screen(name)
+            for _ in range(400):                                # (200 M at most: the check below says if it never came)
+                if (machine.long(TICK_VA) - last_turn["tick"]) & 0xFFF >= TURN_STALE:
+                    break
+                panel.settle(500_000)
+            ticks = (machine.long(TICK_VA) - last_turn["tick"]) & 0xFFF
+            panel.settle()
+            held = machine.long(lay["wr_turn_held"]) - last_turn["held"] if last_turn["held"] is not None else None
+            report["turn_drawn"] = {"ticks": ticks, "frames": [last_turn["frames"], panel.frames()], "held": held}
+            check("the TRIG page drawn after its last turn (ui-turns' wait for a turn's redraw, then the UI composed)",
+                  ticks >= TURN_STALE and panel.frames() > last_turn["frames"],
+                  f"{ticks} ticks after the turn, frames {last_turn['frames']} -> {panel.frames()}, "
+                  f"redraw passes held since it (wr_turn_held) {held}")
 
         up = lambda: machine.long(lay["sl_page_up"])           # noqa: E731
         clears = {"n": 0}
@@ -893,14 +1016,14 @@ def main() -> int:
             box = {(i, j) for i, j in area(stocks(LEN_ID, 30 << 8, 0), 24, 0)
                    if i in (0, 18) or j in (7, 23)}             # LEN's box: its outline
             bad = []
-            for k in range(15):
+            for k in range(NXT + 1):                     # v0.66: NXT drawn as the others
                 px = area(ours("slen", k, 0), 24, 0)
                 text = {(i, j) for i, j in px if 0 < i < 18 and 7 < j < 23}
                 cx2 = min(i for i, _ in text) + max(i for i, _ in text) if text else -99
                 if {(i, j) for i, j in px if i in (0, 18) or j in (7, 23)} != box or abs(cx2 - 18) > 1:
                     bad.append(k)
             check("v0.40: every SLEN value: LEN's box, its text centred as LEN's", not bad, f"values {bad}")
-            live_check(frame, 0, 0, 4, 0, "idle")
+            live_check(frame, 0, 0, NXT, 0, "idle")       # v0.66: no lock is NXT
 
         def live_check(frame, sld, sld_lk, slen, slen_lk, what):
             """the page's own places (canvas y up: screen row 63 - y) as sl_draw_* draws them"""
@@ -911,6 +1034,14 @@ def main() -> int:
                 got = {(i, j) for i, j in lit if x - 3 <= i <= x + 21 and 0 <= j <= 24}
                 check(f"v0.40: the page's {kind.upper()} place ({what}) is sl_draw's, label included",
                       want == got and len(want) > 20, f"{len(want ^ got)} pixels differ")
+                # 2026-11-21 (control; the gate gap "SLEN place off by 2 px" was this check reading the page inside
+                # the turn hold, 990ff578): sl_draw's drawing moved 2 px right, or one value on, must not pass
+                shifted = {(i + 2, j) for i, j in ours(kind, v, lk, x, 0) if x - 3 <= i + 2 <= x + 21 and 0 <= j <= 24}
+                other = {(i, j) for i, j in ours(kind, (v + 1) % (NXT + 1) if kind == "slen" else 1 - v, lk, x, 0)
+                         if x - 3 <= i <= x + 21 and 0 <= j <= 24}
+                check(f"v0.40: (control) the page's {kind.upper()} place ({what}) compared 2 px off, and with "
+                      f"another value, is seen", shifted != got and other != got,
+                      f"2 px off: {len(shifted ^ got)} pixels differ, another value: {len(other ^ got)}")
 
         panel.settle(5_000_000)
         panel.tap(key(1))
@@ -936,25 +1067,35 @@ def main() -> int:
         # v0.41 (the owner): SLEN four detents a choice, as SRC/CHAN and the choice controls:
         # three detents move nothing, the fourth one choice; a fast item of four is one choice;
         # a turn back starts the count again (the three after it move nothing)
-        turn(5, 3)                                              # F: three detents: still 1 step
+        # v0.66: the choices are NXT (no lock), 1/8, 1/4, 1/2 .. 64: from no lock (NXT) the
+        # first choice right is 1/8 (index 0)
+        turn(5, 3)                                              # F: three detents: still NXT
         tbl_ = machine.long(lay["sl_ui_table"])
         slen3 = lock(tbl_, 0, 0, 1) if tbl_ else None
-        turn(5, 1)                                              # the fourth: 1 -> 1.5 steps (index 5)
-        turn(5, 4)                                              # one item of four: 2 steps (6)
+        turn(5, 1)                                              # the fourth: NXT -> 1/8 (index 0)
+        turn(5, 4)                                              # one item of four: 1/4 (1)
         turn(5, -1)                                             # back: the count starts again
-        turn(5, 3)                                              # three on: nothing yet (6)
+        turn(5, 3)                                              # three on: nothing yet (1)
         tbl_ = machine.long(lay["sl_ui_table"])
         slen6 = lock(tbl_, 0, 0, 1) if tbl_ else None
-        turn(5, 1)                                              # 3 steps (7)
-        check("v0.41: SLEN four detents a choice (3 detents: nothing; a turn back restarts)",
-              slen3 in (0xFFFF, 4) and slen6 == 6, f"after 3 detents {slen3}, after 4, 4, -1, 3: {slen6}")
+        turn(5, 1)                                              # 1/2 (2)
+        check("v0.41: SLEN four detents a choice (3 detents: nothing; a turn back restarts); v0.66: NXT first",
+              slen3 in (0xFFFF, NXT) and slen6 == 1, f"after 3 detents {slen3}, after 4, 4, -1, 3: {slen6}")
+        # 2026-11-19 (v0.59's knob turns drawn together, f9f9338f, csrc/waverider/page.c turn_hold): while a knob
+        # turns, the full redraw waits until TURN_GAP ticks after the last full draw, or TURN_STALE while a knob's
+        # item still waits in the UI queue; the value is set at once, only its drawing waits, and the last value is
+        # always drawn. 5 M instructions after the last turn fall inside that wait: the page still showed the turn
+        # before (v0.65: SLEN 2 steps, one pixel of the "2" at x 58 where the "3" has it at x 60) while the lock was
+        # already the next value, drawn in the next window. So the screen is read once TURN_STALE ticks have passed since the last
+        # turn and the UI has composed after it, and a full draw must have come after that turn
+        turn_drawn("trig2_held_turning")
         panel.screen("trig2_held_locked")
         held_frame = bytes(panel.capture.frames[-1]) if panel.capture.frames else b""
         panel.let_go(key(25))
         panel.settle(10_000_000)
         tbl = machine.long(lay["sl_ui_table"])
         got = [lock(tbl, 0, 0, 0), lock(tbl, 0, 0, 1)] if tbl else None
-        check("trig held, E and F turned: step 1 locks SLD ON and SLEN 3 steps", got == [1, 7], f"{got}")
+        check("trig held, E and F turned: step 1 locks SLD ON and SLEN 1/2 step", got == [1, 2], f"{got}")
         # the trig stays on after the release, as when a stock parameter is locked from a held
         # trig (and as a long hold with nothing turned: measured, stock never removes a trig on
         # a long hold's release; a tap removes it)
@@ -1099,7 +1240,7 @@ def main() -> int:
         # v0.40: the drawing checks, last (they call into the firmware on a canvas of their
         # own, outside the UI's run)
         widgets_check(idle_frame)
-        live_check(held_frame, 1, 1, 7, 1, "held, locked")
+        live_check(held_frame, 1, 1, 2, 1, "held, locked")
 
     faults = getattr(machine.m, "faults", [])[faults_before:]
     check("no fault", not faults, f"{len(faults)} fault(s)")

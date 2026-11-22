@@ -39,13 +39,14 @@ shows the progress and the result. The instrument runs the same erase, from its 
 |---|---|
 | `0x600000` .. `0x6C8000` | the pool image (header `DN2Q`, then 400 MB) |
 | `0x6D0000` .. `0x6E02FF` | the per-project pools: superblocks, 129 lists x 2 copies |
-| `0x6F0800` .. `0x6FEFFF` | the wishes record's cells (`DN2W`, `docs/wishes-record.md`; 2026-11-11) |
+| `0x5D8000` .. `0x5EE7FF` | the wishes record's cells (`DN2W`, `docs/wishes-record.md`; 2026-11-11; v0.69.2: here, 92,160) |
 | `0x6FF000` | the mod's settings sector (`DN2S`: DIRECT JUMP) |
 | `0x700000` .. the device's last sector | the +Drive library: superblock, index, folders, frames |
 
 Nothing else. The stock store (below `0x458000`), the factory buffer (`0x458000` ..
 `0x5D7FFF`) and the free gaps between our regions (`0x5D8000` .. `0x5FFFFF`,
-`0x6C8001` .. `0x6CFFFF`, `0x6E0300` .. `0x6EFFFF`, `0x6F0701` .. `0x6F07FF`, `0x6FF001` .. `0x6FFFFF`) are never
+`0x6C8001` .. `0x6CFFFF`, the tunings and PERFORM, `0x6F0701` .. `0x6F07FF`, `0x6FF001` .. `0x6FFFFF`; v0.69.2: the regions
+follow `docs/memory-map.md`, the move record and the inserts' mark are never erased) are never
 named. `erase.c` asserts it twice: statically (each region's bounds against the other
 files' constants and against the floor `0x600000`, above the factory buffer) and on every
 call (`er_inside`: one range inside exactly one of the four regions, at most 2,048 sectors,

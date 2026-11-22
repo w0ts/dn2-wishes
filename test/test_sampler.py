@@ -637,7 +637,8 @@ def test_smp_asm_is_the_program_as_it_now_is():
     import gen_smp_asm as G
     def norm(ln):
         ln = re.sub(r"(JUMP|CALL) 0x[0-9a-f]+;\s*", r"\1 T; ", ln)
-        return re.sub(r"R12 = 0x[0-9a-f]+;\s*(// return address)", r"R12 = T; \1", ln)
+        # (2026-11-20, dnfw.perc.flow: a dead call's return address goes straight to I12)
+        return re.sub(r"([RI]12) = 0x[0-9a-f]+;\s*(// return address)", r"\1 = T; \2", ln)
     want = [norm(ln) for ln in G.build().splitlines()]
     have = [norm(ln) for ln in (root / "csrc/waverider/sharc/smp.asm").read_text().splitlines()]
     assert have == want, "run scripts/gen_smp_asm.py, then gen_waverider_sharc.py --assemble"
@@ -914,7 +915,8 @@ def test_v023_slices_made_on_the_instrument_come_from_the_slice_area():
         nz = play(2 * (k + 1))
         assert abs(min(nz) - a / n) < 0.05 and abs(max(nz) - b / n) < 0.05, k
     assert SM.SLICE_AREA + SM.POOL_SLOTS * SM.SLICE_TABLE_BYTES <= SM.REC_END
-    assert SM.REC_OFFSET + SM.REC_BYTES == SM.TABLE_AREA      # v0.26: then the tables the ColdFire sends
+    assert SM.REC_OFFSET + SM.REC_BYTES == SM.BANK_AREA       # v0.65: then banks B..D's pages (docs/banks.md)
+    assert SM.BANK_AREA + (SM.BANK_N - 1) * SM.BANK_PAGE == SM.TABLE_AREA   # v0.26: then the tables the ColdFire sends
     assert SM.TABLE_AREA + SM.TABLE_ROOM == SM.SLICE_AREA and SM.TABLE_AREA <= SM.TABLE_READY < SM.SLICE_AREA
 
 

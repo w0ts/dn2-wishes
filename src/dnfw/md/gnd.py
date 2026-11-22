@@ -31,11 +31,17 @@ def out_loop(p: Prog, L: K.Layout, body) -> None:
 
 def pitch_word(p: Prog, L: K.Layout, d: int, x: int, extra: int = 0) -> None:
     """Fd = tblP[x & 127] << ((x >> 7) + extra), the scale functions' pitch idiom, as a
-    float (Rx an integer). Clobbers R12, R13, R14, I1."""
-    p.iconst(12, 127)
-    p.iop(14, x, "AND", 12)
-    K.table_f(p, L, d, "hostP", 14, 12)       # an int: the table holds integers
-    p.lsh(14, x, -7)
+    float (Rx an integer). Clobbers R12, R13, R14, I1 (and I12 for R4 from R0 or R1: the lookup a subroutine in the
+    host bodies' span, 2026-11-20, CLAP and the cymbals' room: 18 hosts)."""
+    def look():
+        p.iconst(12, 127)
+        p.iop(14, x, "AND", 12)
+        K.table_f(p, L, d, "hostP", 14, 12)   # an int: the table holds integers
+        p.lsh(14, x, -7)
+    if d == 4 and x in (0, 1):
+        p.call(f"md_pitch{x}", look)
+    else:
+        look()
     if extra:
         p.iconst(12, extra)
         p.iop(14, 12, "+", 14)

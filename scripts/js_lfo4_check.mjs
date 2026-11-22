@@ -52,22 +52,30 @@ const built = await chain(stock, alone.content);
 checks.push([`lfo4 on stock: rebuilt image verifies (${built.passed}/${built.total}), `
              + `${built.bytes.length} B .syx, MAIN OS ${alone.content.length} B`, built.passed === built.total]);
 
-// 2. stock -> fxmod -> .syx -> lfo4, the browser's way of chaining
-const fx = await chain(stock, fxmod.apply(stock).content);
-checks.push([`fxmod image verifies (${fx.passed}/${fx.total})`, fx.passed === fx.total]);
-const pair = lfo4.apply(fx.firmware);
-checks.push(["fxmod then lfo4: MAIN OS == CLI --mod fxmod --mod lfo4",
-             same(pair.content, new Uint8Array(readFileSync(arg("py-fx-lfo4"))))]);
-const pairBuilt = await chain(fx.firmware, pair.content);
-checks.push([`fxmod then lfo4: rebuilt image verifies (${pairBuilt.passed}/${pairBuilt.total})`,
-             pairBuilt.passed === pairBuilt.total]);
-
+// 2. stock -> fxmod -> .syx -> lfo4, the browser's way of chaining. 2026-11-17: fxmod is a 1.11 mod and lfo4 a
+// 1.12 one since the port, so on 1.12 stock (no --py-fx-lfo4) the pair cannot be made: fxmod must refuse instead
+if (arg("py-fx-lfo4")) {
+  const fx = await chain(stock, fxmod.apply(stock).content);
+  checks.push([`fxmod image verifies (${fx.passed}/${fx.total})`, fx.passed === fx.total]);
+  const pair = lfo4.apply(fx.firmware);
+  checks.push(["fxmod then lfo4: MAIN OS == CLI --mod fxmod --mod lfo4",
+               same(pair.content, new Uint8Array(readFileSync(arg("py-fx-lfo4"))))]);
+  const pairBuilt = await chain(fx.firmware, pair.content);
+  checks.push([`fxmod then lfo4: rebuilt image verifies (${pairBuilt.passed}/${pairBuilt.total})`,
+               pairBuilt.passed === pairBuilt.total]);
+} else {
+  checks.push(["fxmod refuses this OS (a 1.11 mod on 1.12 stock)", refusal(() => fxmod.apply(stock)) !== null]);
+}
 // 3. the other mods lfo4 is applied after: moddest (table edits) and midiarp
 checks.push(["moddest then lfo4: MAIN OS == Python",
              same(lfo4.compose(moddest.apply(stock).content),
                   new Uint8Array(readFileSync(arg("py-moddest-lfo4"))))]);
-checks.push(["midiarp then lfo4: applies",
-             refusal(() => lfo4.compose(midiarp.apply(stock).content)) === null]);
+if (arg("py-fx-lfo4")) {
+  checks.push(["midiarp then lfo4: applies",
+               refusal(() => lfo4.compose(midiarp.apply(stock).content)) === null]);
+} else {                                        // 1.12 stock: midiarp is a 1.11 mod
+  checks.push(["midiarp refuses this OS (a 1.11 mod on 1.12 stock)", refusal(() => midiarp.apply(stock)) !== null]);
+}
 
 // 4. refusals
 const longer = new Uint8Array(stockContent.length + 16);

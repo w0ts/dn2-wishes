@@ -70,10 +70,19 @@ DMIX = ((0, 0, 1, 0, 0), (0, 0, 0, 0, 1), (0, 0, -1, 3, -2), (-1, 4, -5, 1, 1), 
 MSMIX = ((0, 0, -1, 0), (0, 0, 0, 1), (0, -1, 0, 0), (1, 1, 1, 0), (1, 1, 0, 0))
 
 
+def kc_float(v) -> float:
+    """a KC value as the float the table holds: an int is a bit pattern (the reciprocal's seed)"""
+    import struct
+    return struct.unpack("<f", struct.pack("<I", v))[0] if isinstance(v, int) else float(v)
+
+
 def table_layout(models) -> tuple[list[float], dict[str, tuple[int, int]]]:
     """the mix tables the models need, back to back: (floats, {name: (word offset, row words)})"""
     out: list[float] = []
     at: dict[str, tuple[int, int]] = {}
+    # 2026-11-21 (a2-juno-fast): the loops' constants first (KC, read through I1 so each load rides on a compute)
+    at["kc"] = (0, len(KC))
+    out += [kc_float(v) for _n, v in KC]
     want = (("svf", SVFMIX, ("SVF",)), ("lmix", LMIX, ("LADR", "OTA")), ("dmix", DMIX, ("DIOD",)),
             ("msmix", MSMIX, ("MS20",)))
     for name, rows, users in want:
@@ -87,7 +96,10 @@ def table_layout(models) -> tuple[list[float], dict[str, tuple[int, int]]]:
 WORDS = ("gs", "ge", "res", "mode", "model", "buf", "zp", "row", "nst", "k", "a1", "a2", "a3",
          "d1", "d2", "d3", "cbk", "cb1", "cin", "inv", "G", "H", "G4", "ota", "gout", "gd",
          "ip1", "ip2", "ip3", "ip4", "h1", "h2", "h3", "h4", "gp2", "gp3", "Gk", "hh", "dn", "omG",
-         "t0", "t1", "t2")
+         "t0", "t1", "t2",
+         # 2026-11-21: 1 while the coefficient words already hold this half's (a client that filters two signals with
+         # the same words: ANALOG 2's side, then its mid): the ladders, DIOD and MS20 then skip them (_once)
+         "cv")
 
 
 class Ctx:
@@ -145,10 +157,13 @@ def _newton(p: Prog, x: int, r: int, t: int) -> None:
 
 # -- the leaves ------------------------------------------------------------------------------
 def _tanh_body(p: Prog) -> None:
-    """F15 = x (27 + x^2) / (27 + 9 x^2), x clamped to +-3 (a2m_tanh). Clobbers R12-R14."""
+    """F15 = x (27 + x^2) / (27 + 9 x^2), x clamped to +-3 (a2m_tanh). Clobbers R12-R14. (2026-11-20: past +-3 the
+    curve is flat: the voice's clip)"""
     p.fconst(12, 3.0)
+    _clip(p, 15, "GT", 12)
     p.fop(15, 15, "MIN", 12)
     p.fconst(12, -3.0)
+    _clip(p, 15, "LT", 12)
     p.fop(15, 15, "MAX", 12)
     p.fop(13, 15, "*", 15)                       # x^2
     p.fconst(12, 9.0)
@@ -249,7 +264,16 @@ def _rowi(p: Prog, X: Ctx, table: str) -> None:
     p.seti(3, 8)
 
 
+def _clip(p: Prog, x: int, cond: str, b: int) -> None:
+    """2026-11-20 (clip-inner; the User: "NO DIGITAL CLIPPING ... if it does, i want the alert"): Fx past the hold in
+    Fb (a nonzero word): the voice's clip (perc.program clip_flag)"""
+    from ....perc import program as PP
+    PP.clip_flag(p, x, cond, b, b)
+
+
 def _clamp_out(p: Prog, y: int) -> None:
+    # (2026-11-20, clip-inner: not flagged: +-32 is 30 dB past anything a voice reaches, and the DSP upload's room is
+    # spent on the stages that do engage)
     p.fconst(12, OUT_MAX)
     p.fop(y, y, "MIN", 12)
     p.fconst(12, -OUT_MAX)
@@ -355,9 +379,13 @@ def _svf_stage(p: Prog, X: Ctx) -> None:
     for w, r in (("a1", 3), ("a2", 4), ("a3", 5), ("d1", 6), ("d2", 7), ("d3", 8)):
         _ld(p, X, r, w)
     _buf_in(p, X)
+    if SSCHED:
+        _xi(p, X)
+        _kci(p, X, 10)
 
     def knee(r: int, lim: float) -> None:
         def over():
+            p.fpass(10, 15)                      # (2026-11-20: |x| kept, F10 free after the store)
             p.fop(15, 15, "-", 12)
             if lim != 1.0:
                 p.fconst(12, 1.0 / lim)
@@ -369,13 +397,76 @@ def _svf_stage(p: Prog, X: Ctx) -> None:
                 p.fop(15, 15, "+", 15)
             p.fconst(12, lim)
             p.fop(15, 12, "+", 15)
+            p.fconst(12, 1.122)                  # 2026-11-20 (clip-inner): squashed by 1 dB or more: the voice's clip
+            p.fop(12, 15, "*", 12)
+            _clip(p, 12, "LT", 10)
             p.fconst(12, 0.0)
             p.if_(r, "LT", 12, lambda: p.fop(r, 12, "-", 15), lambda: p.fpass(r, 15))
         fabs(p, 15, r)
         p.fconst(12, lim)
         p.if_(15, "GT", 12, over)
 
+    def fast():
+        from ....mnm.sched import Sched
+        s = Sched(pairs=MFP)
+        s.ld(0, 0, 0)                            # x
+        s.sub(10, 0, 2)                          # v3 = x - ic2
+        s.mul(13, 3, 1)
+        s.mul(14, 4, 10)
+        s.add(13, 13, 14)                        # v1 = a1 ic1 + a2 v3
+        s.mul(14, 4, 1)
+        s.mul(15, 5, 10)
+        s.add(14, 14, 15)
+        s.add(14, 2, 14)                         # v2 = ic2 + (a2 ic1 + a3 v3)
+        s.add(15, 13, 13)
+        s.sub(1, 15, 1)                          # ic1 = 2 v1 - ic1
+        s.add(15, 14, 14)
+        s.sub(2, 15, 2)                          # ic2 = 2 v2 - ic2
+        s.ld(10, 0, 3)
+        s.mul(10, 10, 0)
+        s.mul(15, 9, 13)
+        s.add(10, 10, 15)
+        s.ld(15, 3, 3)
+        s.mul(15, 15, 14)
+        s.add(10, 10, 15)                        # (cx x + cb v1) + cl v2
+        s.ld(15, 4, 3)
+        s.fop(10, 10, "MIN", 15)
+        s.ld(15, 5, 3)
+        s.fop(10, 10, "MAX", 15)
+        s.add(3, 3, 6)                           # (the ramp's steps: read by the next sample only; the knees
+        s.add(4, 4, 7)                           # never touch F3-F8)
+        s.add(5, 5, 8)
+        s.raw(lambda q: fabs(q, 15, 1), (1,), (15,))
+        s.ld(12, _kc("k1"), 1)
+        s.emit(p)
+        p.stpost(0, 10)
+        p.if_(15, "GT", 12, lambda: over(1, 1.0))
+        fabs(p, 15, 2)
+        p.ldi(12, _kc("k2"), 1)
+        p.if_(15, "GT", 12, lambda: over(2, 2.0))
+
+    def over(r: int, lim: float) -> None:
+        p.fpass(10, 15)
+        p.fop(15, 15, "-", 12)
+        if lim != 1.0:
+            p.fconst(12, 1.0 / lim)
+            p.fop(15, 15, "*", 12)
+        p.fconst(12, 2.0)
+        p.fop(15, 15, "MIN", 12)
+        tanh(p)
+        if lim != 1.0:
+            p.fop(15, 15, "+", 15)
+        p.fconst(12, lim)
+        p.fop(15, 12, "+", 15)
+        p.fconst(12, 1.122)
+        p.fop(12, 15, "*", 12)
+        _clip(p, 12, "LT", 10)
+        p.fconst(12, 0.0)
+        p.if_(r, "LT", 12, lambda: p.fop(r, 12, "-", 15), lambda: p.fpass(r, 15))
+
     def one():
+        if SSCHED:
+            return fast()
         p.ldi(0, 0, 0)                           # x
         p.fop(10, 0, "-", 2)                     # v3 = x - ic2
         p.fop(13, 3, "*", 1)
@@ -413,6 +504,9 @@ def _svf_stage(p: Prog, X: Ctx) -> None:
     p.sti(1, 2, 2)
 
 
+SSCHED = True                                    # (perf, 2026-11-21) the SVF stage's loop scheduled; False = as before
+
+
 def _svf_half(p: Prog, X: Ctx) -> None:
     """the SVF over the half: one stage, two for LP24 (the second at K2ND, its row 5, states zp + 8)"""
     svf_k(p, X, 1)
@@ -444,7 +538,19 @@ def _svf_half(p: Prog, X: Ctx) -> None:
 
 
 # -- LADR, OTA: the 4-pole ladders (a2m_ladder) ------------------------------------------------
+def _once(p: Prog, X: Ctx, body) -> None:
+    """BODY (a model's coefficients) unless the word cv says they are set already. Clobbers R0."""
+    _ld(p, X, 0, "cv")
+    p.ifz(0, "EQ", body)
+
+
 def _ladder_half(p: Prog, X: Ctx) -> None:
+    _once(p, X, lambda: ladder_coefs(p, X))
+    ladder_core(p, X)
+
+
+def ladder_coefs(p: Prog, X: Ctx) -> None:
+    """the ladders' words (k, cin, ota, G, t0, H, G4, inv) from ge and res"""
     both = "LADR" in X.models and "OTA" in X.models
     only_ota = "OTA" in X.models and not both
 
@@ -483,7 +589,6 @@ def _ladder_half(p: Prog, X: Ctx) -> None:
     p.fop(15, 12, "+", 15)
     recip(p)
     _st(p, X, "inv", 15)
-    ladder_core(p, X)
 
 
 def ladder_core(p: Prog, X: Ctx) -> None:
@@ -494,7 +599,23 @@ def ladder_core(p: Prog, X: Ctx) -> None:
     p.call("a2lad", lambda: _ladder_loop(p, X))
 
 
+MFP = False                                      # (perf, 2026-11-21) the scheduled loops pair a multiply with an add or
+                                                 # subtract (multifunction, dnfw.perc.mf's PROVEN forms); False: none
+# ANALOG 2's sine (analog2.SIN_Q, its oscillators' u (1 - u^2) Q(u^2)): kept here, in KC, for its two-sample kernel
+A2_SIN_Q = tuple(-c * (32767.0 / 32768.0) for c in (3.14159230309089, -2.0260895597297144, 0.5237673445980027,
+                                                    -0.07439094157966462, 0.005918106135584834))
+# ANALOG 2's drive curve (analog2.TANH_P, tanh(x) / x in x^2): kept here, in KC, for its two-sample loop (_drive2)
+A2_TANH_P = tuple(c * (32767.0 / 32768.0) for c in (0.994438468571122, -0.3077078377445752, 0.08908856172526249,
+                                                    -0.01588368865468038, 0.0012091530231845907))
+KC = (("k3", 3.0), ("km3", -3.0), ("k9", 9.0), ("k27", 27.0), ("kmag", RECIP_MAGIC), ("kout", OUT_MAX),
+      ("koutn", -OUT_MAX), ("k1", 1.0), ("k2", 2.0)) + tuple((f"sq{k}", c) for k, c in enumerate(A2_SIN_Q)) + \
+     (("km2", -2.0), ("khalf", 0.5)) + tuple((f"tp{k}", c) for k, c in enumerate(A2_TANH_P))   # (2026-11-21, filt-opt)
+LSCHED = True                                    # (perf, 2026-11-21) _ladder_fast; False = the loop as before
+
+
 def _ladder_loop(p: Prog, X: Ctx) -> None:
+    if LSCHED:
+        return _ladder_fast(p, X)
     both = "LADR" in X.models and "OTA" in X.models
     only_ota = "OTA" in X.models and not both
     _rowi(p, X, "lmix")
@@ -558,8 +679,149 @@ def _ladder_loop(p: Prog, X: Ctx) -> None:
     _states_out(p, X, (1, 2, 3, 4))
 
 
+def _kci(p: Prog, X: Ctx, r: int) -> None:
+    """I1 = the constants (KC, the tables' first words). Clobbers Rr."""
+    p.iconst(r, X.T["kc"][0])
+    p.seti(1, r)
+
+
+def _kc(name: str) -> int:
+    """a constant's offset from I1 (_kci)"""
+    return [n for n, _v in KC].index(name)
+
+
+def _wk(name: str) -> int:
+    """a word's offset from I2 (X_MID)"""
+    return WORDS.index(name) - X_MID
+
+
+def _tanh_sched(p: Prog, s):
+    """_tanh_body's operations on F15, after the ops already in Sched S (emitted with the first part): its constants
+    from the words (LCONSTS, through I2), the two clip flags between scheduled runs. Returns a new Sched holding the
+    tail (from the MAX on), for the caller to add to and emit."""
+    from ....mnm.sched import Sched
+    s.ld(12, _kc("k3"), 1)
+    s.emit(p)
+    _clip(p, 15, "GT", 12)
+    s = Sched(pairs=MFP)
+    s.fop(15, 15, "MIN", 12)
+    s.ld(12, _kc("km3"), 1)
+    s.emit(p)
+    _clip(p, 15, "LT", 12)
+    s = Sched(pairs=MFP)
+    s.fop(15, 15, "MAX", 12)
+    _tanh_core(s, True)
+    return s
+
+
+def _tanh_core(s, words: bool) -> None:
+    """_tanh_body's operations from x^2 on (F15 clamped): WORDS, its constants from KC through I1 (_kci)"""
+    def k(d, name, x):
+        if words:
+            s.ld(d, _kc(name), 1)
+        else:
+            s.const(d, x)
+    s.mul(13, 15, 15)                            # x^2
+    k(12, "k9", 9.0)
+    s.mul(14, 12, 13)
+    k(12, "k27", 27.0)
+    s.add(14, 12, 14)                            # 27 + 9 x^2
+    s.add(13, 12, 13)
+    s.mul(13, 15, 13)                            # x (27 + x^2)
+    if words:
+        s.ld(12, _kc("kmag"), 1)
+    else:
+        s.raw(lambda q: q.iconst(12, RECIP_MAGIC), (), (12,))
+    s.raw(lambda q: q.iop(15, 12, "-", 14), (12, 14), (15,))
+    for _ in range(3):                           # _newton(14, 15, 12)
+        s.mul(12, 14, 15)
+        s.mul(12, 15, 12)
+        s.add(15, 15, 15)
+        s.sub(15, 15, 12)
+    s.mul(15, 13, 15)
+
+
+def _clamp_sched(s, y: int) -> None:
+    """_clamp_out's operations, the bounds from the words"""
+    s.ld(12, _kc("kout"), 1)
+    s.fop(y, y, "MIN", 12)
+    s.ld(12, _kc("koutn"), 1)
+    s.fop(y, y, "MAX", 12)
+
+
+def _ladder_fast(p: Prog, X: Ctx) -> None:
+    """_ladder_loop's operations on the same values in the same order (so bit for bit), with: the LADR / OTA choice
+    made once, outside the loop (a loop each); cin, inv, G4 and the constants (LCONSTS) read through I2 (X_MID), so
+    their loads ride on the computes; the straight runs between the clip flags' branches scheduled (dnfw.mnm.sched,
+    no multifunction pairs)."""
+    from ....mnm.sched import Sched
+    both = "LADR" in X.models and "OTA" in X.models
+    only_ota = "OTA" in X.models and not both
+    w = lambda name: WORDS.index(name) - X_MID   # noqa: E731
+    _rowi(p, X, "lmix")
+    _states_in(p, X, (1, 2, 3, 4))
+    _ld(p, X, 5, "G")
+    _ld(p, X, 6, "H")
+    _ld(p, X, 7, "k")
+    _buf_in(p, X)
+    _xi(p, X)
+    _kci(p, X, 8)
+
+    def one(ota: bool):
+        s = Sched(pairs=MFP)
+        s.ld(0, 0, 0)
+        s.ld(8, w("cin"), 2)
+        s.mul(0, 0, 8)                           # x
+        s.mul(8, 5, 1)
+        s.add(8, 8, 2)
+        s.mul(8, 5, 8)
+        s.add(8, 8, 3)
+        s.mul(8, 5, 8)
+        s.add(8, 8, 4)
+        s.mul(8, 6, 8)                           # S = H (G (G (G z1 + z2) + z3) + z4)
+        s.mul(9, 7, 8)
+        s.sub(9, 0, 9)
+        s.ld(10, w("inv"), 2)
+        s.mul(9, 9, 10)                          # t = (x - k S) inv
+        if ota:                                  # tanh's argument: G4 t + S
+            s.ld(10, w("G4"), 2)
+            s.mul(15, 10, 9)
+            s.add(15, 15, 8)
+        else:
+            s.raw(lambda q: q.fpass(15, 9), (9,), (15,))
+        s = _tanh_sched(p, s)                    # _tanh_body's operations, its constants from the words
+        if ota:                                  # u = x - k tanh(G4 t + S)
+            s.mul(15, 7, 15)
+            s.sub(15, 0, 15)
+        for z, yin, y in ((1, 15, 8), (2, 8, 13), (3, 13, 14), (4, 14, 10)):   # four one-poles
+            s.sub(9, yin, z)
+            s.mul(9, 9, 5)
+            s.add(y, 9, z)
+            s.add(z, y, 9)
+        s.ld(9, 0, 3)
+        s.mul(9, 9, 15)
+        for k, y in ((1, 8), (2, 13), (3, 14), (4, 10)):
+            s.ld(12, k, 3)
+            s.mul(12, 12, y)
+            s.add(9, 9, 12)
+        _clamp_sched(s, 9)
+        s.emit(p)
+        p.stpost(0, 9)
+    if both:
+        _ld(p, X, 10, "ota")
+        p.ifz(10, "NE", lambda: _loop16(p, lambda: one(True)), lambda: _loop16(p, lambda: one(False)))
+    else:
+        _loop16(p, lambda: one(only_ota))
+    _states_out(p, X, (1, 2, 3, 4))
+
+
 # -- DIOD: the diode ladder (a2m_diod), its tridiagonal system by elimination ------------------
 def _diod_half(p: Prog, X: Ctx) -> None:
+    _once(p, X, lambda: _diod_coefs(p, X))
+    _diod_run(p, X)
+
+
+def _diod_coefs(p: Prog, X: Ctx) -> None:
     _ld(p, X, 0, "res")
     p.fconst(12, DIOD_K)
     p.fop(0, 0, "*", 12)
@@ -616,6 +878,9 @@ def _diod_half(p: Prog, X: Ctx) -> None:
     p.fop(15, 12, "+", 15)
     recip(p)
     _st(p, X, "inv", 15)
+
+
+def _diod_run(p: Prog, X: Ctx) -> None:
     _rowi(p, X, "dmix")
     _states_in(p, X, (1, 2, 3, 4))
     _ld(p, X, 5, "gd")
@@ -623,6 +888,8 @@ def _diod_half(p: Prog, X: Ctx) -> None:
 
     if SCHED:
         _xi(p, X)
+        if DKW:
+            _kci(p, X, 10)
 
         def one():
             _diod_sample(p, X)
@@ -683,6 +950,9 @@ def _xi(p: Prog, X: Ctx) -> None:
     p.seti(2, 12)
 
 
+DKW = True                                       # (perf, 2026-11-21) DIOD's tanh and bound constants from the words
+
+
 def _tanh_ops(s) -> None:
     """_tanh_body's operations onto the scheduler S (dnfw.mnm.sched), on F15, the same order and registers"""
     s.const(12, 3.0)
@@ -730,7 +1000,14 @@ def _diod_sample(p: Prog, X: Ctx) -> None:
     s.mul(13, 12, 9)
     s.sub(15, 15, 13)
     s.mul(15, 15, 14)
-    _tanh_ops(s)                                 # u = tanh((x cin - k e4) inv), a2th's operations inline
+    if DKW:                                      # u = tanh((x cin - k e4) inv), a2th's operations inline
+        s.ld(12, _kc("k3"), 1)
+        s.fop(15, 15, "MIN", 12)
+        s.ld(12, _kc("km3"), 1)
+        s.fop(15, 15, "MAX", 12)
+        _tanh_core(s, True)
+    else:
+        _tanh_ops(s)
     tmp = [10, 12, 13, 14]
     n = 0
     for h, e in (("h1", 6), ("h2", 7), ("h3", 8), ("h4", 9)):
@@ -756,15 +1033,23 @@ def _diod_sample(p: Prog, X: Ctx) -> None:
         s.add(10, 10, t)
     s.ld(12, w("gout"), 2)
     s.mul(10, 12, 10)
-    s.const(12, OUT_MAX)
-    s.fop(10, 10, "MIN", 12)
-    s.const(12, -OUT_MAX)
-    s.fop(10, 10, "MAX", 12)
+    if DKW:
+        _clamp_sched(s, 10)
+    else:
+        s.const(12, OUT_MAX)
+        s.fop(10, 10, "MIN", 12)
+        s.const(12, -OUT_MAX)
+        s.fop(10, 10, "MAX", 12)
     s.emit(p)
 
 
 # -- MS20: the Sallen-Key 2-pole (a2m_ms20) ----------------------------------------------------
 def _ms20_half(p: Prog, X: Ctx) -> None:
+    _once(p, X, lambda: _ms20_coefs(p, X))
+    _ms20_run(p, X)
+
+
+def _ms20_coefs(p: Prog, X: Ctx) -> None:
     _ld(p, X, 0, "res")
     p.fconst(12, MS20_K)
     p.fop(0, 0, "*", 12)
@@ -783,6 +1068,9 @@ def _ms20_half(p: Prog, X: Ctx) -> None:
     _ld(p, X, 14, "G")
     p.fop(14, 14, "*", 0)
     _st(p, X, "Gk", 14)
+
+
+def _ms20_run(p: Prog, X: Ctx) -> None:
     _rowi(p, X, "msmix")
     _ld(p, X, 0, "zp")
     p.seti(2, 0)
@@ -793,6 +1081,16 @@ def _ms20_half(p: Prog, X: Ctx) -> None:
     _ld(p, X, 5, "t0")
     _ld(p, X, 6, "k")
     _buf_in(p, X)
+    if MSCHED:
+        _xi(p, X)
+        _kci(p, X, 8)
+        _loop16(p, lambda: _ms20_fast(p))
+        _ld(p, X, 0, "zp")
+        p.seti(2, 0)
+        p.sti(0, 2, 1)
+        p.sti(1, 2, 2)
+        p.sti(3, 2, 3)
+        return
 
     def one():
         p.ldi(0, 0, 0)
@@ -845,6 +1143,57 @@ def _ms20_half(p: Prog, X: Ctx) -> None:
     p.sti(0, 2, 1)
     p.sti(1, 2, 2)
     p.sti(3, 2, 3)
+
+
+MSCHED = True                                    # (perf, 2026-11-21) _ms20_fast; False = the loop as before
+
+
+def _ms20_fast(p: Prog) -> None:
+    """one sample of _ms20_half's loop: its operations on the same values in the same order (so bit for bit), the
+    words (Gk, dn, omG) and the constants read through I2 so their loads ride on the computes, a2th's operations
+    inline, the straight runs scheduled (no multifunction pairs)"""
+    from ....mnm.sched import Sched
+    s = Sched(pairs=MFP)
+    s.ld(0, 0, 0)
+    s.mul(7, 4, 0)
+    s.ld(8, _wk("Gk"), 2)
+    s.mul(8, 8, 2)
+    s.sub(8, 1, 8)
+    s.mul(8, 8, 5)
+    s.add(7, 7, 8)
+    s.ld(8, _wk("dn"), 2)
+    s.mul(7, 7, 8)                               # y1, linear
+    s.ld(8, _wk("omG"), 2)
+    s.mul(15, 8, 7)
+    s.mul(9, 2, 5)                               # s2 h
+    s.sub(15, 15, 9)
+    s = _tanh_sched(p, s)
+    s.mul(15, 6, 15)                             # f = k tanh((1 - G) y1 - s2 h)
+    s.add(7, 0, 15)                              # x + f
+    s.mul(8, 4, 7)
+    s.mul(10, 1, 5)
+    s.add(8, 8, 10)                              # y1 = G (x + f) + s1 h
+    s.mul(10, 4, 8)
+    s.add(10, 10, 9)                             # y2 = G y1 + s2 h
+    s.add(13, 8, 8)
+    s.sub(1, 13, 1)
+    s.add(13, 10, 10)
+    s.sub(2, 13, 2)
+    s.sub(8, 8, 10)
+    s.add(8, 8, 8)                               # 2 bp
+    s.sub(13, 10, 3)
+    s.mul(13, 13, 4)
+    s.add(14, 13, 3)                             # lp4
+    s.add(3, 14, 13)
+    s.ld(9, 0, 3)
+    s.mul(9, 9, 7)
+    for k, y, op in ((1, 8, "-"), (2, 10, "-"), (3, 14, "+")):
+        s.ld(13, k, 3)
+        s.mul(13, 13, y)
+        s.fop(9, 9, op, 13)
+    _clamp_sched(s, 9)
+    s.emit(p)
+    p.stpost(0, 9)
 
 
 # -- the entry ---------------------------------------------------------------------------------

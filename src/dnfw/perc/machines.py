@@ -166,7 +166,7 @@ class Layout:
     """Addresses the program is built for (dnfw.waverider.dsp provides them)."""
 
     def __init__(self, state, scratch, tables, sin, md_state=None, md_tables=None,
-                 mnm_scratch=0, mnm_tables=0, md_shipped=None, md_ready=None, md_delay=None,
+                 mnm_scratch=0, mnm_tables=0, md_shipped=None, md_ready=None, md_delay=None, md_delay_stride=None,
                  mnm_dt=None, mnm_render=None, mnm_interp=None, l1_exp2=None, l1_tan=None, sin_at=None):
         self.state, self.tables, self.sin = state, tables, sin
         self.C = {w: scratch + 4 * k for k, w in enumerate(SC_WORDS)}
@@ -179,7 +179,8 @@ class Layout:
         assert len(MDK.SC_WORDS) <= 24
         self.md = MDK.Layout(md_state if md_state is not None else 0, self.C["c0"],
                              md_tables if md_tables is not None else 0,
-                             shipped=md_shipped, ready=md_ready, delay=md_delay)
+                             shipped=md_shipped, ready=md_ready, delay=md_delay,
+                             **({} if md_delay_stride is None else {"delay_stride": md_delay_stride}))
         if self.shipped:
             at_ = self.md.T["_end"]
             for n in SHIPPED_TABLES:
@@ -359,11 +360,12 @@ def _sat_body(p: Prog) -> None:
         _recip_inline(p, 15, 13, 0)
         p.fop(15, 14, "*", 15)
     p.fconst(12, 3.0)
+    from . import guard as G                    # 2026-11-20 (clip-inner): past +-3 the curve is flat: the voice's clip
 
     def notlo():
         p.fconst(12, -3.0)
-        p.if_(15, "LT", 12, lambda: p.fconst(15, -1.0), mid)
-    p.if_(15, "GT", 12, lambda: p.fconst(15, 1.0), notlo)
+        p.if_(15, "LT", 12, lambda: (p.st(G.CLIP_HIT, 12), p.fconst(15, -1.0)), mid)
+    p.if_(15, "GT", 12, lambda: (p.st(G.CLIP_HIT, 12), p.fconst(15, 1.0)), notlo)
 
 
 def sat(p: Prog, d: int, x: int) -> None:

@@ -15,6 +15,28 @@ section 5, the output stage `0x1c244d`'s channel table), after each call of the 
   argument, read at its call sw 0x1c307b; in the runner the caller's locals are zeros, so the buffer is at 0);
 - **track buffers**: the 16 mono buffers at the block's end (as step 4).
 
+**Declared (2026-11-20, the User's yes under the stock-code rule; scratch/mixer-overview.md):** the analog outputs'
+words for a main-mix sample at or over full scale. Stock converts the main mix for the codec with FIX BY 31 with
+ALUSAT off and then negates the words as integers (the driver, after this routine: sw 0x1c9d3f, 0x1c9e29), so an over
+reaches the DAC as about 0 and -1.0 with the wrong sign; the build's wr_pvmix holds the mix to +-DAC_TOP first (a
+clean clip). That page is not one of the outputs compared here (the driver runs after sw 0x1c2712); step dacover
+(scripts/sharc_dacover_step.py) holds it: every word of a sample under full scale stock's, every over a clean clip.
+Everything compared here stays bit-identical (the hold is on the driver's side, after this routine; the levels pass,
+sampler.program.levels, only reads). Not checked here: that nothing reads MIX_BUF's held words before the next block's
+master mix writes it again (the runner's engine does not write MIX_BUF: its caller's R8 is not the unit's); upstream's
+preview and MON have written MIX_BUF in place at the same call since v0.25 / v0.59 without a sign of it [I].
+
+**Declared (2026-11-20, the User's option 1 under the stock-code rule; dnfw.waverider.ampsw, docs/live-select.md "AMP
+ON/OFF"):** a voice slot playing a track whose bit the ColdFire sets in its AMP ON/OFF word (the pool's READY page,
+`ampsw.pool_off`: MAGIC | a bit per track whose sound is a drum machine, MACHINEDRUM, SOPHIE, DRUM, PLAITS on BD/SD/HH,
+with AMP OFF; csrc/msel/ampsw.c sets no bit for any other track) skips stock's AMP stage and VOL: its buffer, and every
+output word it feeds (its track blocks, the main mix, the sends, TDM, the records), may differ from stock's in every
+block while that bit is set, and only then. Stock's AMP stage and VOL still run for it (on a scratch buffer), so their
+state is stock's. With no word (0, as here: these frames carry only stock machines, and the runner's pool holds no
+word), or a word without MAGIC, every output is stock's. Proof: the `ampdsp` step (scripts/sharc_ampsw_step.py): the
+OFF slot leaves VOL's loop bit for bit as it reached the AMP stage; ON, every other slot, and a word without MAGIC
+bit-identical to the run with no word.
+
 Words are compared as bit patterns (NaN included). The frames: every track on a stock machine, random parameter
 words on every carried index (machine pages, filter, amp, FX sends, overdrive, ...), random notes and filter types,
 trigs spread over the blocks, a few words changed every block (as p-locks and LFOs arrive), a stretch of silence

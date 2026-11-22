@@ -23,7 +23,7 @@ export const LABELS = CODE.labels;
 export const TABLES = CODE.tables;
 export const RUNTIME_VA = CODE.runtime_va;
 const BASE = 0x40000400;
-const STUB = [0x402cf52c, 46];                   // the packaged build's copy stub
+const STUB = [0x402cfa6c, 46];                   // the packaged build's copy stub (OS 1.12; 1.11 had it at 0x402cf52c)
 const SHORT_NAME = 0x400372da, SHORT_NAME_DISPLACED = 10;
 
 export class ModError extends Error {}
@@ -35,7 +35,7 @@ const grouped = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 
 const own = (e) => {
   const lo = e.va - BASE, hi = lo + e.new.length / 2, stub = STUB[0] - BASE;
-  return !(platform.extents().some((x) => x.start < hi && lo < x.start + x.length)
+  return !(platform.extents(0).some((x) => x.start < hi && lo < x.start + x.length)
            || (stub < hi && lo < stub + STUB[1]));
 };
 const EDITS = CODE.edits.filter(own);

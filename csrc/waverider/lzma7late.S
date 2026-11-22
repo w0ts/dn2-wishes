@@ -9,4 +9,5 @@
         .globl  dn7_late
 dn7_late:
         move.l  %d0, 0x4243989c
+        jsr     sm_late                 | 2026-11-21 SAFE MODE (csrc/safemode/normal.c): the boot record, before the upload
         jmp     0x400cf4b0

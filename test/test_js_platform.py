@@ -14,7 +14,8 @@ import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 HARNESS = ROOT / "scripts" / "js_platform_check.mjs"
-STOCK_111 = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip"
+# OS 1.12: lfowaves, bootscreen and lfo4 are 1.12 mods since their port (2026-11-14/16, docs/lfo-112-port.md)
+STOCK_112 = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.12_dist.zip"
 
 
 def _refusal(fn):
@@ -31,8 +32,8 @@ def run(tmp_path_factory):
     node = shutil.which("node")
     if not node:
         pytest.skip("node is not on PATH; the browser mods cannot be checked")
-    if not STOCK_111.exists():
-        pytest.skip("Digitone II 1.11 is not in 00_Resources")
+    if not STOCK_112.exists():
+        pytest.skip("Digitone II 1.12 is not in 00_Resources")
 
     from dnfw.cli.files import read_image
     from dnfw.cli.mods import _staged
@@ -41,7 +42,7 @@ def run(tmp_path_factory):
 
     tmp = tmp_path_factory.mktemp("js_platform")
     syx = tmp / "image.syx"
-    syx.write_bytes(read_image(STOCK_111))
+    syx.write_bytes(read_image(STOCK_112))
     firmware = load(syx.read_bytes())
     mark = [bootscreen.image_from_pixels({(x, x >> 1) for x in range(128)})]
     run = {"lfowaves": lfowaves.apply, "bootscreen": lambda f: bootscreen.apply(f, mark),

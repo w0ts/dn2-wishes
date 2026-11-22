@@ -6,17 +6,20 @@
    subharmonic at half the note's frequency).
 """
 
+import importlib.util
 import pathlib
-import sys
 
 import pytest
 
 np = pytest.importorskip("numpy")
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "grains"))
-
-from model import RATE, Table, note_hz, render          # noqa: E402
+# grains/model.py by its path, under its own name (ping/, rings/, shft/ and cz/ each have a model.py; a bare
+# `import model` hands every later test in the worker this one)
+_SPEC = importlib.util.spec_from_file_location("grains_model", ROOT / "grains" / "model.py")
+_M = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(_M)
+RATE, Table, note_hz, render = _M.RATE, _M.Table, _M.note_hz, _M.render
 from dnfw.waverider import testtable                    # noqa: E402
 
 TABLE = Table(testtable.table())

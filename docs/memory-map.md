@@ -198,15 +198,16 @@ between them, adds its row and an `assert` against its neighbours in `dnfw.waver
 | Range | Owner | What |
 |---|---|---|
 | `0x47000000` .. `0x4700d110` | `dnfw.mods.waverider._tables` | the DSP's tables, sent at power-on by the sample link (53,520 B) |
-| `0x47100000` .. `0x47200000` | remoteui, `csrc/devtest/prof.c` (`pages.PROF_RAM`, `PROF_BYTES`) | the CPU profiler's state and sample ring (1 MB) |
-| `0x47200000` .. `0x47280000` | (free) | 512 KB kept clear between the profiler and the wishes record |
+| `0x47070000` .. `0x47280000` | PROJECT RAM banks, `csrc/sampler/link.c`, `pools.c` (`sampler.machines.BANK_RAM`, v0.65; v0.65.1: here, the tables' chunk capped at 448 KB, `TABLE_RAM_MAX`) | banks B..D's pages, their slots' overviews, slice columns and sums, the bank lists' staging and reserved extents (2,162,688 B) |
 | `0x47280000` .. `0x476E4200` | the wishes record, `csrc/wishes` (`pages.WISH_RAM`, `docs/wishes-record.md`) | index, free stack, hash cache, queue, carry scratch, 8,192 entries of 512 B (4,604,416 B) |
 | `0x476F0000` .. `0x476F8000` | the matrix, `csrc/matrix` (`pages.MX_RAM`, `docs/matrix.md`) | each track's routes and envelope times laid out twice for the audio frame, the voices' envelopes, the scratch row (32 KB) |
+| `0x476F8000` .. `0x47700000` | SAFE MODE, `csrc/safemode` (`pages.SM_RAM`, `docs/safe-mode.md`, 2026-11-21) | the RAM mark (32 B of a reserved 256 B; read and wiped by the kernel at every boot, written through the uncached alias `0x4F6F8000` before our soft reset), then the kernel CODE chunk at `0x476F8100` (code, then the unpatch table; about 10 KB) |
+| `0x47700000` .. `0x47800000` | remoteui, `csrc/devtest/prof.c` (`pages.PROF_RAM`, `PROF_BYTES`) | the CPU profiler's state and sample ring (1 MB); at `0x47100000` until v0.65.1 |
 | `0x47800000` | (bound) | the claims above stay under it; the stack descends from `0x48000000` |
 
 | mod | caves | in-place edits | appended | RAM |
 |---|---|---|---|---|
-| `lfo4-tick6a` | 210 B at `0x402dfa1c` | 137 B, 33 sites | — | 12,288 B at `0x46700000` |
+| `lfo4-tick6a` | 210 B at `0x402dfa1c` | 137 B, 33 sites | — | 12,288 B at `0x46808000` (`0x46700000` until 2026-11-17: under stock 1.12's +Drive bounce buffer) |
 | `lfo-waveshapes8` | 668 B `0x402cf52c` + 746 B `0x402d0664` | 83 B, 26 sites | — | 8,192 B NOI state + 336 B glyph tiles |
 | `lfo-wavetable4` | 676 B + 560 B, same two caves | 80 B, 25 sites | — | glyph tile |
 | `arp-on-midi2` | — | 4 B, 1 site | — | — |
@@ -247,7 +248,17 @@ declares all of them). 1.12's BSS ends at `0x466b84d0`.
 | `0x46aff000`..`0x46aff100` | 256 B | the system meter's state | `pages.METER_RAM` |
 | `0x46b00000`..`0x47000000` | 5 MB | the sample link's mirror of the pool | `sampler.machines.MIRROR` |
 | `0x47000000`..`0x47013428` | 78,888 B (up to 512 KB) | the DSP's tables | `sampler.machines.TABLE_LOAD` |
-| `0x47100000`.. | 1 MB | the CPU profiler, while PROFILE runs | `pages.PROF_RAM` |
+| `0x47070000`..`0x47280000` | 2,162,688 B | PROJECT RAM banks (v0.65) | `sampler.machines.BANK_RAM` |
+| `0x47700000`.. | 1 MB | the CPU profiler, while PROFILE runs (`0x47100000` until v0.65.1) | `pages.PROF_RAM` |
+
+**A restart that keeps the RAM (2026-11-18).** These blocks are not cleared by a load, and a restart that keeps the
+RAM (measured on the DN2: one after a flash kept it, a 20-minute power-off did not) leaves the last run's words in them,
+magic included, while stock's BSS (the frame clock `0x4058F8D4`, the panel tick) starts again at 0 and our C's data
+(`.data`, part of the loaded image) is loaded again. So a block of ours is trusted only once this load has cleared
+it: a word of code data, 0 after every load, beside its magic (wishes' `wish_ready`, `mv_loaded`, `mc_loaded`,
+`mtr_loaded`, `mx_loaded`, `prof_mine`). Measured before it: the moving lines' deadline (MOD_RAM) stood 2 h 17 min
+ahead of the new clock, and the lines moved once a second for that long (`scratch/env2-mod.md`). Gate: `lineonly`
+(`restart`). A deadline kept in a block must never be compared with a restarting clock before that.
 
 **The renderer moved down on 2026-11-12** (the User's ruling): from `0x46ac0000` with a
 0x30000 span (v0.29..v0.40 0x20000), where it had 1.5 KB left, to `0x46a40000` with 0xB0000,
@@ -266,25 +277,57 @@ each region checked against its bounds before the stock block driver (`0x4012c59
 | sectors (512 B) | owner | what |
 |---|---|---|
 | below `0x458000` | stock | projects, sounds, samples: never written by the mod |
+| `0x458000` .. `0x5D7FFF` | stock | the factory buffer: never written by the mod |
+| **ours, below `0x600000` (where upstream names nothing)** | | |
+| `0x5D8000` .. `0x5EE7FF` | the wishes record (`csrc/wishes/store.c`, `docs/wishes-record.md`) | 92,160 cells of one sector (`DN2W`), each a record filed under its hash; v0.69.2: here (59,392 at `0x6F0800` until v0.69.1, filed again once by `csrc/sampler/dmove.c`) |
+| `0x5EE800` .. `0x5FEFFF` | free | (the old bank lists B `0x5F0000..0x5FE7FF` until v0.69.1, read once by the move) |
+| `0x5FF000` .. `0x5FF101` | the inserts (`csrc/inserts/store.c`, `docs/inserts.md`; here since v0.69.1) | 129 records x 2 copies (`DN2I`) |
+| `0x5FF102` | the inserts' move (v0.69.1) | the mark (`DN2M`): the records were copied from `0x6E0400..0x6E0501` once; never erased |
+| `0x5FF200` .. `0x5FFA00` | the DSP program's copy (`csrc/waverider/lzma7cache.c`, `docs/lzma7.md`; here since v0.69.2) | header (`DN7C`, written last), then the program decoded from section 7 (up to 1 MiB); moved from `0x6E8000` at the first boot (the upload) |
+| `0x5FFB00` | SAFE MODE's boot record (`csrc/safemode/normal.c`, `docs/safe-mode.md`; here since v0.69.2) | one sector (`DN2B`): pending, safe_tries, the build id, a CRC-32; moved from `0x6E0300` at the first boot (the eMMC-ready point) |
+| `0x5FFC00` | the move record (`csrc/include/dmove.h`, v0.69.2) | `DN2V`, its complement, six bits (SAFE, DSP, tunings, bank lists A, wishes, bank lists B: each moved), a check; never erased |
+| **upstream's** | | |
 | `0x600000` | the sample link (`csrc/sampler/link.c`) | the pool image's header (`DN2Q`) |
 | `0x600001` .. `0x6C8000` | the sample link | the pool image (400 MB, `POOL_BYTES`) |
 | `0x6D0000`, `0x6D0001` | the per-project sample pools (`csrc/sampler/pools.c`, `docs/project-pools.md`) | the superblock (`DN2J`), two copies: owner, generation, a switch's intent |
 | `0x6D0100` .. `0x6E02FF` | the per-project sample pools | 129 lists (128 projects + the legacy list) x 2 copies x 256 sectors (`DN2K` header, sums, directory page, meta block, slice area) |
-| `0x6E0400` .. `0x6E0501` | the inserts (`csrc/inserts/store.c`, `docs/inserts.md`) | 129 records x 2 copies (`DN2I`) |
-| `0x6E8000` .. `0x6E8800` | the DSP program's copy (`csrc/waverider/lzma7cache.c`, `docs/lzma7.md`) | header (`DN7C`, written last), then the program decoded from section 7 (up to 1 MiB) |
+| `0x6E0400` .. `0x6E04FF` | microtuning (`csrc/sampler/tune.c`, `docs/microtuning.md`), upstream's place | 128 records x 2 copies (`DN2T`); v0.69.2: here (ours at `0x6E0600` until v0.69.1, copied once); not erased by ERASE MOD DATA |
+| `0x6E0500` .. `0x6E05FF` | PERFORM (`csrc/sampler/perf.c`, v0.69), upstream's place | 128 records x 2 copies |
+| `0x6E0600` .. `0x6EEDFF` | PROJECT RAM banks (`csrc/sampler/pools.c`, v0.65, `docs/banks.md`), upstream's place | projects 0..63's bank lists (B..D), 2 copies x 464 sectors (`DN2B` header last); v0.69.2: here again (at `0x5E0000` v0.65.1..v0.69.1, copied once) |
 | `0x6F0000` .. `0x6F0700` | the +Drive library's extension (`csrc/sampler/lib.c` `LIB_X_AT`) | entries 2,048..16,383 |
-| `0x6F0800` .. `0x6FEFFF` | the wishes record (`csrc/wishes/store.c`, `docs/wishes-record.md`) | 59,392 cells of one sector (`DN2W`), each a sound's record filed under its hash; written once |
+| `0x6F0800` .. `0x6FEFFF` | PROJECT RAM banks, upstream's place | projects 64..127's bank lists; v0.69.2: here again (at `0x5F0000` until v0.69.1, copied once) |
 | `0x6FF000` | DIRECT JUMP (`csrc/jump/jump.c`, `docs/jump.md`) | the mod's settings sector (`DN2S`, version, flags, check); bit 0: DIRECT JUMP, bit 1: REMOTE CONTROL OFF (`csrc/devtest/usbcfg.c`), bit 2: LIVE SELECT OFF (`csrc/msel/live.c`), bit 3: VOICE BUDGET OFF (`csrc/load/load.c` SET_BUDGET_OFF, 2026-11-12); bits 2.. carried through by jump.c's writes |
 | `0x700000` .. the device's end | the +Drive library (`csrc/sampler/lib.c`) | superblock (`DN2L`), index, folders, then the samples' frames |
 
-Free between them: `0x6C8001..0x6CFFFF`, `0x6D0002..0x6D00FF`, `0x6E0300..0x6E03FF`, `0x6E0502..0x6E7FFF`,
-`0x6E8801..0x6EFFFF`, `0x6F0701..0x6F07FF` (the folders 64..127 at `0x6FF800..0x6FF804`). A new region takes a range
-from there and adds its row here and a `_Static_assert` against its neighbours in its C.
+Free between them: `0x5EE800..0x5FEFFF`, `0x5FF103..0x5FF1FF`, `0x5FFA01..0x5FFAFF`, `0x5FFB01..0x5FFBFF`,
+`0x5FFC01..0x5FFFFF` (ours to take); `0x6C8001..0x6CFFFF`, `0x6D0002..0x6D00FF`, `0x6E0300..0x6E03FF`,
+`0x6EEE00..0x6EFFFF`, `0x6F0701..0x6F07FF` (gaps between upstream's: not ours). A new region of ours takes a range
+below `0x600000`, adds its row here and a `_Static_assert` against its neighbours in its C.
 
-**v0.39, ERASE MOD DATA** (`csrc/sampler/erase.c`, `docs/erase-mod-data.md`) TRIMs exactly the four
-mod rows above (the pool image `0x600000..0x6C8000`, the lists' whole range `0x6D0000..0x6E02FF`, the
-settings sector, the library to the device's end) and nothing below `0x600000`. A new region must be
-added to its job table and `er_inside`, or it survives an erase.
+**Rule (the User, 2026-11-22): our +Drive data lives in ranges upstream does not use.** Upstream
+(De-Pattern/dn2mk2-firmware) names `0x600000..0x6C8000` (the pool image), `0x6D0000..0x6E02FF` (the lists),
+`0x6E0400..0x6E04FF` (its tunings), `0x6E0500..0x6E05FF` (PERFORM), `0x6E0600..0x6EEDFF` and `0x6F0800..0x6FEFFF`
+(its bank lists), `0x6F0000..0x6F0700` (the library's extension), `0x6FF000` (settings), `0x6FF800..` and `0x700000..`
+(the library); below `0x600000` it names nothing (v0.69, `erase.c`). A region of ours goes **below `0x600000`** (past
+the factory buffer, `0x5D8000`), never into a range upstream names or is likely to grow into; an upstream feature we
+take keeps upstream's place (so its data is the same on both firmwares); when an upstream release takes a range we
+hold, ours moves with a one-time copy on the unit. Since v0.69.2 (`csrc/sampler/dmove.c`, `csrc/include/dmove.h`)
+every region of ours is below `0x600000` and every upstream feature sits at upstream's place.
+
+**The moves (v0.69.2).** Once, in an order where each frees the place the next takes: SAFE MODE's record (at the
+eMMC-ready point, `normal.c`) and the DSP program's copy (at the upload, `lzma7cache.c`) at the boot itself; then, at
+the first ask in the UI (`dm_ok`, before the pools read their bank lists, the tunings and the wishes record wait for
+it): the inserts' own move first (`0x6E0400..` is the tunings' new place), our tunings to `0x6E0400`, bank lists A to
+`0x6E0600`, the wishes record filed again into its 92,160 cells at `0x5D8000`, bank lists B to `0x6F0800`. Each copies
+the old place's whole records (a stale upstream record at the new place with nothing copied over it is cleared), sets
+its bit in the move record, and never writes an old place. Gate steps `drivemove`, `insmove`, `safeboot` (part m) and
+`test_lzma7cache.py`.
+
+**v0.39, ERASE MOD DATA** (`csrc/sampler/erase.c`, `docs/erase-mod-data.md`) TRIMs the mod's regions in the table
+above (v0.69.2: the pool image, the lists, the settings sector, the library, its extension and folders, the inserts'
+records, the DSP program's copy, the wishes record, the bank lists, SAFE MODE's record; not the tunings, PERFORM, the
+marks or the move record) and nothing below `0x5D8000` (`ER_FLOOR`). A new region must be added to its job table and
+`er_inside`, or it survives an erase.
 
 ## The DSP (SHARC): where its map lives, and recent claims
 
@@ -301,6 +344,7 @@ the sample reader, `docs/dsp-cost.md`):
 | L1 `0x2ddff0..0x2ddffc` | the guard's later insert words (INS_DLP, INS_BUSEND, REST_OUT; v0.52 merge: v0.49's words filled the block at 0x2de000), after PERC's scratch (to 0x2ddfe8) | `perc.guard.INS_LO` |
 | L1 `0x2e0098..0x2e0100` | the taps' line: its switch, its tag, then 24 words (to `sampler.program.RELATCH`) | `SMP_LINE_DM` |
 | DDR `0x81218000..0x81219824` | freed (the reader's coefficients until 2026-11-12) | `SMP_TABLES_DDR` |
+| DDR `0x81216000..0x81216804` | freed (2026-11-20, DRUM's room: PERC's DDR exp2 no longer loaded; the program and the sample machines read its L1 copy `PERC_EXP2_DM` since 2026-11-12) | `PERC_TABLES_DDR` |
 
 ## DSP optimisation claims 2026-11-12 (SHARC L1 / L2)
 
@@ -337,7 +381,7 @@ listed (`scratch/juno-engine/l1consts.py`) and F1, F2 re-checked against them (R
 | L1 F2 `0x2E1200..0x2E1700` | 1,280 | DPRO speed (v0.52) | DPRO's interp table (`dsp.MNM_INTERP_DM`; trackbuf's span cut to `0x2E1200`) | measured on v0.52's engines (dsp_cost.py, engine): DPRO-DDRW -2,560 a voice (12,444 -> 9,884), DPRO-DENS -1,280 (5,735 -> 4,455) | used (re-allotted 2026-11-13) |
 | L1 F2 `0x2E1700..0x2E1750` | 80 | opt-host | the inserts' refusal telemetry (round 13): per-type skip counts (`guard.INS_TSKIP`, 16 words) and each insert pass's least room (`guard.INS_ROOM`, 4 words); a span (`dsp.INS_TSKIP_DM`) | (telemetry, not a saving) | used (claude/instel; the arbiter allotted 0x2E1700..0x2E1980, the rest given back) |
 | L1 F1 `0x2E0640..0x2E0E44` | 2,052 | opt-synths | PERC's exp2 table | SOPHIE -2.2..3.9k a voice (with tan), MD too | allotted |
-| L1 F1 `0x2E0E44..0x2E0F08` | 196 | plaits16 (main, the arbiter, 2026-11-15) | ANALOG 2's PARA chords (`engines.analog2.para`: HELD, CUR[16], MEM[16], ROLE[16]; `dsp.PARA_DM`), live across blocks; zeros in the upload, so clear after every DSP load | (a feature: a 4-note ANALOG 2 chord ~12k cycles against ~27k as four voices, the study's) | used (claude/para) |
+| L1 F1 `0x2E0E44..0x2E1000` | 444 | plaits16 (main, the arbiter, 2026-11-15); one voice 2026-11-16 (F1's tail) | ANALOG 2's PARA chords (`engines.analog2.para`: HELD, CUR[16], MEM[16], ROLE[16]; `dsp.PARA_DM`), live across blocks; zeros in the upload, so clear after every DSP load | (a feature: a 4-note ANALOG 2 chord ~12k cycles against ~27k as four voices, the study's) | used (claude/para) |
 | L1 `0x2E4050..0x2E53D0` | 4,992 | inserts (bus) | the bus FDN8 instances' stores (`inserts.bus.FD_L1`), live across blocks | (perf 2026-11-11) | used |
 | L1 `0x2E68EC..0x2E6DEC` (FDN8 state's tail) | 1,280, **transient: FDN8 block only, written before read** | insfx (main, 2026-11-14) | FDN8's staged tank's block buffers X, S, F0..F7 (`fdn8.stages.bufs`); XDLY's x / xb borrow them while XDLY runs (`xdly.program._xx`) | FDN8 25.1k -> 16.0k an instance, bit-identical | used |
 | L1 `0x2E6F00..0x2E7000` (XDLY state's unused tail) | 256, **transient: FDN8 block only, written before read** | insfx (main, 2026-11-14) | FDN8's L / R sums (`fdn8.stages.lr_bufs`) | (with the row above) | used |
@@ -349,21 +393,38 @@ listed (`scratch/juno-engine/l1consts.py`) and F1, F2 re-checked against them (R
 | L2 `0x2009B400..0x200A0000` | 19,456 | perc-layout | PERC's event-only code: host bodies (18,074) + trx_coefs / md_idiv (754) | PERC's span -24.3 KB with 2b (0 instructions changed) | used: perc2a 18,828 B (628 B spare); dsp.py pairwise L2 overlap check (round 11) |
 | L2 `0x200A2800..0x200A4000` | 6,144 | perc-layout | 2b: init bodies (4,788) + vo6_bqx (648) | (with 2a) | used: perc2b 5,480 B (664 B spare) |
 | L2 `0x200A6FC0..0x200A7000` (MNM scratch +0x2FC0) | 64 | opt-host | the budget sums (`perc.program.CUM_OFF`, 16 words) | (the host cut, bf2639fd) | used |
+| L2 `0x200A73BC..0x200A73C0` (MNM scratch +0x33BC) | 4 | drum (2026-11-20) | `CLOCK_OFF`: PERC's block clock, one added at PERC's entry every block (DRUM built); DRUM's choke reads it (`dnfw.perc.program`); zero in the upload | (a feature) | used (claude/drum) |
+| L2 `0x200A73C0..0x200A7400` (MNM scratch +0x33C0) | 64 | drum (2026-11-20) | `CHOKE_OFF`: DRUM's hat chokes, a word a track (16 words): every CLOSED hit writes the block clock into its track's (the track from the stock's slot map `ROUTE` 0x257898); an OPEN voice keeps the word and the clock at its hit and falls in 3 ms when the word moves, or (a CLOSED hit earlier in its own block) once that block is over (`dnfw.engines.drum.hats`); zeros in the upload | (a feature) | used (claude/drum) |
 | L2 `0x200A7400..0x200A7440` (MNM scratch +0x3400) | 64 | clicks | `VEL_OFF`: per-slot velocity (16 words; plus frame slot 62 of our voices, types 5..31) | - | allotted (claude/velocity) |
 | L2 `0x200A4000..0x200A6550` (MNM scratch +0x0000) | 9,552 | lever 5 (opt-inserts) | the FDN8 diffusers of the send and of bus 0 (`fdn8.program.DIFF_SEND_L2`, `DIFF_BUS0_L2`; 0x200A4000..0x200A6000 used, to 0x200A6550 allotted): **persistent** delay state | (lever 5) | used (r5; its own claim in test_dsp_claims.py since 2026-11-14) |
 | L2 `0x200A9200..0x200A9C88` | 2,696 | opt-md | PI-RS's strike table (`PIRS_TAB`), copied once from the decoded tables when they become whole (`md.core.tables_in_l2`, `dsp.PIRS_TAB_L2`) | PI-RS -624 a voice (with the curve) | used (main as arbiter, 2026-11-14; claude/md16-r5) |
 | L2 `0x200B5800..0x200B6000` | 2,048 | opt-md | the P-I modes' curve table (`PI_CURVE_142949`; `dsp.PI_CURVE_L2`), copied the same way: the gap between a2f.asm's span and smp.asm's (ANALOG 2's filter state left it for L1, 2026-11-11) | PI-SD/RS/BD/MT/ML a little each block | used (main as arbiter, 2026-11-14; claude/md16-r5) |
+| L1 block 2 `0x302000..0x31A000` | 98,304 | MD 14k (the User's option A, 2026-11-16) | the P-I delay lines and VO-6's ring, 16 slots x 6 KB (`dsp.MD_DELAY_L1`, `md.core.PI_LINES_STRIDE`; their block scratch is in L1 already), zeros in the upload; above the SHARC runner harness's frame (`0x300000..0x301A80`), below the PM cache (`0x31C000`); never used on the DN2 at this size before | PI-SD 14,616 -> 12,698, PI-RS 13,732 -> 11,814, PI-BD 12,969 -> 11,051, PI-MT 12,858 -> 10,940 (dsp_cost.py, steady) | claude/pi-lines-l1, not in a build; DN2 check last |
+| L2 `0x200B1800..0x200B2400` | 3,072 | todo-items (2026-11-16) | inspost.asm's span grows `0x1C00 -> 0x1F00` (to `0x200B1B00`; 7,034 of 7,040 B were used); the side blocks (DRONE's BEAT, ANALOG 2's WDTH, 0x900 B) move up from `0x200B1800` to `0x200B1B00..0x200B2400` (the free `0x200B2100..0x200B2400` ate the move; they now end at a2f.asm's start) | (room, not a saving) | allotted (claude/post-room) |
+| L2 `0x200AD800..0x200ADA00` | 512 | fx-opt2 (main, 2026-11-21) | inserts.asm's span grows `0x2300 -> 0x2500` downward (`dsp.INS_L2_LOAD` 0x200ADA00 -> 0x200AD800, `INS_SW` 0xBD6C00, `design.INS_ONE_SW` 0xBD6C03), taken from the end of XDLY's span (now `0x200AC400..0x200AD800`, 5,120 B: xdly.asm 4,882 B, 238 B over its code, 110 B over the 128-B tail `dsp.L2_TAIL`) | (room for TAPE / the shapers' multifunction loops) | used (claude/fx-opt2) |
+| L2 `0x200EE000..0x200F5000` | 28,672 | fx-fast (the User, 2026-11-21: "use 28 KB of the reserve") | the bus FDN8 instances 1..7's diffusers, a 1,024-word ring each (`fdn8.program.DIFF_BUSK_L2`, instance k at + 4 KB (k - 1)), as lever 5's for the send and instance 0: **persistent** delay state, zeroed by the engine's switch when an instance starts | bus FDN8 instances 1..7 each about -1.4k a block (lever 5's measure; this session's in docs/dsp-perf.md) | used (claude/fx-fast) |
 | L2 128 KB, place open | 131,072 | opt-md | DSP2's sine table (no exact smaller form: no symmetry) | EFM-CY -2.5k a voice, FM / TRX | **decision**: no 128 KB contiguous anywhere today; see below |
 
-Left free: F1 `0x2E0F08..0x2E1000` (248 B), F2 `0x2E1750..0x2E1C00` (1,200 B), F3: none (FDN8 stores),
+Left free: F1 none (PARA's chords use `0x2E0E44..0x2E0F34`, `dsp.PARA_DM`, and its claim keeps the rest to
+`0x2E1000`; corrected 2026-11-20), F2 none, **F2 is full** (main, 2026-11-21: dist-onset's FZ_COPY was refused there, the loop reads its buffer again): the bus XDLY stores take `0x2E1750..0x2E1980` since 2026-11-13, PERC's constant pool `0x2E1980..0x2E1B40` (112 words) since 2026-11-21, `dsp.PERC_POOL_DM`, `dnfw.perc.cpool`, and AMP ON/OFF's data `0x2E1B40..0x2E1C00`, `dsp.AMPSW_DATA_DM`; F3: none (FDN8 stores),
 L2 `0x2009B400..0x200A0000` (19,456 B) and `0x200A2800..0x200A4000` (6,144 B), both taken by perc-layout: with them,
 nothing is left inside dsp.py's L2 floor but the small gaps between spans.
 
 The Monomachine L2 scratch (`0x200A4000..0x200A8000`, one span): `+0x0000..+0x2FC0` unused since v0.43 (the render scratch
 went to L1), then **lever 5's FDN8 diffusers at `+0x0000..+0x2550`** (persistent; a 2026-11-14 note here still said
 "unused" and opt-md's P-I tables nearly landed on them); free `+0x2550..+0x2FC0` (2,672 B, main allots it); `+0x2FC0` opt-host's sums; `+0x3000..+0x31C4` the voices'
-bookkeeping (keys, costs, rests, strikes, bounds, SLOT_N); `+0x3200..+0x33A8` ANALOG 2's mix tables (106 words);
-`+0x3400..+0x3440` clicks' VEL_OFF; free `+0x33A8..+0x3400` and `+0x3440..+0x4000`.
+bookkeeping (keys, costs, rests, strikes, bounds, SLOT_N); `+0x3200..+0x33A8` free since 2026-11-21 (ANALOG 2's mix tables, 106 words, were here: ANALOG 2 and JUNO now read the
+A2 filter pass's own L1 copy, `analog2.tables_at` = `a2f program.TABLES`, in the L1 span at `0x2DD600`; -436 B of section 7);
+`+0x33BC` PERC's block clock (CLOCK_OFF, 2026-11-20); `+0x33C0..+0x3400` DRUM's hat chokes (CHOKE_OFF, 2026-11-20); `+0x3400..+0x3440` clicks' VEL_OFF; `+0x3440..+0x3660` the post
+inserts' aux and gate words (`inserts.design.POST_AUX_L2`); free `+0x3200..+0x33BC` and `+0x3660..+0x4000` (corrected
+2026-11-20: this note had `+0x3440..` free). `dsp.regions()` lists every one of these as a sub-area since 2026-11-20,
+the diffusers included.
+
+2026-11-16 (PARA as one voice, `dnfw.engines.analog2.para`): the shadow pool, 16 x 1 KB in L2 at `0x200EA000..0x200EE000`
+(the User's Q5, 2026-11-16: "16 KB pool in L2": **taken from the User's 64 KB reserve** above PERC; 48 KB of it left,
+`0x200EE000..0x200FA000`, then 2026-11-21 28 KB of that to the bus FDN8 diffusers (`0x200EE000..0x200F5000`): **20 KB
+left, `0x200F5000..0x200FA000`**; `dsp.PARA_POOL_L2`, in `dsp.regions()` and `test/test_dsp_claims.py`); the chord rows in DDR, the pool's `PV_TABLE`
+(`dnfw.sampler.machines`, the slice area's unused tail, 384 B; zeroed by the DSP's first block after a load).
 
 DDR (no fast-memory cost; listed so nobody lands on another): juno-chorus `0x82550000..0x82551050` (the send's state +
 a 1,024-float ring with 3 mirror words, zeros at power-on), right after the moved TAPE's rings (`0x82540000..0x82550000`);
@@ -376,3 +437,33 @@ units; a runtime scan of stock should come first) AND opt-samples' 6 KB and the 
 tap (`0x200A4000..0x200A9200`, 20.5 KB) moved elsewhere (e.g. into `0x200EA000..`, the User's margin above PERC). (2) L1 block 2 (112 KB, 1-cycle) would
 serve opt-stock's -115k and opt-md's table best, but only 4 KB of it has run on the unit and the runner cannot see
 the PM cache: it needs a hardware check by the User before anyone's state goes there.
+
+## The DSP's write windows and the ghost audit (2026-11-20)
+
+The User heard a ghost delay long after playing, the DN2 idle, and asked whether DSP memory areas overlap. The audit
+(main 2449656b and claude/v0626; its notes, scripts and farm logs in the main checkout's `scratch/dsp-overlap-audit*`):
+
+- **No overlap.** Every area of `dsp.regions()`, the areas it then left out, stock's known DDR areas
+  (`0x80000018..0x80530BE8`: the reverb line, the delay's 4 MB sample area, the chorus state, the track buffers) and
+  every literal address in the 17 built SHARC objects: no two overlap but a sub-area inside its container. The RAM
+  check's two 256 KB areas (`0x8CF00000`, `0x9CF00000`) are in the pool's user part, far from every delay line (ours
+  `0x82000000..0x83FFFFFF`).
+- **No stray writer, no stale read** (the SHARC runner, `scripts/sharc_ghost_step.py`): a write watch on every DSP
+  write saw no write into a delay line, ring or FX state by anyone but its owner, and none outside the map; with the
+  areas the DSP's load never clears (the bus FDN8 rings, the bus XDLY lines, the moved inserts' rings, PLAITS' big
+  buffers, the PARA pool) filled with noise first, as a unit's memory is after a DSP restart, every output word was
+  bit-identical to a run on zeroed memory. The ghost itself was not found; the runner reaches 0.8 s of audio, not
+  minutes, and cannot model the stock send FX (G15).
+- **Closed: the fast link's write window had no lower bound.** `sampler.program.tdm_rx` wrote a packet whose word
+  offset was negative ("wholly before the command block") below the pool: 64 MB below is stock's reverb and delay,
+  16 MB below the bus XDLY lines. Now a negative offset writes nothing (`test/test_link_window.py`).
+- **Closed: the map's gaps.** `regions()` now holds PARA_DM, PIRS_TAB_L2, PI_CURVE_L2, `l1b2_spans()` (the P-I lines
+  in L1 block 2), the FDN8 diffusers (sub-area of the Monomachine scratch) and the pool's inner areas (recordings,
+  shipped tables, READY / TPG / LV_WANT, slice tables, the RAM check's areas). `test/test_dsp_map_complete.py` holds
+  every literal address of the built assembly inside the map.
+- **Gate:** `sharc:ghost-z` (no input, zeroed vs stale memory), `sharc:ghost-d` (hits, zeroed vs stale), `sharc:ghost-h`
+  (hits, the RAM check and the levels pass on, 600 blocks: no output back after 192 silent blocks, more than the
+  longest onset of an engine with no early path, FDN8 LONG's ~186 blocks). Each under the write watch.
+
+Run-time areas (not in the boot stream) keep what the last program left across a DSP restart: a new state area there
+must be safe stale, or cleared by its owner before it is read (juno-engine's READY word, 2026-11-12).

@@ -125,6 +125,20 @@ static void timer_off(void)
         VEC96 = STOCK_DEFAULT;
 }
 
+/* (2026-11-18) PROF_RAM outlives a restart that keeps the RAM; the timer, its vector and the frame clock do not. A run
+ * left "running" by the last load is not this load's: it is stopped (its samples kept for READ), so the audio
+ * interrupt stops recording into it (W_AUDIO_GATE) and START is not refused as busy. prof_mine is code data, 0 after
+ * every load; START sets it */
+u32 prof_mine __attribute__((section(".data"))) = 0;
+
+static void stale_run_stopped(void)
+{
+    if (!prof_mine && P[W_MAGIC] == MAGIC && P[W_STATE] == S_RUN) {
+        P[W_STATE] = S_STOPPED;
+        P[W_AUDIO_GATE] = 0;
+    }
+}
+
 /* one sample: FRAME is the exception frame (u16 format/vector, u16 SR, u32 PC); LATE in DTIM0 ticks */
 static void record(const volatile u16 *frame, u32 late)
 {
@@ -174,6 +188,7 @@ void prof_tick(const volatile u16 *frame)
  * compare a frame otherwise): FRAME is the audio interrupt's exception frame (its link %fp + 4) */
 void prof_audio(const volatile u16 *frame)
 {
+    stale_run_stopped();
     if (P[W_MAGIC] != MAGIC || P[W_STATE] != S_RUN || P[W_SOURCE] != SRC_AUDIO)
         return;                                           /* RAM above BSS holds anything at power-on */
     if (++P[W_DIV_N] < P[W_DIV])
@@ -201,6 +216,7 @@ static u32 timer_unusable(void)
 
 static u32 start(u32 source, u32 rate)
 {
+    stale_run_stopped();
     if (P[W_MAGIC] == MAGIC && P[W_STATE] == S_RUN)
         return ST_BUSY;
     if (source != SRC_TIMER && source != SRC_AUDIO) {
@@ -235,6 +251,7 @@ static u32 start(u32 source, u32 rate)
     u32 sr = irq_off();
     P[W_T0] = DTCN0;
     P[W_F0] = FRAMES;
+    prof_mine = 1;
     P[W_STATE] = S_RUN;
     if (source == SRC_TIMER) {
         P[W_SAVED_RR] = DTRR0;
@@ -255,6 +272,7 @@ static u32 start(u32 source, u32 rate)
 
 static void stop(void)
 {
+    stale_run_stopped();
     if (P[W_MAGIC] != MAGIC)
         return;
     u32 sr = irq_off();
@@ -272,6 +290,7 @@ static void stop(void)
 /* STATUS: u8 state, u8 source, u8 why, u8 record bytes, then u32 x 17 */
 static u32 status(u8 *rp, u32 r)
 {
+    stale_run_stopped();
     int ok = P[W_MAGIC] == MAGIC;
     u32 running = ok && P[W_STATE] == S_RUN;
     rp[r++] = ok ? (u8)P[W_STATE] : S_OFF;
@@ -319,6 +338,7 @@ static u32 read_ring(u32 from, u8 *rp, u32 r)
 NOJT u32 prof_rx(const u8 *rq, u32 n, u8 *rp, u32 r, u8 *st)
 {
     u32 sub = n >= 4 ? rq[3] : 0xFFu;
+    stale_run_stopped();
     if (sub == 0) {
         return status(rp, r);
     } else if (sub == 1) {

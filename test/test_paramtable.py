@@ -159,3 +159,17 @@ def test_the_scans_stop_at_the_firmware_s_own_image(stock):
     assert len(paramtable.bound_sites(tail, BASE)) == paramtable.EXPECTED_BOUNDS
     assert len(paramtable.base_sites(tail, BASE)) == sum(paramtable.EXPECTED_BASES.values())
     assert paramtable.STOCK_END == BASE + len(stock)
+
+
+def test_live_base_is_where_the_builds_accessors_read(stock):
+    """emu_fine_swap / emu_encoder_trace read records out of RAM where the build's accessors do (2026-11-16):
+    stock's base on stock, lfo4's 0x468fffcc once relocated, and a build reading two tables refused."""
+    assert paramtable.live_base(stock, stock, BASE) == 0x401F83A4
+    buf = bytearray(stock)
+    paramtable.relocate(buf, BASE, table_va=0x46900000, added=10)
+    assert paramtable.live_base(stock, bytes(buf), BASE) == 0x46900000 - 60 + 8 == 0x468FFFCC
+    half = bytearray(stock)
+    site = paramtable.base_sites(stock, BASE)[0]
+    struct.pack_into(">I", half, site.va - BASE, site.was + 0x46900000 - paramtable.TABLE)
+    with pytest.raises(paramtable.TableError):
+        paramtable.live_base(stock, bytes(half), BASE)

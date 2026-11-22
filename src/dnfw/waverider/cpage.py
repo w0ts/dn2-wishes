@@ -29,26 +29,37 @@ LINK_SOURCES = [SOURCE.parents[1] / "sampler" / "link.c", SOURCE.parents[1] / "s
                 SOURCE.parents[1] / "sampler" / "pools.c",          # v0.38: per-project pools
                 SOURCE.parents[1] / "sampler" / "erase.c",          # v0.39: ERASE MOD DATA
                 SOURCE.parents[1] / "sampler" / "rectrig.c",        # v0.41: REC trigs, buffers, QREC/QPLAY
+                SOURCE.parents[1] / "sampler" / "tune.c",           # v0.61: microtuning
+                SOURCE.parents[1] / "sampler" / "perf.c",           # v0.69: PERFORM (upstream)
+                SOURCE.parents[1] / "sampler" / "dmove.c",          # v0.69.2: our +Drive data out of upstream's places (once)
                 SOURCE.parent / "lzma7.c",                          # 2026-11-11: section 7 as LZMA (docs/lzma7.md)
                 SOURCE.parent / "lzma7cache.c", SOURCE.parent / "lzma7late.S",   # ... decoded once, kept on the +Drive
+                SOURCE.parents[1] / "safemode" / "normal.c",           # 2026-11-21: SAFE MODE's normal-boot half (docs/safe-mode.md)
                 SOURCE.parents[1] / "jump" / "jump.c", SOURCE.parents[1] / "jump" / "hooks.S",   # DIRECT JUMP
-                SOURCE.parents[1] / "slides" / "slide.c", SOURCE.parents[1] / "slides" / "hooks.S",   # parameter slides
+                SOURCE.parents[1] / "slides" / "slide.c", SOURCE.parents[1] / "slides" / "hooks.S", SOURCE.parents[1] / "modulation" / "snap.S",   # parameter slides
                 SOURCE.parents[1] / "meter" / "meter.c", SOURCE.parents[1] / "meter" / "hooks.S",   # the system meter
                 SOURCE.parents[1] / "meter" / "quiet.c",              # ... the CPU label quiet while stock loads or upgrades
+                SOURCE.parents[1] / "meter" / "mixer.c",              # ... the MIXER pages' meters and the CLIP label (2026-11-20)
+                SOURCE.parents[1] / "meter" / "startup.c",            # ... DSP and CLIP quiet while the DN2 starts (2026-11-20)
                 SOURCE.parents[1] / "fdn8" / "ui.c",                 # FDN8's TYPE knob and names (docs/fdn8.md)
                 SOURCE.parents[1] / "xdly" / "ui.c",                 # XDLY's TYPE knob and names (docs/xdly.md)
                 SOURCE.parents[1] / "fxpage" / "fxp.c",               # the send pages' second page (docs/fxpage.md)
                 SOURCE.parents[1] / "inserts" / "ins.c",              # the per-track inserts' page (docs/inserts.md)
                 SOURCE.parents[1] / "inserts" / "store.c",            # ... saved with the project (2026-11-10)
+                SOURCE.parents[1] / "inserts" / "ovw.c",              # ... FX on release, the overview held (2026-11-17)
+                SOURCE.parents[1] / "inserts" / "ovw_draw.c",         # ... the page keys' overviews drawn (2026-11-17)
                 SOURCE.parents[1] / "inserts" / "hooks.S",
                 SOURCE.parents[1] / "scope" / "scope.c",              # AMP page 2's oscilloscope (2026-11-11)
                 SOURCE.parents[1] / "hold" / "hold.c",                # DRONE's HOLD latch (2026-11-10)
                 SOURCE.parents[1] / "hold" / "hooks.S",
                 SOURCE.parents[1] / "para" / "vmenu.c",               # PARA on the VOICE menu's B (2026-11-15)
                 SOURCE.parents[1] / "para" / "hooks.S",
+                SOURCE.parents[1] / "para" / "one.c",                 # PARA as one voice (2026-11-16)
+                SOURCE.parents[1] / "para" / "led.c",                 # PARA on the VOICE key's LED (2026-11-19)
                 SOURCE.parent / "popup.c",                            # the list popup (2026-11-09)
                 SOURCE.parents[1] / "msel" / "msel.c",               # MACHINE SEL in two columns (2026-11-11)
                 SOURCE.parents[1] / "msel" / "live.c",               # ... LIVE SELECT, its PERSONALIZE row (2026-11-12)
+                SOURCE.parents[1] / "msel" / "ampsw.c",              # AMP ON/OFF for the drum machines (2026-11-20)
                 SOURCE.parents[1] / "load" / "load.c",               # the DSP load budget at note-on (2026-11-12)
                 SOURCE.parents[1] / "load" / "hooks.S",
                 SOURCE.parents[1] / "msel" / "live.S",
@@ -64,6 +75,12 @@ LINK_SOURCES = [SOURCE.parents[1] / "sampler" / "link.c", SOURCE.parents[1] / "s
                 SOURCE.parents[1] / "matrix" / "matrix.c",          # the matrix's routes (docs/matrix.md)
                 SOURCE.parents[1] / "matrix" / "env2_page.c",       # ... AMP's ENV2 page
                 SOURCE.parents[1] / "matrix" / "routes_pop.c",      # ... the routes popup (FUNC + push)
+                SOURCE.parents[1] / "matrix" / "dest_pop.c",        # ... the DEST popup (an LFO's routes)
+                SOURCE.parents[1] / "matrix" / "routes.c",          # ... an LFO's routes as the popups edit them
+                SOURCE.parents[1] / "matrix" / "atten.c",           # ... DEP, the LFO's attenuverter (2026-11-19)
+                SOURCE.parents[1] / "matrix" / "setup.c",           # ... MOD SETUP's entries from the popup (2026-11-21)
+                SOURCE.parents[1] / "matrix" / "setup.S",
+                SOURCE.parents[1] / "knobs" / "notch.c",            # knob notches, our popups' slow turns (2026-11-19)
                 SOURCE.parents[1] / "modulation" / "cascade.c",       # LFOs on the LFOs above them (2026-11-11)
                 SOURCE.parents[1] / "modulation" / "hooks.S",
                 SOURCE.parents[1] / "modulation" / "moving.c",        # controls that move (2026-11-11)
@@ -73,8 +90,10 @@ LINK_SOURCES = [SOURCE.parents[1] / "sampler" / "link.c", SOURCE.parents[1] / "s
                 SOURCE.parents[1] / "presets" / "engfilt.c",          # the preset browser's ENGINE filter (2026-11-12)
                 SOURCE.parents[1] / "presets" / "hooks.S",
                 SOURCE.parents[1] / "devtest" / "usbcfg.c",           # ... REMOTE CONTROL in USB CONFIG (2026-11-12)
-                SOURCE.parents[1] / "devtest" / "usbcfg.S"]
-LINK_ENTRIES = ["smp_rx_hook", "kb_rec_hook", "smp_hi", "smp_walk", "smp_booted", "smp_key", "smp_cmds", "smp_quant_hook", "fx_type_hook", "smp_tdm_hook", "smp_tdm_sent", "smp_tdm_heard", "smp_retries", "smp_saved", "smp_boot", "smp_save_recording", "smp_save_mark", "smp_load", "smp_lstate", "smp_ui_pop", "wr_screen", "rec_combo", "wr_lfo_mask", "rec_overlay", "rec_src", "rec_dest", "smp_ram", "rec_phase", "trim_slot", "trim_n", "trim_s", "trim_e", "nm_cur", "nm_text", "slc_state", "slc_page_seen", "smp_analyse", "smp_analysis", "smp_onsets", "smp_slices_set", "smp_slices_get", "slc_keynotes", "slc_nfr", "slc_sl", "slc_ns", "slc_cur", "slc_grid_n", "smp_pos", "smp_pos_at", "smp_periods", "smp_mod_apply", "smp_dir_ok", "smp_meta_ok", "smp_lst_open", "smp_fb_open", "smp_fb_folder", "smp_fb_cur", "rec_pv_on", "smp_func_held", "smp_question_up", "sn_opens", "sn_results", "sn_up", "smp_machine_commit", "smp_fb_store", "smp_lib_refresh", "smp_lib_pending", "smp_lp_queued", "smp_lib_load", "smp_lib_slot_of", "smp_lib_preview", "smp_lib_preview_stop", "smp_fb_rowtext", "smp_mq_off", "smp_fb_mcur", "smp_lp_done", "smp_lp_full", "smp_fb_auto", "smp_fb_auto_starts", "smp_lp_skipped", "smp_lib_state", "smp_lib_writes", "smp_held_lo", "smp_held_hi", "smp_knob_d", "smp_knob_at", "smp_dsp_load", "smp_load_peak", "smp_load_seen", "smp_load_at", "rec_state", "rec_heard", "slc_kb_c", "slc_alloc_n", "smp_tables", "smp_pv_state", "trim_zoom", "trim_head_x", "sl_ui_table_now", "smp_push_slot", "sl_rec_knob", "sl_rec_held", "sl_rec_table", "rec_view", "rec_rlen", "rec_link", "rec_room", "as_done", "rec_saved_slot", "rec_rstrt", "rec_thres", "rec_src", "rec_chan", "sl_rec_page", "smp_rec_place", "smp_slot_empty", "smp_pl_dirp", "rec_combo", "rec_overlay", "rt_on", "rt_play", "rt_rplace", "rt_rbytes", "rt_pend", "rt_cur", "rt_manual", "rt_qrec", "rt_qplay", "rt_pos", "rt_steps", "rt_nx_place", "rt_nx_room", "rt_nx_need", "rt_w", "rt_gen", "q_gen", "q_fire", "q_cancel", "rt_fired", "rt_refused", "rt_swaps", "rt_qfired", "rt_why", "rt_trig", "rt_cur_end", "rt_bounce_samp", "rt_is_bounce", "rt_buf_of", "rt_trig_get", "rt_trig_toggle", "rt_rearm", "rt_count", "rt_take_handover", "rt_regions", "rt_rsteps", "rt_last_step", "rt_used", "rt_fired_at", "rt_fired_trk", "rt_why_trk", "rt_last_key", "bn_page", "bn_yes_at", "bn_active", "bn_led_walk", "bn_led_poll", "bn_led_claims", "bn_open", "bn_save", "bn_pages", "bn_said_at", "bn_said_n", "bn_nothing_at", "rt_frame", "rt_poll", "rt_cut", "smp_rt_sent", "rec_rt_take", "rt_q_set", "rt_q_waiting", "rt_knob", "rt_state", "rt_arm", "rt_req", "bn_sub", "rt_flex_req", "rt_req_waiting", "rt_buf_value", "rt_buf_code", "rt_samp_buf", "smp_samp_direct", "rec_gain", "sl_knob_push", "rt_clear", "bn_clear_ask", "bn_cleared", "bn_cleared_at", "fx_get", "fx_set", "fx_valid", "ms_frame", "ms_mask", "ms_frames", "rt_mute_knob", "bn_mute", "rec_peak",
+                SOURCE.parents[1] / "devtest" / "usbcfg.S",
+                SOURCE.parents[1] / "stocklink" / "hooks.S",        # stock link/USB passes, less work
+                SOURCE.parents[1] / "obfast" / "hooks.S"]           # Overbridge path, less work (DN2_OB_FAST)
+LINK_ENTRIES = ["pf_ui", "pf_sel", "pf_col", "pf_mute", "pf_opens", "pf_frames", "pf_writes", "pf_reads", "pf_bad", "pf_owner", "pf", "pf_set", "pf_tab", "pf_tsel", "pf_dbg", "pf_poll", "pf_publish", "pf_apply", "pf_mark", "smp_rx_hook", "smp_lfo_hook", "smp_lfo_fix", "smp_bank_live", "smp_bank_count", "smp_bank_blocked", "smp_lp_bank", "smp_row_step", "smp_word_row", "smp_row_word", "smp_name", "smp_discard", "smp_set_samp_word", "smp_samp_word", "kb_rec_hook", "smp_hi", "smp_walk", "smp_booted", "smp_key", "smp_cmds", "smp_quant_hook", "fx_type_hook", "smp_tdm_hook", "smp_tdm_sent", "smp_tdm_heard", "smp_retries", "smp_saved", "smp_boot", "smp_save_recording", "smp_save_mark", "smp_load", "smp_lstate", "smp_ui_pop", "wr_screen", "rec_combo", "wr_lfo_mask", "rec_overlay", "rec_src", "rec_dest", "smp_ram", "rec_phase", "trim_slot", "trim_n", "trim_s", "trim_e", "nm_cur", "nm_text", "slc_state", "slc_page_seen", "smp_analyse", "smp_analysis", "smp_onsets", "smp_slices_set", "smp_slices_get", "slc_keynotes", "slc_nfr", "slc_sl", "slc_ns", "slc_cur", "slc_grid_n", "smp_pos", "smp_pos_at", "smp_periods", "smp_mod_apply", "smp_dir_ok", "smp_meta_ok", "smp_lst_open", "smp_fb_open", "smp_fb_folder", "smp_fb_cur", "rec_pv_on", "smp_func_held", "smp_question_up", "sn_opens", "sn_results", "sn_up", "smp_machine_commit", "smp_fb_store", "smp_lib_refresh", "smp_lib_pending", "smp_lp_queued", "smp_lib_load", "smp_lib_slot_of", "smp_lib_preview", "smp_lib_preview_stop", "smp_fb_rowtext", "smp_mq_off", "smp_fb_mcur", "smp_lp_done", "smp_lp_full", "smp_fb_auto", "smp_fb_auto_starts", "smp_lp_skipped", "smp_lib_state", "smp_lib_writes", "smp_held_lo", "smp_held_hi", "smp_knob_d", "smp_knob_at", "smp_dsp_load", "smp_load_peak", "smp_load_seen", "smp_load_at", "rec_state", "rec_heard", "slc_kb_c", "slc_alloc_n", "smp_tables", "smp_pv_state", "trim_zoom", "trim_head_x", "sl_ui_table_now", "smp_push_slot", "sl_rec_knob", "sl_rec_held", "sl_rec_table", "rec_view", "rec_rlen", "rec_link", "rec_room", "as_done", "rec_saved_slot", "rec_rstrt", "rec_thres", "rec_src", "rec_chan", "sl_rec_page", "smp_rec_place", "smp_slot_empty", "smp_pl_dirp", "rec_combo", "rec_overlay", "rt_on", "rt_play", "rt_rplace", "rt_rbytes", "rt_pend", "rt_cur", "rt_manual", "rt_qrec", "rt_qplay", "rt_pos", "rt_steps", "rt_nx_place", "rt_nx_room", "rt_nx_need", "rt_w", "rt_gen", "q_gen", "q_fire", "q_cancel", "rt_fired", "rt_refused", "rt_swaps", "rt_qfired", "rt_why", "rt_trig", "rt_cur_end", "rt_bounce_samp", "rt_is_bounce", "rt_buf_of", "rt_trig_get", "rt_trig_toggle", "rt_rearm", "rt_count", "rt_take_handover", "rt_regions", "rt_rsteps", "rt_last_step", "rt_used", "rt_fired_at", "rt_fired_trk", "rt_why_trk", "rt_last_key", "bn_page", "bn_yes_at", "bn_active", "bn_led_walk", "bn_led_poll", "bn_led_claims", "bn_open", "bn_save", "bn_pages", "bn_said_at", "bn_said_n", "bn_nothing_at", "rt_frame", "rt_poll", "rt_cut", "smp_rt_sent", "rec_rt_take", "rt_q_set", "rt_q_waiting", "rt_knob", "rt_state", "rt_arm", "rt_req", "bn_sub", "rt_flex_req", "rt_req_waiting", "rt_buf_value", "rt_buf_code", "rt_samp_buf", "smp_samp_direct", "rec_gain", "sl_knob_push", "rt_clear", "bn_clear_ask", "bn_cleared", "bn_cleared_at", "fx_get", "fx_set", "fx_valid", "ms_frame", "ms_mask", "ms_frames", "ms_playing_mask", "ms_play_force", "rt_mute_knob", "bn_mute", "rec_peak", "rec_mon", "rec_sent_chan", "slc_view0", "slc_fv_n", "slc_fv_lo", "slc_fv_hi", "slc_fine_views", "slc_live_sends", "slc_grid_jumps", "smp_save_keep", "smp_save_head", "kh_on", "kh_close", "kh_set", "slc_follows", "slc_snaps", "smp_fine_reads", "smp_frames_read", "tn_retune", "tn_poll", "tn_pop", "tn_draw", "tn_kb_draw", "tn_kb_up", "tn_visible", "tn_set", "tn_offset", "tn_publish", "tn_cur", "tn_root", "tn_mask", "tn_ui", "tn_user", "tn_snap", "tn_sel", "tn_frames", "tn_writes", "tn_reads", "tn_bad", "tn_owner", "tn_opens", "tn_note", "tn_from",
                 # DIRECT JUMP (csrc/jump, docs/jump.md)
                 "jmp_cue", "jmp_tick", "jmp_arm", "jmp_switch", "jmp_tracks", "jmp_key", "jmp_poll",
                 "jmp_on", "jmp_armed", "jmp_pending", "jmp_count", "jmp_last", "jmp_loaded", "jmp_dirty",
@@ -96,10 +115,10 @@ LINK_ENTRIES = ["smp_rx_hook", "kb_rec_hook", "smp_hi", "smp_walk", "smp_booted"
                  # the RECORDER as the DT2's screens (rec_dt2.c): the DSP's status the checks set
                  "rec_room", "rec_frames", "rec_peak", "rec_wave", "rec_thres", "rec_link",
                  # AMP page 2's oscilloscope (csrc/scope, docs/scope.md): the state the checks read
-                 "scope_up", "scope_taps", "scope_ring", "scope_pos", "smp_rx_sh"]
+                 "scope_up", "scope_taps", "scope_ring", "scope_pos", "smp_rx_sh", "scope_draw", "scope_poll", "scope_end", "scope_frames", "scope_alone", "scope_dropped", "scope_gain", "scope_auto", "scope_zoom", "scope_set_taken"]
 # parameter slides (csrc/slides, dnfw.slides): the hooks and the state the checks read
 SLIDE_ENTRIES = ["sl_ui_table", "sl_cell", "sl_knob", "sl_screen", "sl_page_up", "sl_page_seen", "sl_pre_hook", "sl_pre", "sl_apply", "sl_smooth", "sl_build", "sl_clear", "sl_load", "sl_save",
-                 "sl_lock_get", "sl_lock_set", "sl_v", "sl_cap", "sl_started", "sl_ticks"]
+                 "sl_lock_get", "sl_lock_set", "sl_v", "sl_cap", "sl_started", "sl_nxt_last", "sl_ticks"]
 # the system meter (csrc/meter, docs/meter.md): its three hooks and the figures the checks read
 METER_ENTRIES = ["mtr_isr_out", "mtr_switch", "mtr_poll", "mtr_draw"]
 # FDN8 (csrc/fdn8, docs/fdn8.md): its poll and the state the checks read
@@ -108,20 +127,29 @@ FDN8_ENTRIES = ["rvt_poll", "rvt_cell", "rvt_state", "rvt_placed", "rvt_seen"]
 XDLY_ENTRIES = ["dlt_poll", "dlt_cell", "dlt_state", "dlt_placed", "dlt_seen"]
 FXP_ENTRIES = ["fxp_pop", "fxp_draw", "fxp_begin", "fxp_seen", "fxp_words", "fxp_active", "fxp_gen", "fxp_up", "fxp_v", "fxp_record", "fxp_set_record", "fxp_defaults"]
 # the per-track inserts (csrc/inserts, docs/inserts.md): the page's hooks and the values the checks read
-INS_ENTRIES = ["ins_pop", "ins_draw", "ins_visible", "ins_words", "ins_gen", "ins_up", "ins_sel", "ins_selv", "ins_mod", "ins_kv", "ins_hdr_tail",
+INS_ENTRIES = ["ins_period", "ins_take", "ins_trig", "ins_ui_poll", "ins_knob_now", "ins_route_dest", "ins_pkt", "ins_chg",
+               "ins_pkts", "ins_urgents", "ins_trigs", "ins_lk", "ins_cell", "ins_moff", "ins_keep", "ins_rr", "ins_due",
+               "ins_hdirty", "ins_tpg_gen", "ins_tpg_w", "sl_ins_held", "sl_ins_set", "sl_ins_record", "mx_ins_routes",   # 2026-11-20: live inserts
+               "ttl_off", "ttl_draws", "ins_title_icon", "isel_open", "isel_at", "isel_slot", "isel_opens", "isel_picks", 
+               "ins_pop", "ins_draw", "ins_visible", "ins_words", "ins_gen", "ins_up", "ins_sel", "ins_selv", "ins_mod", "ins_kv", "ins_fza", "ins_hdr_tail",
                "ins_inst", "ins_edits", "ins_pj_write_hook", "ins_store_poll", "ins_wr_ring", "ins_wr_head",
-               "ins_st_writes", "ins_st_loads", "ins_st_fails"]
+               "ins_st_writes", "ins_st_loads", "ins_st_fails", "ins_st_moved", "ins_st_copied", "ins_st_booted", "dm_ok", "dm_run", "dm_bits", "dm_tried", "dm_runs", "dm_fails", "dm_copied"]
 HOLD_ENTRIES = ["hold_note_hook", "hold_final_hook", "hold_final", "hold_len", "hold_keys", "hold_poll", "hold_seq", "hold_key", "hold_count", "hold_drops", "hold_rel",
-                "para_live", "para_kept", "para_count"]   # DRONE's HOLD (csrc/hold); ANALOG 2's PARA legato (2026-11-15)
-PARA_ENTRIES = ["vm_seen_hook", "vm_begin", "vm_draw", "vm_pop", "vm_seen", "vm_sets"]   # PARA on the VOICE menu (csrc/para)
+                "para_live", "para_kept", "para_count",
+                "hold_locked", "hold_lock", "hold_nosl", "hold_latch", "hold_sus_seen"]   # DRONE's HOLD (csrc/hold); ANALOG 2's PARA legato (2026-11-15); the latches kept from other notes (2026-11-19)
+PARA_ENTRIES = ["vm_seen_hook", "vm_begin", "vm_draw", "vm_pop", "vm_seen", "vm_sets",
+                "pv_rel_hook", "pv_pre", "pv_post", "pv_rel", "pv_final", "pv_row", "pv_leaders", "pv_ch", "pv_cur",
+                "pv_kept", "pv_ends", "pv_now", "pv_joins", "pv_starts", "pv_rels", "pv_lens", "pv_nets", "pv_drops",
+                "pv_lost", "pv_hidden", "pv_taken",
+                "pu_voice_led", "pu_led_poll", "pu_led_sets", "pu_led_marks", "pu_led_state"]   # PARA as one voice (csrc/para/one.c, 2026-11-16)   # PARA on the VOICE menu (csrc/para)
 DEVTEST_ENTRIES = ["dt_rx", "dt_poll", "dt_sw", "smp_bulk_at", "prof_isr", "prof_audio",
                    "dt_glass", "dt_present", "dt_inv",   # the test channel (csrc/devtest)
                    "dt_usb_rebuild", "dt_usb_items", "dt_usb_changes", "set_remote", "set_reset_seen"]
 LZMA7_ENTRIES = ["dn_depack7", "dn7_status", "dn7_length", "dn7_late", "dn7c_state", "dn7c_why"]    # 2026-11-11 (docs/lzma7.md)
-MOD_ENTRIES = ["mod_mask_hook", "mod_lfo_mask", "mod_eval", "mod_eval_pre", "mod_wb", "mod_wb_cell",   # csrc/modulation
-               "mv_begin", "mv_cell", "mv_cell_span", "mv_knob", "mv_poll"]
+MOD_ENTRIES = ["mod_mask_hook", "mod_lfo_mask", "mod_eval", "mod_eval_pre", "mod_wb", "mod_wb_cell", "sm_fast", "sm_snap", "lfo_fast", "mods_fast",   # csrc/modulation
+               "mv_begin", "mv_cell", "mv_cell_span", "mv_knob", "mv_poll", "mv_end"]
 # the wishes record (csrc/wishes, docs/wishes-record.md): its four stubs and the state the checks read
-WISH_ENTRIES = ["wish_memcpy_stub", "wish_memset_stub", "wish_load_stub", "wish_save_stub", "wish_poll",
+WISH_ENTRIES = ["wish_memcpy_stub", "wish_voice_copy", "wish_post_copy", "wish_memset_stub", "wish_load_stub", "wish_save_stub", "wish_poll",
                 "wish_n", "wish_ready", "wish_busy", "wish_reentered", "wish_full", "wish_wants",
                 "wish_loads", "wish_links_in", "wish_saves", "wish_links_out", "wish_copies", "wish_carries",
                 "wish_clears", "wish_cells_written", "wish_cells_found", "wish_cells_read", "wish_resolved",
@@ -130,25 +158,44 @@ WISH_ENTRIES = ["wish_memcpy_stub", "wish_memset_stub", "wish_load_stub", "wish_
                 "wish_item", "wish_kit_load_stub", "wish_kit_save_stub", "wish_pat_load_stub", "wish_pat_save_stub",
                 "wish_song_load_stub", "wish_song_save_stub", "wish_ps_load_stub", "wish_ps_save_stub",
                 "wish_item_loads", "wish_item_saves", "wish_item_nolane", "wish_item_dropped",
-                "mx_poll", "mx_eval", "mx_lay", "mx_compiles", "mx_env_on", "mx_env_off",
-                "mxp_pop", "mxp_poll", "mxp_draw", "mxp_visible",
+                "mx_poll", "mx_eval", "mx_lay", "mx_compiles", "mx_env_on", "mx_env_off", "mx_dmask",
+                "mxp_pop", "mxp_poll", "mxp_draw", "mxp_visible", "mxp_placed",
                 "mxp_pushes", "mxp_opens", "mxp_refusals", "mxp_why", "mxp_rid", "mxp_turns", "mxp_keys", "mxp_detents",
                 "env2_visible", "mx_env2_locks", "sl_e2_held", "sl_e2_set",     # the matrix (csrc/matrix)
+                "env2_amp_draw", "wr_turn_held", "wr_drawn_at",                 # 2026-11-18: ENV2's draw, turns drawn together
                 "mxp_setup_dep", "mxp_setup_rows", "mxp_erased", "ins_title_now",
-                "wish_rx", "wish_put_wait", "wish_puts"]                         # travel (store.c: PUT, GET)
+                "mxp_order", "mxp_setup_hint", "mxp_rows_drawn", "mxp_lit",                 # the routes popup's sort, hint, rows
+                "mxp_end", "mxp_fulls", "mxp_parts", "mxp_same", "mxp_dropped", "mxp_groups",   # its redraws (2026-11-18)
+                "mxs_copy", "mxs_mark", "mxs_copies", "mxs_refresh",   # 2026-11-21: MOD SETUP's
+                "mxs_set", "mxs_mute", "mxs_delete", "mxs_offers", "mxp_dims", "mxp_ticks",   # rows edited from the popup (csrc/matrix/setup.c)
+                "mxp_note", "mxp_per_note",                     # 2026-11-20: PER NOTE in its header (the checks read it)
+                "ldp_pop", "ldp_poll", "ldp_draw", "ldp_visible", "ldp_p", "ldp_rows", "ldp_opens", "ldp_refusals",
+                "ldp_turns", "ldp_keys", "ldp_erased", "ldp_full", "ldp_alone", "ldp_dropped", "ldp_built",
+                "ldp_routes_drawn", "ldp_valid", "ldp_checks", "ldp_detents",                  # the DEST popup (csrc/matrix/dest_pop.c)
+                "wish_rx", "wish_put_wait", "wish_puts",                         # travel (store.c: PUT, GET)
+                "mx_kof", "mx_m_of", "mx_atab", "mx_lay_first", "mxa_convert", "mxa_compat", "mxa_converted", "mxa_changed",
+                "mxa_saved", "mx_loaded", "mx_route_level", "wish_drop", "mxa_stored", "wish_att_head", "wish_att_lost",
+                "kn_cur", "kn_tcb", "kn_d", "kn_items", "kn_seen", "kn_catches", "kn_held", "kn_passes", "kn_releases", "kn_locks",
+                "kn_item", "kn_value", "kn_units", "kn_lock_snd", "kn_lock_kit"]   # knob notches (csrc/knobs)                      # DEP the attenuverter (csrc/matrix/atten.c)
 # the preset browser's ENGINE filter (csrc/presets, dnfw.waverider.engfilt): its hooks and the state the checks read
 ENG_ENTRIES = ["eng_test_hook", "eng_sort_hook", "eng_ctor_hook", "eng_label", "eng_title", "eng_list", "eng_sort_row",
                "eng_clear", "eng_toggle", "eng_tick", "eng_match", "eng_mask", "eng_tests", "eng_lists", "eng_n"]
 # LIVE SELECT (csrc/msel/msel.c, live.c, live.S): its hooks and the state the checks read
 LIVE_ENTRIES = ["live_menu_hook", "live_label", "live_box", "live_yes", "live_delta", "live_row", "live_on", "live_rows",
-                "msel_poll", "ls_commits", "ls_reverts", "set_bits"]
+                "msel_poll", "ls_commits", "ls_reverts", "set_bits",
+                # 2026-11-20: AMP ON/OFF for the drum machines (csrc/msel/ampsw.c): the state the drumamp check reads
+                "as_mask", "as_gen", "as_turns", "as_draws", "as_drum", "as_on", "as_set", "as_poll", "as_pop", "as_draw",
+                "as_sent"]
 # 2026-11-12: the DSP load budget (csrc/load): its hook and the state the emulator check reads
 LOAD_ENTRIES = ["load_alloc_hook", "load_poll", "load_voice", "load_stock", "load_fx", "load_off", "load_checks",
                 "load_over", "load_keyups", "load_sp_min", "load_last_sum", "load_last_need", "load_rows",
                 # 2026-11-13: the budget by the DSP's room, the release tails (the checks set and read them)
                 "load_meas", "load_busins", "load_pend", "load_pend_at", "load_tails", "load_by_room", "load_last_free",
                 "smp_tlm_cost", "smp_room_now", "smp_room_at", "smp_periods"]
-LINK_ENTRIES = LINK_ENTRIES + WISH_ENTRIES + LOAD_ENTRIES + LIVE_ENTRIES + ENG_ENTRIES + DEVTEST_ENTRIES + LZMA7_ENTRIES + MOD_ENTRIES + SLIDE_ENTRIES + METER_ENTRIES + FDN8_ENTRIES + XDLY_ENTRIES + FXP_ENTRIES + INS_ENTRIES + HOLD_ENTRIES + PARA_ENTRIES
+STOCKLINK_ENTRIES = ["skl_fill", "skl_rcopy", "skl_mode5", "skl_modex", "skl_tx_after", "skl_isr_install",
+                     "skl_usbout", "skl_rxclr"]                      # (only with DN2_STOCK_LINK_FAST: compile_page)
+OBFAST_ENTRIES = ["obf_build_pair", "obf_in32", "obf_clr"]   # (only with DN2_OB_FAST: compile_page)
+LINK_ENTRIES = LINK_ENTRIES + STOCKLINK_ENTRIES + OBFAST_ENTRIES + WISH_ENTRIES + LOAD_ENTRIES + LIVE_ENTRIES + ENG_ENTRIES + DEVTEST_ENTRIES + LZMA7_ENTRIES + MOD_ENTRIES + SLIDE_ENTRIES + METER_ENTRIES + FDN8_ENTRIES + XDLY_ENTRIES + FXP_ENTRIES + INS_ENTRIES + HOLD_ENTRIES + PARA_ENTRIES
 
 
 # the list popup (csrc/waverider/popup.c, docs/popups.md): on our machines' and FX's list parameters,
@@ -180,6 +227,7 @@ def compile_page(header: str, *, base: int) -> tuple[bytes, dict[str, int], int]
         defines["MX_BYTES"] = PG.MX_BYTES
         defines["WR_LOAD_BOUND"] = PG.TYPES_LAST + 2   # the stored-sound LOAD's machine bound (csrc/wishes/hooks.S replays it)
         defines["MOD_RAM"] = hex(PG.MOD_RAM) + "u"    # csrc/modulation's state (2026-11-11)
+        defines["MOD_RAM_A"] = hex(PG.MOD_RAM)        # the same for the assembler (2026-11-21: hooks.S's mod_wb_cell, inline)
         defines["MOD_CASCADE_BYTES"] = PG.MOD_CASCADE_BYTES
         defines["MOD_MOVING_RAM"] = hex(PG.MOD_RAM + PG.MOD_CASCADE_BYTES) + "u"
         defines["MOD_MOVING_BYTES"] = PG.MOD_BYTES - PG.MOD_CASCADE_BYTES
@@ -188,19 +236,36 @@ def compile_page(header: str, *, base: int) -> tuple[bytes, dict[str, int], int]
         defines["WPOP_OURS"] = int(POPUP_OURS)        # the list popup's two parts (csrc/waverider/popup.c)
         defines["WPOP_STOCK"] = int(POPUP_STOCK)
         defines["WPOP_MIN"] = int(POPUP_MIN)
-        for name in ("POOL_BYTES", "REC_OFFSET", "REC_END", "RAM_PROVEN", "SLICE_AREA", "TABLE_AREA", "TABLE_ROOM", "TABLE_READY", "TABLE_MAGIC", "TABLE_SUM_AT", "TABLE_LOAD", "CMD_OFFSET", "STATUS_MAGIC", "TDM_TAG",
+        for name in ("POOL_BYTES", "REC_OFFSET", "REC_END", "RAM_PROVEN", "SLICE_AREA", "TABLE_AREA", "TABLE_ROOM", "TABLE_READY", "TABLE_MAGIC", "TABLE_SUM_AT", "TABLE_LOAD", "PV_TABLE", "CMD_OFFSET", "STATUS_MAGIC", "TDM_TAG",
                      "RX_MAGIC", "TX_MAGIC", "POS_MAGIC", "POS_NONE", "POS_ONE", "META_PTR", "META_PTR_MAGIC", "META_MAGIC", "META_FOLDERS",
-                     "META_FOLDER_BYTES", "META_SLOT_BYTES", "META_NAME_BYTES", "META_BYTES", "LIBID_OFFSET"):      # v0.16; v0.25 POS
+                     "META_FOLDER_BYTES", "META_SLOT_BYTES", "META_NAME_BYTES", "META_BYTES", "LIBID_OFFSET",
+                     "LV_MAGIC", "CLIP_MAGIC", "LV_ONE", "LV_WANT_OFF", "LV_WANT", "LV_REPLY_AT", "LV_REPLY_MAGIC",
+                     "BANK_AREA", "BANK_PAGE", "BANK_MAGIC", "BANK_META", "BANK_SLICES", "BANK_RAM"):   # v0.16; v0.25 POS; 2026-11-20 the mixer meters
             defines[name] = hex(getattr(SM, name)) + "u"
+        from . import ampsw as _as                  # 2026-11-20: AMP ON/OFF's word for the DSP (csrc/sampler/link.c)
+        defines["AS_POOL_OFF"] = hex(_as.pool_off()) + "u"
+        defines["AS_MAGIC"] = hex(_as.MAGIC) + "u"
+        for name in ("LV_CH", "LV_BIT_MAIN_OB", "LV_BIT_DAC", "LV_BIT_IN", "LV_BIT_REC"):
+            defines[name] = int(getattr(SM, name))
         for name in ("REC_FIRST", "REC_SLOTS", "REC_SLOT_SHIFT", "CMD_SEND", "CMD_VERIFY", "CMD_PROBE", "CMD_PREVIEW", "CMD_SCAN",
-                     "RX_WORDS", "TX_WORDS", "CMD_WORDS",
-                     "BUF_N", "BUF_HALVES", "BUF_ENTRY", "BUF_DIR", "BUF_SLOT0", "BOUNCE_TYPE"):   # v0.44 BOUNCE
+                     "RX_WORDS", "TX_WORDS", "CMD_WORDS", "PV_ROW_WORDS",
+                     "BUF_N", "BUF_HALVES", "BUF_ENTRY", "BUF_DIR", "BUF_SLOT0", "BOUNCE_TYPE", "BANK_N"):   # v0.44 BOUNCE; v0.65
             defines[name] = int(getattr(SM, name))
         import os
         if PG.stock_units_on():
             defines["DN2_STOCK_UNITS"] = 1            # the stock records' units (md_page.c, page.c): a build option
+        if PG.ob_fast_on():
+            defines["DN2_OB_FAST"] = 1                # csrc/obfast: stock's Overbridge path, less work (an option)
+        if PG.stock_link_fast_on():
+            defines["DN2_STOCK_LINK_FAST"] = 1        # csrc/stocklink: stock's link and USB passes, less work (an option)
         if PG.lfo4_on():
             defines["DN2_LFO4"] = 1                   # lfo4's side in our code (page.c; docs/lfo-112-port.md): an option
+        if PG.lfo_halfrate_on():
+            defines["DN2_LFO_HALFRATE"] = 1           # half the voices' LFOs a frame (cascade.c lh_args): an option
+        if PG.route8_on():
+            defines["DN2_ROUTE8"] = 1                 # the route tables in 8 bytes a route (matrix.c): an option
+        if PG.route_probe_on():
+            defines["DN2_ROUTE_PROBE"] = 1            # mx_probe before mx_eval (matrix.c, hooks.S): a test build's
         # 2026-11-14 (docs/lfo-112-port.md 4.2, 4.3): where stock reads the parameter records and the LFOs' live
         # state. lfo4 moves both (its table copy at 0x46900000, four LFOs a voice from 0x46700000); every one of
         # our C sources reads them through these, stock's values when DN2_LFO4 is off (the code is then today's)
@@ -209,18 +274,32 @@ def compile_page(header: str, *, base: int) -> tuple[bytes, dict[str, int], int]
         if PG.lfo4_on():                          # LFO4's values in the wishes record: lfo4's table, by address
             from ..mods import lfo4 as _l4
             defines.update({f"LFO4_{k.upper()}": f"{v:#x}u" for k, v in _l4.SPEC["symbols"].items()})
+            # 2026-11-16: the wishes stubs go on into lfo4's memcpy / memset stubs (csrc/wishes/hooks.S; lfo4's entry
+            # hooks are left out, dnfw.mods.lfo4 MEMORY_SITES): plain numbers, which the assembler reads
+            defines.update({"LFO4_MEMCPY_STUB_VA": f"{_l4.SPEC['symbols']['lfo4_memcpy_stub']:#x}",
+                            "LFO4_MEMSET_STUB_VA": f"{_l4.SPEC['symbols']['lfo4_memset_stub']:#x}"})
+            # 2026-11-17: the memcpy stub's own test and call of lfo4's carry (csrc/wishes/hooks.S)
+            defines.update({"LFO4_EXT_LIVE_VA": f"{_l4.SPEC['symbols']['ext_live']:#x}",
+                            "LFO4_ON_MEMCPY_VA": f"{_l4.SPEC['symbols']['lfo4_on_memcpy']:#x}"})
             extra.append(SOURCE.parents[1] / "wishes" / "lfo4.c")
+        # 2026-11-17: lfo_fast (csrc/modulation/hooks.S), stock's LFO evaluator as the build runs it: lfo4's and
+        # lfowaves' addresses in it, read out of their edits (dnfw.waverider.lfofast checks them word for word); 2026-11-19
+        # with DN2_LFO4 off too (stock's evaluator with lfowaves' edits)
+        from . import lfofast as _lf
+        defines.update({k: v for k, v in _lf.defines(*_lf.specs()).items() if PG.lfo4_on() or k not in ("LF_LIVE", "LF_BACKUP")})
         if os.environ.get("DNFW_SMP_STORE_TEST"):
             # an emulator-only build: the +Drive region inside the emulator's 15 MB device
             # (never shipped: scripts/gen_waverider_code.py refuses to write it)
             sector, floor = os.environ["DNFW_SMP_STORE_TEST"].split(",")
             defines.update({"STORE_SECTOR": sector + "u", "STORE_FLOOR": floor + "u"})
         linked = cbuild.build([SOURCE, *LINK_SOURCES, *extra], base=base,
-                              entries=[ENTRY, POLL, OVERLAY, *LINK_ENTRIES],
+                              entries=[ENTRY, POLL, OVERLAY, *(e for e in LINK_ENTRIES
+                                                               if (PG.stock_link_fast_on() or e not in STOCKLINK_ENTRIES)
+                                                               and (PG.ob_fast_on() or e not in OBFAST_ENTRIES))],
                               include=[pathlib.Path(tmp)], defines=defines)
     # libgcc's 64-bit helpers use instructions the ColdFire lacks (an illegal-instruction
     # exception on the instrument, found in the emulator in v0.16): none may be linked
     wide = sorted(n for n in linked.symbols if n.endswith("di3") or n.endswith("di4"))
     if wide:
         raise RuntimeError(f"the page renderer links libgcc's 64-bit helpers {wide}: use 32-bit arithmetic")
-    return linked.image, linked.symbols, linked.bss
+    return linked.image, linked.symbols, linked.bss, linked.abs32

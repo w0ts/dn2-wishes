@@ -129,6 +129,7 @@ def type_of(word: int) -> int:
 # eight records (PARAM_IDS), named per machine while such a track is active
 from ..mnm import machines as _mnm
 from ..engines.plaits import plaits as _mnm_plaits
+from ..engines.drum import drum as _mnm_drum
 MNM_LONG = {"TUNE": "Tune", "---": "Unused",
             "ENGN": "Engine",                   # 2026-11-11: MONOMACHINE's (page 1 H)
             # SOPHIE (docs/sophie.md)
@@ -150,6 +151,17 @@ MNM_LONG = {"TUNE": "Tune", "---": "Unused",
             # JUNO (docs/mnm.md "JUNO"; PW, NOIS, CUT, RES, ENV, DEC: above)
             "SUB": "Sub Osc", "KEY": "Key Track", "ATK": "Attack", "SUS": "Sustain", "REL": "Release", "PWM": "PW Mod",
             "RNGE": "Range",
+            # DRUM (docs/drum.md; TUNE, DCAY, SWEP, HOLD, NOIS: above)
+            "SWTM": "Sweep Time", "SNAP": "Click", "CLIK": "Body/Click", "CURV": "Sweep Curve", "CLKT": "Click Colour", "DRIV": "Drive", "SHAP": "Body Shape",
+            "SIGH": "Pitch Sigh", "CLKL": "Click Length", "VEL": "Vel Timbre",
+            # 2026-11-20: DRUM's SNARE, hats, TOM (dnfw.engines.drum.drum PLACES; by place: MNM_LONG_BY)
+            "MODE": "Mode", "WIRE": "Wire Decay", "BUZZ": "Wire Buzz", "WTON": "Wire Tone", "WATK": "Wire Attack",
+            "SIZZ": "Sizzle", "HPF": "High-Pass", "Q": "Resonance", "LOWB": "Low Band",
+            "SWHD": "Sweep Hold", "WCHR": "Wire Circuit",      # stage 3: KICK's page 2 G, SNARE's page 2 H
+            # stage 4: CLAP, RIDE and CRASH
+            "CNT": "Clap Count", "TAIL": "Tail Level", "HUMN": "Humanize", "GRP": "Group", "TLTN": "Tail Tone",
+            "TATK": "Tail Attack", "RAMP": "Burst Ramp", "BELL": "Bell", "HIT": "Hit Decay", "SET": "Metal Set",
+            "SWEL": "Swell", "RIVT": "Rivets",
             # SID 6581, DPRO WAVE / DDRW / DENS, VO-6 (v0.26; removed 2026-11-08, back 2026-11-11):
             # their names as at 28eb110's parent (MIX, SYNC, WAV2, WAVE: below, by machine)
             "PW": "Pulse Width", "PWAD": "PW Sweep", "PWRS": "PW Restart",
@@ -160,13 +172,20 @@ MNM_LONG = {"TUNE": "Tune", "---": "Unused",
             "BR1": "Bit Reduce 1", "WID": "Detune Width", "BR2": "Bit Reduce 2",
             "PCH2": "Pitch 2", "PCH3": "Pitch 3", "PCH4": "Pitch 4",
             "VOC1": "Vocal Freq 1", "VOC2": "Vocal Freq 2", "V-SW": "Vowel Switch",
-            "VOIC": "Voice Type", "CONS": "Consonant", "CLEN": "Cons Length", "CVOL": "Cons Volume"}
+            "VOIC": "Voice Type", "CONS": "Consonant", "CLEN": "Cons Length", "CVOL": "Cons Volume",
+            # FM+ STAT, PAR, DYN (v0.59)
+            "1FRQ": "Op1 Freq", "1FIN": "Op1 Fine", "1ENV": "Op1 Env", "1FB": "Op1 Feedback",
+            "2FRQ": "Op2 Freq", "2VOL": "Op2 Volume", "2ENV": "Op2 Env", "3FRQ": "Op3 Freq",
+            "3ENV": "Op3 Env", "1FEN": "Op1 Freq Env", "1VOL": "Op1 Volume", "1VEN": "Op1 Vol Env",
+            "2FB": "Op2 Feedback"}
 
 
 def _ck(M, sh: str) -> tuple[str, str]:
-    """2026-11-11: the key a control's choices, widget and tags go by: (machine, control); on a MONOMACHINE place
-    ENGN is MONOMACHINE's, its other controls the engine's (M.NAME)"""
-    return (M.HOST, sh) if sh == _mnm.MONO_ENGN and hasattr(M, "HOST") else (M.NAME, sh)
+    """2026-11-11: the key a control's choices, widget and tags go by: (machine, control); on a host's place
+    (dnfw.mnm.machines HOSTS: MONOMACHINE, DRUM) its SEL (ENGN, TYPE) is the host's, its other controls the place's
+    (M.NAME: the engine, "DRUM SNAR" ..)"""
+    h = _mnm.HOST_BY_NAME.get(getattr(M, "HOST", None))
+    return (M.HOST, sh) if h is not None and sh == h.SEL else (M.NAME, sh)
 
 
 def _choices(M) -> dict:
@@ -178,13 +197,57 @@ def _choices(M) -> dict:
 
 
 # a name one machine means otherwise (MNM_LONG is by short name across machines)
-MNM_LONG_BY = {("ANALOG2", "WAVE"): "Waveform", ("JUNO", "WAVE"): "Waveform", ("JUNO", "ENV"): "VCF Env",
+MNM_LONG_BY = {("DRUM", "TYPE"): "Drum Type", ("ANALOG2", "WAVE"): "Waveform", ("JUNO", "WAVE"): "Waveform", ("JUNO", "ENV"): "VCF Env",
                ("JUNO", "HPF"): "High-Pass",
+               # 2026-11-20: DRUM's types (the place's name: dnfw.engines.drum.drum PLACES)
+               ("DRUM SNAR", "MODE"): "Head Mode", ("DRUM TOM", "MODE"): "Skin Mode",
+               ("DRUM SNAR", "SNAP"): "Stick", ("DRUM TOM", "SNAP"): "Stick",
+               # stage 4
+               ("DRUM CLAP", "SNAP"): "Burst Snap", ("DRUM CLAP", "DCAY"): "Tail Decay",
+               ("DRUM RIDE", "SNAP"): "Stick", ("DRUM CRSH", "SNAP"): "Stick",
+               ("DRUM RIDE", "ATK"): "Swell Time", ("DRUM CRSH", "ATK"): "Swell Time",
+               ("DRUM CLHH", "SNAP"): "Strike", ("DRUM OPHH", "SNAP"): "Strike",
+               ("DRUM SNAR", "NOIS"): "Body/Wires", ("DRUM SNAR", "GLID"): "Pitch Glide",
+               # stage 5: the balance knobs (left the first part only, centre both 100 %, right the second only)
+               ("DRUM TOM", "NOIS"): "Body/Noise", ("DRUM CLAP", "TAIL"): "Burst/Tail",
+               ("DRUM RIDE", "BELL"): "Bell/Wash", ("DRUM CRSH", "BELL"): "Bell/Wash",
+               ("DRUM CLHH", "NOIS"): "Metal/Noise", ("DRUM OPHH", "NOIS"): "Metal/Noise",
+               ("DRUM RIDE", "NOIS"): "Metal/Noise", ("DRUM CRSH", "NOIS"): "Metal/Noise",
+               ("DRUM CLHH", "TONE"): "Band Freq", ("DRUM OPHH", "TONE"): "Band Freq",
+               ("DRUM CLHH", "TOP"): "Top Octave", ("DRUM OPHH", "TOP"): "Top Octave",       # stage 3
+               ("DRUM CLHH", "DRFT"): "Metal Drift", ("DRUM OPHH", "DRFT"): "Metal Drift",
                ("SID 6581", "WAVE"): "Waveform", ("DPRO-WAVE", "WAVE"): "Waveform", ("DPRO-DENS", "WAVE"): "Waveform",
                ("DPRO-DDRW", "MIX"): "Wave Mix", ("DPRO-DDRW", "WAV2"): "Wave 2", ("DPRO-WAVE", "SYNC"): "Sync"}
 # parameters the port does not run (DENS's chorus is the Monomachine's effect after the
 # machine): drawn as "-", as an unused one
 MNM_UNPORTED = {"CHRL", "CHRW"}
+# 2026-11-20 (the User, scratch/mod-live-design.md D, 9a): the controls read only at a note's start, per machine (its
+# NAME: a host's places each their own, as the Monomachine's and DRUM's engines share slots): the routes popup says
+# "PER NOTE" on them (csrc/matrix/routes_pop.c mxp_note; md_page.c reports them as it draws them)
+MNM_PER_NOTE = {
+    "TB303": ("ACC", "SLID"),
+    "DRONE": ("HOLD",),
+    "SID 6581": ("PWRS",),
+    "DPRO-WAVE": ("WPRS",),
+    "VO-6": ("V-SW", "CONS", "CLEN", "CVOL"),
+    "DRUM KICK": ("TYPE", "VEL", "CLIK", "NOIS"),   # (2026-11-21: KICK's SNAP place is CLIK since the drum balances)
+    "DRUM SNAR": ("TYPE", "VEL", "SNAP", "TONE"),
+    "DRUM CLHH": ("TYPE", "VEL", "SNAP"),
+    "DRUM OPHH": ("TYPE", "VEL", "SNAP"),
+    "DRUM TOM": ("TYPE", "VEL", "SNAP", "TONE", "NOIS"),
+}
+
+
+def mnm_per_note_masks() -> list[int]:
+    """each place's controls read only at the note's start (MNM_PER_NOTE), as a mask of j (bit j)"""
+    names = {M.NAME for M in _mnm.CF_ALL}
+    assert set(MNM_PER_NOTE) <= names, sorted(set(MNM_PER_NOTE) - names)
+    out = []
+    for M in _mnm.CF_ALL:
+        want, pn = MNM_PER_NOTE.get(M.NAME, ()), mnm_pnames(M)
+        assert set(want) <= set(pn), (M.NAME, sorted(set(want) - set(pn)))
+        out.append(sum(1 << j for j, sh in enumerate(pn) if sh in want))
+    return out
 
 
 def _pch_names() -> tuple[tuple[int, ...], tuple[str, ...]]:
@@ -224,6 +287,13 @@ MNM_CHOICES = {
     "DPRO-DDRW": {"WAV1": 64, "WAV2": 64},
     "DPRO-DENS": {"WAVE": 64, "PCH2": "pch", "PCH3": "pch", "PCH4": "pch"},
     # VO-6: its manual's names (Appendix A); V-SW below 64 ends the vowel
+    # v0.60 (zuzsw, Thos Grol; the owner's manual pages): FM+'s listed frequencies by the ROM's
+    # ratio table (the DSP's (6 knob + 3) >> 5), named as ratios (1/2, 1, 2 ...); DYN's two
+    # continuous frequencies as the Monomachine shows them: 1FRQ x.x (2 knob/128: 1.0 at 64),
+    # 2FRQ x.xx (4 (knob/128)^2: 1.33 at 74), both 1.0 x their top at 127
+    "FM+STAT": {"1FRQ": "flist", "2FRQ": "flist"},
+    "FM+PAR": {"1FRQ": "flist", "2FRQ": "flist", "3FRQ": "flist"},
+    "FM+DYN": {"1FRQ": "lin2", "2FRQ": "sqr4"},
     "VO-6": {"V-SW": ("OFF", "ON"), "CONS": ("-", "B", "D", "F", "G", "H", "J", "K", "L", "M", "N",
                                             "P", "R", "RR", "S", "SJ", "T", "TJ", "TH", "V", "Z")},
     "SOPHIE": {"MODL": ("FUSE", "STAK", "SPLT", "SHRD", "PIPE", "BOOM", "KICK")},
@@ -237,6 +307,11 @@ MNM_CHOICES = {
     "DRONE": {"TOPO": ("PAIR", "CHN", "RING"), "GLTY": ("RATE", "TIME"), "HOLD": ("OFF", "ON"),
               # 2026-11-11, the User: an octave knob, -3..+3 (dnfw.engines.drone.drone q2), in its unit
               "OCT": ("-3oc", "-2oc", "-1oc", "0oct", "+1oc", "+2oc", "+3oc")},
+    "DRUM": {"TYPE": _mnm_drum.TYPES},           # 2026-11-20: DRUM's type (page 1 H: the host's, on every type's place)
+    "DRUM TOM": {"RNGE": _mnm_drum.RANGES},      # 2026-11-20: TOM's RANGE (page 2 D): LOW MID HI
+    "DRUM CLAP": {"CNT": _mnm_drum.COUNTS},      # stage 4: CLAP's bursts (page 1 D): 1 .. 8
+    "DRUM RIDE": {"SET": _mnm_drum.SETS},        # stage 4: the cymbals' squares (page 2 A): 808 WIDE CLST LOW
+    "DRUM CRSH": {"SET": _mnm_drum.SETS},
     "PLAITS": {"MODL": _mnm_plaits.MODELS, "TUNE": 49, "FINE": 128},   # TUNE, FINE: steps (MW_SEMIS, MW_CENTS)      # 2026-11-09: every engine ported (dnfw.engines.plaits.plaits)
     # 2026-11-11: MONOMACHINE's engine (page 1 H), the list popup's names (dnfw.mnm.machines MONO_CHOICES)
     _mnm.MONO_NAME: {_mnm.MONO_ENGN: tuple(_mnm.MONO_CHOICES[n] for n in _mnm.MONO_ENGINES)},
@@ -245,7 +320,8 @@ MNM_CHOICES = {
 # 1 empty): 2 a grid the marker steps through row by row, 3 a bar sliding along a line, 4 a
 # needle at the bottom moving left or right, 5 a knob switch pointing at its position (the
 # removed machines used 2..4; md_page.c keeps their drawing)
-MNM_WIDGET = {("SOPHIE", "MODL"): 5, ("PLAITS", "MODL"): 5, (_mnm.MONO_NAME, _mnm.MONO_ENGN): 5,
+MNM_WIDGET = {("SOPHIE", "MODL"): 5, ("PLAITS", "MODL"): 5, ("DRUM", "TYPE"): 5, (_mnm.MONO_NAME, _mnm.MONO_ENGN): 5,
+              ("DRUM TOM", "RNGE"): 5, ("DRUM CLAP", "CNT"): 5, ("DRUM RIDE", "SET"): 5, ("DRUM CRSH", "SET"): 5,
               # the Monomachine's own (back 2026-11-11, as at 28eb110's parent): DPRO-WAVE's WAVE and
               # VO-6's CONS a grid, DDRW's WAV1 / WAV2 and DENS's WAVE a bar, DENS's PCH2..4 a needle
               ("DPRO-WAVE", "WAVE"): 2, ("VO-6", "CONS"): 2,
@@ -260,10 +336,33 @@ MNM_WIDGET = {("SOPHIE", "MODL"): 5, ("PLAITS", "MODL"): 5, (_mnm.MONO_NAME, _mn
               ("JUNO", "WAVE"): 5, ("JUNO", "HPF"): 5, ("JUNO", "PWM"): 5, ("JUNO", "RNGE"): 5,
               # 2026-11-09: 6 MW_SEMIS, the step - n / 2 as +7 / -12 / 0 (the User, build #3: semitones,
               # not the note name); 7 MW_CENTS, the step - n / 2 as +12c / -30c
-              ("PLAITS", "TUNE"): 6, ("PLAITS", "FINE"): 7}   # 2026-11-09: md_page.c draws a choice as a
+              ("PLAITS", "TUNE"): 6, ("PLAITS", "FINE"): 7,   # 2026-11-09: md_page.c draws a choice as a
                                                                # knob with its choice's name; 5 marks it a choice
+              # v0.60: FM+'s listed frequencies a bar along a line (the ratio under it), DYN's
+              # continuous ones a meter's box (the value under it), as its manual draws them
+              ("FM+STAT", "1FRQ"): 3, ("FM+STAT", "2FRQ"): 3,
+              ("FM+PAR", "1FRQ"): 3, ("FM+PAR", "2FRQ"): 3, ("FM+PAR", "3FRQ"): 3,
+              ("FM+DYN", "1FRQ"): 4, ("FM+DYN", "2FRQ"): 4}
 MNM_WAVES = 32
 MNM_PCH = 255                       # mnm_choices' mark: the choice by mnm_pch_idx[knob]
+MNM_FLIST = 254                     # v0.60: FM+'s listed ratio, by mnm_flist_idx[knob]
+MNM_LIN2 = 253                      # v0.60: DYN's 1FRQ, a knob shown x.x (2 knob / 128)
+MNM_SQR4 = 252                      # v0.60: DYN's 2FRQ, a knob shown x.xx (4 (knob / 128)^2)
+
+
+def _flist_names() -> tuple[tuple[int, ...], tuple[str, ...]]:
+    """FM+'s listed frequencies: the knob -> its entry ((6 knob + 3) >> 5, as dnfw.mnm.fm.ratio
+    reads the ROM), and each entry's ratio (the ROM's word / 2^20) as a fraction: 1/2, 1, 5/4"""
+    import fractions
+    from ..mnm import rom as mrom
+    idx = tuple((6 * k + 3) >> 5 for k in range(128))
+    if not mrom.available():
+        return idx, tuple(str(k) for k in range(24))
+    names = []
+    for v in mrom.words(*mrom.FM_FLIST):
+        f = fractions.Fraction(v, 0x100000)
+        names.append(str(f.numerator) if f.denominator == 1 else f"{f.numerator}/{f.denominator}")
+    return idx, tuple(names)
 
 
 # the Monomachine's machines (v0.26; kinds 2 and 3 were RESONATOR's and CZ's until v0.25):
@@ -330,13 +429,33 @@ MNM_LABELS2 = [{r: (sh if sh != "---" else "-") for r, sh in zip(MNM_PAGE2, mnm_
 MNM_LABELS3 = [{r: (sh if sh != "---" else "-") for r, sh in zip(MNM_PAGE3, mnm_pnames(M)[16:])}
                for M in _mnm.CF_MACHINES]
 MNM_TITLES = tuple(sh for _lo, sh in _mnm.CF_LIST_NAMES)
+
+
+def _asm_places() -> tuple[tuple[int, ...], tuple[int, ...]]:
+    """2026-11-18 (ours on 50..55, the User's option A): the pages assembly's Monomachine places: every machine its
+    own, the reserved types (dnfw.mnm.machines Removed: eight unused controls, the same tables) ONE shared place.
+    -> (each place's index in CF_MACHINES, each CF_MACHINES index's place)"""
+    places, ix, removed = [], [], None
+    for k, M in enumerate(_mnm.CF_MACHINES):
+        if M is _mnm.Removed:
+            if removed is None:
+                removed = len(places)
+                places.append(k)
+            ix.append(removed)
+        else:
+            ix.append(len(places))
+            places.append(k)
+    return tuple(places), tuple(ix)
+
+
+ASM_PLACES, ASM_IX = _asm_places()
 MNM_SUBTITLES = tuple(lo for lo, _sh in _mnm.CF_LIST_NAMES)
 
 
 def mnm_named(k: int) -> dict[int, tuple[str, str]]:
     """record -> (long, short) on a Monomachine machine's track"""
     M = _mnm.CF_ALL[k]
-    out = {r: ((MNM_LONG_BY.get((M.NAME, sh), MNM_LONG.get(sh, sh)), sh) if sh != "---" and sh not in MNM_UNPORTED
+    out = {r: ((MNM_LONG_BY.get(_ck(M, sh), MNM_LONG.get(sh, sh)), sh) if sh != "---" and sh not in MNM_UNPORTED
                else (UNUSED_LONG, "-"))
            for r, sh in zip(PARAM_IDS + MNM_PAGE2 + MNM_PAGE3, mnm_pnames(M))}
     out.update({r: (UNUSED_LONG, UNUSED_SHORT) for r in range(238, 263) if r not in out})
@@ -381,6 +500,7 @@ def mnm_default_words(d, M) -> list[int]:
 MNM_CHOICE_TAGS = {
     ("PLAITS", "MODL"): ("WAVESHAPER", "", "ANALOG VCOS", "2-OP FM", "ADDITIVE", "SAW SWARM", "FILT NOISE",
                          "PARTICLES", "STRING", "RESONATOR", "BASS DRUM", "SNARE", "HI-HAT"),
+    ("DRUM", "TYPE"): _mnm_drum.TYPE_TAGS,
     ("SOPHIE", "MODL"): ("SERIES FM", "FM STACK", "PARALLEL FM", "12-BIT WAVE", "FM + RING", "METAL SKIN",
                          "TUNED KICK"),
     # 2026-11-11: MONOMACHINE's engines (page 1 H)
@@ -392,7 +512,8 @@ TAG_MAX = 11                                    # popup.c TAG_X 64 .. the box's 
 def mnm_c_header() -> str:
     q = chr(34)
     names, tags, tag_lists, rows_n, rows_at = [], [], [], [], []
-    for M in _mnm.CF_ALL:
+    flist_at = None                     # (v0.60 merge: FM+'s five listed controls share one copy of the ratio
+    for M in _mnm.CF_ALL:               # names, 24, not five)
         ch = _choices(M)
         n_row, at_row = [], []
         for sh in mnm_pnames(M):
@@ -401,6 +522,15 @@ def mnm_c_header() -> str:
                 n_row.append(MNM_PCH)
                 at_row.append(len(names))
                 names += list(_pch_names()[1])
+            elif c == "flist":
+                n_row.append(MNM_FLIST)
+                if flist_at is None:
+                    flist_at = len(names)
+                    names += list(_flist_names()[1])
+                at_row.append(flist_at)
+            elif c in ("lin2", "sqr4"):
+                n_row.append(MNM_LIN2 if c == "lin2" else MNM_SQR4)
+                at_row.append(0)
             elif isinstance(c, int):
                 n_row.append(c)
                 at_row.append(0)
@@ -415,6 +545,8 @@ def mnm_c_header() -> str:
                     tags += list(tg)
         rows_n.append(n_row)
         rows_at.append(at_row)
+    if max(max(r) for r in rows_at) > 0xFFFF:
+        raise ValueError("mnm_choice_at is 16 bits: a list starts past 65535 in mnm_choice_names")
 
     def arr(rows):
         return ", ".join("{" + ", ".join(map(str, r)) + "}" for r in rows)
@@ -451,14 +583,28 @@ def mnm_c_header() -> str:
         "}",
         f"#define MNM_WAVES {MNM_WAVES}",
         f"#define MNM_PCH {MNM_PCH}",
-        f"static const unsigned char mnm_pch_idx[128] = {{{', '.join(map(str, pidx))}}};",
+        # v0.63: the tables every reader shares are weak, not static: one copy in the image
+        # instead of one a file (md_page.c, page.c, fmt.c: about 2.7 KB, the room the keyboard
+        # HOLD needed under the 2 MiB USB upgrade buffer); their contents are unchanged
+        f"__attribute__((weak)) const unsigned char mnm_pch_idx[128] = {{{', '.join(map(str, pidx))}}};",
+        f"#define MNM_FLIST {MNM_FLIST}\n#define MNM_LIN2 {MNM_LIN2}\n#define MNM_SQR4 {MNM_SQR4}",
+        f"__attribute__((weak)) const unsigned char mnm_flist_idx[128] = {{{', '.join(map(str, _flist_names()[0]))}}};",
+        # v0.60: one place for every reader (md_page.c, page.c, fmt.c): how many choices a
+        # control has, the knob's choice, and whether it is a knob shown as a number
+        "static inline int mnm_cont(int n) { return n == MNM_LIN2 || n == MNM_SQR4; }",
+        "static inline int mnm_count(int n) { return n == MNM_PCH ? mnm_pch_idx[127] + 1 : n == MNM_FLIST ? mnm_flist_idx[127] + 1 : mnm_cont(n) ? 128 : n; }",
+        "static inline int mnm_choice(int n, int k) { k = k < 0 ? 0 : k > 127 ? 127 : k; return n == MNM_PCH ? mnm_pch_idx[k] : n == MNM_FLIST ? mnm_flist_idx[k] : mnm_cont(n) ? k : (k * n) >> 7; }",
+        # DYN's (truncated, as the manual's 1.33 at 74): x.x = 2 k / 128 (2.0 at 127: the DSP's 1.0 there), x.xx = 4 (k / 128)^2 (4.00 at 127)
+        "static inline const char *mnm_cont_text(int n, int k, char *b) { int h = k >= 127 ? (n == MNM_LIN2 ? 200 : 400) : n == MNM_LIN2 ? 200 * k / 128 : 400 * k * k / 16384; int i = 0; b[i++] = (char)('0' + h / 100); b[i++] = '.'; b[i++] = (char)('0' + h / 10 % 10); if (n == MNM_SQR4) b[i++] = (char)('0' + h % 10); b[i] = 0; return b; }",
         "#define MNM_J 24                       /* a machine's controls: page 1's eight, page 2's, page 3's */",
         f"static const unsigned char mnm_npages[MNM_N] = {{{', '.join(str(mnm_pages(M)) for M in _mnm.CF_ALL)}}};",
         f"static const char mnm_labels[MNM_N][MNM_J][6] = {{{labels}}};",
+        f"static const unsigned int mnm_per_note[MNM_N] = {{{', '.join(f'{x:#x}u' for x in mnm_per_note_masks())}}};",
         f"static const unsigned char mnm_lo[MNM_J] = {{{', '.join(str(lo) for _r, _s, lo, _t in MNM_RECS)}}};",
         f"static const unsigned char mnm_top[MNM_J] = {{{', '.join(str(t) for _r, _s, _lo, t in MNM_RECS)}}};",
         f"static const unsigned char mnm_choices[MNM_N][MNM_J] = {{{arr(rows_n)}}};",
-        f"static const unsigned char mnm_choice_at[MNM_N][MNM_J] = {{{arr(rows_at)}}};",
+        # (v0.60 merge: 16 bits; FM+'s ratio names put the lists past a byte, 281, with our machines')
+        f"static const unsigned short mnm_choice_at[MNM_N][MNM_J] = {{{arr(rows_at)}}};",
         f"static const char mnm_choice_names[{max(1, len(names))}][5] = {{{', '.join(q + n + q for n in names)}}};",
         # 2026-11-11: the list popup's tag beside each choice, as PERC's TYPE list's: only the lists that have them
         # (machine, control, first tag); "" none
@@ -483,7 +629,7 @@ def mnm_c_header() -> str:
         "enum { MW_KNOB, MW_EMPTY, MW_GRID, MW_SLIDE, MW_VU, MW_SWITCH, MW_SEMIS, MW_CENTS };",
         f"static const unsigned char mnm_widget[MNM_N][MNM_J] = {{{arr([[MNM_WIDGET.get(_ck(M, sh), 1 if sh == '---' or sh in MNM_UNPORTED else 0) for sh in mnm_pnames(M)] for M in _mnm.CF_ALL])}}};",
         # 2026-11-10: the value readout's units (dnfw.engines.units): kind (bit 7: 0 reads OFF), curve, the curves
-        "enum { MU_RAW, MU_PCT, MU_SPCT, MU_HZ, MU_HZ100, MU_MS, MU_C10, MU_C, MU_DB, MU_OCT, MU_PATN, MU_RATE, MU_PCTC, MU_MODE, MU_MS10, MU_VOIC, MU_GLID, MU_ST10, MU_JUNO, MU_ONOFF };",
+        "enum { MU_RAW, MU_PCT, MU_SPCT, MU_HZ, MU_HZ100, MU_MS, MU_C10, MU_C, MU_DB, MU_OCT, MU_PATN, MU_RATE, MU_PCTC, MU_MODE, MU_MS10, MU_VOIC, MU_GLID, MU_ST10, MU_JUNO, MU_ONOFF, MU_BAL };",
         f"static const unsigned char mnm_unit[MNM_N][MNM_J] = {{{arr(_UNITS[0])}}};",
         f"static const unsigned char mnm_unit_curve[MNM_N][MNM_J] = {{{arr(_UNITS[1])}}};",
         f"static const short mnm_curves[{len(_UNITS[2])}][17] = {{{arr(_UNITS[2])}}};",
@@ -512,54 +658,189 @@ def mnm_c_header() -> str:
     return "\n".join(lines + mnm_mono_lines()) + "\n"
 
 
+def host_dsp_choice(h, v: int) -> int:
+    """the place host H's DSP plays for its SEL record's value V (word >> 8). MONOMACHINE: the engine's voice PERC
+    picks by MONO_THRESHOLDS (dnfw.perc.program mono_engine). DRUM: its one voice reads TYPE as a knob: PERC's param
+    (v x 1/TOP, float32), dnfw.md.voice.inputs' knob (trunc(x 127 + 0.5)), passed on as knob / 128 and read back by
+    C.knob (x 128, trunc: the knob), then the engine's (knob x 5) >> 7 (dnfw.engines.drum.drum trig, type_of; as
+    dnfw.engines.plaits.plaits dsp_model)"""
+    from ..perc import program as _pp
+    from ..perc.dsl import f32
+    if h.NAME == _mnm.MONO_NAME:
+        return sum(v >= t for t in _pp.MONO_THRESHOLDS)
+    assert h.NAME == _mnm_drum.NAME, h.NAME
+    _rid, _slot, lo, top = MNM_RECS[h.J]
+    assert lo == 0
+    x = f32(f32(float(v)) * f32(1.0 / top))
+    knob = min(max(int(f32(f32(x * 127.0) + 0.5)), 0), 127)
+    return _mnm_drum.type_of(knob)
+
+
+def host_page_choice(h, v: int) -> int:
+    """the choice the page shows for H's SEL record value V: knob (v 254 + top) / (2 top), (knob n) >> 7 (md_page.c
+    mnm_k, mnm_choice_of)"""
+    _rid, _slot, lo, top = MNM_RECS[h.J]
+    v = min(max(v - lo, 0), top)
+    return (((v * 254 + top) // (2 * top)) * len(h.PLACES)) >> 7
+
+
+def host_thresholds(h) -> tuple[int, ...]:
+    """host H's thresholds on its SEL record's value: the least value of each place past the first, where the DSP
+    plays that place (MONOMACHINE: dnfw.perc.program MONO_THRESHOLDS itself)"""
+    from ..perc import program as _pp
+    if h.NAME == _mnm.MONO_NAME:
+        return tuple(_pp.MONO_THRESHOLDS)
+    top = MNM_RECS[h.J][3]
+    c = [host_dsp_choice(h, v) for v in range(top + 1)]
+    return tuple(c.index(e) for e in range(1, len(h.PLACES)))
+
+
+def _host_checks(h, th: tuple[int, ...]) -> None:
+    """every record value: the thresholds' place == the DSP's == the page's; every place's start SEL word on it"""
+    _rid, _slot, lo, top = MNM_RECS[h.J]
+    for v in range(256):                         # (a word's high byte: past TOP the last place on all three)
+        e = sum(v >= t for t in th)
+        assert e == host_dsp_choice(h, v) == host_page_choice(h, v), (h.NAME, v, e)
+    for e, P in enumerate(h.PLACES):             # MACHINE SEL's and a SEL change's word lands on the place
+        w = _knob_word(h.knob(e), top, lo) >> 8
+        assert sum(w >= t for t in th) == e, (h.NAME, e, w)
+        assert mnm_default_words(P.DEFAULTS, P)[h.J] == _knob_word(h.knob(e), top, lo)
+
+
 def mnm_mono_lines() -> list[str]:
     """2026-11-11: MONOMACHINE (dnfw.mnm.machines): its place (the type's, MNM_MONO; -1 none) is its first engine's,
     the others' after the types' places; ENGN (control MNM_MONO_J, page 1 H) picks the place every table is read at
-    (mnm_live), the choice as the page shows it and the DSP reads it (dnfw.perc.program MONO_THRESHOLDS)"""
+    (mnm_live), the choice as the page shows it and the DSP reads it (dnfw.perc.program MONO_THRESHOLDS).
+    2026-11-20 (the User: "own page per type"): the mechanism is a TABLE OF HOSTS (dnfw.mnm.machines HOSTS:
+    MONOMACHINE by ENGN, DRUM by TYPE): each host's place (its type's), its SEL control J, its places in its SEL's
+    order and its thresholds on the SEL record's value; MNM_MONO.. stay as MONOMACHINE's names"""
     from ..perc import program as _pp
     n = len(_mnm.MONO_ENGINES)
-    places = _mnm.CF_MONO_PLACES or (0,)
-    th = _pp.MONO_THRESHOLDS or (0,)
     k, j = _mnm.MONO_ENGINE_K, _mnm.MONO_TUNE_J
     assert MNM_RECS[k][:4] == _pp.MONO_ENGN_REC and MNM_RECS[j][:2] == _pp.MONO_TUNE_REC[:2]
-    for e in range(n):                         # MACHINE SEL's and an engine change's ENGN word lands on the engine
-        w = _knob_word(_mnm.mono_knob(e), MNM_RECS[k][3], MNM_RECS[k][2]) >> 8
-        assert sum(w >= t for t in _pp.MONO_THRESHOLDS) == e, (e, w)
+    hosts = _mnm.HOSTS
+    mi, ty, jj, nn, at, places, ths = [], [], [], [], [], [], []
+    for h in hosts:
+        th = host_thresholds(h)
+        _host_checks(h, th)
+        pl = _mnm.CF_HOST_PLACES[h.NAME]
+        assert len(pl) == len(h.PLACES) == len(th) + 1 and max(pl) < 256 and max(th, default=0) < 256
+        mi.append(pl[0])
+        ty.append(h.TYPE)
+        jj.append(h.J)
+        nn.append(len(pl))
+        at.append(len(places))
+        places += pl
+        ths += list(th) + [0]                   # (n slots a host: its n - 1 thresholds, then 0)
+    assert max(mi, default=0) < 128 and not (at and max(at) > 255)
+
+    def c(vals, empty):
+        return ", ".join(map(str, vals)) or empty
     return [
         f"#define MNM_MONO {_mnm.CF_MONO}",
         f"#define MNM_MONO_TYPE {_mnm.MONO_TYPE}",
         f"#define MNM_MONO_N {max(1, n)}",
         f"#define MNM_MONO_J {k}                    /* ENGN: page 1 H */",
-        f"static const unsigned char mnm_mono_place[MNM_MONO_N] = {{{', '.join(map(str, places))}}};",
-        f"static const unsigned char mnm_mono_th[MNM_MONO_N] = {{{', '.join(map(str, th))}}};",
-        "/* ENGN's record value (word >> 8) -> the engine, 0..MNM_MONO_N-1 */",
-        "static inline int mnm_mono_engine(int v)",
+        f"#define MNM_N0 {len(_mnm.CF_MACHINES)}                   /* the types' places; a host's others after them */",
+        f"#define MNM_HOSTS {max(1, len(hosts))}                 /* {', '.join(h.NAME + ' by ' + h.SEL for h in hosts) or 'none'} */",
+        f"#define MNM_HOST_PLACES {max(1, len(places))}",
+        f"#define MNM_SEL_J0 {k}                   /* a machine that is no host: the control mnm_live is handed (unread) */",
+        f"static const signed char mnm_host_mi[MNM_HOSTS] = {{{c(mi, '-1')}}};      /* each host's place (its type's) */",
+        f"static const unsigned char mnm_host_type[MNM_HOSTS] = {{{c(ty, '0')}}};",
+        f"static const unsigned char mnm_host_j[MNM_HOSTS] = {{{c(jj, '0')}}};      /* its SEL control (page 1 H) */",
+        f"static const unsigned char mnm_host_n[MNM_HOSTS] = {{{c(nn, '1')}}};      /* its places */",
+        f"static const unsigned char mnm_host_at[MNM_HOSTS] = {{{c(at, '0')}}};     /* its first in the two below */",
+        f"static const unsigned char mnm_host_place[MNM_HOST_PLACES] = {{{c(places, '0')}}};",
+        f"static const unsigned char mnm_host_th[MNM_HOST_PLACES] = {{{c(ths, '0')}}};",
+        "/* the host whose type's place is MI, -1 none */",
+        "static inline int mnm_host(int mi)",
+        "{",
+        "    for (int h = 0; h < MNM_HOSTS; h++)",
+        "        if (mi >= 0 && mi == mnm_host_mi[h])",
+        "            return h;",
+        "    return -1;",
+        "}",
+        "/* host H's SEL record value (word >> 8) -> its choice, 0..mnm_host_n[h]-1 */",
+        "static inline int mnm_host_choice(int h, int v)",
         "{",
         "    int e = 0;",
-        "    for (int i = 0; i < MNM_MONO_N - 1; i++)",
-        "        if (v >= mnm_mono_th[i])",
+        "    for (int i = 0; i < mnm_host_n[h] - 1; i++)",
+        "        if (v >= mnm_host_th[mnm_host_at[h] + i])",
         "            e++;",
         "    return e;",
         "}",
-        "/* the place the tables are read at: MONOMACHINE's engine's (ENGN's word W), any other machine's own */",
+        "/* the control whose word picks machine MI's place (a host's SEL; any other machine's: unread) */",
+        "static inline int mnm_sel_j(int mi)",
+        "{",
+        "    int h = mnm_host(mi);",
+        "    return h < 0 ? MNM_SEL_J0 : mnm_host_j[h];",
+        "}",
+        "/* the place the tables are read at: a host's choice's (its SEL's word W), any other machine's own */",
         "static inline int mnm_live(int mi, int w)",
         "{",
-        "    return MNM_MONO >= 0 && mi == MNM_MONO ? mnm_mono_place[mnm_mono_engine((w >> 8) & 0xFF)] : mi;",
+        "    int h = mnm_host(mi);",
+        "    return h < 0 ? mi : mnm_host_place[mnm_host_at[h] + mnm_host_choice(h, (w >> 8) & 0xFF)];",
         "}",
     ]
+
+
+def ob_fast_on() -> bool:
+    """2026-11-18 (the User: the Overbridge path sped up by the stocklink rules: bit-identical, its own flag to roll it
+    back alone): csrc/obfast is built only with DN2_OB_FAST set (to anything but 0 or empty) when the code is
+    generated; on by default. Off, the code and every stock site are as without it (scripts/check_stocklink.py, the
+    gate's linkfast and overbridge steps)."""
+    import os
+    return os.environ.get("DN2_OB_FAST", "1") not in ("", "0")
+
+
+def stock_link_fast_on() -> bool:
+    """2026-11-18 (the User: "allow if bit identical yes and add a flag to switch back if needed (compile flag)"):
+    csrc/stocklink, stock's DSP link and USB passes with less work and the same bytes, is built only with
+    DN2_STOCK_LINK_FAST set (to anything but 0 or empty) when the code is generated; on by default. Off, the code and
+    every stock site are main's (scripts/check_stocklink.py, the gate's linkfast and overbridge steps)."""
+    import os
+    return os.environ.get("DN2_STOCK_LINK_FAST", "1") not in ("", "0")
 
 
 def lfo4_on() -> bool:
     """2026-11-14 (the User: "Port both", "we can always disable lfo4"): our code's side of lfo4 (the moved parameter
     table and LFO state, the destination masks, the stored-sound hooks: docs/lfo-112-port.md section 4) is built only
-    with DN2_LFO4 set (to anything but 0 or empty) when the code is generated; off, the code is today's"""
+    with DN2_LFO4 set (to anything but 0 or empty) when the code is generated; off, the code is today's.
+    2026-11-16 (v0.56.2, the User: "now"): on by default; DN2_LFO4=0 (or empty) turns it off. 2026-11-19 (the User:
+    "lfo4 i think we can drop behind a build flag", its CPU): off by default; DN2_LFO4=1 turns it on"""
     import os
-    return os.environ.get("DN2_LFO4", "") not in ("", "0")
+    return os.environ.get("DN2_LFO4", "0") not in ("", "0")
+
+
+def route8_on() -> bool:
+    """2026-11-21 (the User: "measure 2", an A/B on the DN2): the matrix's route tables in 8 bytes a route (220 B a
+    table in place of 312: fewer cache lines read from the DDR every frame, 4 more instructions a route), the same
+    values bit for bit (csrc/matrix/matrix.c struct mx_e), when the code is generated with DN2_ROUTE8 set (to
+    anything but 0 or empty); off by default"""
+    import os
+    return os.environ.get("DN2_ROUTE8", "0") not in ("", "0")
+
+
+def route_probe_on() -> bool:
+    """2026-11-21 (the User: "1", a measurement): mx_probe reads every cache line of each voice's route table just before
+    mx_eval, so the CPU profile shows what the line fills cost (csrc/matrix/matrix.c), when the code is generated with
+    DN2_ROUTE_PROBE set; off by default (a test build's switch: it adds its reads to every frame)"""
+    import os
+    return os.environ.get("DN2_ROUTE_PROBE", "0") not in ("", "0")
+
+
+def lfo_halfrate_on() -> bool:
+    """2026-11-19 (the User: "half rate lfo yes, but half rate env, no, we need fast env"): the LFO evaluator steps
+    half the voices' LFOs a frame (csrc/modulation/cascade.c lh_args, hooks.S lfo_fast) when the code is generated.
+    2026-11-19 (the User ran the half-rate build on the DN2 and kept it): on by default; DN2_LFO_HALFRATE=0 (or empty)
+    turns it off"""
+    import os
+    return os.environ.get("DN2_LFO_HALFRATE", "1") not in ("", "0")
 
 
 REC_BASE_STOCK = 0x401F83A4               # stock 1.12's records, pre-biased as stock's readers take them (+60 id)
 LFO_LIVE_STOCK, LFO_STRIDE_STOCK = 0x44640C18, 120   # stock 1.12's live LFO state: 3 LFOs x 40 B a voice
-LFO4_LIVE, LFO4_STRIDE = 0x46700000, 160  # lfo4's (dnfw.mods.lfo4 STATE_RAM): 4 LFOs x 40 B a voice
+LFO4_LIVE, LFO4_STRIDE = 0x46808000, 160  # lfo4's (dnfw.mods.lfo4 STATE_RAM): 4 LFOs x 40 B a voice
 
 
 def lfo4_moved() -> dict[str, int]:
@@ -598,10 +879,14 @@ def smp_named(name: str) -> dict[int, tuple[str, str]]:
 
 
 LABELS_OUT = ("is_wr", "wr_count", "wr_page", "wr_label", "wr_icons", "wr_grid", "wr_id9",
-              "wr_cell_tail", "labels", "descriptors")
+              "wr_cell_tail", "wr_place_tail", "labels", "descriptors")
 # every stock page cell's widget is drawn by 0x4006448a; its one exit
 CELL_EXIT = 0x400646CA            # movem.l %sp@,%d2-%d7/%a2-%fp ; lea %sp@(80),%sp ; rts
 CELL_EXIT_STOCK = "4cd77cfc4fef00504e75"
+# (2026-11-20) a page's place drawer 0x400169de(view, canvas, x, y, id, ...): every stock machine's place, the ones
+# 0x4006448a draws and FM TONE's own (type 0 takes the view's vtable+196 widget, never 0x4006448a); its one exit
+PLACE_EXIT = 0x40016CE4           # movem.l %fp@(-76),%d2-%d7/%a2-%a5 ; unlk %fp ; rts
+PLACE_EXIT_STOCK = "4cee3cfcffb44e5e4e75"
 # W2: `labels` is where the assembly's code ends and its data (the label table, the
 # descriptors, the strings) begins: the ship gate checks only [is_wr, labels) as code
 GRID = 0x40017428                 # the stock grid: (view, canvas)
@@ -653,7 +938,8 @@ def c_header() -> str:
     names = ",\n".join(" {" + ", ".join(f'"{label(r)}"' for r in page) + "}" for page in PAGES)
     wr = {r: (lo, sh) for r, lo, sh in named()}
     mnm = [mnm_named(k) for k in range(len(_mnm.CF_MACHINES))]
-    mono = [mnm_named(k) for k in _mnm.CF_MONO_PLACES[1:]]     # 2026-11-11: MONOMACHINE's other engines
+    # 2026-11-11: MONOMACHINE's other engines; 2026-11-20: every host's places past its first (CF_EXTRA's order)
+    mono = [mnm_named(k) for k in range(len(_mnm.CF_MACHINES), len(_mnm.CF_ALL))]
     smp = [smp_named(n) for n in _smp.NAMES]
     order = sorted(set(wr) | set(PARAM_IDS) | {r for m in mnm + mono + smp for r in m})
     # by kind (is_wr: the type - 4), from 1: PERC, the sample machines at SMP_FIRST_KIND..,
@@ -675,10 +961,11 @@ def c_header() -> str:
             f"#define WR_KINDS {len(kinds)}\n"
             f"static const char *const wr_named_long[WR_KINDS][WR_NAMED] = {{{', '.join(row(m, 0) for m in kinds)}}};\n"
             f"static const char *const wr_named_short[WR_KINDS][WR_NAMED] = {{{', '.join(row(m, 1) for m in kinds)}}};\n"
-            # 2026-11-11: MONOMACHINE on its second engine on (wr_names: its kind's row is its first engine's)
-            f"#define WR_MONO_ROWS {max(1, len(mono))}\n"
-            f"static const char *const wr_mono_long[WR_MONO_ROWS][WR_NAMED] = {{{', '.join(row(m, 0) for m in mono) or row({}, 0)}}};\n"
-            f"static const char *const wr_mono_short[WR_MONO_ROWS][WR_NAMED] = {{{', '.join(row(m, 1) for m in mono) or row({}, 1)}}};\n"
+            # 2026-11-11: MONOMACHINE on its second engine on (wr_names: its kind's row is its first engine's);
+            # 2026-11-20: every host's place past its first (row: the place - MNM_N0; DRUM's types too)
+            f"#define WR_EXTRA_ROWS {max(1, len(mono))}\n"
+            f"static const char *const wr_extra_long[WR_EXTRA_ROWS][WR_NAMED] = {{{', '.join(row(m, 0) for m in mono) or row({}, 0)}}};\n"
+            f"static const char *const wr_extra_short[WR_EXTRA_ROWS][WR_NAMED] = {{{', '.join(row(m, 1) for m in mono) or row({}, 1)}}};\n"
             + perc_c_header() + smp_c_header() + mnm_c_header())
 
 
@@ -838,19 +1125,26 @@ assert MDUI_LOAD + 0x8000 <= MOD_RAM and MOD_RAM + MOD_BYTES <= METER_RAM, "MD g
 # 2026-11-11, remoteui-5: the CPU profiler's state and sample ring (csrc/devtest/prof.c), written only while
 # PROFILE runs. Above the DSP's tables (sampler.machines.TABLE_LOAD 0x47000000, up to 512 KB) and 14 MB under
 # the boot stack's top (0x48000000; the tasks run on their own stacks in BSS, docs/coldfire-tasks.md)
-PROF_RAM = 0x47100000
+# v0.65.1: moved from 0x47100000 (upstream v0.65's PROJECT RAM banks take 0x47070000..0x47280000,
+# sampler.machines.BANK_RAM) to the top, above the matrix
+PROF_RAM = 0x47700000
 PROF_BYTES = 0x100000
-assert 0x47000000 + (512 << 10) <= PROF_RAM and PROF_RAM + PROF_BYTES <= 0x47800000, "tables, profiler, stack"
+assert PROF_RAM + PROF_BYTES <= 0x47800000, "profiler, stack"
 # the wishes record's RAM (csrc/wishes/wish.h WISH_O_END; docs/wishes-record.md): the sorted index, the free
 # stack, the hash cache, the queue of cells for the +Drive and 8,192 entries of 512 B. Above the DSP tables
 # (dnfw.mods.waverider._tables, 0x47000000..) and remoteui's profiler (0x47100000..0x47200000, 1 MB,
 # csrc/devtest/prof.c), far below the stack (from 0x48000000). docs/memory-map.md lists every claim up here
-WISH_RAM = 0x47280000                           # 512 KB clear above the profiler
+WISH_RAM = 0x47280000                           # just above the banks (v0.65.1; the profiler was below until then)
 WISH_BYTES = 0x464200                           # 4 x 8192 + 2 x 8192 x 2 + 2 x 16384 + 512 x 512 + 512 + 6 x 8192 + 512 x 8192
-assert PROF_RAM + PROF_BYTES + (512 << 10) <= WISH_RAM and WISH_RAM + WISH_BYTES <= 0x47800000, "DSP tables, profiler, wishes, the stack"
+assert _smp.BANK_RAM + _smp.BANK_RAM_BYTES <= WISH_RAM and WISH_RAM + WISH_BYTES <= 0x47800000, "banks, wishes, the stack"   # below it: the banks (sampler.machines.BANK_RAM, v0.65.1)
 MX_RAM = 0x476F0000                             # the matrix's tables (csrc/matrix/matrix.c struct mx_state): each
 MX_BYTES = 0x8000                               # track's routes laid out twice, the envelopes, the scratch row
-assert WISH_RAM + WISH_BYTES <= MX_RAM and MX_RAM + MX_BYTES <= 0x47800000, "wishes, matrix, the stack"
+assert WISH_RAM + WISH_BYTES <= MX_RAM and MX_RAM + MX_BYTES <= PROF_RAM, "wishes, matrix, profiler"
+SM_RAM = 0x476F8000                             # 2026-11-21: SAFE MODE (csrc/safemode/sm.h, docs/safe-mode.md): the RAM mark
+SM_MARK_BYTES = 0x100                           # (32 B used, 256 kept), then the kernel CODE chunk (dnfw.mods.safemode)
+SM_LOAD = SM_RAM + SM_MARK_BYTES
+SM_BYTES = 0x8000                               # the mark and the chunk (code + the unpatch table), to the profiler
+assert MX_RAM + MX_BYTES <= SM_RAM and SM_RAM + SM_BYTES <= PROF_RAM, "matrix, SAFE MODE, profiler"
 MD_FX_NIBBLES = 0x31313311                      # AMD-AMF, EQF-EQG, FLTF-FLTW-FLTQ clipped, as the MD's
 TRACK_LEVEL_ID = 10                             # record 10, "Track Level" / LEV, 0..0x7f00 (read from the 1.11 record table)
 
@@ -866,10 +1160,12 @@ def md_c_header() -> str:
             f"static const char perc_what_upper[PERC_N][12] = {{{upper}}};\n")
 
 
-def source(page_draw: int, cell: int) -> str:
+def source(page_draw: int, cell: int, place: int) -> str:
     """The chunk's assembly (GNU as, ColdFire), linked at LOAD. PAGE_DRAW is the C
     renderer's entry, `wr_page_draw(view, canvas)`; CELL its `wr_cell(view, canvas, x,
-    y, id)`, run as each cell widget of a stock page finishes (parameter slides' marks)."""
+    y, id)`, run as each cell widget of a stock page finishes (parameter slides' marks);
+    PLACE `mxp_placed(view, id, place)` (csrc/matrix/routes_pop.c), run as each place of a
+    stock page is drawn, FM TONE's included (2026-11-20)."""
     table = "\n".join(f"    .long {rid}, lab_{rid}" for rid in LABELS)
     strings = "\n".join(f'lab_{rid}: .asciz "{name}"' for rid, name in LABELS.items())
     pages = []
@@ -878,9 +1174,9 @@ def source(page_draw: int, cell: int) -> str:
                      f"    .long {', '.join(str(e) for e in entries)}\n"
                      f"    .long {TAG}")
     page_data = "\n".join(pages)
-    mlabs = [{**lab, **(MNM_LABELS2[k] if mnm_pages(_mnm.CF_MACHINES[k]) > 1 else {}),
+    mlabs = [{**MNM_LABELS[k], **(MNM_LABELS2[k] if mnm_pages(_mnm.CF_MACHINES[k]) > 1 else {}),
               **(MNM_LABELS3[k] if mnm_pages(_mnm.CF_MACHINES[k]) > 2 else {})}
-             for k, lab in enumerate(MNM_LABELS)]
+             for k in ASM_PLACES]                # 2026-11-18: a place each (ASM_PLACES: the reserved types share one)
     mtables = "\n".join(f"    .long mnm_labels_{k}" for k in range(len(mlabs)))
     mtables += "\n" + "\n".join(f"mnm_labels_{k}:\n" + "\n".join(f"    .long {rid}, mlab_{k}_{rid}" for rid in lab)
                                 + "\n    .long 0" for k, lab in enumerate(mlabs))
@@ -890,14 +1186,27 @@ def source(page_draw: int, cell: int) -> str:
     # mnm_label_tables (not a range: a range let BOUNCE, kind 13, index past the table)
     if len(MNM_KINDS) != len(MNM_LABELS):
         raise ValueError(f"{len(MNM_KINDS)} Monomachine kinds, {len(MNM_LABELS)} label tables")
-    mnm_label_pick = "\n".join(f"    moveq   #{kd - 1},%d1\n    cmp.l   %d1,%d0\n    bne.s   wl_n{k}\n"
-                               f"    moveq   #{k},%d0\n    bra.s   wl_hit\nwl_n{k}:"
-                               for k, kd in enumerate(MNM_KINDS))
+    # (2026-11-18: bra.w, the chain's first tests are past a short branch's 127 bytes from wl_hit with FM+ and the
+    # reserved types 21..25: the assembler refused bra.s)
+    # (2026-11-18: each kind's place, ASM_IX; a run of kinds on one place -- the reserved types' -- is one range
+    # test, lo..hi, still explicit: no kind outside the run reaches it)
+    runs = []
+    for k, kd in enumerate(MNM_KINDS):
+        if runs and runs[-1][1] == kd - 1 and runs[-1][2] == ASM_IX[k]:
+            runs[-1][1] = kd
+        else:
+            runs.append([kd, kd, ASM_IX[k]])
+    mnm_label_pick = "\n".join(
+        (f"    moveq   #{lo - 1},%d1\n    cmp.l   %d1,%d0\n    bne.s   wl_n{n}\n" if lo == hi else
+         f"    moveq   #{lo - 1},%d1\n    cmp.l   %d1,%d0\n    blt.s   wl_n{n}\n"
+         f"    moveq   #{hi - 1},%d1\n    cmp.l   %d1,%d0\n    bgt.s   wl_n{n}\n")
+        + f"    moveq   #{i},%d0\n    bra.w   wl_hit\nwl_n{n}:"
+        for n, (lo, hi, i) in enumerate(runs))
     # 2026-11-11: each machine's knobs in its own order (mnm_order: a control keeps its record wherever it is drawn)
     mnm_page_data, mnm2_page_data, mnm3_page_data = (
         "\n".join(f"    .long mnm_title_{k}, mnm_subtitle_{k}\n"
                   f"    .long {', '.join(str(MNM_RECS[j][0]) for j in mnm_order(M)[8 * pg:8 * pg + 8])}\n"
-                  f"    .long {TAG}" for k, M in enumerate(_mnm.CF_MACHINES))
+                  f"    .long {TAG}" for k, M in ((i, _mnm.CF_MACHINES[c]) for i, c in enumerate(ASM_PLACES)))
         for pg in range(3))
     smp_page_data = "\n".join(f"    .long smp_title_{k}, smp_subtitle_{k}\n"
                               f"    .long {', '.join(str(e) for e in entries)}\n"
@@ -1000,6 +1309,10 @@ wr_page:
     addi.l  #descriptors,%d0
     bra.w   2f
 | d0 = kind - 1: 1, 2 -> the Monomachine's 0, 1; 3..8 a sample machine; 9.. -> 2..;
+| v0.60 (zuzsw, Thos Grol on v0.59): upstream picks each Monomachine kind by an explicit test, as
+| v0.59's "9.. -> 2.." arithmetic broke at BOUNCE's kind 13 between VO-6 and FM+. Ours: the same
+| arithmetic only indexes mnm_ix_tab, which maps every kind to its own machine (_mnm_ix, by
+| MNM_KINDS, BOUNCE's gap counted; 2026-11-10), and FLEX is taken out before it.
 | v0.44: 12 (BOUNCE, kind 13) -> the sample row 6 (d0 9 at 4:, as 3..8 give 0..5)
 5:  moveq   #{_smp.BOUNCE_TYPE - 5},%d1
     cmp.l   %d1,%d0
@@ -1153,6 +1466,25 @@ wr_cell_tail:
     move.l  %sp@+,%d0
     rts
 
+| -- (2026-11-20) the exit of 0x400169de, a page's place drawer (view, canvas, x, y, id,
+| value, place, ...; its arguments at %fp@(8..), never written), at 0x40016ce4, now `jmp`
+| here: mxp_placed(view, id, place) with d0 and d1 kept, then its own epilogue back to its
+| caller. The routes popup learns which parameter each knob has on FM TONE's pages too
+| (its places never reach 0x4006448a, and lie off the usual columns).
+wr_place_tail:
+    move.l  %d0,%sp@-
+    move.l  %d1,%sp@-
+    move.l  %fp@(32),%sp@-
+    move.l  %fp@(24),%sp@-
+    move.l  %fp@(8),%sp@-
+    jsr     {place:#010x}
+    lea     %sp@(12),%sp
+    move.l  %sp@+,%d1
+    move.l  %sp@+,%d0
+    movem.l %fp@(-76),%d2-%d7/%a2-%a5
+    unlk    %fp
+    rts
+
 | -- the SYN page draw at 0x40018202 (`moveq #9,%d1 ; cmp.l %d3,%d1 ; bne.s` to the grid
 | call), now jsr here: back to the id-9 grid variant (0x40018208) only when the stock
 | test would go there -- page id 9 in d3 and not one of our tracks; otherwise to the
@@ -1183,16 +1515,16 @@ mnm2_descriptors:
 mnm3_descriptors:
 {mnm3_page_data}
 mnm_ix_tab:
-    .byte {", ".join(str(_mnm_ix(d)) for d in range(max(MNM_KINDS) - 7))}
+    .byte {", ".join(str(_mnm_ix(d) if _mnm_ix(d) == 0xFF else ASM_IX[_mnm_ix(d)]) for d in range(max(MNM_KINDS) - 7))}
     .align 2
 mnm_npages_tab:
-    .byte {", ".join(str(mnm_pages(M)) for M in _mnm.CF_MACHINES)}
+    .byte {", ".join(str(mnm_pages(_mnm.CF_MACHINES[c])) for c in ASM_PLACES)}
     .align 2
 smp_descriptors:
 {smp_page_data}
 {_rep("subtitle", SUBTITLE)}
-{chr(10).join(_rep(f"mnm_title_{k}", t) for k, t in enumerate(MNM_TITLES))}
-{chr(10).join(_rep(f"mnm_subtitle_{k}", t) for k, t in enumerate(MNM_SUBTITLES))}
+{chr(10).join(_rep(f"mnm_title_{i}", MNM_TITLES[c]) for i, c in enumerate(ASM_PLACES))}
+{chr(10).join(_rep(f"mnm_subtitle_{i}", MNM_SUBTITLES[c]) for i, c in enumerate(ASM_PLACES))}
 {chr(10).join(_rep(f"smp_title_{k}", t) for k, t in enumerate(SMP_TITLES))}
 {chr(10).join(_rep(f"smp_subtitle_{k}", t) for k, t in enumerate(SMP_SUBTITLES))}
 {_rep("smp_rec_title", "REC")}

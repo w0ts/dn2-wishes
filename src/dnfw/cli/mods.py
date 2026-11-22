@@ -25,6 +25,7 @@ from ..mods import lfo4 as lfo4_mod
 from ..mods import lfowaves as lfowaves_mod
 from ..mods import midiarp as midiarp_mod
 from ..mods import moddest as moddest_mod
+from ..mods import safemode as safemode_mod
 from ..mods import songguard as songguard_mod
 from ..mods import transients as transients_mod
 from ..mods import usbprobe as usbprobe_mod
@@ -45,7 +46,8 @@ REGISTRY = {transients_mod.ID: transients_mod,
             lfo4_mod.ID: lfo4_mod,
             songguard_mod.ID: songguard_mod,
             waverider_mod.ID: waverider_mod,
-            usbprobe_mod.ID: usbprobe_mod}
+            usbprobe_mod.ID: usbprobe_mod,
+            safemode_mod.ID: safemode_mod}
 
 
 def configure(parser) -> None:

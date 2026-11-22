@@ -7,7 +7,7 @@ track's voices must put sound in their track buffers (the DSP's block after the 
 
 Stage 2 (a cold boot: the ColdFire's power-on upload and READY) is not covered here: the DSP side is warm.
 
-2026-11-14: --ours TRACK:TYPE puts our machine on by MACHINE SEL's commit (the gate's ournote: 2:21 DRONE, then 2:23
+2026-11-14: --ours TRACK:TYPE puts our machine on by MACHINE SEL's commit (the gate's ournote: 2:52 DRONE, then 2:50
 JUNO, each in its own run). Until the runner's G12-G14 only voice slot 0 sounded here, so the gate's runs play their
 note first; with the warm snapshot built under them every slot does (docs/coupled-emulator.md).
 
@@ -80,7 +80,7 @@ def main() -> int:
     p.add_argument("--stock", required=True)
     p.add_argument("--snapshot", required=True)
     p.add_argument("--tracks", default="1", help="stock tracks (0-based; not 0: unassigned voices read 0); 1: track 2, type 0")
-    p.add_argument("--ours", default="", help="TRACK:TYPE of ours put on first (21 DRONE, 23 JUNO: the gate's ournote, "
+    p.add_argument("--ours", default="", help="TRACK:TYPE of ours put on first (52 DRONE, 50 JUNO since 2026-11-18: the gate's ournote, "
                                                  "one a run with --tracks '', so its note is on voice slot 0)")
     p.add_argument("--layout", default=str(REPO / "src/dnfw/mods/waverider_code.json"))
     p.add_argument("--periods", type=int, default=48)

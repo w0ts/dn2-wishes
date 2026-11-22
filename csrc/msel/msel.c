@@ -1,5 +1,5 @@
 /* MACHINE SEL in two columns (2026-11-11, the User's design E: scratch/lists/E1..E3, approved with continuous
- * lines between the groups).
+ * lines between the groups; 2026-11-20 the lines and their cells removed).
  *
  * Stock's MachineListView (vtable 0x401dfde8, constructor 0x4005b56e) stays as it is: its rows, its cursor,
  * UP / DOWN / YES / NO / LEFT / RIGHT. Measured in the 1.12 emulator: the view's +420 is the cursor's row
@@ -8,7 +8,8 @@
  * under the title bar: two columns of six cells over the full width, each a 7 x 5 icon and a name of up to
  * 12 characters in the list's own font (VAL, the record stock draws MACHINE SEL's rows with), the screen of
  * twelve that holds the cursor (cells never change column), the selected cell inverted, the track's machine
- * a dot left of its icon, a continuous line where stock puts its dotted divider, the scrollbar and, under it,
+ * a dot left of its icon (no line where stock puts its dotted divider, and no cell: 2026-11-20, the User:
+ * "remove the lines --------------"), the scrollbar and, under it,
  * the two pages' dots. The rows and names are dnfw.waverider.msel's (wr_gen.h), made from the same lists
  * stock's view is given; the emulator test holds them to stock's.
  *
@@ -24,6 +25,7 @@
  */
 typedef unsigned int u32;
 typedef unsigned char u8;
+typedef signed char s8;
 
 #include "wr_gen.h"
 
@@ -99,15 +101,9 @@ static void fill(void *c, int x0, int y0, int x1, int y1, int on)
             px(c, x, y, on);
 }
 
-static void cell(void *c, int k, int type, int filters, int sel, int cur)
+static void cell(void *c, int k, const char *name, const u8 *icon, int sel, int cur)
 {
     int x = X0 + (k / ROWS) * COLW, y = TOP + 8 * (k % ROWS);
-    if (type < 0) {                             /* a group's divider: one continuous line */
-        fill(c, x + 1, y + 2, x + COLW - 4, y + 2, 1);
-        return;
-    }
-    const char *name = filters ? msel_fname[type] : msel_mname[type];
-    const u8 *icon = filters ? msel_ficon[type] : msel_micon[type];
     if (sel) {                                  /* the selection: an inverted bar, its corners round */
         fill(c, x - 1, y - 2, x + COLW - 3, y + 5, 1);
         px(c, x - 1, y - 2, 0);
@@ -128,36 +124,40 @@ static void cell(void *c, int k, int type, int filters, int sel, int cur)
     }
 }
 
-void msel_draw(void *c)
+/* the list as MACHINE SEL draws it (2026-11-20: MACHINE SEL, FILTER SEL and INSERT SEL, one drawing): ROWS (N of them,
+ * stock's dividers DIVIDER take no cell: 2026-11-20, the User: "remove the lines --------------"), each type's NAME and
+ * ICON; AT the cursor's row, MINE the track's type, PAGE (0, 1) the dot filled under the scrollbar. Everything under
+ * the title bar: the screen of twelve that holds the cursor (cells never change column), the scrollbar */
+static void sel_draw(void *c, const signed char *rows, int n, const char *const *name, const u8 (*icon)[5], int at,
+                     int mine, int page)
 {
-    u32 v = view();
-    if (!v)
-        return;
-    int page = *(volatile int *)(v + V_PAGE) ? 1 : 0;
-    int n = page ? MSEL_FROWS : MSEL_MROWS;
-    const signed char *rows = page ? msel_frows : msel_mrows;
-    int at = *(volatile int *)(v + V_CURSOR);
-    int mine = *(volatile int *)(v + (page ? V_FILTER : V_TYPE));
     if (at < 0 || at >= n)
         at = 0;
-    int first = at / CELLS * CELLS;
-    fill(c, 0, 7, 127, H - 1, 0);               /* stock's picture, < SYN >, its rows, its scrollbar */
-    if (page) {                                 /* the filter page's own title, drawn as stock draws its (0x4005b7d4) */
-        fill(c, 0, 0, 127, 6, 0);
-        D_TEXT(c, (const void *)F_TITLE, 62, 58, 2, "FILTER SEL \x9b TRACK %d", TRK_INDEX(TRK_OBJ(TRK_CUR())) + 1);
-        D_BADGE(c, 0, 57, 127, 63, -1);
+    int shown = 0, s_at = 0;
+    for (int i = 0; i < n; i++) {
+        if (i == at)
+            s_at = shown;
+        shown += rows[i] >= 0;
     }
-    for (int k = 0; k < CELLS && first + k < n; k++) {
-        int type = rows[first + k];
-        cell(c, k, type, page, first + k == at, type >= 0 && type == mine);
+    if (!shown)
+        return;
+    int first = s_at / CELLS * CELLS;
+    fill(c, 0, 7, 127, H - 1, 0);               /* stock's picture, < SYN >, its rows, its scrollbar */
+    for (int i = 0, k = -first; i < n && k < CELLS; i++) {
+        int type = rows[i];
+        if (type < 0)
+            continue;
+        if (k >= 0)
+            cell(c, k, name[type], icon[type], i == at, type == mine);
+        k++;
     }
     /* the scrollbar (x 124..127, y 12..47) */
     int t0 = 12, t1 = 47, len = t1 - t0 + 1;
     fill(c, 124, t0, 124, t1, 1);
     fill(c, 127, t0, 127, t1, 1);
-    int a = t0 + len * first / n, b = t0 + len * (first + CELLS < n ? first + CELLS : n) / n - 1;
+    int a = t0 + len * first / shown, b = t0 + len * (first + CELLS < shown ? first + CELLS : shown) / shown - 1;
     fill(c, 125, a, 126, b, 1);
-    /* the pages' dots under it: the machines, the filters (filled: this one) */
+    /* the pages' dots under it: the machines, the filters (INSERT SEL: INSERT 1, INSERT 2; filled: this one) */
     for (int p = 0; p < 2; p++) {
         int y = 52 + 6 * p;
         if (p == page)
@@ -165,6 +165,47 @@ void msel_draw(void *c)
         else
             fill(c, 125, y + 1, 126, y + 2, 1);
     }
+}
+
+static void title(void *c, const char *fmt, int a, int b)   /* the title bar, drawn as stock draws its (0x4005b7d4) */
+{
+    fill(c, 0, 0, 127, 6, 0);
+    D_TEXT(c, (const void *)F_TITLE, 62, 58, 2, fmt, a, b);
+    D_BADGE(c, 0, 57, 127, 63, -1);
+}
+
+void msel_draw(void *c)
+{
+    u32 v = view();
+    if (!v)
+        return;
+    int page = *(volatile int *)(v + V_PAGE) ? 1 : 0;
+    int at = *(volatile int *)(v + V_CURSOR);
+    int mine = *(volatile int *)(v + (page ? V_FILTER : V_TYPE));
+    if (page) {                                 /* the filter page's own title (the machine page's is stock's) */
+        title(c, "FILTER SEL \x9b TRACK %d", TRK_INDEX(TRK_OBJ(TRK_CUR())) + 1, 0);
+        sel_draw(c, msel_frows, MSEL_FROWS, msel_fname, msel_ficon, at, mine, 1);
+    } else
+        sel_draw(c, msel_mrows, MSEL_MROWS, msel_mname, msel_micon, at, mine, 0);
+}
+
+/* the FX icons' one table (dnfw.waverider.msel FX_ICONS): the INSERT page's M.SEL box (ins.c), the FX overview
+ * (csrc/inserts/ovw_draw.c) */
+const u8 *msel_fx_icon(int type)
+{
+    return type >= 0 && type < (int)(sizeof msel_iicon / sizeof msel_iicon[0]) ? msel_iicon[type] : 0;
+}
+
+/* the title bar's icon (csrc/inserts/ins.c ins_title_icon): KIND 1 a machine, 2 a filter, 3 an insert; 0 none */
+const u8 *msel_icon_of(int kind, int type)
+{
+    if (type < 0)
+        return 0;
+    if (kind == 1)
+        return type < (int)(sizeof msel_micon / sizeof msel_micon[0]) && msel_mname[type] ? msel_micon[type] : 0;
+    if (kind == 2)
+        return type < (int)(sizeof msel_ficon / sizeof msel_ficon[0]) && msel_fname[type] ? msel_ficon[type] : 0;
+    return kind == 3 ? msel_fx_icon(type) : 0;
 }
 
 static void ls_key(u32 code);                   /* LIVE SELECT (below) */
@@ -303,12 +344,14 @@ static void ls_commit(u32 v)
 }
 
 static void fp_poll(void);
+static void is_poll(void);
 
 /* page.c wr_poll, every UI pass */
 void msel_poll(void)
 {
     u32 now = ls_now();
     fp_poll();
+    is_poll();
     u32 v = view();
     if (!v) {
         ls_v = 0;
@@ -436,8 +479,15 @@ static void fp_move(int d)
 }
 
 /* from rec.c smp_ui_pop, every item while no screen of ours is up: -> 1 when the item is the list's (dropped) */
+static int isel_item(const u8 *it, u32 code, int down, int func_held);
+
 int flt_pop(const u8 *it, u32 code, int down, int func_held)
 {
+    if (!fp_open && isel_item(it, code, down, func_held)) {  /* INSERT SEL (below) */
+        extern void ins_func_push(void);
+        ins_func_push();                        /* (FUNC's release after FUNC + A is no FUNC tap: ins.c) */
+        return 1;
+    }
     if (it[0] == IT_KEY && code >= K_TRIG1 && code < K_TRIG1 + 16u)
         return 0;                               /* a [TRIG] key: the list stays, the key does what it does (2026-11-12,
                                                  * the User: "should not close when I press one of the 16 track
@@ -495,4 +545,196 @@ int flt_pop(const u8 *it, u32 code, int down, int func_held)
     }
     wpop_modal("FLT1", MSEL_FROWS, fp_at, fp_name, 0);
     return 1;
+}
+
+/* INSERT SEL (2026-11-20, the User: "same code/ui as filter and synth engine => coherence and less code"): the insert
+ * types of the INSERT page's slot in MACHINE SEL's page, drawn by its code (sel_draw, cell), OFF then A-Z
+ * (dnfw.waverider.msel fx_rows, as ins.c ORDER), each with its icon; the title "INSERT n > TRACK t". Stock has no view
+ * for it, so the cursor and the keys are kept here, as stock's MachineListView keeps its (measured in the 1.12
+ * emulator, 2026-11-20): UP / DOWN one row, stopping at the ends; LEFT / RIGHT the pages, here INSERT 1 and INSERT 2
+ * (the INSERT page under it follows), stopping at the ends; on another page the cursor on that slot's own type.
+ * Opened on an INSERT page by pushing A (M.SEL), or by FUNC + turning A (as FUNC + turning G opens the filter list on
+ * FLTR). YES picks the row's type (stock's YES on MACHINE SEL) and closes, NO closes. With LIVE SELECT on, as MACHINE
+ * SEL: the type under a cursor that has rested REST_MS is picked, YES picks what is still pending, NO puts both slots
+ * back as they were when it opened. A pick is M.SEL's own (ins.c ins_isel_pick: MIX 0, AUTO OFF). Knob A moves the
+ * cursor too; the other knobs do nothing while it is up. A [TRIG] key and FUNC go on as ever; any other key closes it
+ * and does what it does. */
+#define K_ENC_A   41                            /* encoder A pushed; the eight: 41..48 */
+extern int ins_visible(void);
+extern int ins_isel_type(int j);
+extern void ins_isel_pick(int j, int type);
+extern void ins_isel_keep(void);
+extern int ins_isel_back(void);
+extern void ins_isel_show(int j);
+extern int ins_up;
+extern int smp_overlay_dirty;
+extern u32 smp_key_seq, smp_ui_seq;             /* rec.c: a key's order (the knob popup goes on a key) */
+
+int isel_open __attribute__((section(".data"))) = 0;      /* the checks read these three */
+int isel_slot __attribute__((section(".data"))) = 0;      /* 0, 1: INSERT 1, 2 */
+static int is_track __attribute__((section(".data"))) = 0;
+int isel_at __attribute__((section(".data"))) = 0;        /* the cursor's row of msel_irows */
+static int is_due __attribute__((section(".data"))) = 0;      /* LIVE SELECT: a pick waiting for the rest */
+static u32 is_when __attribute__((section(".data"))) = 0;
+static u32 is_eat __attribute__((section(".data"))) = 0;      /* keys taken: their repeats and their release too */
+u32 isel_opens __attribute__((section(".data"))) = 0;         /* the checks read these */
+u32 isel_picks __attribute__((section(".data"))) = 0;
+
+static int is_row_of(int type)
+{
+    for (int i = 0; i < MSEL_IROWS; i++)
+        if (msel_irows[i] == type)
+            return i;
+    return 0;
+}
+
+int isel_up(void)
+{
+    if (isel_open && (!ins_visible() || ((ins_up - 1) & 1) != isel_slot || fp_track() != is_track)) {
+        isel_open = 0;                            /* the page went, or another slot or track under it: left as it is */
+        is_due = 0;
+    }
+    return isel_open;
+}
+
+void isel_draw(void *c)
+{
+    title(c, "INSERT %d \x9b TRACK %d", isel_slot + 1, is_track + 1);
+    sel_draw(c, msel_irows, MSEL_IROWS, msel_iname, msel_iicon, isel_at, ins_isel_type(isel_slot), isel_slot);
+}
+
+static void is_dirty(void)
+{
+    smp_overlay_dirty = 1;
+}
+
+static void is_pick(void)                       /* the cursor's type, if it is not the slot's already */
+{
+    is_due = 0;
+    int type = msel_irows[isel_at];
+    if (type != ins_isel_type(isel_slot)) {
+        ins_isel_pick(isel_slot, type);
+        isel_picks++;
+        ls_commits++;
+    }
+}
+
+static void is_open_now(void)
+{
+    isel_open = 1;
+    isel_slot = (ins_up - 1) & 1;
+    is_track = fp_track();
+    isel_at = is_row_of(ins_isel_type(isel_slot));
+    is_due = 0;
+    ins_isel_keep();                            /* both slots as they are, for NO (LIVE SELECT) */
+    smp_key_seq = ++smp_ui_seq;                 /* the M.SEL knob's list popup goes, as on a key */
+    isel_opens++;
+    is_dirty();
+}
+
+static void is_close(int how)                   /* PICK (YES), DISCARD (NO), OTHER (another key) */
+{
+    isel_open = 0;
+    if (live_on()) {
+        if (how == DISCARD && ins_isel_back())
+            ls_reverts++;
+        else if (how == PICK && is_due)
+            is_pick();
+    } else if (how == PICK)
+        is_pick();
+    is_due = 0;
+    is_dirty();
+}
+
+static void is_move(int d)                      /* the cursor D rows on, stopping at the ends */
+{
+    int was = isel_at;
+    isel_at += d;
+    isel_at = isel_at < 0 ? 0 : isel_at >= MSEL_IROWS ? MSEL_IROWS - 1 : isel_at;
+    if (isel_at != was) {
+        is_due = live_on();
+        is_when = ls_mono + REST;
+        is_dirty();
+    }
+}
+
+static void is_page(int to)                     /* LEFT / RIGHT: the other slot, stopping at the ends */
+{
+    if (to == isel_slot)
+        return;
+    is_due = 0;                                 /* (as MACHINE SEL's page switch: a pending pick dropped) */
+    isel_slot = to;
+    ins_isel_show(to);                          /* the INSERT page under it: that slot's */
+    isel_at = is_row_of(ins_isel_type(to));
+    is_dirty();
+}
+
+/* msel_poll, every UI pass: a resting cursor's type picked (LIVE SELECT) */
+static void is_poll(void)
+{
+    if (isel_up() && is_due && (int)(ls_mono - is_when) >= 0) {
+        is_pick();
+        is_dirty();
+    }
+}
+
+static u32 is_bit(u32 code)
+{
+    return code == K_YES ? 1u : code == K_NO ? 2u : code == K_UP ? 4u : code == K_DOWN ? 8u : code == K_LEFT ? 16u
+           : code == K_RIGHT ? 32u : code >= K_ENC_A && code < K_ENC_A + 8u ? 64u << (code - K_ENC_A) : 0u;
+}
+
+/* from flt_pop, every item: -> 1 when the item is INSERT SEL's (dropped) */
+static int isel_item(const u8 *it, u32 code, int down, int func_held)
+{
+    if (!isel_up()) {                           /* shut: push A, or FUNC + turn A, on an INSERT page opens it */
+        if (!ins_visible() || smp_fb_open || smp_lst_open || msel_visible())
+            return 0;
+        if (it[0] == IT_KEY && code == K_ENC_A && down && !func_held && !(is_eat & is_bit(code))) {
+            is_eat |= is_bit(code);
+            is_open_now();
+            return 1;
+        }
+        if (it[0] == IT_KNOB && code == 1 && func_held) {
+            is_open_now();                      /* (the first turn opens it, as FUNC + G's list) */
+            return 1;
+        }
+        if (it[0] == IT_KEY && !down && (is_eat & is_bit(code))) {
+            is_eat &= ~is_bit(code);            /* the release of a key it took (closed since) */
+            return 1;
+        }
+        return 0;
+    }
+    if (it[0] == IT_KNOB) {
+        if (code == 1)
+            is_move((s8)it[8]);
+        return 1;
+    }
+    if (it[0] != IT_KEY || code == K_FUNC || (code >= K_TRIG1 && code < K_TRIG1 + 16u))
+        return 0;                               /* a [TRIG] key, FUNC: as ever, the page stays */
+    u32 b = is_bit(code);
+    if (!down) {
+        if (is_eat & b) {
+            is_eat &= ~b;
+            return 1;
+        }
+        return 0;
+    }
+    if (is_eat & b) {                           /* a held key's repeat: UP / DOWN step on */
+        if (code == K_UP || code == K_DOWN)
+            is_move(code == K_UP ? -1 : 1);
+        return 1;
+    }
+    if (!b) {
+        is_close(OTHER);                        /* another key: it does what it does */
+        return 0;
+    }
+    is_eat |= b;
+    if (code == K_UP || code == K_DOWN)
+        is_move(code == K_UP ? -1 : 1);
+    else if (code == K_LEFT || code == K_RIGHT)
+        is_page(code == K_RIGHT);
+    else if (code == K_YES || code == K_NO)
+        is_close(code == K_YES ? PICK : DISCARD);
+    return 1;                                   /* (an encoder's push: nothing) */
 }

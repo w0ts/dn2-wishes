@@ -19,7 +19,8 @@ import pytest
 from dnfw.codec import lzma7
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-C_HDR, C_SECTORS = 0x6E8000, 1 + 2048
+C_HDR, C_SECTORS = 0x5FF200, 1 + 2048         # v0.69.2: the copy's new place (csrc/include/dmove.h)
+OLD, DM = 0x6E8000, 0x5FFC00                   # its old place, the move record
 
 
 def _content(n: int, seed: int) -> bytes:
@@ -42,14 +43,23 @@ HARNESS = r"""
 #include <string.h>
 extern long dn_depack7(const uint8_t *src, uint8_t *dst);
 extern volatile uint32_t dn7_status, dn7c_state, dn7c_why;
-static uint8_t disk[(1 + 2048) * 512];
+/* the +Drive the cache sees: the copy's new place first (the image's start), its old place, the move record */
+static uint8_t disk[(2 * (1 + 2048) + 1) * 512];
+static long at_of(uint32_t s)
+{
+    if (s >= 0x5FF200u && s < 0x5FF200u + 2049u) return (long)(s - 0x5FF200u);
+    if (s >= 0x6E8000u && s < 0x6E8000u + 2049u) return (long)(2049u + s - 0x6E8000u);
+    if (s == 0x5FFC00u) return 2 * 2049;
+    return -1;
+}
 uint32_t host_ready = 1, host_sectors = 48340992;
 static long reads, writes, write_fail_at = -1, read_fail = 0, bad = 0;
 long host_stock(const uint8_t *src, uint8_t *dst) { return 0x100000; }
 unsigned long host_malloc(unsigned int n) { return (unsigned long)malloc(n); }
 static int span_ok(uint32_t s, uint32_t n)
 {
-    if (s < 0x6E8000u || n == 0 || n > 0x10000u || (s - 0x6E8000u) * 512u + n > sizeof disk) { bad++; return 0; }
+    long a = at_of(s);
+    if (a < 0 || n == 0 || n > 0x10000u || at_of(s + (n - 1u) / 512u) != a + (long)((n - 1u) / 512u)) { bad++; return 0; }
     return 1;
 }
 int host_read(uint32_t s, uint32_t n, void *buf)
@@ -57,14 +67,14 @@ int host_read(uint32_t s, uint32_t n, void *buf)
     reads++;
     if (read_fail || !span_ok(s, n))
         return -1;
-    memcpy(buf, disk + (s - 0x6E8000u) * 512u, n);
+    memcpy(buf, disk + at_of(s) * 512u, n);
     return 0;
 }
 int host_write(uint32_t s, uint32_t n, const void *buf)
 {
     if (writes++ == write_fail_at || !span_ok(s, n))
         return -1;                                  /* a failed write (or a power cut): nothing after it */
-    memcpy(disk + (s - 0x6E8000u) * 512u, buf, n);
+    memcpy(disk + at_of(s) * 512u, buf, n);
     return 0;
 }
 int main(int argc, char **argv)
@@ -113,7 +123,7 @@ def boot(tmp_path_factory):
     defines = ["-DDN7_STOCK_DEPACK=host_stock", "-DDN7_MALLOC=host_malloc", "-DDN7_FREE=free",
                "-DDN7C_READ=host_read", "-DDN7C_WRITE=host_write", "-DDN7C_READY=host_ready",
                "-DDN7C_SECTORS=host_sectors"]
-    r = subprocess.run([cc, "-O1", "-w", *defines, "-include", "stdlib.h", "-include", str(d / "stub.h"),
+    r = subprocess.run([cc, "-O1", "-w", "-Dsection(x)=aligned(4)", *defines, "-include", "stdlib.h", "-include", str(d / "stub.h"),
                         "-o", str(exe), str(d / "h.c"), str(ROOT / "csrc" / "waverider" / "lzma7.c"),
                         str(ROOT / "csrc" / "waverider" / "lzma7cache.c")],
                        capture_output=True, text=True)
@@ -148,8 +158,11 @@ def test_first_boot_writes_the_copy_header_last(boot, tmp_path):
     assert hdr[:4] == b"DN7C" and struct.unpack(">III", hdr[4:16]) == (1, len(data), zlib.crc32(data))
     assert hdr[16:40] == stored[:24] and struct.unpack(">I", hdr[40:44])[0] == zlib.crc32(hdr[:40])
     assert img[512:512 + len(data)] == data
-    # writes: the header cleared, the program in 64 KB calls, the header
-    assert r["writes"] == 1 + -(-len(data) // 0x10000) + 1
+    # writes: the move record (v0.69.2: nothing at the old place to copy), the header cleared, the program in 64 KB
+    # calls, the header
+    assert r["writes"] == 1 + 1 + -(-len(data) // 0x10000) + 1
+    assert img[2 * C_SECTORS * 512:2 * C_SECTORS * 512 + 16] == struct.pack("=4I", 0x444E3256, 0xBBB1CDA9, 2,   # (the host's byte order: the C writes words)
+                                                                              2 ^ 0x4D4F5645)
 
 
 def test_second_boot_reads_it_byte_for_byte(boot, tmp_path):
@@ -217,7 +230,8 @@ def test_a_failed_read_decodes(boot, tmp_path):
     disk = tmp_path / "disk.bin"
     boot(stored, disk)
     r = boot(stored, disk, read_fail=1)
-    assert (r["status"], r["state"], r["out"]) == (2, 3, data)    # decoded, then written again
+    # decoded; the move record unread (v0.69.2): no copy written at either place
+    assert (r["status"], r["state"], r["writes"], r["out"]) == (2, 5, 0, data)
 
 
 def test_no_drive_no_io(boot, tmp_path):
@@ -232,7 +246,9 @@ def test_an_erased_copy_decodes(boot, tmp_path):
     disk = tmp_path / "disk.bin"
     boot(stored, disk)
     for erased in (0x00, 0xFF):                     # the card's ERASED_MEM_CONT either way
-        disk.write_bytes(bytes([erased]) * (C_SECTORS * 512))
+        img = bytearray(disk.read_bytes())
+        img[:C_SECTORS * 512] = bytes([erased]) * (C_SECTORS * 512)
+        disk.write_bytes(bytes(img))
         r = boot(stored, disk)
         assert (r["status"], r["state"], r["why"], r["out"]) == (2, 3, 1, data)
 
@@ -245,3 +261,25 @@ def test_the_largest_program_fits_its_sectors(boot, tmp_path):
     assert boot(stored, disk)["state"] == 3
     r = boot(stored, disk)
     assert (r["status"], r["out"]) == (8, data)
+
+
+def test_the_old_copy_moves_once_and_is_never_written(boot, tmp_path):
+    """v0.69.2 (csrc/include/dmove.h): a +Drive as v0.69.1 left it (the copy at 0x6E8000, no move record): the first
+    boot copies it sector for sector to 0x5FF200 (its header last), sets the move record's DSP bit and loads the
+    program from the new place without decoding; the old sectors are never written; the next boot does not copy"""
+    data, stored = _build(seed=17)
+    first = tmp_path / "first.bin"
+    boot(stored, first)                            # a copy, made at the new place ...
+    img = first.read_bytes()
+    old = bytearray(2 * (2 * C_SECTORS + 1) * 256 * 2)[:(2 * C_SECTORS + 1) * 512]
+    old[C_SECTORS * 512:2 * C_SECTORS * 512] = img[:C_SECTORS * 512]   # ... put at the old place, no move record
+    disk = tmp_path / "disk.bin"
+    disk.write_bytes(bytes(old))
+    r = boot(stored, disk)
+    after = disk.read_bytes()
+    assert (r["got"], r["status"], r["state"], r["out"]) == (len(data), 8, 1, data)   # loaded, not decoded
+    assert after[:C_SECTORS * 512] == img[:C_SECTORS * 512]          # the copy, sector for sector
+    assert after[C_SECTORS * 512:2 * C_SECTORS * 512] == bytes(old[C_SECTORS * 512:2 * C_SECTORS * 512])
+    assert struct.unpack("=4I", after[2 * C_SECTORS * 512:2 * C_SECTORS * 512 + 16])[2] == 2
+    r = boot(stored, disk)
+    assert (r["status"], r["state"], r["writes"]) == (8, 1, 0)       # moved: no second copy

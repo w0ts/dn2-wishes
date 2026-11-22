@@ -125,6 +125,9 @@ def isolated_rebuild(zbytes: bytes, mod_version: str, paths: dict[str, pathlib.P
     """the zip's build, run as builder-worker.js runs it (the zip in RUN/code, VERSION in RUN, nothing
     from this repository, no build variable inherited) -> its sha256, or the error's last line"""
     env = {k: v for k, v in os.environ.items() if k not in BUILD_ENV}
+    # v0.65.1 (upstream's packer, docs/packer.md): the planner as the browser runs it, apopt.wasm (here under node),
+    # not the native library: the zip must rebuild the cleared file through the WebAssembly the page uses
+    env["DNFW_APOPT"] = "node"
     with tempfile.TemporaryDirectory() as td:
         run = pathlib.Path(td)
         with zipfile.ZipFile(io.BytesIO(zbytes)) as z:
@@ -233,20 +236,18 @@ def main(argv: list[str]) -> int:
 
 
 def check_site(outdir: pathlib.Path) -> int:
-    """the Pages workflow's check: wishes.json is a list (an empty list is allowed: the builder then says
-    "No release published yet"); every row listed is one build in this format, its zip is there with its
-    sha256, and it has a published gate record that clears its sha256. Any miss: exit 1, publish nothing."""
+    """the Pages workflow's check: at least one release is listed, each row is one build in this format,
+    its zip is there with its sha256, and it has a published gate record that clears its sha256. Any
+    miss: exit 1, publish nothing."""
     man = outdir / "wishes.json"
     if not man.is_file():
         print(f"no {man}: nothing cleared to publish")
         return 1
     bad = []
     rows = json.loads(man.read_text())
-    if not isinstance(rows, list):
-        bad.append("wishes.json is not a list of releases")
+    if not isinstance(rows, list) or not rows:
+        bad.append("no release listed")
         rows = []
-    elif not rows:
-        print("no release listed yet: the builder will say so")
     for row in rows:
         what = f"v{row.get('release') if isinstance(row, dict) else row}"
         if not isinstance(row, dict) or set(row) != set(ROW_KEYS):

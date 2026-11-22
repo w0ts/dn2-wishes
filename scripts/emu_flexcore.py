@@ -75,11 +75,19 @@ def main() -> int:
                 differences(stock, snap_image.read_bytes()) if va + len(b) <= 0x40000400 + len(stock)]
         machine.apply(back)
     image = (pathlib.Path(a.build) / "section_3_MAIN_OS.bin").read_bytes()
+    # 2026-11-16 (v0.56.2): lfo4 moves the 60-byte record table (0x468fffcc) and every stock accessor with it;
+    # stock's copy stays in the image, unread, and our C (REC_BASE) sets the formats in the moved one. The
+    # records are read where the build's own accessors read them (stock's 0x401f83a4 without lfo4).
+    from dnfw.patch import paramtable                          # noqa: PLC0415
+    rec_base = paramtable.live_base(stock, image, 0x40000400)
+    print(f"records at {rec_base:#010x} (the build's accessors; stock's 0x401f83a4)", flush=True)
     machine.apply(differences(stock, image))
     from dnfw.mods import platform                             # noqa: PLC0415
     from dnfw.sampler import machines as SM                    # noqa: PLC0415
     for va, blob in platform.runtime(image):
         machine.write(va, blob)
+    from emulib import attkit
+    attkit.store_kit(machine)  # (2026-11-21) a converted kit stored back: converted once
     for page in range(SM.MIRROR, SM.MIRROR + SM.MIRROR_BYTES, 0x100000):
         try:
             uc.mem_map(page, 0x100000, UC_PROT_ALL)
@@ -91,6 +99,10 @@ def main() -> int:
 
     def call(fn, *args, until=None, limit=50_000_000):
         saved = [uc.reg_read(r) for r in regs]
+        # (2026-11-16, v0.56.2b: PC and SR too. Left at SENTINEL after a call, the next free run's timer
+        # interrupt stacked SENTINEL as the interrupted PC; its RTE then ran into SENTINEL + 4 and stock's crash
+        # handler halted the ColdFire (on 6ebfb8fb's own snapshot, by its timer phase): every key after it lost)
+        saved_pc, saved_sr = uc.reg_read(K.UC_M68K_REG_PC), uc.reg_read(K.UC_M68K_REG_SR)
         sp = STACK_TOP - 0x200
         machine.write(sp, struct.pack(">I", SENTINEL) + b"".join(struct.pack(">I", x & 0xFFFFFFFF) for x in args))
         machine.write(SENTINEL, bytes.fromhex("4e714e71"))
@@ -100,6 +112,8 @@ def main() -> int:
         pc = uc.reg_read(K.UC_M68K_REG_PC)
         for r, v in zip(regs, saved):
             uc.reg_write(r, v)
+        uc.reg_write(K.UC_M68K_REG_SR, saved_sr)
+        uc.reg_write(K.UC_M68K_REG_PC, saved_pc)
         return d0, pc
 
     def L(name):
@@ -251,7 +265,7 @@ def main() -> int:
           led_site != bytes.fromhex("4eb94011d692"), led_site.hex())
 
     # ---- record 244: FLEX's BUF (01..08) on FLEX, stock's text elsewhere ----------------------
-    REC244 = 0x401F83A4 + 60 * 244
+    REC244 = rec_base + 60 * 244
     stock_f = machine.long(REC244 + 0x34)
     fs = []
     for kind in (13, 4, 0, 2):                         # FLEX, ONESHOT, a stock machine, SID
@@ -424,7 +438,7 @@ def main() -> int:
     # v0.47: the Monomachine's TUNE (knob H, record 240): its header text a signed knob
     # (-64..+63, 0 in tune), not stock's percentage; FUNC + turn steps by semitones (32)
     if "smp_quant" in lay:
-        REC240 = 0x401F83A4 + 60 * 240
+        REC240 = rec_base + 60 * 240
         stock_t = machine.long(REC240 + 0x34)
         call(lay["smp_formats"], 2)                          # SID 6581 (type 6, kind 2)
         f_t = machine.long(REC240 + 0x34)

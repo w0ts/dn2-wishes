@@ -193,6 +193,10 @@ def knee(p: Prog, a=None) -> None:
         p.fop(0, 0, "+", 1)
         p.fconst(1, 1.0)
         p.fop(0, 0, "MIN", 1)                    # a
+        from ..perc import program as PP         # 2026-11-20 (clip-inner): the loop squashed by 1 dB or more (or held
+        p.fconst(1, 1.122)                       # at 1.0): a clip (the send's or the track's: entry, inserts.bus)
+        p.fop(1, 0, "*", 1)
+        PP.clip_flag(p, 1, "LT", 5, 5)           # (F5 = |x| > kn > 0: a nonzero word)
         a.ld(p, 6, "kv")
         p.fconst(1, 0.0)
 
@@ -318,14 +322,19 @@ def core(p: Prog, a=None) -> None:
     """one sample after its x / xb (ref.Ref.block's loop): the times, the lines' inputs, the writes, the counts, the
     taps, the output"""
     a = a or ABS
-    a.ld(p, 4, "kf")
-    for t, d in (("ta", "da"), ("tb", "db")):
-        a.ld(p, 2, t)
-        a.ld(p, 3, d)
-        p.fop(2, 2, "-", 3)
-        p.fop(2, 2, "*", 4)
-        p.fop(3, 3, "+", 2)
-        a.st(p, d, 3)
+    a.ld(p, 4, "kf")                             # 2026-11-21 (fx-fast): the two times' smoothing interleaved (A in R2 R3,
+    a.ld(p, 2, "ta")                             # B in R6 R7), so B's loads and A's store ride on computes: the same
+    a.ld(p, 3, "da")                             # operations on the same values
+    p.fop(2, 2, "-", 3)
+    a.ld(p, 6, "tb")
+    p.fop(2, 2, "*", 4)
+    a.ld(p, 7, "db")
+    p.fop(3, 3, "+", 2)
+    p.fop(6, 6, "-", 7)
+    a.st(p, "da", 3)
+    p.fop(6, 6, "*", 4)
+    p.fop(7, 7, "+", 6)
+    a.st(p, "db", 7)
     loop_in(p, "fa", "ya", a=a)
     a.st(p, "ia", 0)
     loop_in(p, "fb", "yb", "xb", a=a)
@@ -647,6 +656,10 @@ def entry(p: Prog) -> None:
         xdly_block(p)
     p.ifz(0, "NE", lambda: clearing(p), ours)
     p.ld(0, C["im"])
+    from ..perc import guard as G, program as PP  # 2026-11-20 (clip-inner): the send's clip: the delay return's bit;
+    from ..inserts import bus as BUS               # an instance's (a track's bus insert): the bus pass's track, C['t']
+    p.ifz(0, "EQ", lambda: PP.clip_note_track(p, bit=G.CLIPTRK_RET + 0), lambda: PP.clip_note_track(p, BUS.C["t"]))
+    p.ld(0, C["im"])
 
     def to_pass():
         restore(p)
@@ -708,7 +721,9 @@ def program(prefix: str = "xd") -> str:
     p.emit_subs()
     p.raw(".wr_xdly..end:")
     p.raw("      .type wr_xdly.,STT_FUNC;")
-    return p.text()
+    # 2026-11-20 (DRUM's room): the R12 loads nothing reads, folded (dnfw.perc.flow)
+    from ..perc import flow as _FLOW
+    return _FLOW.fold_text(p.text())
 
 
 def run(mem: Mem, regs: dict[int, int]) -> tuple[str, Prog]:

@@ -313,6 +313,20 @@ def engines(R, warm, sound, machines, counts, only):
                     words[slot] = word
                     return words
                 cases.append(("PLAITS-" + (m or "?"), "PLAITS", w, MM.TYPES[k], False))
+        elif n == "DRUM":                      # 2026-11-20: each type at its start and its dearest (dsp_cost's cases)
+            import sharc_drum_step as DS
+            from dnfw.perc import live as PLx
+            from dnfw.perc import machines as PMx
+
+            def dw(t, p1, p2, k=k):
+                k1, k2 = DS.knobs_of(t, p1, p2)
+                words = R.mnm_words(k, k1)
+                for j, x in enumerate(k2.values()):
+                    _rid, slot, lo, top = DS.rec2(j)           # (stage 3: page 2 H, SNARE's WCHR)
+                    words[slot] = PLx.knob_word(x, top, lo)
+                return words
+            for dname, case in DS.cost_cases().items():
+                cases.append((dname, "DRUM", lambda case=case: dw(*case), MM.TYPES[k], False))
         else:
             fam = "MONOMACHINE" if n in MM.MONO_ENGINES else n
             cases.append((n, fam, lambda k=k: R.mnm_words(k), MM.TYPES[k], False))

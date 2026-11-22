@@ -6,8 +6,9 @@ caravel firmware/src/eng_drone.c), as a Monomachine-style machine (THIRD-PARTY.m
 
 One network a track at 44.1 kHz (PERC's stream, Optimist's own rate). A note plays four sines;
 each one's phase is moved (under a quarter turn) by another's previous sample through a soft
-odd cubic (CHAR); the four averaged, a ~14 Hz DC block, a one-pole low-pass (TONE), a soft
-knee at 16000/32768. A note transposes the whole network.
+odd cubic (CHAR); the four averaged, a ~14 Hz DC block, a one-pole low-pass (TONE). (Optimist's soft knee at
+16000/32768 is gone since 2026-11-21: no limiter; DRONE's level keeps it clear of the outputs' full scale.) A note
+transposes the whole network.
 
 Parameters (page 1, knob / 128): SPREAD (ratios 1 : 1 + s/4 : 1 + s/2 : 1 + s), COUPLE (the
 phase modulation, 0 .. a quarter turn), TOPO (PAIRS 0<->1 2<->3, CHAIN 0->1->2->3, RING
@@ -34,10 +35,9 @@ Against Optimist:
   Its integer followers (floored d >> 10) lag the exponential a little: after a note change the
   network sits ~4e-4 turn off the reference's phase (47 dB, inaudible).
 - The sine: s (1 - s^2) Q(s^2), s = 2 x phase in -1..1, Q of degree 3 (error 1.1e-5, under
-  Optimist's own Q15 step 3.1e-5; its 1024-point table 4.7e-6). tanh in the knee: 1 - 2 /
-  (2^(2v/ln2) + 1) with tb303's precise exp2 (Optimist: TANH_Q15, 257 points).
+  Optimist's own Q15 step 3.1e-5; its 1024-point table 4.7e-6).
 - The DC block keeps Optimist's integer offset: its floored dco >> 9 adds half an LSB (2^-16) a
-  sample on average, a standing +0.0078 an ear (mid +0.0153, -36 dB) that also tilts the knee;
+  sample on average, a standing +0.0078 an ear (mid +0.0153, -36 dB);
   emulated (+2^-16 a sample: 55 dB to the reference against 30 dB without); likewise the
   one-pole's floored product (-2^-16 a sample: TONE 0 54 dB against 25) and the drift's
   inc >> 16 (DRIFT 127 63 dB against 41).
@@ -66,6 +66,7 @@ from __future__ import annotations
 import math
 
 from ...mnm import core as C
+from ..plaits.plaits_drumkit import EXP2_F15
 from ..tb303.tb303 import _exp2p
 from ...perc.dsl import Prog
 
@@ -75,7 +76,7 @@ DEFAULTS = (0, 12, 0, 18, 32, 76, 0, 24)         # Optimist's defaults; DTUNE: S
 PNAMES2 = ("GLID", "GLTY", "OCT", "---", "---", "---", "HOLD")
 DEFAULTS2 = (0.0, 0.5, 0.5, 0.5, 0.0, 1.0, 0.0)  # q0..q6 as 0..1 (PERC's records' defaults)
 
-SIDE_L2 = 0x200B1800                             # the slots' side blocks (the coordinator's)
+SIDE_L2 = 0x200B1B00                             # the slots' side blocks (the coordinator's; 0x200b1800 until 2026-11-16)
 SIDE_STRIDE = 0x90                               # 36 words a slot
 SR = 44100.0
 FOL = 1.0 - 2.0 ** -10                           # drone_follow: ~23 ms
@@ -83,7 +84,6 @@ R16 = FOL ** 16                                  # a half's follower step
 A16 = FOL * (1.0 - R16) / (16.0 * (1.0 - FOL))   # the mean of its 16 values
 MAXINC = 0.375                                   # DRONE_MAXINC, turns a sample
 BEAT_K = (2 ** 32 + 50 * 44100) // (100 * 44100)   # DRONE_BEAT_K (974)
-KNEE = 16000.0 / 32768.0
 IV = (0.0, 16384.0, 32768.0, 65536.0)            # SPREAD's ratios - 1, Q16
 DT = (-3.0, -1.0, 1.0, 3.0)
 PH0, DPH0 = 0x19234567, 0x39123457               # the fresh network's phases
@@ -102,6 +102,9 @@ K_IV, K_DT, K_DR = 72, 76, 80                    # per generator, set by init (x
 # this note began legato (the gate still open at its trig)
 S_GATE, S_LEG = 84, 85
 NOTE_OFF_WORD = 0x25C4B0                         # frame +36 (low half): the note-off / amp gate-off mask, bit slot
+# 2026-11-20 (live knobs): the glide's start distance |T - CUR| x 4096 (1/4096 semitone units), kept so GLID/GLTY
+# re-read during the glide give the same step for unmoved knobs (after K_Q0; written before it is read: not in init)
+S_GD0 = 92
 S_END = 86                                       # DT x 252 x 128 / 127; and (8 + g) / 8
 CPL, TOPO, CHR, DRF, TONE = range(5)
 
@@ -142,7 +145,10 @@ def init(p: Prog, L: C.Layout) -> None:
 def _exp2(p: Prog, d: int, x: int) -> None:
     """Fd = 2^Fx, tb303's precise exp2 as one subroutine. Clobbers R0, R1, R12, R14, R15, I12."""
     p.fpass(15, x)
-    p.call("drone_exp2", lambda: (_exp2p(p, 14, 15), p.fpass(15, 14)))
+    # 2026-11-20 (CLAP and the cymbals' room): PLAITS' drum kit's copy (plaits_drumkit.EXP2_F15: the same text, F15 in,
+    # F14 out), F15 = F14 after it as before
+    p.call(EXP2_F15, lambda: _exp2p(p, 14, 15))
+    p.fpass(15, 14)
     p.fpass(d, 15)
 
 
@@ -163,47 +169,76 @@ def trig(p: Prog, L: C.Layout) -> None:
     _sv(p, S_IDLE, 0)
 
 
-def _glide_start(p: Prog, L: C.Layout) -> None:
+def _glide_d0(p: Prog) -> None:
+    """a legato trig's glide (GLID > 0): S_GD0 = |F1 (the target) - S_CUR| x 4096, and S_GST -1 (a fresh glide:
+    `_glide_step` works out its step this block)."""
+    _ld(p, 3, S_CUR)
+    p.fop(3, 1, "-", 3)
+    p.fconst(12, 0.0)
+    p.fop(4, 12, "-", 3)
+    p.fop(3, 3, "MAX", 4)
+    _k(p, 3, 3, "*", 4096.0)                     # |d|, units
+    _sv(p, S_GD0, 3)
+    p.fconst(3, -1.0)
+    _sv(p, S_GST, 3)
+
+
+def _glide_step(p: Prog, L: C.Layout) -> None:
     """S_GST: voice.c glide_set's step (1/4096 semitone a block, as semitones) for GLID's time
     ms = a2glide.ms_of(q0) (2026-11-11: up to 5 minutes): TIME |d| / trunc(ms FS / 1000 / 32), RATE
-    ENV_LIN x 3 / 1024, neither truncated (a2glide.step_semis). In: F1 the target,
-    F2 GLID (> 0)."""
+    ENV_LIN x 3 / 1024, neither truncated (a2glide.step_semis); |d| the glide's start distance (S_GD0).
+    2026-11-20 (live knobs): run for a fresh glide (S_GST -1, `_glide_d0`) and, during a glide (S_GST > 0), on the
+    voice's turn (dnfw.md.voice.live_turn, ~94 Hz): GLID and GLTY follow modulation and p-locks mid-glide (from the
+    start distance, so unmoved knobs keep the step bit for bit); GLID turned to 0 ends the glide (at the note).
+    Clobbers R0-R7, R12-R15, I12 (F1 too)."""
     from ..analog2 import a2glide as G
-    G.curve_x(p, 3, 2)
-    _k(p, 3, 3, "*", -math.log2(10.0))
-    _exp2(p, 4, 3)                               # 1 / ms
-    _k(p, 4, 4, "*", float(1 << 24) * 32.0 * 1000.0 / SR)
-    p.trunc(5, 4)                                # ENV_LIN
-    C.page2(p, L, 6, 1)
+    C.page2(p, L, 2, 0)
 
-    def time_():
-        _target(p, L)                            # (the target again: _exp2p clobbered R1)
-        p.iconst(12, 0)
-        p.float_(4, 5, 12)
-        from ...perc import machines as PM
-        PM._recip_inline(p, 6, 4, 7)
-        _k(p, 6, 6, "*", float(1 << 24) * (1.0 + 2e-7))
-        p.trunc(5, 6)                            # ticks
-        p.iconst(12, 0)
-        p.float_(4, 5, 12)
-        PM._recip_inline(p, 6, 4, 7)             # 1 / ticks
-        _ld(p, 3, S_CUR)
-        p.fop(3, 1, "-", 3)
-        p.fconst(12, 0.0)
-        p.fop(4, 12, "-", 3)
-        p.fop(3, 3, "MAX", 4)
-        _k(p, 3, 3, "*", 4096.0)                 # |d|, units
-        p.fop(3, 3, "*", 6)
-        _k(p, 3, 3, "*", 1.0 + 2e-7)             # gstep, units
+    def glide():
+        G.curve_x(p, 3, 2)
+        _k(p, 3, 3, "*", -math.log2(10.0))
+        _exp2(p, 4, 3)                           # 1 / ms
+        _k(p, 4, 4, "*", float(1 << 24) * 32.0 * 1000.0 / SR)
+        p.trunc(5, 4)                            # ENV_LIN
+        C.page2(p, L, 6, 1)
 
-    def rate():
-        p.iconst(12, -10)
-        p.float_(3, 5, 12)
-        _k(p, 3, 3, "*", 3.0)
-    p.fconst(12, 0.5)
-    p.if_(6, "GE", 12, time_, rate)
-    G.step_semis(p)
+        def time_():
+            p.iconst(12, 0)
+            p.float_(4, 5, 12)
+            from ...perc import machines as PM
+            PM._recip_inline(p, 6, 4, 7)
+            _k(p, 6, 6, "*", float(1 << 24) * (1.0 + 2e-7))
+            p.trunc(5, 6)                        # ticks
+            p.iconst(12, 0)
+            p.float_(4, 5, 12)
+            PM._recip_inline(p, 6, 4, 7)         # 1 / ticks
+            _ld(p, 3, S_GD0)                     # |d|, units
+            p.fop(3, 3, "*", 6)
+            _k(p, 3, 3, "*", 1.0 + 2e-7)         # gstep, units
+
+        def rate():
+            p.iconst(12, -10)
+            p.float_(3, 5, 12)
+            _k(p, 3, 3, "*", 3.0)
+        p.fconst(12, 0.5)
+        p.if_(6, "GE", 12, time_, rate)
+        G.step_semis(p)
+    p.fconst(3, 0.0)
+    p.fconst(12, 0.0)
+    p.if_(2, "GT", 12, glide)
     _sv(p, S_GST, 3)
+
+
+def _glide_live(p: Prog, L: C.Layout) -> None:
+    """`_glide_step` for a fresh glide (S_GST < 0), or during one (S_GST > 0) when VW live says so (a trig block or
+    the voice's turn); the same test every block. Clobbers R0, R3, R12 before it."""
+    from ...md import core as K
+    K.vw(p, 0, "live")
+    _ld(p, 3, S_GST)
+    p.fconst(12, 0.0)
+    p.if_(3, "LT", 12, lambda: p.iconst(0, 0))
+    p.if_(3, "EQ", 12, lambda: p.iconst(0, 1))
+    p.ifz(0, "EQ", lambda: _glide_step(p, L))
 
 
 def _target(p: Prog, L: C.Layout) -> None:
@@ -245,7 +280,7 @@ def _pitch_glide(p: Prog, L: C.Layout) -> None:
 
         def legato_or_all():                     # legato only: the gate still open at the trig
             _ld(p, 0, S_LEG)
-            p.ifz(0, "NE", lambda: _glide_start(p, L), jump)
+            p.ifz(0, "NE", lambda: _glide_d0(p), jump)
         p.if_(2, "GT", 12, lambda: p.ifz(0, "NE", legato_or_all, jump), jump)
 
     def follow():                                # CUR += T - last T
@@ -258,6 +293,7 @@ def _pitch_glide(p: Prog, L: C.Layout) -> None:
         p.iconst(12, 1)
         p.if_(0, "EQ", 12, on_trig, lambda: (p.iconst(0, 1), _sv(p, S_TRG, 0), follow()), kind="i")
     p.ifz(0, "NE", pending, follow)
+    _glide_live(p, L)
     _target(p, L)                                # (the glide's set-up clobbers F1)
     _sv(p, S_TGT, 1)
     _ld(p, 2, S_CUR)                             # one step towards T (S_GST 0: there)
@@ -545,7 +581,7 @@ def _ear_sched(p: Prog) -> None:
     (dnfw.mnm.sched): the generators in two register sets, so one's loads and integer steps ride on the other's
     computes; the slot's words through I0 (_half_i0), the sine's first coefficient and 1.0 from slot words too
     (K_ONE, K_Q0), each generator's output in T_O until all four have read the previous ones; its phase step
-    moved up (it reads nothing the sine writes). The soft knee as before."""
+    moved up (it reads nothing the sine writes)."""
     from ...mnm.sched import Sched
     s = Sched()
     o = lambda k: k - I0_AT                      # noqa: E731
@@ -614,11 +650,9 @@ def _ear_sched(p: Prog) -> None:
     s.add(0, 0, 15)                              # its floored product: -1/2 LSB a sample
     s.st(E_LOW, 1, 0)
     s.emit(p)
-    p.fconst(12, 0.0)                            # soft_knee(x, 16000)
-    p.fop(1, 12, "-", 0)
-    p.fop(1, 1, "MAX", 0)
-    p.fconst(12, KNEE)
-    p.if_(1, "GT", 12, lambda: _knee(p))
+    # 2026-11-21 (the User: "just make it quieter! not a limiter... a synth in its normal settings must not clip"):
+    # Optimist's soft knee (16000/32768, a protection for its Q15 output) is gone; the ear's output is the low-pass's,
+    # linear, and DRONE's level (perc.program LEVEL_DB) keeps its loudest setting clear of the outputs' full scale
     p.sti(E_Y, 1, 0)
 
 
@@ -677,30 +711,10 @@ def _ear_body(p: Prog) -> None:
     p.fop(0, 0, "+", 1)
     _k(p, 0, 0, "+", -(2.0 ** -16))              # its floored product: -1/2 LSB a sample
     p.sti(E_LOW, 1, 0)
-    p.fconst(12, 0.0)                            # soft_knee(x, 16000)
-    p.fop(1, 12, "-", 0)
-    p.fop(1, 1, "MAX", 0)
-    p.fconst(12, KNEE)
-    p.if_(1, "GT", 12, lambda: _knee(p))
+    # 2026-11-21 (the User: "just make it quieter! not a limiter... a synth in its normal settings must not clip"):
+    # Optimist's soft knee (16000/32768, a protection for its Q15 output) is gone; the ear's output is the low-pass's,
+    # linear, and DRONE's level (perc.program LEVEL_DB) keeps its loudest setting clear of the outputs' full scale
     p.sti(E_Y, 1, 0)
-
-
-def _knee(p: Prog) -> None:
-    """F0 = sign(x) (k + tanh(min(2 (|x| - k), 2)) / 2): F0 x, F1 |x|."""
-    from ...perc import machines as PM
-    p.fpass(8, 0)
-    _k(p, 3, 1, "+", -KNEE)
-    p.fop(3, 3, "+", 3)
-    _k(p, 3, 3, "MIN", 2.0)
-    _k(p, 3, 3, "*", 2.0 / math.log(2.0))
-    _exp2p(p, 2, 3)                              # e^(2v)
-    _k(p, 2, 2, "+", 1.0)
-    PM._recip_inline(p, 4, 2, 5)
-    _k(p, 4, 4, "*", -32767.0 / 32768.0)         # tanh x 32767 / 32768, halved, + k
-    _k(p, 4, 4, "+", 0.5 * 32767.0 / 32768.0 + KNEE)
-    p.fconst(12, 0.0)
-    p.fop(0, 12, "-", 4)
-    p.if_(8, "GT", 12, lambda: p.fpass(0, 4))
 
 
 def _ear(p: Prog, word: int) -> None:

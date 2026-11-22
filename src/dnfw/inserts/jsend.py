@@ -116,8 +116,9 @@ def stock_words() -> list[tuple[int, int]]:
                for k in range(STOCK_SECTION_N)])
 
 
-def block(p: Prog) -> None:
-    """one block of JUNO on the send (in -> out, then post.juno in place on out)"""
+def block(p: Prog, juno_sw: int | None = None) -> None:
+    """one block of JUNO on the send (in -> out, then post.juno in place on out); JUNO_SW: the address of post's one
+    JUNO copy in inspost.asm (2026-11-21, DSP room: entered by post.juno_call), None: juno() inline here"""
     _state_at(p)
     p.ldi(0, 6, 4)
     p.iconst(1, D.JS_JUNO)
@@ -155,7 +156,10 @@ def block(p: Prog) -> None:
     p.st(C["rb"], 0)
     _knob(p, D.JS_DPTH_WORD, True, "p0")         # MIX: DPTH
     _knob(p, D.JS_SPD_WORD, False, "p1")         # MODE: SPD
-    P.juno(p)
+    if juno_sw is None:
+        P.juno(p)
+    else:
+        P.juno_call(p, juno_sw)
     _state_at(p)
     for k in range(6):
         p.ld(8, C[f"s{k}"])
@@ -173,8 +177,8 @@ def ret(p: Prog) -> None:
     p.e("NOP;")
 
 
-def entry(p: Prog) -> None:
-    """after save(): TYPE; the stock chorus (and our state forgotten), or one block of JUNO"""
+def entry(p: Prog, juno_sw: int | None = None) -> None:
+    """after save(): TYPE; the stock chorus (and our state forgotten), or one block of JUNO (block's JUNO_SW)"""
     p.ld(0, D.JS_TYPE)
     p.iconst(1, D.JS_JUNO)
 
@@ -191,11 +195,13 @@ def entry(p: Prog) -> None:
     p.if_(0, "NE", 1, go_stock, kind="i")
     if p.run and p.went == "stock":             # (the model: the stock chorus took the call)
         return
-    block(p)
+    block(p, juno_sw)
     ret(p)
 
 
-def program(prefix: str = "js") -> str:
+def program(prefix: str = "js", juno_sw: int | None = None) -> str:
+    """JUNO_SW: the resolved address of inspost.asm's one JUNO copy (scripts/gen_inserts_asm.py resolves inspost
+    first); None: JUNO inline (the text before 2026-11-21)"""
     p = Prog("emit", prefix=prefix)
     p.raw("// jsend.asm -- JUNO in the stock chorus's slot on the FX bus (docs/inserts.md \"The chorus send\"). GENERATED")
     p.raw("// by scripts/gen_inserts_asm.py from dnfw.inserts.jsend; do not edit by hand.")
@@ -205,11 +211,13 @@ def program(prefix: str = "js") -> str:
     p.raw(".GLOBAL wr_jsend.;")
     p.raw("wr_jsend.:")
     P.save(p)
-    entry(p)
+    entry(p, juno_sw)
     p.emit_subs()
     p.raw(".wr_jsend..end:")
     p.raw("      .type wr_jsend.,STT_FUNC;")
-    return p.text()
+    # 2026-11-20 (DRUM's room): the R12 loads nothing reads, folded (dnfw.perc.flow)
+    from ..perc import flow as _FLOW
+    return _FLOW.fold_text(p.text())
 
 
 def model(mem: Mem, regs: dict[int, int]) -> tuple[str, Prog]:

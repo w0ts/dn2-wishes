@@ -64,7 +64,10 @@ def test_the_formatters_answer_units(monkeypatch, tmp_path):
         "#define MNM_N", "#define MNM_J", "enum { MU_", "static const unsigned char mnm_unit", "static const unsigned char ins_unit",
         "static const unsigned char flt_unit", "static const unsigned char fxp_unit", "static const short mnm_curves", "static const unsigned short mnm_glid",
         "#define STU_", "static const unsigned short stu_", "static const unsigned char stu_", "static const unsigned int stu_"))]
+    # REC_BASE: where our C reads stock's records, as the build passes it (cpage: pages.lfo4_moved(); since
+    # 2026-11-16 lfo4112). Only stu_poll's STU_FMT reads it, which this program never calls
     prog = ("#include <stdio.h>\ntypedef unsigned int u32;\n#define DN2_STOCK_UNITS 1\nint wr_track_ours(void){return 0;}\n"
+            + f"#define REC_BASE {WP.lfo4_moved()['REC_BASE']:#x}u\n"
             + "\n".join(keep) + "\n" + src[a:b].replace("__attribute__((section(\".data\")))", "")
             + "\nint main(void){char b[16];for(int w=0;w<STU_N;w++)for(int k=0;k<128;k++){stu_fns[w](k<<8,b);"
               "printf(\"%d %d %s\\n\",stu_ids[w],k,b);}return 0;}\n")
@@ -96,9 +99,13 @@ def _fine_prog(hdr: str, smp: str) -> str:
     fmt = (ROOT / "csrc/sampler/fmt.c").read_text()
     a = fmt.index("#define POS_RANGE")
     b = fmt.index("\n}\n", fmt.index("void smp_fine(int kind)\n{")) + 3
-    body = (fmt[a:b].replace("__attribute__((section(\".data\")))", "")
-            .replace("((int *)(0x401F83A4u + 60u * (id)))", "(rec_w[id])")
-            .replace("((u32 *)(0x4243425Cu + 68u * (id) + 4u))", "(entry_type[id])"))
+    body = fmt[a:b].replace("__attribute__((section(\".data\")))", "")
+    # the record and the value-type accessors, as fmt.c spells them (REC_BASE since 2026-11-16 lfo4112): each must be
+    # found, or the program would read the real addresses
+    for old, new in (("((int *)(REC_BASE + 60u * (id)))", "(rec_w[id])"),
+                     ("((u32 *)(0x4243425Cu + 68u * (id) + 4u))", "(entry_type[id])")):
+        assert body.count(old) == 1, old
+        body = body.replace(old, new)
     md = (ROOT / "csrc/waverider/md_page.c").read_text()
     stu = md[md.index("void *stu_stock_of(int id)"):]
     stu = stu[:stu.index("\n}\n") + 3]

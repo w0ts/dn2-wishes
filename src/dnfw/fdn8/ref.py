@@ -14,7 +14,7 @@ anything else the stock reverb (every kit stores 1).
 
 The design's arithmetic, and where it comes from (optimist reverb_alt.c rvf_params, rv_lfo,
 rv_step; rev_math.c rv_exp2n):
-- SIZE s = DEC x 127: below the knee (90) the ROOM's decay kt(s) = (14647 - 135 s + s^2 (23109
+- SIZE s = DEC x 127, through design.SIZE_MAP (the knob's travel, identity up to 90): below the knee (90) the ROOM's decay kt(s) = (14647 - 135 s + s^2 (23109
   - 44 s) / 2^16) / 2^24 log2 per 22.05 kHz sample; above it the decay time doubles every 11
   steps, and 2.25 doublings more from 126 to 127 (optimist: a step at 127; here linear over
   the last step, as the knob is smoothed). Each line's gain 2^(-kt' (L + CM)), kt' = kt x
@@ -57,12 +57,21 @@ RSQRT_MAGIC = 0x5F3759DF
 NEWTON = 3
 
 # derived constants, float32 (the DSP code loads these same values)
-K_KT = D.KT_SCALE * D.KG / 2 ** 24
+K_KT = D.K_KT                                    # (design's since 2026-11-22: the active table carries them, HALF its own)
 LOG2_100 = math.log2(D.FILT_SPAN)
-W_HPF = -2 * math.pi * D.HPF_LO / D.FS / math.log(2)
-W_LPF = -2 * math.pi * D.LPF_LO / D.FS / math.log(2)
-DEP_GROW = (D.EXC48 - D.FEXC48) / (127 - D.KNEE)
-CHUNK = 4096                                     # words cleared a block after a switch
+W_HPF, W_LPF, DEP_GROW = D.W_HPF, D.W_LPF, D.DEP_GROW
+CHUNK = 4096                                     # words cleared a block after a switch (the stock buffers; FDN8 / LONG
+                                                 # until 2026-11-21)
+# 2026-11-21 (fx-fast): FDN8 / LONG clear only the ring's window a fresh engine reads before it writes: every access is at
+# p + off, 0 <= off < RB_END (stages.py), and p counts down, so a word enters at offset 0 (written first) unless it lay in
+# [p, p + RB_END) when the engine started. The same CLEAR_BLOCKS silent blocks as before (the same output), each
+# clearing WIN[type] words from p rounded down to 16 (so 32 x WIN >= RB_END + 15); the ring's other words keep what
+# they held (never read before written). False: the whole ring, CHUNK a block (the A/B reference).
+WINDOW_CLEAR = True
+CLEAR_BLOCKS = D.RING_WORDS // CHUNK             # 32
+WIN = {1: 1264, 2: 2352, 3: 672}                 # FDN8, LONG, HALF (the bus inserts): words a clearing block
+assert all(w % 16 == 0 and CLEAR_BLOCKS * w >= e + 15
+           for w, e in ((WIN[1], D.RB_END), (WIN[2], D.RB_ENDL), (WIN[3], D.RB_ENDH)))
 # the stock reverb's sample buffers in its DDR state (0x80000018; notes of Digiwerk T3.4 3.3,
 # measured again by the runner's fdn8 step): pre-delay, 8 diffusers, the two tank sets
 STOCK_STATE = 0x80000018
@@ -149,6 +158,19 @@ def sine(ph: int) -> np.float32:
     return poly(SIN_C, z) * y
 
 
+def size_map(s) -> np.float32:
+    """the knob's SIZE -> optimist's (design.SIZE_MAP): the hinges summed, then added (s exactly below the knee),
+    held to 127 (the knob's top exactly where it was)"""
+    acc = F(0.0)
+    for p, c in D.SIZE_HINGES:
+        t = s - F(p)
+        t = max(t, F(0.0))
+        t = t * F(c)
+        acc = acc + t
+    s = s + acc
+    return min(s, F(127.0))
+
+
 class Ref:
     def __init__(self):
         self.ring = np.zeros(D.RING_WORDS, F)
@@ -174,6 +196,7 @@ class Ref:
         pr = [min(max(F(x), F(0.0)), F(1.0)) for x in par]
         s = pr[1] * F(127.0)
         d = pr[2] * F(127.0)
+        s = size_map(s)
         y = max(s - F(D.KNEE), F(0.0))
         sk = s - y
         t = F(44.0) * sk
@@ -184,7 +207,7 @@ class Ref:
         u = F(135.0) * sk
         kt = F(14647.0) - u
         kt = kt + t
-        kt = kt * F(K_KT)
+        kt = kt * F(self.vt["kkt"])
         e = y * F(D.DBL_PER_STEP)
         fz = s - F(126.0)
         fz = min(max(fz, F(0.0)), F(1.0))
@@ -194,7 +217,7 @@ class Ref:
         ktr = kt * rho
         ktr = ktr * F(self.vt["ktv"])
         for k in range(8):
-            self.g[k] = exp2(ktr * F(-(self.vt["L"][k] + D.CM)))
+            self.g[k] = exp2(ktr * F(-(self.vt["L"][k] + self.vt["cm"])))
         c0, c1, c2, c3 = D.DAMP_C
         w = F(c3) * d
         w = F(c2) - w
@@ -221,29 +244,29 @@ class Ref:
             tt = min(tt, F(D.T_MAX))
             pp = exp2(tt)
             qq = pp - F(1.0)
-            qq = qq * F(1 / D.K48)
+            qq = qq * F(self.vt["kinv"])
             tq = qq + qq
             f4 = qq * F(4.0)
             f4 = f4 + F(1.0)
             den = tq + F(1.0)
             den = den + sqrt(f4)
             self.c[k] = tq * recip(den)
-        dg = y * F(DEP_GROW)
-        dg = dg + F(D.FEXC48)
+        dg = y * F(self.vt["dgrow"])
+        dg = dg + F(self.vt["fexc"])
         m = pr[3] * F(D.MOD_MAX)
         self.dq = dg * m
         pp = pr[0] * pr[0]
-        pp = pp * F(float(D.PD_MAX))
-        self.pd = min(trunc(pp), D.PD_MAX)
+        pp = pp * F(float(self.vt["pd"]))
+        self.pd = min(trunc(pp), self.vt["pd"])
         self.g1 = y * F(0.05 / 37) + F(0.75)
         self.g2 = y * F(0.075 / 37) + F(0.625)
         x = e * F(-0.125)
         self.gh = exp2(x) * F(D.GIN * 0.5)
         w = pr[4] * F(LOG2_100)
-        w = exp2(w) * F(W_HPF)
+        w = exp2(w) * F(self.vt["whp"])
         self.ah = F(1.0) - exp2(w)
         w = pr[5] * F(LOG2_100)
-        w = exp2(w) * F(W_LPF)
+        w = exp2(w) * F(self.vt["wlp"])
         self.al = F(1.0) - exp2(w)
 
     def extras(self, ex) -> None:
@@ -262,7 +285,7 @@ class Ref:
             self.ph[k] = (self.ph[k] + D.LFO_INC[k]) & M32
             sn = sine(self.ph[k])
             t = self.dq * sn
-            t = t + F(self.vt["L"][k] + D.CM - 0.5)
+            t = t + F(self.vt["L"][k] + self.vt["cm"] - 0.5)
             dk = trunc(t)
             fr = t - F(dk)
             h = fr - F(0.5)
@@ -360,20 +383,27 @@ class Ref:
         return outl, outr
 
     # -- the slot's call: the stock reverb, a switch's clearing, or FDN8 --------------------
+    def kind(self, tw: int) -> int:
+        """the type a TYPE word asks for: 1 FDN8 (0), 2 LONG (0x200), else 0 the stock reverb"""
+        return 1 if tw == 0 else 2 if tw == 0x200 else 0
+
     def block(self, type_word: int, inl, inr, par, ex=None):
         tw = type_word & 0xFFFF
-        t = 1 if tw == 0 else 2 if tw == 0x200 else 0
+        t = self.kind(tw)
         if t != self.cur:
             self.cur, self.pos = t, 0
-            self.clr = D.RING_WORDS if t else STOCK_WORDS
+            self.clr = (CLEAR_BLOCKS * WIN[t] if WINDOW_CLEAR else D.RING_WORDS) if t else STOCK_WORDS
             if t:
                 self.vt = D.variant(t)
                 self.ap, self.lp = [F(0)] * 8, [F(0)] * 8
                 self.hs = self.ls = F(0)
                 self.last = None
         if self.clr:
-            n = min(CHUNK, self.clr)
-            if self.cur:
+            n = min(WIN[self.cur] if self.cur and WINDOW_CLEAR else CHUNK, self.clr)
+            if self.cur and WINDOW_CLEAR:
+                s = (self.p & D.RING_MASK & ~15) + self.pos
+                self.ring[[(s + k) & D.RING_MASK for k in range(n)]] = 0
+            elif self.cur:
                 self.ring[self.pos:self.pos + n] = 0
             else:
                 self.cleared.append((self.pos, n))

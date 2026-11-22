@@ -38,7 +38,7 @@ stock-bytes guards re-prove each placement.
 
 | owner | range | what |
 |---|---|---|
-| lfo4 | 0x46700000 .. 0x46702A00 | LFO state LIVE, SECOND, BACKUP (3 x 2,560 B: 16 tracks x 4 LFOs x 40 B) |
+| lfo4 | 0x46808000 .. 0x4680AA00 (until 2026-11-17 0x46700000 .. 0x46702A00, inside stock 1.12's +Drive bounce buffer) | LFO state LIVE, SECOND, BACKUP (3 x 2,560 B: 16 tracks x 4 LFOs x 40 B) |
 | lfo4 | 0x46800000 .. 0x46802A68 | its C and BSS (CODE chunk) |
 | lfo4 | 0x46900000 .. 0x46904D60 | the relocated parameter table (330 records: stock's 320 + its 10) and names |
 | lfowaves | 0x46740000 .. 0x46742000 | NOIS state |

@@ -137,25 +137,14 @@ def test_refuses_an_image_whose_guards_moved(dn2_111):
 
 
 def test_refuses_an_image_lfo4_has_applied_to(dn2_111):
-    """lfo4 moves the parameter table and leaves the stock one in place, so
-    fxmod's ten record masks would still find their stock bytes after it and
-    land on a table nothing reads. It refuses, and names the order that works;
-    the browser's fxmod.js carries the same guard (test/test_js_lfo4.py)."""
+    """lfo4 moves the parameter table and leaves the stock one in place, so fxmod's ten record masks would still
+    find their stock bytes after it and land on a table nothing reads. 2026-11-17: since the OS 1.12 port lfo4 is a
+    1.12 mod and fxmod a 1.11 one, so that order cannot arise on either: lfo4 refuses the 1.11 image fxmod applies
+    to. (fxmod's own guard, "apply fxmod first, then lfo4", stays for an image that would carry both.)"""
     from dnfw.mods import lfo4
 
-    content = lfo4.compose(dn2_111.container.find(fxmod.SECTION).unpack())
-
-    class Stub:
-        class container:
-            @staticmethod
-            def find(_):
-                class S:
-                    @staticmethod
-                    def unpack():
-                        return content
-                return S
-    with pytest.raises(ModError, match="apply fxmod first, then lfo4"):
-        fxmod.apply(Stub)
+    with pytest.raises(ModError, match="is not stock"):
+        lfo4.compose(dn2_111.container.find(fxmod.SECTION).unpack())
 
 
 def test_names_twenty_four_destinations():

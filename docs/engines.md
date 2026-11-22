@@ -12,6 +12,7 @@ where upstream keeps them (`src/dnfw/mnm/`, `src/dnfw/md/`, ...), so every upstr
 | `engines/analog2/` | ANALOG 2 | `analog2.py`, `a2glide.py` (its legato glide) |
 | `engines/analog2/filters/` | ANALOG 2's filters and the A2 filter machines (the pass after the voices) | `models.py`, `design.py`, `program.py`, `live.py`, `ref.py`, `pages.py`, `coldfire.py` |
 | `engines/juno/` | JUNO | `juno.py`, `juno_data.py` (its data), `tables.py` (its tables, from that data) |
+| `engines/drum/` | DRUM (docs/drum.md) | `drum.py` (the machine), `kick.py` (KICK), `dmath.py` (its arithmetic), `ref.py` (its reference) |
 | `engines/` | our list, and what our engines' pages read | `machines.py` (our engines, their machine types and builder parts, in PERC's order), `units.py` (the value readouts), `stock_measured.json` (the stock machines' measured units) |
 
 There is one machine framework, upstream's: PERC's voice (`dnfw.md.voice`), the DSL (`dnfw.perc.dsl`) and the

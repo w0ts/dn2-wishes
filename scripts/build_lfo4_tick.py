@@ -99,9 +99,14 @@ BASE = 0x40000400
 # equals the track's.  That block is the bridge between the two indexings.
 # The count is 16 either way, so every stride edit below is unaffected.
 # lands in nothing rather than in a neighbour.
-LIVE = 0x46700000
-SECOND = 0x46701000
-BACKUP = 0x46702000
+# 2026-11-17: moved from 0x46700000/01000/02000, which lay inside stock 1.12's +Drive bounce
+# buffer (0x466f9300..0x46709300, dnfw.mods.stockram) and the RAM stock 1.12 writes in the
+# emulator (0x466f9100..0x46701300): any unaligned +Drive read overwrote LIVE/SECOND. Now in
+# lfo4's own region, above its C and BSS (0x46800000..) and below its table (0x46900000), picked
+# against stockram.stock_ranges() and every mod's ram(); lfo4.STATE_RAM declares them.
+LIVE = 0x46808000
+SECOND = 0x46809000
+BACKUP = 0x4680A000
 STATE_LEN = 2560
 STATE_STRIDE = 160          # per track: 4 LFOs x 40
 STOCK_LEN = 1920

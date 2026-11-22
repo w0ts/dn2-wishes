@@ -104,7 +104,20 @@ Measured on the runner, step 3f (the GAIN 0 take, out of the amp, against its so
 
 STRETCH plays this take 1.92 dB under ONESHOT whether it is marked or not. That is STRETCH's own level against
 ONESHOT's, not the mark, so step 3f compares the mark's part: STRETCH against ONESHOT, marked and saved, within 0.1 dB.
-The cause of the 1.92 dB is not measured.
+Its cause, measured 2026-11-16 (the runner, v0.56.1, step 3f's GAIN 0 take on ONESHOT and on STRETCH, track 0's
+voice before the stock chain):
+
+- STRETCH plays the 768-frame take bit-exact: every frame is the take's x 8.00 (correlation 1.0000, 18.06 dB =
+  `TAKE_HEAD`); a least-squares kernel puts 8.001 on lag 0 and nothing elsewhere.
+- ONESHOT plays it through the DT2's reader (`render()`: the 6-tap, 256-phase interpolator at 96 kHz and the 2:1
+  decimator, Elektron's coefficients). Fitted kernel (x 8, lag -4..4): -0.17 -1.30 5.44 5.34 -0.99 -0.39 0.09 -0.04
+  0.01, unity at DC, about 1.5 frames early. Against STRETCH: 0-1 kHz -0.01 dB, 1-4 kHz +0.48, 4-10 kHz +1.43,
+  10-24 kHz +1.83 dB: a treble lift.
+- So the 1.92 dB is 1.48 dB of that lift on this bright source (frames 416-768, inside the take) plus 0.44 dB from the
+  window running 32 frames past the take's end (frames 768-800), where STRETCH (no LOOP) stops and ONESHOT loops
+  (PLAY 80, LOOP 20). The amp output reads the same (1.91 / 1.48).
+
+Not a STRETCH level fault and not the mark: STRETCH reads exact frames, ONESHOT's reader is not flat.
 
 ## For upstream
 
@@ -112,3 +125,58 @@ The cause of the 1.92 dB is not measured.
 - `TRK_UNITY` x 10^(17.86 / 20) if they want GAIN 0 = source level on a unit at the init sound.
 
 Upstream has no trackbuf.asm, so the 2026-11-15 TRK silence (ours) does not apply to them.
+
+## v0.65.1: upstream's level taken (the User, 2026-11-21)
+
+`TRK_UNITY` is now upstream v0.65's: 2.339 x 10^(`TRK_HW_DB` 12 / 20) = 9.31, 5.86 dB under our init-sound unity
+(18.28). Measured on the runner (step flexlevel, build 9b89e2b9 at 18.28; minus 5.86 dB for 9.31; the runner reads
+1.86 dB over the unit):
+
+| sound | at 18.28 (runner / unit) | at 9.31 (runner / unit) |
+|---|---|---|
+| init sound | +1.77 / -0.09 dB | -4.09 / -5.95 dB |
+| every level at 127 (VOL, SUS, LEVEL, LEV) | +8.60 / +6.74 dB | +2.74 / +0.88 dB |
+
+flexlevel now expects the init sound at `RUNNER_TO_UNIT_DB + TRK_INIT_UNIT_DB` (-4.0 dB) and the all-127 sound at
+`RUNNER_TO_UNIT_DB` (the source's level on the unit), each within its tolerance.
+
+**TODO (not measured yet, investigate later):** a take's level against its source depends on the sound, about 7 dB
+between the init sound and every level at 127. That suggests the track's LEVEL / VOL (and SUS, LEV) count differently
+when the take is recorded and when it is played back: the take carries its track's chain once more (section 3
+above), so a hot track's take comes out hotter. Measure on the unit which stages count twice before changing the
+level again.
+
+## v0.68.1: upstream's v0.68 level taken (the User, 2026-11-22)
+
+Upstream v0.68 (its owner, on v0.67 itself, pattern volume 100, compressor off: a track's take 12 dB short, MAIN and
+IN as well) set `TRK_HW_DB` 24 and `MAIN_PLAY_DB` 24. Both taken: `TRK_UNITY` = 2.339 x 10^(24 / 20) = 37.08, 6.14 dB
+over our init-sound unity (18.28); a MAIN / IN take plays x 15.85 (was x 3.98).
+
+Measured on the runner (step flexlevel on build v0.69.1 440085e4, 2026-11-22; the unit's column is the runner's
+minus `RUNNER_TO_UNIT_DB` 1.86, derived, not measured on a unit):
+
+| sound | at 37.08 runner (measured) | unit (derived) | the take's peak (stored x 1/8) |
+|---|---|---|---|
+| init sound | +7.92 dB | +6.06 dB | 0.189 of full scale |
+| every level at 127 (VOL, SUS, LEVEL, LEV) | +14.74 dB | +12.88 dB | 0.350 of full scale, 0 frames at the clamp |
+
+flexlevel's expectations follow the constants: the init sound at `RUNNER_TO_UNIT_DB + TRK_INIT_UNIT_DB` (+8.00 dB),
+the all-127 sound at `RUNNER_TO_UNIT_DB + TRK_HW_DB - LOUD_UNITY_HW_DB` (+13.86 dB; `LOUD_UNITY_HW_DB` 12 is upstream
+v0.65's calibration of that sound, NiKo). So on our runner model a GAIN 0 take is no longer at its source's level for
+either sound; upstream's owner hears it at the source's level on his unit. The two disagree by the TODO above.
+
+Upstream's known issues against ours:
+
+- **A loud take may clip at GAIN 0** (upstream: the gain is applied before the recorder's int16 clamp). Ours stores a
+  track's take x 1/8 (`TAKE_HEAD`, v0.54.3), so ours has 18 dB more room before that clamp than upstream's. At
+  18.28 the hot source (VOL, SUS, LEVEL, LEV 127) recorded unclipped; at 37.08 that margin is 6.14 dB smaller.
+  Measured at 37.08 (runner): the hot source records unclipped at GAIN 0, its take peaking at 0.350 of full scale
+  as stored, 9.1 dB under the clamp. Without the 1/8 (upstream's way) the same take would peak at 2.8: clipped. On
+  the unit a source hotter than the runner's hot one (other machines, drive, FX before the bucket) could still reach
+  the clamp at GAIN 0; not measured.
+- **A MAIN or IN take saved as a sample plays 24 dB quieter** than it played live: the same here. The saved entry
+  is plain int16 without the MAIN mark (bit 15). A saved take of a **track** keeps its TAKE_HEAD mark (bit 17,
+  v0.64.1), so it plays at the live take's level.
+- The runner's G17 (TRK buckets cleared) and `RUNNER_TO_UNIT_DB` (+1.86) are unchanged: the level change is one
+  constant in the recorder (x TRK_UNITY) and one in the voice (x MAIN_PLAY_DB); smp.asm differs from v0.67.5's in
+  those four constants only.

@@ -64,7 +64,8 @@ if set(MACHINE_NAMES) != set(NEW_TYPES):
 # what was PING's (0x4670F000..; v0.45: PING removed) and below the platform runtime; the caves are
 # left as stock had them.
 MCHUNK = 0x4670F800
-PAGES_END = 0x4670F000                  # the pages assembly's room ends here (PING's chunk until v0.44)
+PAGES_END = 0x4670E000                  # the pages assembly's room ends here; 0x4670E000..0x4670F000 is the boot-screen
+                                        # stamp's (scripts/gen_bootscreen_code.py LOAD_VA, 1.12)
 MCHUNK_END = 0x46710000
 
 # -- 1. the MACHINE SEL list -------------------------------------------------------------
@@ -132,7 +133,20 @@ WISH_KEEP = (0x400031A8,                # lea memcpy,%a3 in the Overbridge packe
              0x400D7ED4)                # move.l #memcpy,%d4, 108 B records (the audio interrupt's path)
 # v0.52 merge: references another hook already takes, left to it: the frame ISR's 14-byte frame copy (MUTE_SITE's jsr,
 # upstream v0.52's ms_frame; the audio interrupt's path, as WISH_KEEP's)
-WISH_HOOKED = (0x400275B2,)
+WISH_HOOKED = (0x400275B2,
+               0x400254F2, 0x4002594E)  # 2026-11-21: MOD SETUP's two copies into a voice (MXS_COPY_SITES)
+# 2026-11-21 (csrc/matrix/setup.c, setup.S; docs/matrix.md "MOD SETUP's rows"): stock's two copies of a sound's 153 MOD
+# SETUP bytes into a voice (0x4002549c at a note, 0x4002591e at an edit) load memcpy into %a3 once; that `lea` names
+# mxs_copy (a muted entry lands with depth 0; any other size goes on to wish_memcpy_stub as the wishes build did)
+MXS_COPY_SITES = (0x400254F0, 0x4002594C)
+MXS_COPY_STOCK = bytes.fromhex("47f940134770")          # lea 0x40134770,%a3
+# 2026-11-18 (the User's CPU, claude/cpu-cuts): the audio interrupt's memcpy calls in its voice loop (four a voice, 16
+# voices) and just past it (four) become one jsr each to a copy of the same bytes (csrc/wishes/hooks.S); the bytes
+# they jump over stay stock (their memcpy references are still named, by the loop below, and never run)
+VOICE_COPY_SITE = 0x40027526            # pea 0x52 ; pea 84(%a5) ; pea 218(%a4) ; jsr (%a1) -> jsr ; bra.s 0x40027574
+VOICE_COPY_STOCK = bytes.fromhex("48780052486d0054")
+POST_COPY_SITE = 0x400275B6             # pea 0x12 ; pea 3330(%a2) ; pea 0x... -> lea 12(%sp) ; jsr ; bra.s 0x40027612
+POST_COPY_STOCK = bytes.fromhex("48780012486a0d0248798000")
 WISH_REFS = {WISH_MEMCPY: 694, WISH_MEMSET: 307}     # every reference in stock 1.12's MAIN OS (measured)
 # the instructions a reference may be the operand of: jsr / jmp abs.l, lea abs.l,An, move.l #imm,Dn
 WISH_OPS = {0x4EB9, 0x4EF9} | {0x41F9 | r << 9 for r in range(8)} | {0x203C | r << 9 for r in range(8)}
@@ -518,12 +532,18 @@ USB_REBUILD_STOCK = bytes.fromhex("205242a72f06")
 # voice allocator (jsr 0x4002a6a2), its nine arguments pushed just before
 LOAD_ALLOC_SITE = 0x400269E6
 LOAD_ALLOC_STOCK = bytes.fromhex("4eb94002a6a2")
+# 2026-11-16 (PARA as one voice, csrc/para/one.c): the ISR's key-up call of the allocator (type not 1), its nine
+# arguments pushed just before (move.l %d3,-(%sp): the track), then lea 36(%sp),%sp
+PV_REL_SITE = 0x40026D86
+PV_REL_STOCK = bytes.fromhex("4eb94002a6a2")
 LIVE_MENU_SITE = 0x400987A2             # PersonalizeMenuView's constructor ends: movem.l 24(%sp),%d2-%d6/%a2-%a6
 LIVE_MENU_STOCK = bytes.fromhex("4cef7c7c0018")
 LINK_RX_SITE = 0x4012197A               # lea 0x40207f9e,%a3: F0 00 20 3C, before the compare
 LINK_RX_STOCK = bytes.fromhex("47f940207f9e")
 LINK_FEED_SITE = 0x400276A2             # lea 0x40006c4a,%a2: the frame is built
 LINK_FEED_STOCK = bytes.fromhex("45f940006c4a")
+AMP_DRAW_SLOT = 0x401E2330               # 2026-11-18: stock's AMP page view's draw, in its vtable (+0x10)
+AMP_DRAW_STOCK = 0x4006DFB6              # the eight knobs, the shape, then the level meter (vtable + 184)
 KEY_SLOT = 0x401D4DB8                    # the parameter page view's key handler, in its vtable (v0.15)
 KEY_STOCK = 0x40016480                   # stock's: code 2 cycles the pages, the rest to its base
 QUANT_SITE = 0x40037BE6                  # the setter's write: movea.l %d0,%a0 ; move.w %d3,14(%a0,%d2.l*2)
@@ -531,8 +551,42 @@ QUANT_STOCK = bytes.fromhex("204031832a14")
 MUTE_SITE, MUTE_STOCK = 0x400275B0, "4eb940134770"   # v0.52: the frame ISR, after its voice loop: jsr 0x40134770 (a copy)
 FX_TYPE_SITE = 0x40037DF6                # the kit setter's store: movea.l %d0,%a0 ; move.w %d3,0(%a0,%d2.l*2) (the FX TYPE hook, 2026-11-11)
 FX_TYPE_STOCK = bytes.fromhex("204031832a00")
+LOCK_SND_SLOT, LOCK_SND_STOCK = 0x401DBC50, 0x40037CB6   # 2026-11-19: the sound ParameterSet's LOCK_SET (vtable 0x401dbc0c + 68)
+LOCK_KIT_SLOT, LOCK_KIT_STOCK = 0x401DBCD8, 0x40037FAC   # ... and the kit's (vtable 0x401dbc94 + 68): knob notches on p-locks
 TDM_SITE = 0x40026098                    # the SSI ISR, its transmit fill done: move.l %fp,%d2 ; addi.l #-72,%d2 (v0.16)
 TDM_STOCK = bytes.fromhex("240e0682ffffffb8")
+# stock's DSP link and USB passes with less work, the same bytes (csrc/stocklink, scratch/dup-study.md; 2026-11-18):
+# (site, its stock bytes, our symbol, jsr instead of jmp, what); only with DN2_STOCK_LINK_FAST (pages.stock_link_fast_on).
+# scripts/gate_overbridge.py allows these sites alone in Overbridge's path, each proved by scripts/check_stocklink.py
+STOCKLINK_SITES = (
+    (0x400CFA5A, "200ab5fc00000af0", "skl_fill", False, "the SPI frame's staging fill: a long an entry"),
+    (0x400CF956, "4eb940134770", "skl_rcopy", True, "the reply copy: stock's memcpy in 32-byte blocks"),
+    (0x40025F66, "202effc8720b", "skl_mode5", False, "mode 5's transmit-half clear: only what was written"),
+    (0x40026080, "780be9a948780800", "skl_modex", False, "the other modes' transmit-half clear: only what was written"),
+    (0x40025576, "203c40025e36", "skl_isr_install", True, "the audio interrupt installed: both halves cleared whole"),
+    (0x400276B2, "49f94664c074", "skl_usbout", False, "mode 5's USB audio out: each channel read once"),
+    (0x400279E8, "202effc8760b48780800", "skl_rxclr", False, "mode 6's receive-half clear (2 KB + 84 B): as movem"))
+# stock's Overbridge streaming path with less work, the same bytes (csrc/obfast; 2026-11-18): only with DN2_OB_FAST
+# (pages.ob_fast_on), apart from DN2_STOCK_LINK_FAST. (site, stock bytes, symbol, jsr, what, the bytes after the jsr:
+# a bra.s to the loop's top); the overbridge and linkfast steps hold them as the stocklink sites
+OBFAST_SITES = (
+    (0x40003264, "2007ed88d0af002c", "obf_build_pair", False,
+     "the mode-6 packet builder's sample loop (2026-11-21: the whole loop, entered at its top): two copies straight a "
+     "sample", None),
+    (0x40003492, "487800202f092f00", "obf_in32", True, "the Overbridge input's frame: one copy straight", "60e6"),
+    (0x40003414, "4eb94013419c", "obf_clr", True, "the Overbridge input's transmit-half clear: as movem", None))
+
+
+def site_bytes(stock_hex: str, target: int, call: bool, tail: str | None = None) -> bytes:
+    """a declared site's new bytes: jsr/jmp to TARGET, then TAIL (default: nops over the displaced instructions)"""
+    word = bytes.fromhex("4eb9" if call else "4ef9") + _long(target)
+    rest = bytes.fromhex(tail) if tail is not None else b""
+    return word + rest + bytes.fromhex("4e71") * ((len(stock_hex) // 2 - len(word) - len(rest)) // 2)
+
+
+def declared_sites() -> list[tuple]:
+    """every declared site in Overbridge's path, whatever the flags: (va, stock hex, symbol, call, what, tail)"""
+    return [(*x, None) for x in STOCKLINK_SITES] + list(OBFAST_SITES)
 # DIRECT JUMP (csrc/jump, docs/jump.md): the PTN view's single cue, the sequencer tick ISR's
 # queue test, arming, switch and per-track positions, and the PTN view's key handler
 JUMP_CUE_SITE = 0x400FA3A6               # jsr 0x400d9554: the PTN view's one-pattern cue (0x400fa2ea)
@@ -594,12 +648,23 @@ REC_COMBO_STOCK = bytes.fromhex("2f2a00a44eb940046bfe")
 REC_COMBO_EXIT = 0x4005FC50             # the handler's common exit (the key offered to the base)
 LFO_MASK_LEA = 0x40039570               # the LFO destination list's lea 0x400dc472,%a2 (v0.22)
 LFO_MASK_STOCK = 0x400DC472
+VCHECK_SITE = 0x40039904                # the parameter set's value check: link.w %fp,#-28 ; movem.l (4 regs),(%sp)
+VCHECK_STOCK = bytes.fromhex("4e56ffe448d7")
 # 2026-11-11, LFOs modulating the LFOs above them (csrc/modulation, docs/modulation-more.md):
 # the frame's call of the LFO evaluator, and the evaluator's write of one LFO into its DEST cell
 MOD_EVAL_SITE = 0x400272D4              # jsr 0x40137a06 (its seven arguments pushed before)
 MOD_EVAL_STOCK = bytes.fromhex("4eb940137a06")
 MOD_WB_SITE = 0x40137D7A                # movea.l 52(%sp),%a0 ; mvs.w 82(%a4),%d1
 MOD_WB_STOCK = bytes.fromhex("206f0034736c0052")
+SMOOTH_SITE = 0x400DB28E                # stock's parameter smoother: lea -28(%sp),%sp ; movem.l %d2-%d6/%a2-%a3,(%sp)
+SMOOTH_STOCK = bytes.fromhex("4fefffe448d70c7c")
+# 2026-11-18 (the User's CPU, claude/cpu-cuts): stock's smoother snap at a voice's note (101 state words = the targets
+# << 16, 909 instructions a call, up to 16 in a frame) entered by a jmp into sm_snap (csrc/modulation/snap.S)
+SNAP_SITE = 0x400DAFFC                  # move.l %d2,-(%sp) ; move.l #202,%d1 ; ... (the whole routine checked below)
+SNAP_STOCK = bytes.fromhex("2f02223c000000ca202f0008206f000c4c0108004201d08006808000dea475701800224054815880"
+                           "4842424222c20c81000000ca66e8241f4e75")
+MODS_SITE = 0x400DB390                  # stock's MOD SETUP pass: lea -60(%sp),%sp ; movem.l %d2-%d7/%a2-%fp,(%sp)
+MODS_STOCK = bytes.fromhex("4fefffc448d77cfc")
 KB_REC_SITES = (0x40072D74, 0x40072DCA)    # v0.48: the RECORD key's jsr 0x40055cca (grid recording on?), both toggles
 KB_REC_STOCK = bytes.fromhex("4eb940055cca")
 KEYNOTES_SITE = 0x40058BE8              # v0.23: KeyboardView's jsr 0x40034460(kbd, &notes, key)
@@ -620,6 +685,11 @@ HOLD_FINAL_STOCK = "4eb94002b12e"
 # (pea 0x402108e1, the empty place's label at x 43, y 27); vm_seen_hook pushes the same and marks the menu drawn
 VMENU_B_SITE = 0x400285C0
 VMENU_B_STOCK = "4879402108e1"
+# 2026-11-19: PARA on the VOICE key's LED (csrc/para/led.c, docs/leds.md): MainScreenView's LED routine
+# (0x40060842) asks 0x40029126(x, active track) "UNISON on?" before it lights VOICE (id 8) teal (2, 131);
+# pu_voice_led answers in its place and lights VOICE magenta (2, 91) itself on a PARA ON track
+VOICE_LED_SITE = 0x40060D6E
+VOICE_LED_STOCK = "4eb940029126"
 # 2026-11-11 (lzma-dsp, docs/lzma7.md): the SHARC uploader's (0x400cf4b0) depack of section 7:
 # `jsr 0x40136820` (aPLib depack(src, dst)) -> dn_depack7 (csrc/waverider/lzma7.c), same arguments
 DEPACK7_SITE = 0x400CF73A
@@ -630,6 +700,8 @@ UPLOAD_EARLY_SITE = 0x400CF086
 UPLOAD_EARLY_STOCK = "4eb9400cf4b0"
 UPLOAD_LATE_SITE = 0x400CF0F2           # move.l %d0,0x4243989c: the driver's set-up result
 UPLOAD_LATE_STOCK = "23c04243989c"
+LFO_APPLY_SITE = 0x400272D4             # v0.65: the per-frame driver's jsr 0x40137a06 (the LFOs)
+LFO_APPLY_STOCK = bytes.fromhex("4eb940137a06")
 POLL_SITE = 0x4002E464                  # jsr 0x4011d5d4 (isDirty), its argument the screen
 # v0.38: per-project pools (csrc/sampler/pools.c, hooks.S, docs/project-pools.md): the OS's
 # project LOAD 0x40042E6E (its entry, its success where it sets the slot, its exit) and NEW
@@ -701,6 +773,20 @@ def _cave_free(content: bytes, cave: tuple[int, int]) -> None:
         raise ComposeError(f"the cave at {at:#010x} (+{cap}) is not free")
 
 
+_NUMBER_TYPES = {"unsigned char": 1, "signed char": 1, "char": 1, "unsigned short": 2, "short": 2,
+                 "unsigned int": 4, "int": 4}
+
+
+def _number_tables(header: str, syms: dict) -> list[list[int]]:
+    """[[start, end]]: every `static const <integer type> NAME[N]` of HEADER that the link kept, by its symbol"""
+    import re                                                    # noqa: PLC0415
+    out = []
+    for typ, name, n in re.findall(r"static const ((?:unsigned |signed )?(?:char|short|int)) (\w+)\[(\d+)\]", header):
+        if name in syms:
+            out.append([syms[name], syms[name] + _NUMBER_TYPES[typ] * int(n)])
+    return sorted(out)
+
+
 def compose(stock: bytes, assemble, compile_c) -> dict:
     from . import msel as _msel                  # 2026-11-11: MACHINE SEL in two columns (csrc/msel)
     from . import engfilt as _eng                # 2026-11-12: the preset browser's ENGINE filter (csrc/presets)
@@ -716,17 +802,22 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     # the C page renderer first (the assembly calls it), at C_LOAD
     from .. import slides as SL
     from .. import modversion                   # v0.39: the mod's version (VERSION), shown at the browser's top
+    from . import tunings as TU                 # v0.61: the factory tunings
     from ..engines.analog2.filters import pages as flt_pages        # 2026-11-10: the A2 filter machines' FLTR names
     from .. import load as _load                  # 2026-11-12: the DSP load budget's cost table (csrc/load)
-    cimage, csyms, cbss = compile_c(pages.c_header() + _msel.c_header() + _eng.c_header() + _load.c_header() + flt_pages.c_header() + SL.c_header(stock)
-                                    + modversion.c_define(),
-                                     base=pages.C_LOAD)
+    from . import ampsw as _da                    # 2026-11-20: AMP ON/OFF for the drum machines (csrc/msel/ampsw.c)
+    c_hdr = (pages.c_header() + _msel.c_header() + _da.c_header() + _eng.c_header() + _load.c_header() + flt_pages.c_header()
+             + SL.c_header(stock) + TU.c_header() + modversion.c_define())
+    built_c = compile_c(c_hdr, base=pages.C_LOAD)
+    cimage, csyms, cbss = built_c[:3]
+    c_abs32 = built_c[3] if len(built_c) > 3 else ()        # 2026-11-18: the link's initialised pointers
     if cbss:
         raise ComposeError(f"the page renderer has {cbss} bytes of BSS; nothing zeroes it")
     if len(cimage) > pages.C_SPAN:
         raise ComposeError(f"the page renderer ({len(cimage)} B) is larger than its {pages.C_SPAN:#x}")
     ptable = "\n    .align 2\n" + "\n".join(f"    .long {n}" for n in pages.LABELS_OUT) + "\n"
-    pblob = assemble(pages.source(csyms["wr_page_draw"], csyms["wr_cell"]) + ptable, base=pages.LOAD)
+    pblob = assemble(pages.source(csyms["wr_page_draw"], csyms["wr_cell"], csyms["mxp_placed"]) + ptable,
+                     base=pages.LOAD)
     asm = pblob[:-4 * len(pages.LABELS_OUT)]
     if pages.LOAD + len(asm) > PAGES_END:
         raise ComposeError(f"the pages assembly ({len(asm)} B) runs past {PAGES_END:#010x}")
@@ -838,6 +929,9 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     edit(pages.CELL_EXIT, bytes.fromhex("4ef9") + _long(playout["wr_cell_tail"]) + bytes.fromhex("4e714e71"),
          "a stock page cell's widget (0x4006448a): its exit through wr_cell_tail, which draws "
          "parameter slides' marks (v0.45: no longer PING's TYPE)", bytes.fromhex(pages.CELL_EXIT_STOCK))
+    edit(pages.PLACE_EXIT, bytes.fromhex("4ef9") + _long(playout["wr_place_tail"]) + bytes.fromhex("4e714e71"),
+         "a stock page's place drawer (0x400169de): its exit through wr_place_tail, which tells the routes popup "
+         "each knob's parameter, FM TONE's own places included (2026-11-20)", bytes.fromhex(pages.PLACE_EXIT_STOCK))
     edit(pages.ID9_SITE, bytes.fromhex("4eb9") + _long(playout["wr_id9"]),
          "the SYN page draw: a CZ track's third page (id 9 to the draw) to wr_grid, not "
          "WaveTone's page-3 grid", bytes.fromhex(pages.ID9_STOCK))
@@ -856,6 +950,13 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     _need(content, VMENU_B_SITE + 6, bytes.fromhex("42a7"), "VoiceMenuView: clr.l -(sp) after B's label push")
     edit(VMENU_B_SITE, bytes.fromhex("4eb9") + _long(csyms["vm_seen_hook"]),
          "PARA on the VOICE menu's B: the menu seen as it pushes B's \"---\"", bytes.fromhex(VMENU_B_STOCK))
+    _need(content, VOICE_LED_SITE - 6, bytes.fromhex("2f2effbc2f00"),
+          "MainScreenView's LED routine pushes the active track, then the voice setup")
+    _need(content, VOICE_LED_SITE + 6, bytes.fromhex("4fef000c4a006742487800834878000248780008"),
+          "... tests the answer as a byte, then lights VOICE (id 8) teal (mode 2, palette 131)")
+    edit(VOICE_LED_SITE, bytes.fromhex("4eb9") + _long(csyms["pu_voice_led"]),
+         "PARA on the VOICE key's LED: pu_voice_led lights VOICE magenta on a PARA ON track, else stock's UNISON "
+         "test", bytes.fromhex(VOICE_LED_STOCK))
     edit(POLL_SITE, bytes.fromhex("4eb9") + _long(csyms["wr_poll"]),
          "the UI loop's redraw test: wr_poll asks for a redraw while a modulation marker on "
          "Waverider's page would move, then answers as stock", POLL_STOCK)
@@ -937,6 +1038,11 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
          "the per-frame modulation apply: stock's 0x400db390, then a sample machine's modulated SAMP "
          "moved through the loaded slots", MODAPPLY_STOCK)
 
+    # v0.65 (docs/banks.md): after the LFOs, each sample voice's SAMP keeps its bank. Upstream edits
+    # LFO_APPLY_SITE to smp_lfo_hook; in ours that site is MOD_EVAL_SITE (mod_eval, below), which calls
+    # smp_lfo_fix after the evaluator and the matrix's routes (csrc/modulation/hooks.S, v0.65.1)
+    assert LFO_APPLY_SITE == MOD_EVAL_SITE
+
     # v0.22: the LFOs' destination list leaves out the WaveTone records our machines do not use;
     # 2026-11-11: it offers the 13 closed records (page.c), and each LFO the other LFOs' controls
     # (csrc/modulation/cascade.c, through hooks.S's mod_mask_hook, which reads the builder's want)
@@ -946,6 +1052,13 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
           "... with the record pushed, want at 56(%sp) (move.l %d0,-(%sp) ; jsr (%a2) ; not.l %d0 ; and.l 56(%sp),%d0)")
     _need(content, 0x4003951E, bytes.fromhex("4fefffd448d77c7c2a6f0030"),
           "the builder's frame: lea -44(%sp),%sp ; movem.l (10 registers) ; movea.l 48(%sp),%a5")
+    # 2026-11-18 (the User: "editing destination in modulation page is cpu"): stock's value check of a record, at its
+    # entry: an LFO's DEST checked with one lookup and the list's mask, not a whole list built and sorted (dest_pop.c
+    # ldp_valid); every other record through stock's 0x40036bac, as stock
+    _need(content, VCHECK_SITE + 6, bytes.fromhex("0c0c242e000c47f9400dc472"), "the value check's body, as ldp_valid reads it")
+    edit(VCHECK_SITE, bytes.fromhex("4ef9") + _long(csyms["ldp_valid"]),
+         "the record value check: an LFO's DEST by one lookup and the list's mask (ldp_valid), no list built",
+         VCHECK_STOCK)
     edit(LFO_MASK_LEA + 2, _long(csyms["mod_mask_hook"]),
          "the LFO destination list's mask lookup: mod_lfo_mask(record, want): 0 for a record our "
          "machine leaves unused (named -), 0x1e00 for the 13 closed ones, another LFO's control "
@@ -967,6 +1080,29 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     edit(MOD_WB_SITE, bytes.fromhex("4eb9") + _long(csyms["mod_wb"]) + bytes.fromhex("4e71"),
          "the LFO evaluator's DEST write: a lower LFO's into a higher LFO's control goes to a "
          "shadow cell (mod_wb_cell), carried into the mirror next frame", MOD_WB_STOCK)
+    _need(content, SNAP_SITE, SNAP_STOCK, "stock's smoother snap, as sm_snap replays it")
+    edit(SNAP_SITE, bytes.fromhex("4ef9") + _long(csyms["sm_snap"]),
+         "the smoother snap at a voice's note: the same 101 words, 4 instructions each (sm_snap)", SNAP_STOCK[:6])
+    # 2026-11-17 (the User: the constant cost); 2026-11-19 with DN2_LFO4 off too (the User: LFO4 behind its flag)
+    _need(content, SMOOTH_SITE + 8, bytes.fromhex("266f00202a3c7c290000"), "the smoother's own start, as sm_fast replays it")
+    edit(SMOOTH_SITE, bytes.fromhex("4ef9") + _long(csyms["sm_fast"]) + bytes.fromhex("4e71"),
+         "the parameter smoother: stock's own instructions, its loop four bodies a pass (sm_fast)", SMOOTH_STOCK)
+    if True:                                     # lfo4 (DN2_LFO4) and lfowaves as lfo_fast replays them, or stock's own
+        from . import lfofast as _lf
+        _lf_specs = _lf.specs()
+        if _lf.defines(*_lf_specs, lambda va, n: _read(content, va, n)) != _lf.defines(*_lf_specs):
+            raise ComposeError("lfo_fast: lfo4's cave stubs (or stock's evaluator) read differently with stock under them")
+        _need(content, _lf.EVAL_VA, _lf.EVAL_ENTRY, "the LFO evaluator's own start, as lfo_fast replays it")
+        edit(_lf.EVAL_VA, bytes.fromhex("4ef9") + _long(csyms["lfo_fast"]) + bytes.fromhex("4e71"),
+             "the LFO evaluator A: stock's (lfo4's, lfowaves') instructions, its calls and stubs inline (lfo_fast)",
+             _lf.EVAL_ENTRY)
+    _need(content, MODS_SITE + 8, bytes.fromhex("246f0040428324"), "MOD SETUP's own start, as mods_fast replays it")
+    _need(content, 0x400DB340, bytes.fromhex("4feffff0700448d7003c"), "MOD SETUP's kernel, as mods_fast inlines it")
+    edit(MODS_SITE, bytes.fromhex("4ef9") + _long(csyms["mods_fast"]) + bytes.fromhex("4e71"),
+         "MOD SETUP's pass: stock's kernel inline, its own instructions, 80 calls a frame fewer (mods_fast)", MODS_STOCK)
+    for va in MXS_COPY_SITES:                    # 2026-11-21: MOD SETUP's copies into a voice (csrc/matrix/setup.S)
+        edit(va, bytes.fromhex("47f9") + _long(csyms["mxs_copy"]),
+             "MOD SETUP's copy into a voice: an entry the popup muted lands at depth 0 (mxs_copy)", MXS_COPY_STOCK)
 
     # 2026-11-11: the wishes record (csrc/wishes, docs/wishes-record.md): its four sites
     edit(WISH_SAVE_SITE, bytes.fromhex("4ef9") + _long(csyms["wish_save_stub"]) + bytes.fromhex("4e71"),
@@ -1078,7 +1214,12 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     _need(content, LOAD_ALLOC_SITE - 2, bytes.fromhex("2f03"), "the note-on's last argument: move.l %d3,-(%sp) (the track)")
     _need(content, LOAD_ALLOC_SITE + 6, bytes.fromhex("2d42ff984fef0024"), "... after it: move.l %d2,-104(%fp) ; lea 36(%sp),%sp")
     edit(LOAD_ALLOC_SITE, bytes.fromhex("4eb9") + _long(csyms["load_alloc_hook"]),
-         "the audio ISR's note-on allocation: the DSP load budget first (load_pre / load_post)", LOAD_ALLOC_STOCK)
+         "the audio ISR's note-on allocation: PARA's chords (pv_pre / pv_post) and the DSP load budget "
+         "(load_pre / load_post)", LOAD_ALLOC_STOCK)
+    _need(content, PV_REL_SITE - 2, bytes.fromhex("2f03"), "the key-up's last argument: move.l %d3,-(%sp) (the track)")
+    _need(content, PV_REL_SITE + 6, bytes.fromhex("4fef0024"), "... after it: lea 36(%sp),%sp")
+    edit(PV_REL_SITE, bytes.fromhex("4eb9") + _long(csyms["pv_rel_hook"]),
+         "the audio ISR's key-up of a note (the allocator's release): PARA's joined notes first (pv_rel)", PV_REL_STOCK)
     _need(content, LIVE_MENU_SITE - 10, bytes.fromhex("4e932f054e932f044e93"), "PERSONALIZE's last row's functions destroyed")
     _need(content, LIVE_MENU_SITE + 6, bytes.fromhex("4fef00804e75"), "... then lea 128(%sp),%sp ; rts")
     edit(LIVE_MENU_SITE, bytes.fromhex("4ef9") + _long(csyms["live_menu_hook"]),
@@ -1108,6 +1249,14 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     edit(TDM_SITE, bytes.fromhex("4eb9") + _long(csyms["smp_tdm_hook"]) + bytes.fromhex("4e71"),
          "the SSI audio ISR after its transmit fill: smp_tdm writes the sample link's packet "
          "into TDM slots 8..15 and reads the DSP's from slots 14..15", TDM_STOCK)
+
+    for va, stock_hex, sym, call, what in (STOCKLINK_SITES if pages.stock_link_fast_on() else ()):
+        edit(va, site_bytes(stock_hex, csyms[sym], call), f"stocklink: {what} ({sym})", bytes.fromhex(stock_hex))
+    if pages.stock_link_fast_on():          # (2026-11-21) skl_rxclr replays these and resumes at 0x40027a10
+        _need(content, 0x400279F2, bytes.fromhex("45f94013419ce7a806804e6e71002f004e924878005448798000" "53c04e92"
+                                                 "4879800053c0"), "mode 6's two clears through jsr (%a2), then the resume")
+    for va, stock_hex, sym, call, what, tail in (OBFAST_SITES if pages.ob_fast_on() else ()):
+        edit(va, site_bytes(stock_hex, csyms[sym], call, tail), f"obfast: {what} ({sym})", bytes.fromhex(stock_hex))
 
     for va, want, why in SLIDE_DRAW_GUARDS:
         _need(content, va, bytes.fromhex(want), why)
@@ -1152,6 +1301,11 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
          "RECORDER page records; every other key and page goes on to stock's 0x40016480",
          _long(KEY_STOCK))
 
+    # 2026-11-18: ENV2's page (csrc/matrix/env2_page.c): stock's AMP draw not drawn under it, only its meter
+    edit(AMP_DRAW_SLOT, _long(csyms["env2_amp_draw"]),
+         "the AMP page view's draw (vtable): env2_amp_draw, while ENV2's page covers it only the level meter; "
+         "every other time stock's 0x4006dfb6", _long(AMP_DRAW_STOCK))
+
     # one detent a choice (v0.15): the setter's write through smp_quant_hook
     _need(content, QUANT_SITE - 4, bytes.fromhex("4e90588f"), "the setter's jsr %a0@ ; addq #4 before its write")
     _need(content, QUANT_SITE + 6, bytes.fromhex("4a07"), "... and its tst.b %d7 after")
@@ -1166,6 +1320,13 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     edit(FX_TYPE_SITE, bytes.fromhex("4eb9") + _long(csyms["fx_type_hook"]),
          "the kit setter's write: fx_type_quant steps the Reverb / Delay TYPE in the list's order "
          "(STOCK first), then writes as stock", FX_TYPE_STOCK)
+
+    # 2026-11-19 (the User: virtual notches on p-locks too, csrc/knobs/notch.c): the sound and kit ParameterSets'
+    # LOCK_SET through kn_lock_snd / kn_lock_kit, which call stock's after a knob-driven crossing lands on the centre
+    for slot, fn, stock_fn in ((LOCK_SND_SLOT, "kn_lock_snd", LOCK_SND_STOCK), (LOCK_KIT_SLOT, "kn_lock_kit", LOCK_KIT_STOCK)):
+        _need(content, slot, _long(stock_fn), f"the ParameterSet vtable's LOCK_SET {stock_fn:#x}")
+        edit(slot, _long(csyms[fn]), f"a ParameterSet's LOCK_SET (vtable): {fn}, a knob-driven p-lock that crosses a "
+             f"bipolar value's centre lands on it; then stock's {stock_fn:#x}", _long(stock_fn))
 
     # 7. getMachineType(track): WaveTone for the UI, the real type where it is identity
     _need(content, TRACK_TYPE_FN, TRACK_TYPE_FN_STOCK, "getMachineType(track), as raw_track copies it")
@@ -1226,9 +1387,13 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
         edit(va, bytes.fromhex("4eb9") + _long(csyms[label]) + bytes.fromhex("4e71") * ((n - 6) // 2),
              f"slides: copy/paste carries SLD/SLEN ({label})", bytes.fromhex(stock_hex))
     for name in ("sl_ui_table", "sl_page_up", "sl_page_seen", "sl_knob", "sl_pre_hook", "sl_pre", "sl_apply", "sl_smooth", "sl_build", "sl_clear", "sl_load", "sl_save",
-                 "sl_lock_get", "sl_lock_set", "sl_v", "sl_cap", "sl_started", "sl_ticks", "sl_pasted", "sl_tclip", "sl_paste",
+                 "sl_lock_get", "sl_lock_set", "sl_v", "sl_cap", "sl_started", "sl_nxt_last", "sl_ticks", "sl_pasted", "sl_tclip", "sl_paste",
                  "sl_draw_sld", "sl_draw_slen"):
         layout[name] = csyms[name]
+    edit(VOICE_COPY_SITE, bytes.fromhex("4eb9") + _long(csyms["wish_voice_copy"]) + bytes.fromhex("6046"),
+         "the audio interrupt's voice loop: its four memcpy calls as one copy (wish_voice_copy)", VOICE_COPY_STOCK)
+    edit(POST_COPY_SITE, bytes.fromhex("4fef000c4eb9") + _long(csyms["wish_post_copy"]) + bytes.fromhex("6050"),
+         "the audio interrupt past its voice loop: four memcpy calls as one copy (wish_post_copy)", POST_COPY_STOCK)
     # last of every edit: each reference to memcpy / memset but Overbridge's (WISH_KEEP) names the wishes stub;
     # one that another hook already rewrote fails its stock check here
     for target, stub, word in ((WISH_MEMCPY, "wish_memcpy_stub", "memcpy"), (WISH_MEMSET, "wish_memset_stub", "memset")):
@@ -1251,14 +1416,46 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     from . import cpage as _cpage
     for name in _cpage.LOAD_ENTRIES:
         layout[name] = csyms[name]              # 2026-11-12: the DSP load budget (csrc/load): the check reads its state
-    for name in ("mx_poll", "mx_eval", "mx_lay", "mx_compiles", "mx_env_on", "mx_env_off", "mxp_pop", "mxp_poll",
+    for name in _cpage.PARA_ENTRIES + _cpage.HOLD_ENTRIES:
+        layout[name] = csyms[name]              # 2026-11-16: PARA as one voice (csrc/para/one.c): the check reads its state
+    for name in ("mx_poll", "mx_eval", "mx_lay", "mx_compiles", "mx_env_on", "mx_env_off", "mx_dmask",
+                 "ldp_pop", "ldp_poll", "ldp_draw", "ldp_visible", "ldp_p", "ldp_rows", "ldp_opens", "ldp_refusals", "ldp_turns",
+                 "ldp_keys", "ldp_erased", "ldp_full", "ldp_alone", "ldp_dropped", "ldp_built", "ldp_routes_drawn", "ldp_valid", "ldp_checks", "ldp_detents",
+                 "mxp_pop", "mxp_poll",
                  "mxp_draw", "mxp_visible", "mxp_pushes", "mxp_opens", "mxp_refusals", "mxp_why",
-                 "mxp_rid", "mxp_turns", "mxp_keys", "mxp_detents", "mxp_setup_dep", "mxp_setup_rows", "mxp_erased", "ins_title_now",
-                 "env2_visible", "mx_env2_locks", "sl_e2_held", "sl_e2_set"):
+                 "mxp_rid", "mxp_turns", "mxp_keys", "mxp_detents", "mxp_setup_dep", "mxp_setup_rows", "mxp_erased",
+                 "mxp_order", "mxp_setup_hint", "mxp_rows_drawn", "mxp_lit", "ins_title_now",
+                 "mxp_end", "mxp_fulls", "mxp_parts", "mxp_same", "mxp_dropped", "mxp_groups", "mxp_plains", "mxp_cancels", "mxp_wobbles", "mxp_seen",
+                 "mxp_note", "mxp_per_note",
+                 "mxs_copy", "mxs_mark", "mxs_copies", "mxs_refresh", "mxs_set", "mxs_mute",
+                 "mxs_delete", "mxs_offers", "mxp_dims", "mxp_ticks",
+                 "env2_visible", "mx_env2_locks", "sl_e2_held", "sl_e2_set", "env2_amp_draw", "wr_turn_held", "wr_drawn_at"):
         layout[name] = csyms[name]              # 2026-11-12: the matrix (csrc/matrix): the checks call them
     for name in ("mod_mask_hook", "mod_lfo_mask", "mod_eval", "mod_eval_pre", "mod_wb", "mod_wb_cell",
-                 "mv_begin", "mv_cell", "mv_cell_span", "mv_knob", "mv_poll", "sl_lastv", "wr_screen"):
+                 "sm_fast", "lfo_fast", "mods_fast", "mv_begin", "mv_cell", "mv_cell_span", "mv_knob", "mv_poll", "mv_end", "sl_lastv", "wr_screen"):
         layout[name] = csyms[name]              # 2026-11-11: csrc/modulation (the checks call them)
+    for name in (("mx_probe",) if pages.route_probe_on() else ()):
+        layout[name] = csyms[name]              # 2026-11-21: DN2_ROUTE_PROBE (matrix.c mx_probe): the cost checks
+    for name in (("lh_selw", "lh_n") if pages.lfo_halfrate_on() else ()):
+        layout[name] = csyms[name]              # 2026-11-20: half-rate LFOs (cascade.c lh_args): each frame's voice turns,
+                                                # read by the slides step's stock comparison (scripts/slides_stock.py)
+    for name in ("mx_kof", "mx_m_of", "mx_atab", "mx_lay_first", "mxa_convert", "mxa_compat", "mxa_converted",
+                 "mxa_changed", "mxa_saved", "mx_route_level", "wish_drop", "mxa_stored", "wish_att_head",
+                 "wish_att_lost", "wish_memcpy_stub"):
+        layout[name] = csyms[name]              # 2026-11-19: DEP the attenuverter (csrc/matrix/atten.c): the checks
+    for name in ("wish_busy", "wish_give", "wish_queued", "wish_q_max", "mxa_commit"):
+        layout[name] = csyms[name]              # 2026-11-21: the table's queue for its lock's holder (csrc/wishes/table.c)
+                                                # and the conversion's commit (atten.c): the checks
+    for name in ("kn_cur", "kn_tcb", "kn_d", "kn_items", "kn_seen", "kn_catches", "kn_held", "kn_passes", "kn_releases", "kn_locks",
+                 "kn_item", "kn_value", "kn_units", "kn_lock_snd", "kn_lock_kit", "smp_quant_hook"):
+        layout[name] = csyms[name]              # 2026-11-19: knob notches (csrc/knobs): the checks read them
+    for name in ("mtr_lbl_alone", "mtr_lbl_full"):
+        layout[name] = csyms[name]              # 2026-11-19: the load labels' blinks alone / by a full redraw (the checks)
+    for name in ("mtr_big", "mtr_big_shows", "mtr_big_alone", "mtr_big_full", "mtr_big_due", "mtr_big_groups", "mtr_key"):
+        layout[name] = csyms[name]              # 2026-11-19: the big meter, FUNC tapped then held (the checks)
+    for name in ("mv_loaded", "mc_loaded", "mtr_loaded", "mx_loaded", "prof_mine", "prof_audio", "env2_field_drawn", "mx_e2_knob"):
+        layout[name] = csyms[name]              # 2026-11-18: each RAM block's "cleared since this load" word (code data,
+                                                # 0 after every load): the restart check sets them back to 0
     layout.update(playout)
     # W2: where the C renderer's code ends (its rodata and data follow): the ship gate
     # checks [C_LOAD, c_text_end) as code
@@ -1267,16 +1464,24 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     # remoteui-6: the end of its rodata; [C_LOAD, c_rodata_end) is never written at run time (every emulator
     # step watches it, scripts/emulib/codeguard.py), the range the test channel's identity CRC covers
     layout["c_rodata_end"] = csyms["__rodata_end"]
+    # 2026-11-17 (dnfw.mods.ramcheck, waverider.word_spans): the generated header's number tables (load_md's u16
+    # cycles ...), [start, end) each, where they were linked: numbers, never a pointer
+    layout["c_number_tables"] = _number_tables(c_hdr, csyms)
+    # 2026-11-18 (the User's rule, dnfw.mods.ramcheck "pointer"): every pointer the link filled in, in our C's data
+    layout["c_pointer_sites"] = [a for a in sorted(c_abs32) if pages.C_LOAD <= a < pages.C_LOAD + len(cimage)]
     for name in ("smp_hi", "smp_walk", "smp_booted", "smp_cmds", "smp_tdm_sent", "smp_tdm_heard",
+                 "smp_lfo_hook", "smp_lfo_fix", "smp_bank_live", "smp_bank_count", "smp_bank_blocked", "smp_lp_bank",   # v0.65
+                 "smp_row_step", "smp_word_row", "smp_row_word", "smp_name", "smp_discard", "smp_set_samp_word", "smp_samp_word",
                  "smp_retries", "smp_saved", "smp_boot", "smp_save_recording", "smp_save_mark", "smp_load", "smp_lstate",
-                 "rec_overlay", "rec_src", "rec_dest", "smp_ram", "rec_phase", "trim_slot",
+                 "rec_overlay", "rec_src", "rec_dest", "smp_ram", "smp_ram_at", "rec_phase", "trim_slot",
                  "trim_n", "trim_s", "trim_e", "nm_cur", "nm_text", "slc_state", "slc_page_seen", "slc_seen_draw", "slc_letgo", "slc_open_track",
                  "smp_analyse", "smp_analysis", "smp_onsets", "smp_slices_set", "smp_slices_get",
-                 "slc_nfr", "slc_sl", "slc_ns", "slc_cur", "slc_grid_n", "smp_pos", "smp_pos_at", "smp_periods", "smp_dir_ok", "smp_meta_ok", "smp_lst_open", "smp_fb_open", "smp_fb_folder", "smp_fb_cur", "smp_fb_count", "smp_fb_mark_count", "smp_fb_mark_unused", "smp_fb_marked", "smp_fb_menu", "smp_mod_apply", "smp_quant", "smp_samp_turned", "smp_overlay_dirty", "rec_pv_on", "smp_func_held", "smp_question_up", "sn_opens", "sn_results", "sn_up", "smp_machine_commit", "smp_rx", "smp_fb_store", "smp_lib_refresh", "smp_lib_pending", "smp_lp_queued", "smp_lib_state", "smp_lib_writes", "smp_lib_load", "smp_lib_slot_of", "smp_lib_preview", "smp_lib_preview_stop", "smp_fb_rowtext", "smp_mq_off", "smp_fb_mcur", "smp_lp_done", "smp_lp_full", "smp_fb_auto", "smp_fb_auto_starts", "smp_lp_skipped", "smp_rec_store_named", "smp_name_set", "smp_formats", "smp_rs_done", "smp_rs_last", "smp_trim", "smp_l_order", "smp_walk_total", "smp_held_lo", "smp_held_hi", "smp_knob_d", "smp_knob_at", "smp_dsp_load", "smp_load_peak", "smp_load_seen", "smp_load_at", "wr_screen_obj", "rec_state", "rec_heard", "slc_kb_c", "slc_alloc_n", "smp_tables", "smp_pv_state", "trim_zoom", "trim_head_x", "sl_ui_table_now", "smp_push_slot", "sl_rec_knob", "sl_rec_held", "sl_rec_table", "rec_view", "rec_rlen", "rec_link", "rec_room", "as_done", "rec_saved_slot", "rec_rstrt", "rec_thres", "rec_src", "rec_chan", "sl_rec_page", "smp_rec_place", "smp_slot_empty", "smp_pl_dirp", "rec_combo", "rec_overlay", "rt_on", "rt_play", "rt_rplace", "rt_rbytes", "rt_pend", "rt_cur", "rt_cur_end", "rt_manual", "rt_qrec", "rt_qplay", "rt_pos", "rt_steps", "rt_nx_place", "rt_nx_room", "rt_nx_need", "rt_w", "rt_gen", "q_gen", "q_fire", "q_cancel", "rt_fired", "rt_refused", "rt_swaps", "rt_qfired", "rt_why", "rt_why_at", "rt_trig", "rt_bounce_samp", "rt_is_bounce", "rt_buf_of", "rt_trig_get", "rt_trig_toggle", "rt_rearm", "rt_count", "rt_take_handover", "rt_regions", "rt_rsteps", "rt_last_step", "rt_used", "rt_fired_at", "rt_fired_trk", "rt_why_trk", "rt_last_key", "bn_page", "bn_yes_at", "bn_active", "bn_led_walk", "bn_led_poll", "bn_led_claims", "bn_open", "bn_save", "bn_pages", "bn_said_at", "bn_said_n", "bn_nothing_at", "rt_frame", "rt_poll", "rt_cut", "smp_rt_sent", "rec_rt_take", "rt_q_set", "rt_q_waiting", "rt_knob", "rt_state", "rt_arm", "rt_req", "bn_sub", "rt_flex_req", "rt_req_waiting", "rt_buf_value", "rt_buf_code", "rt_samp_buf", "smp_samp_direct", "rec_gain", "sl_knob_push", "rt_clear", "bn_clear_ask", "bn_cleared", "bn_cleared_at", "fx_get", "fx_set", "fx_valid", "ms_frame", "ms_mask", "ms_frames", "rt_mute_knob", "bn_mute", "rec_peak",
+                 "slc_nfr", "slc_sl", "slc_ns", "slc_cur", "slc_grid_n", "smp_pos", "smp_pos_at", "smp_periods", "smp_dir_ok", "smp_meta_ok", "smp_lst_open", "smp_fb_open", "smp_fb_folder", "smp_fb_cur", "smp_fb_count", "smp_fb_mark_count", "smp_fb_mark_unused", "smp_fb_marked", "smp_fb_menu", "smp_mod_apply", "smp_quant", "smp_samp_turned", "smp_overlay_dirty", "rec_pv_on", "smp_func_held", "smp_question_up", "sn_opens", "sn_results", "sn_up", "smp_machine_commit", "smp_rx", "smp_fb_store", "smp_lib_refresh", "smp_lib_pending", "smp_lp_queued", "smp_lib_state", "smp_lib_writes", "smp_lib_load", "smp_lib_slot_of", "smp_lib_preview", "smp_lib_preview_stop", "smp_fb_rowtext", "smp_mq_off", "smp_fb_mcur", "smp_lp_done", "smp_lp_full", "smp_fb_auto", "smp_fb_auto_starts", "smp_lp_skipped", "smp_rec_store_named", "smp_name_set", "smp_formats", "smp_rs_done", "smp_rs_last", "smp_trim", "smp_l_order", "smp_walk_total", "smp_held_lo", "smp_held_hi", "smp_knob_d", "smp_knob_at", "smp_dsp_load", "smp_load_peak", "smp_load_seen", "smp_load_at", "wr_screen_obj", "rec_state", "rec_heard", "slc_kb_c", "slc_alloc_n", "smp_tables", "smp_pv_state", "trim_zoom", "trim_head_x", "sl_ui_table_now", "smp_push_slot", "sl_rec_knob", "sl_rec_held", "sl_rec_table", "rec_view", "rec_rlen", "rec_link", "rec_room", "as_done", "rec_saved_slot", "rec_rstrt", "rec_thres", "rec_src", "rec_chan", "sl_rec_page", "smp_rec_place", "smp_slot_empty", "smp_pl_dirp", "rec_combo", "rec_overlay", "rt_on", "rt_play", "rt_rplace", "rt_rbytes", "rt_pend", "rt_cur", "rt_cur_end", "rt_manual", "rt_qrec", "rt_qplay", "rt_pos", "rt_steps", "rt_nx_place", "rt_nx_room", "rt_nx_need", "rt_w", "rt_gen", "q_gen", "q_fire", "q_cancel", "rt_fired", "rt_refused", "rt_swaps", "rt_qfired", "rt_why", "rt_why_at", "rt_trig", "rt_bounce_samp", "rt_is_bounce", "rt_buf_of", "rt_trig_get", "rt_trig_toggle", "rt_rearm", "rt_count", "rt_take_handover", "rt_regions", "rt_rsteps", "rt_last_step", "rt_used", "rt_fired_at", "rt_fired_trk", "rt_why_trk", "rt_last_key", "bn_page", "bn_yes_at", "bn_active", "bn_led_walk", "bn_led_poll", "bn_led_claims", "bn_open", "bn_save", "bn_pages", "bn_said_at", "bn_said_n", "bn_nothing_at", "rt_frame", "rt_poll", "rt_cut", "smp_rt_sent", "rec_rt_take", "rt_q_set", "rt_q_waiting", "rt_knob", "rt_state", "rt_arm", "rt_req", "bn_sub", "rt_flex_req", "rt_req_waiting", "rt_buf_value", "rt_buf_code", "rt_samp_buf", "smp_samp_direct", "rec_gain", "sl_knob_push", "rt_clear", "bn_clear_ask", "bn_cleared", "bn_cleared_at", "fx_get", "fx_set", "fx_valid", "ms_frame", "ms_mask", "ms_frames", "ms_playing_mask", "ms_play_force", "rt_mute_knob", "bn_mute", "rec_peak", "rec_mon", "rec_sent_chan", "slc_view0", "slc_fv_n", "slc_fv_lo", "slc_fv_hi", "slc_fine_views", "slc_live_sends", "slc_grid_jumps", "smp_save_keep", "smp_save_head", "kh_on", "kh_close", "kh_set", "slc_follows", "slc_snaps", "smp_fine_reads", "smp_frames_read", "tn_retune", "tn_poll", "tn_pop", "tn_draw", "tn_kb_draw", "tn_kb_up", "tn_visible", "tn_set", "tn_offset", "tn_publish", "tn_cur", "tn_root", "tn_mask", "tn_ui", "tn_user", "tn_snap", "tn_sel", "tn_frames", "tn_writes", "tn_reads", "tn_bad", "tn_owner", "tn_opens", "tn_note", "tn_from", "pf_ui", "pf_sel", "pf_col", "pf_mute", "pf_opens", "pf_frames", "pf_writes", "pf_reads", "pf_bad", "pf_owner", "pf", "pf_set", "pf_tab", "pf_tsel", "pf_dbg", "pf_poll", "pf_publish", "pf_apply", "pf_mark",
                  "jmp_on", "jmp_armed", "jmp_pending", "jmp_count", "jmp_last", "jmp_loaded", "jmp_dirty",
                  "jmp_reads", "jmp_writes", "jmp_to", "jmp_from", "jmp_key", "jmp_poll", "jmp_forced",
                  # 2026-11-12: REMOTE CONTROL in USB CONFIG (csrc/devtest/usbcfg.c; the settings sector, jump.c)
                  "set_remote", "set_reset_seen", "dt_usb_items", "dt_usb_changes", "dt_usb_rebuild",
+                 "dt_present", "dt_inv",   # 2026-11-17: the lines-only check inverts the glass (scripts/emu_line_redraw.py)
                  # v0.38: per-project pools
                  "smp_pj_begins", "smp_pj_ends", "smp_pj_loads", "smp_pj_news", "smp_pj_slot", "smp_pj_newslot", "smp_pj_last", "smp_blank_req", "smp_blank_sent", "smp_pl_on", "smp_pl_owner", "smp_pl_state", "smp_pl_writes", "smp_pl_switches", "smp_pl_lists_written", "smp_pl_events", "smp_pl_src", "smp_pl_boot_case", "smp_pl_gen", "smp_pl_skipped", "smp_pl_mismatch", "smp_discard", "smp_rename",
                  # v0.38: the count to the DSP after a live add (link.c K_HEAD)
@@ -1302,17 +1507,39 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
                  # XDLY (csrc/xdly): the Delay page's TYPE and names
                  "dlt_poll", "dlt_cell", "dlt_state", "dlt_placed", "dlt_seen",
                  # the per-track inserts (csrc/inserts)
-                 "ins_pop", "ins_draw", "ins_visible", "ins_words", "ins_gen", "ins_up", "ins_sel", "ins_selv", "ins_mod", "ins_kv",
-                 "ins_hdr_tail"):   # the sample link's state (v0.15)
+                 "isel_open", "isel_at", "isel_slot", "isel_opens", "isel_picks",   # INSERT SEL (csrc/msel; gate: insel)
+                 "ttl_off", "ttl_draws", "ins_title_icon",   # the title bar's icon (csrc/inserts/ins.c; gate: insel)
+                 "ins_pop", "ins_draw", "ins_visible", "ins_words", "ins_gen", "ins_up", "ins_sel", "ins_selv", "ins_mod", "ins_kv", "ins_fza",
+                 "ins_hdr_tail", "ins_inst", "ins_slot_state", "ovw_up", "ovw_opens", "ovw_taps", "amp_sub", "ovw_key", "ovw_poll",
+                 "ovw_alone", "ovw_fulls", "smp_tlm_cost", "load_stock",
+                 "ins_store_poll", "ins_st_writes", "ins_st_loads", "ins_st_fails", "ins_st_moved", "ins_st_copied",   # the inserts' records
+                 "ins_st_booted", "dm_ok", "dm_run", "dm_bits", "dm_tried", "dm_runs", "dm_fails", "dm_copied"):   # (2026-11-22: the +Drive moves; gates: insmove, drivemove)
         layout[name] = csyms[name]
     for name in ("hold_seq", "hold_count", "hold_len", "hold_keys", "hold_poll", "hold_final", "hold_rel"):   # DRONE's HOLD (csrc/hold)
         layout[name] = csyms[name]
     for name in ("para_live", "para_kept", "para_count", "vm_seen_hook", "vm_begin", "vm_draw", "vm_pop", "vm_seen",
-                 "vm_sets", "vm_frames", "vm_hooks", "vm_bs", "vm_why"):
+                 "vm_sets", "vm_frames", "vm_hooks", "vm_bs", "vm_why",
+                 "pu_voice_led", "pu_led_poll", "pu_led_sets", "pu_led_marks", "pu_led_state"):
         layout[name] = csyms[name]              # 2026-11-15: ANALOG 2's PARA (csrc/hold legato, csrc/para): the checks read them
-    for name in ("scope_up", "scope_taps", "scope_ring", "scope_pos", "smp_rx_sh"):   # AMP page 2's scope (csrc/scope)
+    for name in ("scope_up", "scope_taps", "scope_ring", "scope_pos", "smp_rx_sh", "scope_draw", "scope_poll", "smp_ui_pop", "scope_frames", "scope_alone", "scope_dropped", "scope_gain", "scope_auto", "scope_zoom", "scope_set_taken", "scope_end"):   # AMP page 2's scope (csrc/scope)
+        layout[name] = csyms[name]
+    for name in ("mix_poll", "mix_draw", "mix_end", "mix_acc", "mix_sel", "mix_clip_at", "mix_live", "mix_want",
+                 "mix_lvl_in", "mix_clip_in", "mix_off", "mix_alone", "mix_fulls", "mix_groups", "mix_lvl_n",
+                 "mix_clip_n", "mix_why", "mix_draws", "mix_live_bits",
+                 "mix_clip_forget", "mix_inner_in", "mix_inner_n", "mix_inner_last", "mix_dirty", "mix_held", "mix_let", "mix_thr_off", "smp_input_seq", "mtr_start_done", "mtr_start_at", "mtr_start_polls", "mtr_starting",
+                 "mix_ovw_get", "mix_ovw_takes", "ovw_mix_taps", "ovw_mix_k", "mix_ov_clip_at", "mix_ov_live",
+                 "ovw_tempo_opens", "ovw_preset_opens", "smp_fb_browse", "smp_fb_nactions", "smp_fb_action"):   # 2026-11-20: the mixer meters (csrc/meter/mixer.c; gate: mixmeter); 2026-11-21: the OUTPUTS overview (mixovw), the start-up's quiet (startup.c)
+        layout[name] = csyms[name]
+    for name in ("ins_period", "ins_take", "ins_trig", "ins_ui_poll", "ins_knob_now", "ins_route_dest", "ins_pkt",
+                 "ins_chg", "ins_pkts", "ins_urgents", "ins_trigs", "ins_lk", "ins_cell", "ins_moff", "ins_keep",
+                 "ins_rr", "ins_due", "ins_hdirty", "ins_tpg_gen", "ins_tpg_w", "ins_set_record", "ins_loaded",
+                 "sl_ins_held", "sl_ins_set", "sl_ins_record", "mx_ins_routes", "smp_tdm", "smp_command",
+                 "smp_tdm_sent", "mv_own_knob"):   # 2026-11-20: the inserts locked and modulated (csrc/inserts; gate: matrix)
         layout[name] = csyms[name]
     for name in ("ls_commits", "ls_reverts", "live_rows", "set_bits", "set_flag_put"):   # LIVE SELECT (csrc/msel; gate: livesel)
+        layout[name] = csyms[name]
+    for name in ("as_mask", "as_gen", "as_turns", "as_draws", "as_drum", "as_on", "as_set", "as_poll",
+                 "as_sent"):                    # 2026-11-20: AMP ON/OFF for the drum machines (csrc/msel/ampsw.c; gate: drumamp)
         layout[name] = csyms[name]
     layout["msel_draw"] = csyms["msel_draw"]    # MACHINE SEL in two columns (csrc/msel/msel.c; gate: msel, colsw)
     for name in ("eng_mask", "eng_tests", "eng_lists", "eng_n"):   # the preset browser's ENGINE filter (csrc/presets)

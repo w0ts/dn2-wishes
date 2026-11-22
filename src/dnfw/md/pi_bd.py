@@ -238,8 +238,9 @@ def _host(p: Prog, L: K.Layout, cfg: _Cfg) -> None:
 
 def _init(p: Prog, L: K.Layout, cfg: _Cfg) -> None:
     p.fconst(0, 0.0)
-    for k in list(range(3, 9)) + list(range(10, 26)):
+    for k in range(3, 9):
         ss(p, k, 0)
+    K.zero_words(p, 10, 16)                   # (2026-11-20: a loop, perc2b's room)
     p.iconst(0, 0)
     ss(p, 9, 0)
     p.iconst(0, -1)

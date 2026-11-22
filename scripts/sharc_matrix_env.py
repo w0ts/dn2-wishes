@@ -39,7 +39,7 @@ TOL = 1e-4
 PRIME = 4                                       # blocks: a note at full level, REL 0, two at rest
 # the gate's run (the runner takes seconds a block): every stage and both modes, a note-off in the attack, RSET off
 QUICK = ["ADSR, released in the attack", "AHD, released in the attack", "RSET off: a note-on goes on from the level",
-         "the fastest knobs"]
+         "the fastest knobs", "AHD, a timed hold (HOLD 4)"]
 QUICK_BLOCKS = 120
 
 

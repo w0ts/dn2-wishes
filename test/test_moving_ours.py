@@ -30,13 +30,17 @@ def _emu():
 
 def test_one_line_drawer_every_page_goes_through():
     mv = MOVING.read_text()
-    assert mv.count("SET_PIXEL(canvas") == 1 and "SET_PIXEL(canvas" in _function(mv, "void mv_knob(")
+    # (2026-11-20) the one drawer is mv_place: a record's knob (mv_knob) and our own pages' (mv_own_knob, the inserts)
+    place = _function(mv, "static void mv_place(void *canvas, int x, int y, int w, u32 id, u32 slot, int lo, int hi, "
+                          "int centre)\n{")
+    assert mv.count("SET_PIXEL(canvas") == 1 and "SET_PIXEL(canvas" in place
+    assert "mv_place(canvas, x, y, w, id, slot, lo, hi," in _function(mv, "void mv_knob(")
+    assert "mv_place(canvas, x, y, w, key, slot, 0, 0x7F00, 0);" in _function(mv, "void mv_own_knob(")
     span = _function(mv, "void mv_cell_span(")
     assert "mv_knob(canvas, x0 + MV_DX, y0 + MV_DY, MV_W, id, lo, hi);" in span
     cell = _function(mv, "void mv_cell(")
     assert "mv_cell_span(canvas, x0, y0, id, r[2], r[3]);" in cell     # stock's cells: the record's range
-    knob = _function(mv, "void mv_knob(")
-    assert "c->lo = lo;" in knob and "c->hi = hi;" in knob and "c->w = " in knob
+    assert "c->lo = lo;" in place and "c->hi = hi;" in place and "c->w = " in place
     assert "(c->w - 1) / (hi - lo)" in _function(mv, "static int line_at(")   # the poll redraws by the same rule
 
 
@@ -81,7 +85,8 @@ def test_the_emulator_check_covers_every_page_of_ours_and_the_gate_runs_it():
     assert types["ONESHOT"] == SM.TYPE_OF["ONESHOT"] and types["SLICE"] == SM.TYPE_OF["SLICE"]
     assert set(emu.LFO_ON) == {"MACHINEDRUM", "MONOMACHINE"}
     src = (ROOT / "scripts/emu_modulation.py").read_text()
-    assert 'default="lists,cascade,line,ours,cost"' in src           # the gate's modulation step runs it
+    assert 'default="lists,cascade,line,ours,locks,cost"' in src     # the gate's modulation step runs it (+ locks:
+                                                                     # 53235ca2, 2026-11-21, emu_modlocks.py)
     assert '"--scenario"' not in (ROOT / "scripts/ship_gate.py").read_text().split('mo_cmd = [')[1].split("\n")[0]
 
 

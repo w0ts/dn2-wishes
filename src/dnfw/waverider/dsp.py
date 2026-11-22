@@ -88,12 +88,13 @@ PERC_L2_LOAD = 0x200BE200
 PERC_L2_SPAN = 0x2BE00                       # 175.5 KB (2026-11-12, from 0x200be200); 168 KB (2026-11-11: 169,538 B of code with SID, the DPRO machines and VO-6 back; its end is the L2 ceiling 0x200ea000); 160 KB (v0.45 + b4, 2026-11-09: 150,710 B of code, BOUNCE's type and v0.45's PERC changes; 147 KB PLAITS VA+FM+ADD+SWARM+NOISE+PART+STRING+MODAL+BD+SD+HH, 2026-11-09: 149,892 B of code; VA 131,794; TB303: 128,282 B; PLAITS 123,128; 118,986 without SID, the DPRO machines and VO-6, 2026-11-08;
                                              # 142 KB SOPHIE, 140 KB v0.24..v0.42, 80 KB v0.17..v0.23). The span is zero-padded into
                                              # the DSP upload, so it is kept to the code
-PERC_SW = 0xB80000 + (PERC_L2_LOAD - 0x20000000) // 2       # 0xbdf100 (0xbe0000 until 2026-11-12)
+PERC_SW = 0xB80000 + (PERC_L2_LOAD - 0x20000000) // 2
+assert PERC_L2_LOAD + PERC_L2_SPAN <= 0x200EA000             # (the ceiling: PARA's pool above it, 2026-11-16)       # 0xbdf100 (0xbe0000 until 2026-11-12)
 L2_IMAGE_END = 0x2008823C                    # the stock stream's last L2 byte
 L2_NOCACHE = 0x200FA000                      # the startup's non-cacheable L2 window starts here
 PERC_SCRATCH_DM = 0x2DDE80                   # 55 words (dnfw.perc.machines.SC_WORDS)
 PERC_STATE_DM, PERC_STATE_STRIDE = 0x2DE180, 128             # 16 voices x 32 words
-PERC_TABLES_DDR = 0x81216000                 # dnfw.perc.machines.tables_bytes
+PERC_TABLES_DDR = 0x81216000                 # dnfw.perc.machines.tables_bytes (2026-11-20: not loaded; read from L1)
 # 2026-11-12 (perf, opt-synths; docs/memory-map.md's DSP claims, holes F1 and F3): L1 copies of what PERC's voices
 # look up every sample, which the program reads instead of the DDR originals (those stay, as does the link's
 # shipping): exp2 (513 words) in F1. The hole was zeros in the upload already (spans() pads), so the upload is the
@@ -101,9 +102,19 @@ PERC_TABLES_DDR = 0x81216000                 # dnfw.perc.machines.tables_bytes
 # loaded by stock's boot stream into block 0 and never written at run time, the runner's write-watch): the User's
 # merge of SHFT's sine into it, 26 of its words one ulp apart.
 PERC_EXP2_DM = 0x2E0640                      # .. 0x2E0E44
+# 2026-11-21 (DSP room): PERC's constant pool (dnfw.perc.cpool), 112 words in F2, after the bus XDLY stores
+# (to 0x2E1980) and before AMP ON/OFF's data (dnfw.waverider.ampsw, 0x2E1B40); its words come from gen_perc_asm.py
+PERC_POOL_DM = 0x2E1980                      # .. 0x2E1B40
+PERC_POOL_JSON = pathlib.Path(__file__).resolve().parents[3] / "csrc" / "waverider" / "sharc" / "perc_pool.json"
 # 2026-11-15 (main, the arbiter): ANALOG 2's PARA chords (dnfw.engines.analog2.para: HELD, CUR, MEM, ROLE; 49 words), the
 # start of F1's free tail. Zeros in the upload (spans() pads the REGION's holes), so every DSP load starts it clear
-PARA_DM, PARA_BYTES = 0x2E0E44, 196          # .. 0x2E0F08
+# 2026-11-16 (PARA as one voice): ROLE, CSEQ, OWN and the pass's and the render loop's words (60 words, F1's tail)
+PARA_DM, PARA_BYTES = 0x2E0E44, 240          # .. 0x2E0F34 (the claim: .. 0x2E1000)
+assert PARA_DM + PARA_BYTES <= 0x2E1000
+# 2026-11-16 (the User's Q5: "16 KB pool in L2"): PARA as one voice's shadow pool, 16 x 1 KB (dnfw.engines.analog2.para
+# POOL), taken from the User's 64 KB reserve between PERC's ceiling (0x200EA000) and the non-cacheable window; run-time
+# state, no span (the DSP's first block after a load frees every block)
+PARA_POOL_L2, PARA_POOL_BYTES = 0x200EA000, 0x4000
 STOCK_SINE_DM, STOCK_SINE_N = 0x25D980, 257
 # 2026-11-12 (perf, opt-synths; the arbiter's claim): TB303's constants table (dnfw.engines.tb303.tb303_sched KTAB_AT, 128
 # words) after the Monomachine render scratch's real end (0x2E5400 + core.RENDER_BYTES 3,280 = 0x2E60D0)
@@ -139,7 +150,16 @@ MAIN_TAP_L2 = MNM_DT_L2 + MNM_DT_BYTES                 # 0x200A9000
 PIRS_TAB_L2, PIRS_TAB_BYTES = MAIN_TAP_L2 + 0x200, 4 * 674          # 0x200A9200 .. 0x200A9C88
 PI_CURVE_L2, PI_CURVE_BYTES = 0x200B5800, 4 * 512                   # .. 0x200B6000
 MAIN_TAP_BYTES = 0x200
-MD_DELAY_DDR = 0x82200000                    # 16 slots x core.PI_DELAY_STRIDE
+MD_DELAY_DDR = 0x82200000                    # 16 slots x core.PI_DELAY_STRIDE (the P-I lines until 2026-11-16; zeros, unread)
+# 2026-11-16 (the User's option A, main as the memory arbiter): the P-I delay lines (and VO-6's pulse ring) in L1
+# block 2, above the SHARC runner harness's frame (0x300000..0x301A80, never in a build) and below the PM cache
+# (0x31C000): 16 slots x 6 KB, the lines alone (dnfw.md.core.PI_LINES_STRIDE; their block scratch is in L1 already).
+# Every access was a DDR one (10 on the shared scale): PI-SD / PI-RS read three and write three words a sample.
+# Nothing is loaded here: a voice clears its slot's lines when its machine starts (dnfw.md.voice), as before.
+MD_DELAY_L1 = 0x302000
+MD_DELAY_STRIDE = 0x1800                     # dnfw.md.core.PI_LINES_STRIDE
+MD_DELAY_L1_END = MD_DELAY_L1 + 16 * MD_DELAY_STRIDE           # 0x31A000
+assert 0x301A80 <= MD_DELAY_L1 and MD_DELAY_L1_END <= 0x31C000
 # FDN8 (docs/fdn8.md, dnfw.fdn8): the reverb in the stock reverb's slot. Its code in L2 after the
 # main mix's tap (inside 0x20088400..0x200b0000, the range complex-ping's mods proved on units),
 # its state in L1 block 1's last 3 KB (after the Monomachine's render scratch), its ring in
@@ -147,7 +167,7 @@ MD_DELAY_DDR = 0x82200000                    # 16 slots x core.PI_DELAY_STRIDE
 # 0x1c1d11) gets wr_fdn8 as its target; wr_fdn8 JUMPs on to the stock reverb unless TYPE (k 48)
 # asks for FDN8.
 FDN8_L2_LOAD = 0x200AA000
-FDN8_L2_SPAN = 0x2400                        # 9 KB (2026-11-11: 10 KB until the send pages' second page: its code went to XDLY's; fdn8.asm 7,018 B; 16 KB until XDLY took the rest)
+FDN8_L2_SPAN = 0x3800                        # 14 KB (2026-11-22, the bus HALF tank: XDLY moved to A2F's free tail, FDN8 to the inserts' start); 9 KB (2026-11-11: 10 KB until the send pages' second page: its code went to XDLY's; fdn8.asm 7,018 B; 16 KB until XDLY took the rest)
 FDN8_SW = 0xB80000 + (FDN8_L2_LOAD - 0x20000000) // 2       # 0xbd5000
 FDN8_STATE_DM = 0x2E6400
 FDN8_RING_DDR = 0x82400000
@@ -157,9 +177,9 @@ FDN8_RING_BYTES = 0x80000                   # 512 KB (256 KB until LONG)
 # 512 B of FDN8's L1 block, its two lines in the stock delay's own 4 MB sample area in DDR. The FX
 # bus's call of the stock delay (sw 0x1c1c58) gets wr_xdly as its target; wr_xdly JUMPs on to the
 # stock delay unless TYPE (k 40, Delay FX Routing) asks for XDLY.
-XDLY_L2_LOAD = FDN8_L2_LOAD + FDN8_L2_SPAN   # 0x200ac400
-XDLY_L2_SPAN = 0x200ADA00 - XDLY_L2_LOAD     # 5.5 KB (4.5 KB until 2026-11-11) (2026-11-10: 0x600 to the inserts, SUB DIST GATER RING; xdly.asm 4,148 B)
-XDLY_SW = 0xB80000 + (XDLY_L2_LOAD - 0x20000000) // 2       # 0xbd6200
+XDLY_L2_LOAD = 0x200B3E00                    # 2026-11-22: in A2F's span's free tail (a2f.asm 6,248 B); 0x200ac400 (FDN8's end) until then
+XDLY_L2_SPAN = 0x1A00                        # 6.5 KB (2026-11-22, to the P-I curve table); 5 KB (2026-11-21, fx-opt2: 0x200 to the inserts; xdly.asm 4,882 B, 110 B left over the 128-B tail); 5.5 KB (4.5 KB until 2026-11-11) (2026-11-10: 0x600 to the inserts, SUB DIST GATER RING; xdly.asm 4,148 B)
+XDLY_SW = 0xB80000 + (XDLY_L2_LOAD - 0x20000000) // 2       # 0xbd9f00 (0xbd6200 until 2026-11-22)
 XDLY_STATE_DM = 0x2E6E00
 DELAY_SITE_SW = 0x1C1C58                     # the FX bus: CALL 0xb8482c (DB), then its two pushes
 DELAY_SITE_STOCK = bytes.fromhex("0418b8002c48")
@@ -167,22 +187,24 @@ STOCK_DELAY_SW = 0xB8482C
 # the per-track inserts (docs/inserts.md, dnfw.inserts): their pass in L2 after FDN8's span (inside
 # the range proven on units; XDLY's branch ends its span here), their state after the code. smp.asm's
 # tail JUMPs to wr_ins, which JUMPs on to PING.
-INS_L2_LOAD = 0x200ADA00                     # 2026-11-10 (0x200AE000 until the four ports)
-INS_L2_SPAN = 0x2200                         # the code (2026-11-13: FUZZ / TAPE AUTO, TAPE PGAIN; 2026-11-12: AUTO, the gate, quiet; 0x1c00 until then; 0x1b00 until 2026-11-11: one, the bus pass's moved inserts); 0x1800 until
+INS_L2_LOAD = 0x200AD800                     # 2026-11-21 (fx-opt2): 0x200 down into XDLY's unused span (0x200ADA00 until then); 2026-11-10 (0x200AE000 until the four ports)
+INS_L2_SPAN = 0x2500                         # the code (2026-11-21 (fx-opt2): +0x200, TAPE and the shapers' multifunction loops; 2026-11-20 (clip-inner): +0x100 from POST's span, the inserts' clip flags; 2026-11-13: FUZZ / TAPE AUTO, TAPE PGAIN; 2026-11-12: AUTO, the gate, quiet; 0x1c00 until then; 0x1b00 until 2026-11-11: one, the bus pass's moved inserts); 0x1800 until
                                              # 2026-11-10: two slots' state and the unpacked records need the room)
-INS_SW = 0xB80000 + (INS_L2_LOAD - 0x20000000) // 2          # 0xbd7000
+INS_SW = 0xB80000 + (INS_L2_LOAD - 0x20000000) // 2          # 0xbd6c00
 INS_STATE_DM = 0x2E3000                                      # 2026-11-11 (perf): L1, in the zeros after the shared tail (was L2 0x200af400)
 # the stereo inserts after the pan (docs/inserts.md "After the pan", dnfw.inserts.post): their code in
 # L2 after the inserts' state (below the sample machines' span), their state after the code, their rings
 # in DDR. The engine's call of the FX sends (sw 0x1c3054) gets wr_inpost as its target; wr_inpost JUMPs on
 # to the sends.
-POST_L2_LOAD = 0x200AFC00                    # 2026-11-12 (the guard's hold; the arbiter): 0x200b0000 until then, same end
-POST_L2_SPAN = 0x1C00                        # the code (4,078 B since 2026-11-11, the unrolled loops; 0x1000 before; the L2 from 0x200b1800 to the sample machines' is unused)
+POST_L2_LOAD = 0x200AFD00                    # 2026-11-20 (clip-inner): 0x100 up (the inserts' span); 2026-11-12 (the guard's hold; the arbiter): 0x200b0000 until then, same end
+POST_L2_SPAN = 0x1E00                        # the code (2026-11-20: -0x100, to the inserts; 7,002 B of code; 2026-11-16: +0x300, the side blocks moved up into the free 0x200b2100..0x200b2400;
+                                             # 0x1c00 until then (7,034 B of 7,040 used); 4,078 B since 2026-11-11, the unrolled loops; 0x1000 before)
 POST_SW = 0xB80000 + (POST_L2_LOAD - 0x20000000) // 2        # 0xbd8000
-# 2026-11-09: DRONE's BEAT side blocks at 0x200b1800 (dnfw.inserts.post.SIDE_L2, 0x900 B); the A2 filter
+# 2026-11-09: DRONE's BEAT side blocks at 0x200b1b00 (dnfw.inserts.post.SIDE_L2, 0x900 B, to A2F's start; 0x200b1800
+# until 2026-11-16); the A2 filter
 # machines' pass (dnfw.engines.analog2.filters.program): its code, then its state
 A2F_L2_LOAD = 0x200B2400
-A2F_L2_SPAN = 0x3400                          # the code; then the state (dnfw.engines.analog2.filters.program.STATE)
+A2F_L2_SPAN = 0x1A00                          # the code (2026-11-22: 0x3400 until XDLY took the tail; a2f.asm 6,248 B); then the state (dnfw.engines.analog2.filters.program.STATE)
 A2F_STATE_DM = REGION[0]                      # 2026-11-11 (perf): the state in L1, the free 2 KB at the region's start
                                               # (was L2 0x200b5800: every word an L2 access, 4 cycles)
 A2F_SW = 0xB80000 + (A2F_L2_LOAD - 0x20000000) // 2
@@ -260,10 +282,17 @@ STOCK_REVERB_SW = 0xB836BC
 # sample code down). Until then it followed PERC's span:
 SMP_L2_LOAD = 0x200B6000                     # 0x200e0400 (PLAITS VA; 0x200df800 TB303; 0x200de400 PLAITS; 0x200dd400 2026-11-08; 0x200e3800 SOPHIE; 0x200e3000 v0.24..v0.42; 0x200d4000 v0.17..v0.23, 0x200d0000 until v0.16)
 assert MAIN_TAP_L2 + 0x200 <= PIRS_TAB_L2 and PIRS_TAB_L2 + PIRS_TAB_BYTES <= FDN8_L2_LOAD          # (opt-md's gaps)
-assert A2F_L2_LOAD + A2F_L2_SPAN <= PI_CURVE_L2 and PI_CURVE_L2 + PI_CURVE_BYTES <= SMP_L2_LOAD
+assert A2F_L2_LOAD + A2F_L2_SPAN <= XDLY_L2_LOAD and XDLY_L2_LOAD + XDLY_L2_SPAN <= PI_CURVE_L2
+assert FDN8_L2_LOAD + FDN8_L2_SPAN <= INS_L2_LOAD
+assert PI_CURVE_L2 + PI_CURVE_BYTES <= SMP_L2_LOAD
 SMP_L2_SPAN = 0x6000                         # v0.28: 24 KB (the re-latch took the code past 19 KB; 20 KB v0.18..v0.27, 32 KB until v0.16)
 SMP_SW = 0xB80000 + (SMP_L2_LOAD - 0x20000000) // 2          # 0xbdb000 (below PERC, 2026-11-09; 0xbf0200 PLAITS VA; 0xbefc00 TB303; 0xbef200 PLAITS; 0xbeea00 2026-11-08; 0xbf1c00 SOPHIE; 0xbf1800 v0.24..v0.42; 0xbea000 v0.17..v0.23)
-PVMIX_L2_LOAD = SMP_L2_LOAD + SMP_L2_SPAN - 0x400           # v0.25: pvmix.asm (wr_pvmix)
+PVMIX_ROOM = 0x650                           # its place: the last 1,616 B of the sample machines' L2 span (1 KB until the v0.59
+                                             # merge: upstream's MON took pvmix, with our Overbridge add, to 1,088 B; 1.5 KB
+                                             # until 2026-11-20: the mixer meters' DAC guard took it to 1,312 B, and the
+                                             # levels pass took 780 B more of smp.asm's room; 1,408 B until the same evening:
+                                             # Overbridge main's peaks, ob_peaks, took it to 1,544 B)
+PVMIX_L2_LOAD = SMP_L2_LOAD + SMP_L2_SPAN - PVMIX_ROOM      # v0.25: pvmix.asm (wr_pvmix)
 PVMIX_SW = 0xB80000 + (PVMIX_L2_LOAD - 0x20000000) // 2
 SMP_STATE_DM, SMP_STATE_STRIDE = 0x2DEF00, 128  # 16 voices x 128 bytes (v0.15)
 SMP_SCRATCH_DM = 0x2DF700                    # after 16 x 128 bytes of state (v0.15)
@@ -381,6 +410,8 @@ SMP_ENGINE_SLOT = 5                          # the engine slot the sample machin
 SMP_TYPES = _smp_types.TYPES                 # ONESHOT WERP STRETCH REPITCH GRID SLICE (v0.19); v0.44 BOUNCE (17)
 ENGINES = {5: "PERC", 8: "ONESHOT", 12: "GRID"}   # types with an engine of ours
 MNM_TYPES = _mnm_types.TYPES                 # v0.26: the Monomachine machines (PERC's voice, so PERC's slot)
+# 2026-11-18 (ours on 50..55): the lookup's [-1] guard and a word a type, before the sample voices' state
+assert LOOKUP16_DM + 4 * MACHINE_TYPES <= SMP_STATE_DM, "the machine lookup runs into the sample voices' state"
 RESERVED_TYPES = tuple(_mnm_types.RESERVED)   # a machine this build leaves out (dnfw.builder; the five removed
                                              # 2026-11-08 until 2026-11-11): the MIDI engine's slot, silent
 MIDI_ENGINE_SLOT = 4                         # stock's MIDI machine: the DSP renders nothing for it
@@ -396,7 +427,15 @@ CALL_SITE_STOCK = bytes.fromhex("040f26003884")
 # these same three instructions (absolute: the call, its pushes and its return are stock's).
 PVMIX_SITE_SW = 0x1C9FD2
 PVMIX_SITE_STOCK = bytes.fromhex("04181c003f9dfe5f00814d18c09f1c00da9f")
-PVMIX_ROOM = 0x400                           # its place: the last 1 KB of the sample machines' L2 span
+# 2026-11-20 (the User): AMP ON/OFF for the drum machines (dnfw.waverider.ampsw, docs/live-select.md). Two hooks in the
+# per-slot chain sw 0x1c8ef1: A before the AMP loop (`R15 = DM(I6 - 33); I5 = DM(I6 - 24)`, 8 bytes: JUMP + NOP16), B
+# after VOL's loop (`R1 = 0x4f800000`, 6 bytes: JUMP). ampsw.asm in L2 (the gap after PI-RS's table), its data in L1
+from . import ampsw as _ampsw                   # noqa: E402
+AMPSW_L2_LOAD, AMPSW_L2_SPAN, AMPSW_SW = _ampsw.CODE_L2_LOAD, _ampsw.CODE_SPAN, _ampsw.CODE_SW
+AMPSW_DATA_DM, AMPSW_DATA_END = _ampsw.DATA_DM, _ampsw.END
+AMPSW_A_SW, AMPSW_B_SW = _ampsw.SITE_A_SW, _ampsw.SITE_B_SW
+AMPSW_A_STOCK = bytes.fromhex("089cdf07089ce80a")    # R15 = DM(I6 - 33); I5 = DM(I6 - 24) (parcels, LSB first)
+AMPSW_B_STOCK = bytes.fromhex("010f804f0000")        # R1 = 0x4f800000
 
 
 class DspError(ValueError):
@@ -447,7 +486,7 @@ def objects() -> dict[str, bytes]:
             for name in ("perc", "perc2a", "perc2b", "smp", "entry_jump", "idle_load", "idle_jump", "block_count",
                          "entry_mark", "emark_jump", "lookup_ptr", "ping", "trackbuf",
                          "pvmix", "pvmix_jump", "fdn8", "xdly", "inserts", "inspost", "insbus", "insbus_jump", "a2f",
-                         "jsend")
+                         "jsend", "ampsw", "ampsw_a_jump", "ampsw_b_jump")
             if name in spec}
 
 
@@ -479,8 +518,9 @@ def _ins_state_spans() -> list[tuple[str, int, bytes]]:
 
 def _a2f_state_span(obj) -> tuple[str, int, bytes]:
     """the region's first 2 KB: the A2 filters' state and mix tables when that pass is built (2026-11-11,
-    perf: they were in L2), else free since v0.11 (Waverider's reader and osc 2; zeros)"""
-    if "a2f" not in obj:
+    perf: they were in L2), else free since v0.11 (Waverider's reader and osc 2; zeros). 2026-11-21 (DSP room):
+    ANALOG 2 and JUNO read these mix tables too (analog2.tables_at), so they are loaded whenever one of those is built"""
+    if "a2f" not in obj and not _a2_tables_read():
         return ("free since v0.11 (Waverider's reader and osc 2; zeros)", REGION[0], b"")
     from ..engines.analog2.filters import program as a2f_program
     st = a2f_program.state_bytes()
@@ -535,6 +575,8 @@ def _raw_spans() -> list[tuple[str, int, bytes]]:
          INS_TSKIP_DM, bytes(64) + (0x7FFFFFFF).to_bytes(4, "little") * 4),
         ("the bus XDLY instances' stores in L1 (zeros; 2026-11-13, lever 5: dnfw.inserts.bus.XD_STORE)",
          ins_bus.XD_STORE, bytes(ins_bus.D.XDLY_INSTANCES * ins_bus.XD_L1_STRIDE)),
+        ("PERC's constant pool: 128 words, I6 at its middle while PERC runs (2026-11-21, dnfw.perc.cpool)",
+         PERC_POOL_DM, _perc_pool()),
         ("the stock track buffers in L1 (zeros; 256 B extra block, then 16 x 128 B)", TRACKAUX_DM,
          bytes(TRACKAUX_BYTES + TRACKBUF_BYTES)),
         *_ins_state_spans(),
@@ -544,6 +586,15 @@ def _raw_spans() -> list[tuple[str, int, bytes]]:
         ("Machinedrum / Monomachine voices: 16 slots x 1 KB (zeros; L2 until 2026-11-10)", MD_STATE_DM,
          bytes(16 * _md_core().MD_STRIDE)),
     ]
+
+
+def _perc_pool() -> bytes:
+    """the constant pool's words, as scripts/gen_perc_asm.py wrote them beside perc.asm (dnfw.perc.cpool)"""
+    from ..perc import cpool as CP
+    spec = json.loads(PERC_POOL_JSON.read_text(encoding="utf-8"))
+    assert spec["pool_dm"] == CP.POOL_DM == PERC_POOL_DM and len(spec["words"]) == CP.POOL_WORDS
+    assert PERC_POOL_DM + 4 * CP.POOL_WORDS <= AMPSW_DATA_DM
+    return struct.pack(f"<{CP.POOL_WORDS}I", *spec["words"])
 
 
 def _perc_exp2() -> bytes:
@@ -645,11 +696,6 @@ def _md_core():
     return core
 
 
-def _perc_tables() -> bytes:
-    from ..perc import machines as perc_machines
-    return perc_machines.stream_tables()
-
-
 def _digibank_room() -> None:
     """DDRW's and DENS's Digibank stand-in (built by the DSP, never shipped: dnfw.mnm.core DIGI)
     must lie past the Machinedrum and Monomachine tables and before the P-I delay lines."""
@@ -667,6 +713,26 @@ def _dpro_on() -> bool:
     return bool({"DPRO-DDRW", "DPRO-DENS"} & set(_mnm_types.NAMES))
 
 
+def l1b2_spans() -> list[tuple[str, int, bytes]]:
+    """2026-11-16: (what, load address, payload) of what goes in L1 block 2: the P-I delay lines' zeros (MD_DELAY_L1),
+    as their DDR place had zeros at power-on (a voice clears its lines only when its machine leaves P-I / VO-6)"""
+    return [("Machinedrum P-I delay lines in L1 block 2: 16 slots x 6 KB (zeros; 2026-11-16)",
+             dm_to_load(MD_DELAY_L1), bytes(MD_DELAY_L1_END - MD_DELAY_L1))]
+
+
+def _check_l1b2(stock: bytes, span_list) -> None:
+    """every L1 block 2 span inside 0x301A80..0x31C000 (above the runner harness's frame, below the PM cache) and on
+    no stock block"""
+    blocks = [b for b in bootstream.walk(stock).blocks if b.count]
+    for what, at, payload in span_list:
+        lo, hi = at, at + len(payload)
+        if not (dm_to_load(0x301A80) <= lo and hi <= dm_to_load(0x31C000)):
+            raise DspError(f"{what} at {lo:#x} leaves L1 block 2's room")
+        for b in blocks:
+            if b.target < hi and lo < b.target + b.count:
+                raise DspError(f"{what} overlaps the stock block at {b.target:#x}")
+
+
 def ddr_spans() -> list[tuple[str, int, bytes]]:
     """(what, load address, payload) of each DDR span (load address = address): the
     machines' and filters' state (zeros, so fill blocks) and tables."""
@@ -680,7 +746,9 @@ def ddr_spans() -> list[tuple[str, int, bytes]]:
         # v0.29 and v0.30). The sine only; test_waverider_dsp checks every table PERC reads
         # is loaded by a span.
         # 2026-11-10 (shrink): AMD's sine and PERC's tan ship over the link (perc.machines.shipped_tail)
-        ("PERC tables (exp2; the sample machines read it too)", PERC_TABLES_DDR, _perc_tables()),
+        # 2026-11-20 (DRUM's room): PERC's DDR exp2 (2,052 B) is no longer loaded: the program and the sample machines
+        # read its L1 copy (PERC_EXP2_DM) since 2026-11-12, and no code of ours names 0x81216000..0x81216804
+        # (dnfw.perc.live.table_words holds no words there either)
         ("Machinedrum sine and tables (zeros: the DSP decodes them; v0.24)", MD_TABLES_DDR,
          bytes(_md_core().TABLE_LAYOUT[_md_core().SHIPPED][0])),
         # v0.26: what ships (the host's pitch table and zpack) comes over the fast link from
@@ -746,7 +814,7 @@ def l2_spans() -> list[tuple[str, int, bytes]]:
             raise DspError(f"{name}.asm ({len(code)} bytes) leaves fewer than 64 bytes of its L2 span")
         out.append((what, at, code + bytes(span - len(code))))
     # v0.32: the voices' working state (zeros)
-    out.append(("Monomachine scratch and the voice order, in L2 (zeros; v0.32; ANALOG2's mix tables)",
+    out.append(("Monomachine scratch and the voice order, in L2 (zeros; v0.32)",
                 MNM_SCRATCH_L2, _mnm_scratch()))
     if _dpro_on():
         out.append(("the DPRO tables' room in L2 (zeros, filled by the build; v0.36)", MNM_DT_L2,
@@ -791,6 +859,11 @@ def l2_spans() -> list[tuple[str, int, bytes]]:
     if INSBUS_L2_SPAN - len(code) < L2_TAIL:
         raise DspError(f"insbus.asm ({len(code)} bytes) leaves fewer than 64 bytes of its L2 span")
     out.append(("insbus.asm (wr_inbus), in L2", INSBUS_L2_LOAD, code + bytes(L2_TAIL)))
+    if "ampsw" in obj:                           # 2026-11-20: AMP ON/OFF's hooks (dnfw.waverider.ampsw)
+        code = obj["ampsw"]
+        if AMPSW_L2_SPAN - len(code) < L2_TAIL:
+            raise DspError(f"ampsw.asm ({len(code)} bytes) leaves fewer than {L2_TAIL} bytes of its L2 span")
+        out.append(("ampsw.asm (wr_asw: AMP ON/OFF's two hooks), in L2", AMPSW_L2_LOAD, code + bytes(L2_TAIL)))
     from ..inserts import bus as ins_bus
     assert ins_bus.STATE == INSBUS_STATE_L2 and ins_bus.END <= PERC_L2_LOAD
     assert (ins_bus.SITE_SW, ins_bus.RESUME_SW) == (ROUTE_SITE_SW, ROUTE_RESUME_SW)
@@ -815,24 +888,29 @@ def l2_spans() -> list[tuple[str, int, bytes]]:
             raise DspError(f"a2f.asm ({len(code)} bytes) leaves fewer than 64 bytes of its L2 span")
         out.append(("a2f.asm (wr_a2f), in L2", A2F_L2_LOAD, code + bytes(A2F_L2_SPAN - len(code))))
     if ins_post._beat_built():                   # 2026-11-09: DRONE's BEAT side blocks (dnfw.engines.drone.drone)
-        assert ins_post.SIDE_L2 + ins_post.SIDE_BYTES <= A2F_L2_LOAD
+        assert POST_L2_LOAD + POST_L2_SPAN <= ins_post.SIDE_L2 and ins_post.SIDE_L2 + ins_post.SIDE_BYTES <= A2F_L2_LOAD
         out.append(("DRONE's BEAT side blocks: 16 slots x 36 words (zeros)", ins_post.SIDE_L2,
                     bytes(ins_post.SIDE_BYTES)))
     return out
 
 
-def _mnm_scratch() -> bytes:
-    """the Monomachine L2 scratch: zeros, but for ANALOG2's filter mix tables at its TABLES_OFF
-    (2026-11-09; dnfw.engines.analog2.analog2.ctx: nothing writes there at run time)"""
-    raw = bytearray(MNM_SCRATCH_BYTES)
+def _a2_tables_read() -> bool:
+    """ANALOG 2 or JUNO built: their filters read the A2 mix tables (analog2.tables_at)"""
     from ..mnm import machines as _mm
-    if "ANALOG2" in _mm.NAMES or "JUNO" in _mm.NAMES:        # 2026-11-12: JUNO's ladder reads them too
+    return "ANALOG2" in _mm.NAMES or "JUNO" in _mm.NAMES      # 2026-11-12: JUNO's ladder reads them too
+
+
+def _mnm_scratch() -> bytes:
+    """the Monomachine L2 scratch: zeros. (2026-11-09..2026-11-21 it also carried ANALOG2's filter mix tables at
+    analog2.TABLES_OFF; since 2026-11-21, DSP room, ANALOG 2 and JUNO read the A2 filter pass's own L1 copy,
+    analog2.tables_at, the same floats: -436 B of section 7)"""
+    if _a2_tables_read():
         from ..engines.analog2 import analog2 as A2
-        from ..perc import program as _pp
+        from ..engines.analog2.filters import program as a2f_program
         words = A2.table_words()
-        assert A2.TABLES_OFF >= _pp.BOUNDS_OFF + 4 * 16 and A2.TABLES_OFF + 4 * len(words) <= MNM_SCRATCH_BYTES
-        struct.pack_into(f"<{len(words)}f", raw, A2.TABLES_OFF, *words)
-    return bytes(raw)
+        at = A2.tables_at() - a2f_program.STATE
+        assert a2f_program.state_bytes()[at:at + 4 * len(words)] == struct.pack(f"<{len(words)}f", *words)
+    return bytes(MNM_SCRATCH_BYTES)
 
 
 def _check_l2(stock: bytes, span_list) -> None:
@@ -879,7 +957,7 @@ def _check_ddr(stock: bytes, span_list) -> None:
 def placements() -> list[dict]:
     out = [{"what": what, "load_address": f"{at:#010x}", "dm_byte": f"{at - LOAD_ALIAS:#08x}",
             "bytes": len(payload), "sha256": hashlib.sha256(payload).hexdigest()}
-           for what, at, payload in spans() + ddr_spans() + l2_spans()]
+           for what, at, payload in spans() + l1b2_spans() + ddr_spans() + l2_spans()]
     if _stockfx.ENABLED:                          # (none while the move is off: stock's block stays in DDR)
         out.append({"what": "the stock delay's control words and chorus's state in L2 (the stock stream's initial "
                             f"words at {FX_DDR:#x}; opt-stock)", "load_address": f"{FX_DM:#010x}", "bytes": FX_BYTES})
@@ -919,6 +997,15 @@ def placements() -> list[dict]:
                      f"(wr_inbus, which does the instruction it replaced and JUMPs back to {ROUTE_RESUME_SW:#x})",
              "load_address": f"{sw_to_load(ROUTE_SITE_SW):#010x}", "bytes": len(ROUTE_SITE_STOCK),
              "stock": ROUTE_SITE_STOCK.hex(), "new": obj["insbus_jump"].hex()}]
+    if "ampsw" in obj:
+        out += [{"what": f"patch: the chain before its AMP loop at sw {AMPSW_A_SW:#x} -> JUMP wr_asw_a + NOP "
+                         "(AMP ON/OFF's hook A, which does the two instructions it replaced)",
+                 "load_address": f"{sw_to_load(AMPSW_A_SW):#010x}", "bytes": len(AMPSW_A_STOCK),
+                 "stock": AMPSW_A_STOCK.hex(), "new": (obj["ampsw_a_jump"] + NOP16).hex()},
+                {"what": f"patch: the chain after VOL's loop at sw {AMPSW_B_SW:#x} -> JUMP {_ampsw.ENTRY_B_SW:#x} "
+                         "(AMP ON/OFF's hook B, which does the instruction it replaced)",
+                 "load_address": f"{sw_to_load(AMPSW_B_SW):#010x}", "bytes": len(AMPSW_B_STOCK),
+                 "stock": AMPSW_B_STOCK.hex(), "new": obj["ampsw_b_jump"].hex()}]
     out += [{"what": f"patch: the stock FX state {FX_DDR:#x} -> L2 {FX_DM:#x}, the instruction at sw {sw:#x}",
              "load_address": f"{at:#010x}", "bytes": len(old), "stock": old.hex(), "new": new.hex()}
             for sw, at, old, new in fx_patches()]
@@ -1042,7 +1129,6 @@ def _finish(out: bytearray) -> bytes:
 def regions() -> list[tuple[str, int, int, str]]:
     """(what, lo, hi, container: "" for a top-level area) of every L1 / L2 / DDR area of ours, byte addresses"""
     from ..inserts import bus as ins_bus, design as ins_d
-    from ..engines.analog2 import analog2 as A2
     from ..engines.plaits import plk
     from ..perc import machines as PM, program as PP
     from ..sampler import machines as SM, program as SP
@@ -1054,6 +1140,10 @@ def regions() -> list[tuple[str, int, int, str]]:
     # L1: the loaded blocks (a code object with the 64 B of NOPs its jumps may run into), then the run-time areas
     for what, at, payload in _raw_spans():
         area(what, at, len(payload) + (64 if "asm" in what else 0))
+    for what, at, payload in l1b2_spans():           # 2026-11-20 (ghost audit): L1 block 2's P-I lines were left out
+        area(what, at - LOAD_ALIAS, len(payload))
+    area("ANALOG 2's PARA chords (engines.analog2.para AREA, dsp.PARA_DM; the claim runs to 0x2E1000)", PARA_DM,
+         PARA_BYTES)
     area("SLICE / GRID relatch words (sampler.program.RELATCH)", SP.RELATCH, 16 * 16)
     if "SMP_LINE_DM" in globals():
         area("the sample reader's taps line (SMP_LINE_DM - 8)", SMP_LINE_DM - 8, 0x2E0100 - (SMP_LINE_DM - 8))
@@ -1072,23 +1162,36 @@ def regions() -> list[tuple[str, int, int, str]]:
     # L2: the loaded code and state, then the run-time areas
     for what, at, payload in l2_spans():
         area(what, at, len(payload))
+    area("PARA as one voice's shadow pool (engines.analog2.para POOL; the User's Q5)", PARA_POOL_L2, PARA_POOL_BYTES)
+    from ..fdn8 import program as _FDP              # 2026-11-21 (fx-fast): persistent delay state, from the User's reserve
+    area("the bus FDN8 instances 1..7's diffusers (fdn8.program DIFF_BUSK_L2; the User's reserve)", _FDP.DIFF_BUSK_L2,
+         _FDP.DIFF_BUSK_END - _FDP.DIFF_BUSK_L2)
+    area("PI-RS's strike table, copied from the decoded tables (md.core.tables_in_l2)", PIRS_TAB_L2, PIRS_TAB_BYTES)
+    area("the P-I modes' curve table, copied the same way", PI_CURVE_L2, PI_CURVE_BYTES)
     if _stockfx.ENABLED:                         # (fx_spans(stock): built in section7 from stock's initial words)
         area("the stock delay's control words and chorus's state (opt-stock, dnfw.waverider.stockfx)", FX_DM, FX_BYTES)
     area("the bus inserts' XDLY stores (inserts.bus HEAD_END..MV_STATE)", ins_bus.HEAD_END,
          ins_bus.MV_STATE - ins_bus.HEAD_END)
-    scr = "Monomachine scratch and the voice order, in L2 (zeros; v0.32; ANALOG2's mix tables)"
+    scr = "Monomachine scratch and the voice order, in L2 (zeros; v0.32)"
     scr = next((w for w, _a, _p in l2_spans() if w.startswith("Monomachine scratch")), scr)
     mnm = MNM_SCRATCH_L2
     words = [("the budget sums (CUM_OFF)", getattr(PP, "CUM_OFF", None), 64), ("the keys", PP.MNM_KEYS_OFF, 64),
              ("the costs", PP.MNM_COSTS_OFF, 64), ("the voice order", PP.ORDER_OFF, 0x50),
              ("the rests", PP.RESTS_OFF, 64), ("the strikes", PP.STRIKES_OFF, 64), ("the bounds", PP.BOUNDS_OFF, 64),
-             ("the slot counter", PP.SLOT_N, 4), ("ANALOG 2's mix tables", A2.TABLES_OFF, 4 * len(A2.table_words())),
+             ("the slot counter", PP.SLOT_N, 4),
              ("the velocities (VEL_OFF)", getattr(PP, "VEL_OFF", None), 64),
+             ("DRUM's hat chokes, a word a track (CHOKE_OFF)", getattr(PP, "CHOKE_OFF", None), 64),
+             ("PERC's block clock (CLOCK_OFF, DRUM's choke)", getattr(PP, "CLOCK_OFF", None), 4),
              ("the post inserts' aux and gate words (inserts.design.POST_AUX_L2)", _ins().POST_AUX_L2 - MNM_SCRATCH_L2,
               _ins().POST_AUX_END - _ins().POST_AUX_L2)]
+    from ..fdn8 import program as FDP              # 2026-11-20 (ghost audit): lever 5's diffusers, PERSISTENT delay state
+    words.append(("the FDN8 diffusers of the send and of bus 0 (fdn8.program DIFF_SEND_L2, DIFF_BUS0_L2)",
+                  FDP.DIFF_SEND_L2 - MNM_SCRATCH_L2, FDP.DIFF_BUS0_L2 + 4 * FDP.DIFF_WORDS - FDP.DIFF_SEND_L2))
     for what, off, n in words:
         if off is not None:
             area(what, mnm + off, n, scr)
+    area("AMP ON/OFF's words, its scratch buffer and the kept pointers (ampsw, L1; zeros in the region's padding)",
+         AMPSW_DATA_DM, AMPSW_DATA_END - AMPSW_DATA_DM)
     # DDR: the loaded spans (the pool's header lies inside the pool: its sub-area), then the run-time areas
     pool = "the sample pool"
     for what, at, payload in ddr_spans():
@@ -1104,6 +1207,17 @@ def regions() -> list[tuple[str, int, int, str]]:
     area("the bus FDN8 instances' rings", ins_d.FDN8_RING_DDR, ins_d.FDN8_INSTANCES * ins_d.FDN8_RING_STRIDE)
     area("the bus XDLY instances' lines", ins_d.XDLY_LINES_DDR, ins_d.XDLY_INSTANCES * ins_d.XDLY_LINES_STRIDE)
     area(pool, SMP_POOL_DDR, SM.POOL_BYTES)
+    area("PARA as one voice's chord rows (sampler.machines PV_TABLE, the link writes them)",
+         SMP_POOL_DDR + SM.PV_TABLE, 4 * 16 * SM.PV_ROW_WORDS, pool)
+    # 2026-11-20 (ghost audit): the pool's inner areas, so check_regions sees them
+    for what, lo, hi in (("the recordings' area (sampler.machines REC_OFFSET .. TABLE_AREA)", SM.REC_OFFSET, SM.TABLE_AREA),
+                         ("the shipped tables' area (TABLE_AREA .. TABLE_READY)", SM.TABLE_AREA, SM.TABLE_READY),
+                         ("the tables' READY and sum, TPG, LV_WANT (TABLE_READY .. SLICE_AREA)", SM.TABLE_READY,
+                          SM.SLICE_AREA),
+                         ("the slice tables (SLICE_AREA, 128 x 768 B)", SM.SLICE_AREA, SM.PV_TABLE),
+                         ("the RAM check's low area (PROBE_LO)", SM.PROBE_LO, SM.PROBE_LO + SM.PROBE_BYTES),
+                         ("the RAM check's high area (PROBE_HI)", SM.PROBE_HI, SM.PROBE_HI + SM.PROBE_BYTES)):
+        area(what, SMP_POOL_DDR + lo, hi - lo, pool)
     return out
 
 
@@ -1177,6 +1291,13 @@ def section7(stock: bytes) -> bytes:
         raise DspError(f"the bus pass's JUMP is {len(obj['insbus_jump'])} bytes, not {len(ROUTE_SITE_STOCK)}")
     if len(obj["emark_jump"]) != len(CALL_SITE_STOCK):
         raise DspError(f"the entry-mark JUMP is {len(obj['emark_jump'])} bytes, not {len(CALL_SITE_STOCK)}")
+    if "ampsw" in obj:
+        if bootstream.read_span(stock, sw_to_load(AMPSW_A_SW), len(AMPSW_A_STOCK)) != AMPSW_A_STOCK:
+            raise DspError("sw 0x1c99b4 is not the stock `R15 = DM(I6 - 33); I5 = DM(I6 - 24)`")
+        if bootstream.read_span(stock, sw_to_load(AMPSW_B_SW), len(AMPSW_B_STOCK)) != AMPSW_B_STOCK:
+            raise DspError("sw 0x1c9a3a is not the stock `R1 = 0x4f800000`")
+        if len(obj["ampsw_a_jump"]) + len(NOP16) != len(AMPSW_A_STOCK) or len(obj["ampsw_b_jump"]) != len(AMPSW_B_STOCK):
+            raise DspError("AMP ON/OFF's JUMPs are not one 48-bit instruction each")
     lookup = struct.unpack("<8I", bootstream.read_span(stock, dm_to_load(LOOKUP_DM), 32))
     if lookup != LOOKUP_STOCK:
         raise DspError(f"the machine lookup is {lookup}, not stock {LOOKUP_STOCK}")
@@ -1186,6 +1307,8 @@ def section7(stock: bytes) -> bytes:
         raise DspError("the lookup pointer patch is not one 48-bit instruction")
     added = spans()
     _check_free(stock, added)
+    l1b2 = l1b2_spans()
+    _check_l1b2(stock, l1b2)
     ddr = ddr_spans()
     _check_ddr(stock, ddr)
     l2 = l2_spans()
@@ -1198,7 +1321,7 @@ def section7(stock: bytes) -> bytes:
     check_regions()
 
     out = bytearray(bootstream.insert_before_final(
-        stock, b"".join(_blocks(at, payload) for _, at, payload in added + ddr + l2 + ch)))
+        stock, b"".join(_blocks(at, payload) for _, at, payload in added + l1b2 + ddr + l2 + ch)))
     bootstream.write_span(out, sw_to_load(ENTRY_SW), entry)
     bootstream.write_span(out, sw_to_load(LOOKUP_SITE_SW), obj["lookup_ptr"])
     bootstream.write_span(out, l2_sw_to_load(IDLE_SITE_SW), obj["idle_jump"])
@@ -1209,6 +1332,9 @@ def section7(stock: bytes) -> bytes:
     bootstream.write_span(out, sw_to_load(SENDS_SITE_SW), sends_cjump())
     bootstream.write_span(out, sw_to_load(CHORUS_SITE_SW), chorus_call())
     bootstream.write_span(out, sw_to_load(ROUTE_SITE_SW), obj["insbus_jump"])
+    if "ampsw" in obj:                           # 2026-11-20: AMP ON/OFF (dnfw.waverider.ampsw)
+        bootstream.write_span(out, sw_to_load(AMPSW_A_SW), obj["ampsw_a_jump"] + NOP16)
+        bootstream.write_span(out, sw_to_load(AMPSW_B_SW), obj["ampsw_b_jump"])
     for _, at, _, new in fx_patches():
         bootstream.write_span(out, at, new)
     result = drop_twin(bytes(out))            # 2026-11-10: entry_mark.asm copies A over B

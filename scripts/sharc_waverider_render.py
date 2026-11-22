@@ -63,7 +63,7 @@ OUT = ROOT / "out" / "waverider"
 DN2_111_SECTION7 = "336e340aa0cdcd34e314cfa44849f709a3134f6bd4cd57dfc7e15702c83115e2"
 DIGIKIT_MEASURED_AT = "6f812e9"
 SELAS = os.environ.get("DNFW_SELAS", "/root/selache-target/release/selas")   # (2026-11-12: a patched build, docs/selas-encoding.md)
-SELMAP = "/root/selmap-target/release/selmap"
+SELMAP = os.environ.get("DNFW_SELMAP", "/root/selmap-target/release/selmap")   # (a candidate build: tools/selache)
 
 # Where our blocks go. Every byte must be one the DN2 1.11 stream never loads
 # (checked in `place`): unloaded by the boot stream, NOT proven unused at run time.

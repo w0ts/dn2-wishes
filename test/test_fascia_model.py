@@ -8,6 +8,8 @@ import random
 import numpy as np
 import pytest
 
+pytest.importorskip("scipy", reason="dnfw.fascia.model needs scipy (scipy.signal), which is not in this environment")
+
 from dnfw.fascia import model as R
 
 

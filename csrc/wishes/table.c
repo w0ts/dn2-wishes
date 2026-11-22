@@ -13,9 +13,15 @@
  * Each key names an entry of 512 B in the slab; a copy copies the entry, a drop gives it back to the free stack.
  *
  * **Who calls, and when.** memcpy and memset run in every task and in interrupts. Every mutator here takes
- * wish_busy first; a call that finds it taken (an interrupt's copy while a task is in here) does nothing and
- * counts wish_reentered. LFO4 measured that counter at 0 on 1.11 (scripts/emu_lfo4_boot.py); the gate reads it.
- * The audio interrupt never reads this table: the matrix reads per-track lists the UI task builds. */
+ * wish_busy first. (2026-11-21) A copy, carry or clear (stock's memcpy / memset) that finds it taken (an interrupt's
+ * copy while a task is in here, a task that preempted the holder) is queued, never dropped: the holder does it under
+ * the lock before it lets go (wish_give), in the order they came; only a full queue drops one and counts
+ * wish_reentered (as every other mutator that finds the lock taken still does). LFO4 measured that counter at 0 on
+ * 1.11 (scripts/emu_lfo4_boot.py); the gate reads it. Before, such a copy was dropped: a kit sound copied while the
+ * lock was held lost its record (and W_ATT: the attenuverter then converted it a second time, csrc/matrix/atten.c).
+ * The audio interrupt never reads this table (the matrix reads per-track lists the UI task builds), and its own
+ * memcpys (the voice rows, wish_voice_copy) are all smaller than a sound: it never reaches the queue
+ * (scripts/emu_wish_isr.py). */
 #include "wish.h"
 
 #define KEYS ((u32 *)WISH_AT(WISH_O_KEYS))
@@ -116,7 +122,7 @@ static void clear_entry(struct wish *w)
 }
 
 /* -> 1 with the lock, 0 (counted) when another caller holds it: an interrupt's copy, or a task this one interrupted */
-int wish_take(void)
+static int try_take(void)                /* -> 1 with the lock; 0 (not counted) when it is held */
 {
     int was;
 
@@ -127,16 +133,100 @@ int wish_take(void)
     was = wish_busy;
     wish_busy = 0x80;
 #endif
-    if (was) {
+    return !was;
+}
+
+int wish_take(void)
+{
+    if (!try_take()) {
         wish_reentered++;
         return 0;
     }
     return 1;
 }
 
+/* (2026-11-21) every interrupt masked around the queue's few words (the producer may be an interrupt, the holder a
+ * task): the holder's last look at the queue and its release are one step, so nothing queued is left behind. Task
+ * code here runs in supervisor mode (csrc/devtest/devtest.c irq_off, the same instructions) */
+#if defined(__m68k__)
+static inline u32 irq_off(void)
+{
+    u32 sr;
+    __asm__ volatile ("move.w %%sr, %0\n\tmove.w #0x2700, %%sr" : "=d"(sr) : : "memory");
+    return sr;
+}
+
+static inline void irq_restore(u32 sr)
+{
+    __asm__ volatile ("move.w %0, %%sr" : : "d"(sr) : "memory");
+}
+#else
+static inline u32 irq_off(void) { return 0; }
+static inline void irq_restore(u32 sr) { (void)sr; }
+#endif
+
+/* the queue of copies, carries and clears that found the lock taken (see the top): the holder's to do */
+enum { Q_COPY = 1, Q_CARRY, Q_CLEAR };
+#define WISH_Q 16u
+static u32 q_a[WISH_Q] D_, q_b[WISH_Q] D_, q_n[WISH_Q] D_;
+static u8 q_op[WISH_Q] D_;
+u32 wish_q_head D_ = 0, wish_q_tail D_ = 0;
+u32 wish_queued D_ = 0, wish_q_max D_ = 0;   /* the checks: ops queued, the deepest the queue got */
+
+static void run_op(u32 op, u32 a, u32 b, u32 n);
+
 void wish_give(void)
 {
-    wish_busy = 0;
+    for (;;) {
+        u32 sr = irq_off();
+        if (wish_q_tail == wish_q_head) {
+            wish_busy = 0;
+            irq_restore(sr);
+            return;
+        }
+        u32 k = wish_q_tail % WISH_Q;
+        u32 op = q_op[k], a = q_a[k], b = q_b[k], n = q_n[k];
+        wish_q_tail++;
+        irq_restore(sr);
+        run_op(op, a, b, n);            /* under the lock, still held */
+    }
+}
+
+/* OP now with the lock, or queued for its holder */
+static void op_locked(u32 op, u32 a, u32 b, u32 n)
+{
+    if (try_take()) {
+        run_op(op, a, b, n);
+        wish_give();
+        return;
+    }
+#ifdef WISH_NO_QUEUE
+    wish_reentered++;                   /* (the host tests' negative control: the build before, the op dropped) */
+    return;
+#endif
+    u32 sr = irq_off();
+    if (!wish_busy) {                   /* let go between the two looks: ours now */
+        wish_busy = 0x80;
+        irq_restore(sr);
+        run_op(op, a, b, n);
+        wish_give();
+        return;
+    }
+    if (wish_q_head - wish_q_tail >= WISH_Q) {
+        wish_reentered++;               /* the queue full: dropped, counted */
+        irq_restore(sr);
+        return;
+    }
+    u32 k = wish_q_head % WISH_Q;
+    q_op[k] = (u8)op;
+    q_a[k] = a;
+    q_b[k] = b;
+    q_n[k] = n;
+    wish_q_head++;
+    wish_queued++;
+    if (wish_q_head - wish_q_tail > wish_q_max)
+        wish_q_max = wish_q_head - wish_q_tail;
+    irq_restore(sr);
 }
 
 #define take wish_take
@@ -218,33 +308,56 @@ void wish_drop(u32 sound)
     give();
 }
 
+/* (2026-11-19, csrc/matrix/atten.c) a converted sound's copies (W_ATT: its DEPs the attenuverters), for the UI pass
+ * to store unless they land in the playing kit (mxa_moved): a sound copied into the pool (a sound lock plays it as
+ * stock does, DEP its depth) must hold C. A ring, written under the table's lock, read by the UI pass */
+#define WISH_ATT_RING 32u
+u32 wish_att_ring[WISH_ATT_RING] D_;
+u32 wish_att_head D_ = 0, wish_att_tail D_ = 0, wish_att_lost D_ = 0;
+
+static void att_moved(const struct wish *from, u32 dst)
+{
+    if (!(from->flags & W_ATT))
+        return;
+    if (wish_att_head - wish_att_tail >= WISH_ATT_RING) {
+        wish_att_lost++;
+        return;
+    }
+    wish_att_ring[wish_att_head % WISH_ATT_RING] = dst;
+    wish_att_head++;
+}
+
 /* one sound copied over another: the copy holds what the source holds, or nothing */
-void wish_copy(u32 dst, u32 src)
+static void copy_held(u32 dst, u32 src)
 {
     struct wish *from, *to;
 
-    if (!wish_n || dst == src || !take())
-        return;
     wish_copies++;
     from = find(src);
     if (!from)
         drop(dst);
-    else if ((to = add(dst)) != 0)
+    else if ((to = add(dst)) != 0) {
         copy_entry(to, find(src));      /* add() moved keys, not entries: from is still good */
-    give();
+        att_moved(to, dst);
+    }
+}
+
+void wish_copy(u32 dst, u32 src)
+{
+    if (!wish_n || dst == src)
+        return;
+    op_locked(Q_COPY, dst, src, 0);
 }
 
 /* a block of N bytes copied from SRC to DST: every tracked sound that starts inside the source is now also at the
  * same offset in the destination, and nothing that was tracked inside the destination is any more. The copies are
  * made before the destination's old entries go, so a source inside the destination (an overlap) is read whole. */
-void wish_carry(u32 dst, u32 src, u32 n)
+static void carry_held(u32 dst, u32 src, u32 n)
 {
     u32 *at = (u32 *)WISH_AT(WISH_O_CARRY);        /* as many as the table holds: no batch limit */
     u16 *made = (u16 *)WISH_AT(WISH_O_CARRY + 4u * WISH_N);
     u32 i, j, k, taken = 0;
 
-    if (!wish_n || dst == src || !n || !take())
-        return;
     wish_carries++;
     for (i = lower(src); i < wish_n && KEYS[i] - src < n; i++) {
         if (!nfree) {
@@ -253,6 +366,7 @@ void wish_carry(u32 dst, u32 src, u32 n)
         }
         made[taken] = FREE[--nfree];
         copy_entry(wish_entry(made[taken]), wish_entry(SLOTS[i]));
+        att_moved(wish_entry(made[taken]), dst + (KEYS[i] - src));
         at[taken++] = dst + (KEYS[i] - src);
     }
     i = lower(dst);
@@ -265,22 +379,44 @@ void wish_carry(u32 dst, u32 src, u32 n)
         SLOTS[i + k] = made[k];
     }
     wish_n += taken;
-    give();
+}
+
+void wish_carry(u32 dst, u32 src, u32 n)
+{
+    if (!wish_n || dst == src || !n)
+        return;
+    op_locked(Q_CARRY, dst, src, n);
 }
 
 /* N bytes overwritten at AT: no tracked sound starts inside them any more */
-void wish_clear(u32 at, u32 n)
+static void clear_held(u32 at, u32 n)
 {
     u32 i, j;
 
-    if (!wish_n || !n || !take())
-        return;
     wish_clears++;
     i = lower(at);
     for (j = i; j < wish_n && KEYS[j] - at < n; j++)
         ;
     remove_run(i, j - i);
-    give();
+}
+
+void wish_clear(u32 at, u32 n)
+{
+    if (!wish_n || !n)
+        return;
+    op_locked(Q_CLEAR, at, 0, n);
+}
+
+static void run_op(u32 op, u32 a, u32 b, u32 n)
+{
+    if (!wish_n)                        /* (queued: the table may have emptied meanwhile) */
+        return;
+    if (op == Q_COPY)
+        copy_held(a, b);
+    else if (op == Q_CARRY)
+        carry_held(a, b, n);
+    else
+        clear_held(a, n);
 }
 
 /* hooks.S: stock's memcpy(dst, src, n) and memset(dst, fill, n), only when n >= a sound and wish_n != 0 */
@@ -376,6 +512,8 @@ void wish_load(u32 live, const u8 *stored)
     const struct wish *have;
 
     wish_loads++;
+    wish_edits++;                               /* (2026-11-19) a sound loaded: the matrix lays its track out again (its
+                                                 * DEP, the attenuverter, converted: csrc/matrix/atten.c) */
     if (!wish_link_read(stored, &h0, &h1, &len)) {
         wish_drop(live);
 #if DN2_LFO4
@@ -402,6 +540,8 @@ void wish_load(u32 live, const u8 *stored)
             w->flags = W_WANT | W_DISK;         /* store.c reads the cell */
             wish_wants++;
         }
+        w->flags &= (u8)~W_ATT;                 /* (2026-11-19) a loaded sound is stored: its DEP is C until it is
+                                                 * converted (csrc/matrix/atten.c) */
     }
     give();
 }
@@ -419,6 +559,10 @@ void wish_save(u8 *stored, u32 live)
     if (!wish_n || !take())
         return;
     w = find(live);
+#ifndef WISH_HOST
+    if (w)
+        mxa_save(w, stored, live);              /* (2026-11-19) a converted sound stored as stock reads it (atten.c) */
+#endif
     if (w && (w->flags & W_DIRTY)) {
         if (!w->len) {
             drop(live);

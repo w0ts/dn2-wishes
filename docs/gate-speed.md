@@ -130,3 +130,46 @@ every step; the numbers above are the ones measured.
 
 - Faster tempo or shorter takes in the coupled tests: it would change what is tested.
 - Skipping steps or sampling scenarios: it would weaken the gate.
+
+## 2026-11-16: a clearing run in about an hour (`scripts/gate_parallel.py`)
+
+Measured on v0.54.2 (the integrator's rr gate on the farm, then one full `ship_gate.py` run with the merged
+reuse records): 79 steps, about 15 h of job time, 3.5-4 h of wall time. Three things made it long, none of
+them a check:
+
+1. **One process for the whole Monomachine step** (`sharc:mnm+frame`, 1 to 1.9 h). Its runs are independent
+   (each starts from the same snapshot), so it is now seven parts, each a runner step of its own and a gate
+   step of its own (`sharc_waverider_m5.MNM_PARTS`, `mnm_parts()` asserts that together they hold every unit
+   of work exactly once). Each check is made on the runs of the part that made them; a check over every run
+   (or every machine) is made in each part on its runs, so the whole step's verdict on it is the AND of the
+   parts'. The insert steps that ran together (`insall` .. `twin`, 75 min in one process) are a part each.
+2. **Reuse that missed for reasons that were not inputs.** (a) The `.pyc` files a step's Python read were
+   inputs, and a copy of the tree held other ones (or none). A traced step now compiles its own byte-code into
+   its trace folder (`PYTHONPYCACHEPREFIX`): it reads no `.pyc` at all, and what ran is its sources (traced) under
+   its interpreter (traced). Not a widening: the record holds what decided the code that ran, and no longer a
+   cache of it. (b) The unit tests' temporary folders (pytest's numbered folders, the compiler's output) were
+   inputs under the shared TMPDIR, whose path differs from copy to copy. A traced step now gets a temporary
+   folder made empty for it; it is left out of the record only when every program the step ran is accounted
+   for: Python traces itself; for gcc (the m68k cross compiler and the host's `cc`, which the C unit tests use)
+   the record now holds gcc's installation, its include folders' listings and every file each compile and link
+   read, by gcc's and ld's own account taken as it started (`gcc -M`, `ld --trace`); for the cross binutils, and
+   for the native libraries and programs the tests build and load or run, every file on their command lines; and
+   that native code must import no libc call that opens, lists or looks up a file (`nm -D`), or the folder stays
+   in. Before this, the compilers' inputs were in no record (Python never opened most headers; the temporary
+   outputs had gone when the record was made); the folder's random paths kept the unit tests from ever being
+   reused, so the gap never mattered. A step that runs any other program keeps the folder in its record.
+3. **The steps ran in no particular order with a short limit.** `gate_parallel.py` runs each step alone, in
+   its own copy of the tree, **longest first**, each under its own limit (`scripts/gate_times.json`: measured
+   time and memory peak; limit 2.5 x the time, at least 30 min; jump's is about 67 min, not 15), and starts a
+   step only while the memory available, less what the running steps may still grow to, holds its peak and
+   16 GB more. Then it merges the copies' records into the tree and runs ONE full `ship_gate.py`, which
+   reuses a pass only when every input re-hashes identical and runs everything else itself. Only that run can
+   print CLEARED TO FLASH.
+
+`ship_gate.py --list` prints the full run's order with each step's expected time, limit and memory, and
+`gate_parallel.py`'s order. On the farm:
+
+    SNAPDIR=SNAPS nice -n 19 python scripts/gate_parallel.py TREE STOCK BUILD --run-dir DIR --jobs 8 \
+        --max-jobs 20 --venv $BENCH/venv/bin/python --wrap "$BENCH/bench_ns112.sh {tree}"
+
+(`echo N > DIR/jobs` changes the number of jobs while it runs.)

@@ -43,6 +43,26 @@ def fx() -> dict[str, dict]:
     return out
 
 
+def place_cost(M, eng: dict, var: dict) -> int:
+    """one place of dnfw.mnm.machines.CF_ALL -> its cost a voice (0 only for a REMOVED place).
+
+    2026-11-21: a place's cost is its own case (dsp_cost's name), or a DRUM type's dearer of its start and its
+    dearest setting (dsp_cost's "DRUM-KICK" / "DRUM-KICK-WORST" for the place "DRUM KICK"). A place with no
+    measurement stops the generator: until then a missing name fell back to 0 (a free voice), which is how the
+    DRUM types would have been priced."""
+    if M.NAME == "REMOVED":
+        return 0
+    if M.NAME in var:
+        return var[M.NAME]
+    if M.NAME in eng:
+        return eng[M.NAME]
+    case = M.NAME.replace(" ", "-")
+    found = [eng[k] for k in (case, case + "-WORST") if k in eng]
+    if not found:
+        raise SystemExit(f"gen_load_table: no dsp_cost measurement for the place {M.NAME!r}")
+    return max(found)
+
+
 def table(eng: dict, fxr: dict) -> dict:
     import para_cost as PC                    # (scripts/, on sys.path above)
     from dnfw.engines.analog2.filters import design as A2D
@@ -63,7 +83,7 @@ def table(eng: dict, fxr: dict) -> dict:
     plaits = [eng[f"PLAITS-{n or PLT.MODELS[0]}"] for n in PLT.MODELS]      # the retired choice plays WS
     mono = [eng[n] for n in MM.MONO_ENGINES]
     var = {"SOPHIE": max(sophie), "ANALOG2": max(a2flt), "PLAITS": max(plaits)}
-    mnm = [var.get(M.NAME, eng.get(M.NAME, 0)) if M.NAME != "REMOVED" else 0 for M in MM.CF_ALL]
+    mnm = [place_cost(M, eng, var) for M in MM.CF_ALL]
     types = {t: m(LD.STOCK[t]) for t in LD.STOCK}
     types.update({ty: eng[n] for n, ty in SM.TYPE_OF.items() if n in eng})
     return {
@@ -80,8 +100,9 @@ def table(eng: dict, fxr: dict) -> dict:
                 if f"BUS {ID.NAMES[t]}" in fxr},
         "send": {k: m(fxr[f"SEND {k}"]["per_instance"]) for k in ("FDN8", "XDLY", "JUNO")},
         "engines": eng,
-        "para": PC.table_costs(),             # 2026-11-15: ANALOG 2's PARA chords (a joining note, a dropped one)
-        "para_juno": PC.table_costs("JUNO"),  # 2026-11-15: JUNO's
+        # 2026-11-21: PARA as one voice (scripts/para_cost.py): a chord's slot = the voice + base + add[its notes]
+        "para": PC.table_costs("ANALOG2"),
+        "para_juno": PC.table_costs("JUNO"),
     }
 
 

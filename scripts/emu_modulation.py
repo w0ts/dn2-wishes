@@ -8,7 +8,9 @@ lists    the builder 0x4003951e called with the live ParameterSet of track 1, fo
          and PERC; stock 1.12 beside the build (and --before, the line it replaces). What must hold:
          nothing stock lists is lost; the 13 closed records are added to every list (8 of them FM
          TONE's own); each LFO's list adds the other LFOs' SPD MULT FADE WAVE SPH MODE DEP that
-         stock leaves out, never its own controls, never a DEST.
+         stock leaves out, never its own controls, never a DEST. A build carrying lfo4: LFO1..3's lists
+         also offer LFO4's seven controls (ids 321 322 323 325 327 328 329), exactly those, never
+         its DEST (324); MOD SETUP's none.
 
 cascade  the frame's LFO path called by hand (the emulator runs no audio interrupt): stock's
          smoother 0x400db28e, then the frame's call of the evaluator (the build's mod_eval, or
@@ -20,12 +22,13 @@ cascade  the frame's LFO path called by hand (the emulator runs no audio interru
 
 cost     the evaluator call's instructions, build minus stock, all 16 rows at full depth: typical
          (no LFO aimed at an LFO above it) and worst (every row's LFO1 and LFO2 aimed at LFO3's
-         controls); each must stay under its bound.
+         controls); each must stay under its bound. A build carrying lfo4: build minus stock with
+         lfo4 alone applied (lfo4's fourth LFO in stock's evaluator is lfo4's share, printed).
 
 line     the FLTR page on track 1 (WaveTone): test values written into the heard array of the
          voice the track last played; the cell of FREQ (slot 67) must show a 1 px line in its row
          MV_DY, its length the heard value, none when heard = set (after the 400 ms linger), and
-         the UI asks for a redraw by itself when the heard value moves. Before that, with nothing
+         the UI updates it by itself when the heard value moves (the line alone, read from the glass's buffer). Before that, with nothing
          modulated, no line on WaveTone's SYN page. The instructions of mv_cell, of a poll and of
          the page's draws are printed, also with every cell of the page modulated (the worst case).
 
@@ -35,6 +38,11 @@ ours     the same line on our own pages (2026-11-12): MACHINEDRUM, SOPHIE, PLAIT
          moved draws exactly moving.c's line in that row, and nothing 400 ms after heard = set again;
          on MACHINEDRUM and MONOMACHINE, LFO1 aimed at that knob, run by the frame's evaluator: the line
          moves by itself, and leaves once LFO1's depth is zero.
+
+locks    (2026-11-20, scripts/emu_modlocks.py) a p-lock played with stock's own builder, applier and undo on a stock
+         page (WaveTone's FLTR, FREQ), one of our machines' pages (TB-303) and a sample machine's (ONESHOT): the line
+         at the locked value while the knob keeps its own value, gone 400 ms after the step without the lock; a knob
+         turned: no line (the smoother's glide). A build before the change: no line on a lock (checked as such).
 
 Last line PASS or FAIL.
 """
@@ -73,9 +81,23 @@ OPENED = (34, 35, 61, 73, 74, 221, 222, 224, 225, 226, 235, 236, 237)
 FM_ONLY = (221, 222, 224, 225, 226, 235, 236, 237)
 LFO_CTL = {1: (75, 76, 77, 79, 81, 82, 83), 2: (85, 86, 87, 89, 91, 92, 93), 3: (95, 96, 97, 99, 101, 102, 103)}
 DESTS = (78, 88, 98)
+# lfo4 (DN2_LFO4, docs/lfo-112-port.md; ship_gate 6m4): its records are ids 321..330 in LFO3's order (SPD MULT FADE
+# DEST WAVE SLEW SPH MODE DEP MULT2, dnfw.patch.lfo4records). LFO1..3's lists offer its seven controls by design, as
+# they offer each other's (cascade.c lfo_of): never its DEST (324), nor SLEW (326, its slot is SPH's) nor the second MULT (330)
+LFO4_CTL = (321, 322, 323, 325, 327, 328, 329)
+LFO4_DEST = 324
 TOP = 0x7F00
 MV_DY_DEFAULT = 5                   # csrc/modulation/moving.c MV_DY
 FAILS: list[str] = []
+
+
+FB_BACK = 0x402A10CC                # the panel's BACK pointer: between presents, the frame on the glass
+
+
+def glass(m):
+    """what the glass shows: BACK (2026-11-17: a moving line is rewritten there alone, with no page draw, so
+    the last frame drawn (panel.capture) no longer holds it; csrc/modulation/moving.c mv_lines_only)"""
+    return bytes(m.read(m.long(FB_BACK), 1024))
 
 
 def check(what, ok, detail=""):
@@ -89,8 +111,9 @@ def idx(v, s):
 
 
 # --- the machine ------------------------------------------------------------------------
-def machine(build, snapshot):
-    """the snapshot with stock 1.12's MAIN OS, then BUILD's (if any) as the loader leaves it"""
+def machine(build, snapshot, sec3_in=None):
+    """the snapshot with stock 1.12's MAIN OS, then BUILD's (if any) as the loader leaves it
+    (SEC3_IN: a MAIN OS in place of BUILD's, e.g. stock with lfo4 alone: the cost's reference)"""
     from emulib.image import differences
     from emulib.machine import Machine
     m = Machine(snapshot)
@@ -99,15 +122,17 @@ def machine(build, snapshot):
     sec3 = None
     m.apply([(va, stock[va - BASE:va - BASE + len(b)]) for va, b in differences(stock, snap_sec)
              if va + len(b) <= BASE + len(stock)])
-    if build:
+    if build or sec3_in is not None:
         from dnfw.cli.files import read_image
         from dnfw.firmware.load import load
         from dnfw.mods import platform
         from unicorn import UC_PROT_ALL, UcError
-        sec3 = load(read_image(pathlib.Path(build))).container.find(3).unpack()
+        sec3 = sec3_in if sec3_in is not None else load(read_image(pathlib.Path(build))).container.find(3).unpack()
         m.apply(differences(stock, sec3))
         for va, blob in platform.runtime(sec3):
             m.write(va, blob)
+        from emulib import attkit
+        attkit.store_kit(m)  # (2026-11-21) a converted kit stored back: converted once
         from dnfw.sampler import machines as SMx
         for pg in range(SMx.MIRROR, SMx.MIRROR + 0x500000, 0x100000):
             try:
@@ -172,6 +197,21 @@ def record(m, rid):
     return struct.unpack(">15i", m.read(RECORDS + 60 * rid, 60))
 
 
+def stored(m, s, t=0):
+    """track T's sound's stored value of slot S (sound + 20 + 2 S): what the moving line takes as set (moving.c)"""
+    return u16(m, m.long(KIT) + 52 + 1163 * t + 20 + 2 * s)
+
+
+def rest_on_sound(m, v=0, t=0):
+    """voice V's smoother settled on track T's sound and nothing added: its input SRC, STATE and OUT at the stored values
+    (2026-11-20: the line's set is the stored value; on a build before, the smoother's state, which this makes the same)"""
+    for s in range(1, 101):
+        val = stored(m, s, t)
+        w16(m, SRC + 2 * idx(v, s), val)
+        m.write(STATE + 4 * idx(v, s), struct.pack(">I", val << 16))
+        w16(m, OUT + 2 * idx(v, s), val)
+
+
 def set_machine(m, panel, track, mtype):
     owner = guest(m, CTX)
     guest(m, COMMIT, owner + 0xF4, track, mtype, 1, 1)
@@ -220,6 +260,8 @@ def lists_of(build, snapshot):
 
 
 def scenario_lists(a, report):
+    lfo4 = lfo4_in(a.build)
+    print(f"    lfo4 in the build: {'yes (LFO1..3 offer its seven controls)' if lfo4 else 'no'}", flush=True)
     runs = {"stock": lists_of(None, a.snapshot), "build": lists_of(a.build, a.snapshot)}
     if a.before:
         runs["before"] = lists_of(a.before, a.snapshot)
@@ -252,9 +294,15 @@ def scenario_lists(a, report):
                 others = set(sum((LFO_CTL[j] for j in LFO_CTL if j != k), ()))
                 check(f"{name} {lfo}: every other LFO's controls listed", others <= bl, f"missing {sorted(others - bl)}")
                 check(f"{name} {lfo}: none of its own controls", not (set(LFO_CTL[k]) & bl), f"{sorted(set(LFO_CTL[k]) & bl)}")
+                if lfo4:
+                    check(f"{name} {lfo}: LFO4's seven controls listed (lfo4)", set(LFO4_CTL) <= bl,
+                          f"missing {sorted(set(LFO4_CTL) - bl)}")
             check(f"{name} {lfo}: no DEST listed", not (set(DESTS) & bl))
+            check(f"{name} {lfo}: no LFO4 DEST listed", LFO4_DEST not in bl)
             if rl is not None:
-                extra = sorted(bl - rl - set(OPENED) - set(sum(LFO_CTL.values(), ())))
+                # lfo4's controls are expected only where lfo4 offers them: LFO1..3's lists, on a build carrying lfo4
+                allowed = set(OPENED) | set(sum(LFO_CTL.values(), ())) | (set(LFO4_CTL) if lfo4 and k else set())
+                extra = sorted(bl - rl - allowed)
                 check(f"{name} {lfo}: nothing else added", not extra, f"{extra}")
 
 
@@ -298,8 +346,12 @@ def cascade_run(build, snapshot, frames, spd, mult, sym):
             lfo = struct.unpack(">i", bytes(uc.mem_read(sp + 48, 4)))[0]
             read[lfo] = uc.reg_read(K.UC_M68K_REG_D6) & 0xFFFF
     m.uc.hook_add(UC_HOOK_CODE, on_spd, begin=0x40137B20, end=0x40137B20)
+    if build and lfo_fast_in(build):            # 2026-11-17: the build runs the evaluator as lfo_fast (hooks.S): the same
+        at = lfo_fast_spd(m, sym)               # read there, the frame the same
+        m.uc.hook_add(UC_HOOK_CODE, on_spd, begin=at, end=at)
     rows, bad, faults = [], [], 0
     for f in range(frames):
+        read.clear()                            # (DN2_LFO_HALFRATE: a frame where row 0's LFOs do not step reads none)
         try:
             m.call(SMOOTHER, SRC)
             m.call(caller, OUT, rate, 1, 1, o1, o2, 0, limit=2_000_000)
@@ -321,13 +373,32 @@ def cascade_run(build, snapshot, frames, spd, mult, sym):
     return rows, bad, faults, m
 
 
+def halfrate_in() -> bool:
+    """this tree's build steps half the voices' LFOs a frame (DN2_LFO_HALFRATE: lh_args in its code map)"""
+    d = json.loads((HERE.parent / "src/dnfw/mods/waverider_code.json").read_text())
+    return "lh_args" in (d.get("c_text_symbols") or {})
+
+
+# (2026-11-19, DN2_LFO_HALFRATE on by default, the User's choice, agreed with main) with half-rate LFOs a row's LFOs
+# step every second frame (its turn) and read their SPD only then: on the build the reads are taken from the frames
+# where row 0 stepped, which must be exactly every second frame, and "LFO2 hears what LFO1 wrote one frame earlier" is
+# checked at each of them (LFO1 writes LFO2's SPD every frame, from its last output). Without half-rate: every frame.
 def scenario_cascade(a, report, sym):
     n = a.frames
     rep = {}
+    half = halfrate_in()
     for label, build in (("stock", None), ("build", a.build)):
         rows, bad, faults, m = cascade_run(build, a.snapshot, n, 0x5800, 4, sym)
-        h2 = [r[1] for r in rows]
-        h1 = [r[0] for r in rows]
+        turns = [k for k in range(len(rows)) if rows[k][1] is not None]
+        if label == "build" and half:
+            check("build (half-rate LFOs): row 0's LFOs step every second frame, no more, no less",
+                  len(turns) >= len(rows) // 2 - 1 and all(y - x == 2 for x, y in zip(turns, turns[1:])),
+                  f"{len(turns)} of {len(rows)} frames, first {turns[:6]}")
+            rep["half_rate_turns"] = len(turns)
+        else:
+            check(f"{label}: row 0's LFOs step every frame", len(turns) == len(rows), f"{len(turns)} of {len(rows)}")
+        h2 = [rows[k][1] for k in turns] or [0]
+        h1 = [rows[k][0] for k in turns if rows[k][0] is not None] or [0]
         rep[label] = {"frames": len(rows), "lfo2_spd": [min(h2), max(h2)], "lfo1_spd": [min(h1), max(h1)],
                       "faults": faults}
         print(f"    {label}: {len(rows)} frames, LFO1 SPD heard {min(h1):#06x}..{max(h1):#06x}, "
@@ -341,8 +412,9 @@ def scenario_cascade(a, report, sym):
                   f"{min(h2):#06x}..{max(h2):#06x}")
         else:
             check("build: LFO1 -> LFO2 SPD is heard", max(h2) - min(h2) > 0x400, f"{max(h2) - min(h2):#x}")
-            late = [k for k in range(1, len(rows)) if rows[k][1] != max(0, min(TOP, 0x5800 + rows[k - 1][2]))]
-            check("build: what LFO2 hears is what LFO1 wrote one frame earlier", not late, f"{len(late)} frames differ")
+            late = [k for k in turns if k >= 1 and rows[k][1] != max(0, min(TOP, 0x5800 + rows[k - 1][2]))]
+            check("build: what LFO2 hears is what LFO1 wrote one frame earlier" + (" (at each turn)" if half else ""),
+                  not late, f"{len(late)} frames differ")
             carried = m.long(0x46AF8000 + 8)
             check("build: the carry ran", carried > 0, f"{carried} cells carried")
             # costs: the pre-pass alone, with and without a carry
@@ -372,11 +444,58 @@ def lfowaves_edits(build):
     return LW.EDITS
 
 
-def eval_cost(build, snapshot, sym, dests, frames=8, without=()):
+LFO_FAST_JMP = bytes.fromhex("4ef9")             # 0x40137a06: jmp lfo_fast ; nop (dnfw.waverider.lfofast)
+LFO_FAST_SPD = bytes.fromhex("7d6c0044712c0046")  # mvs.w 68(%a4),%d6 ; mvs.b 70(%a4),%d0: the LFO's SPD read
+
+
+def lfo_fast_in(build):
+    """True when BUILD's evaluator A is entered by a jmp into lfo_fast (csrc/modulation/hooks.S)"""
+    from dnfw.cli.files import read_image
+    from dnfw.firmware.load import load
+    sec3 = load(read_image(pathlib.Path(build))).container.find(3).unpack()
+    return sec3[EVAL_A - BASE:EVAL_A - BASE + 2] == LFO_FAST_JMP
+
+
+def lfo_fast_edits(build):
+    """lfo_fast's jmp at 0x40137a06 as an edit to put back (eval_cost's WITHOUT), or [] when the build has none"""
+    from dnfw.waverider import lfofast
+    return [{"va": EVAL_A, "stock": lfofast.EVAL_ENTRY.hex()}] if lfo_fast_in(build) else []
+
+
+def lfo_fast_spd(m, sym):
+    """-> the address in lfo_fast of the instruction after its SPD read (stock's 0x40137b20)"""
+    code = bytes(m.read(sym["lfo_fast"], 0x400))
+    at = code.find(LFO_FAST_SPD)
+    if at < 0 or code.find(LFO_FAST_SPD, at + 1) >= 0:
+        raise SystemExit("lfo_fast: its SPD read is not found once")
+    return sym["lfo_fast"] + at + 4
+
+
+def lfo4_in(build):
+    """True when BUILD carries lfo4: its CODE chunk at 0x46800000 (as emu_lfo4.py finds it). Its in-image edits are
+    not compared byte for byte here: where lfowaves' hook covers one (0x400372e3), the platform writes it into the
+    displaced copy instead (dnfw.mods.platform.write)"""
+    from dnfw.cli.files import read_image
+    from dnfw.firmware.load import load
+    from dnfw.mods import platform
+    sec3 = load(read_image(pathlib.Path(build))).container.find(3).unpack()
+    _, chunks = platform.split(sec3)
+    return any(c == platform.area.CODE and platform.area.CodeChunk.unpack(d).load == 0x46800000 for c, d in chunks)
+
+
+def stock_with_lfo4():
+    """stock 1.12's MAIN OS with lfo4 alone applied (dnfw.mods.lfo4.compose, what gen_lfo4_code.py checks byte for
+    byte): the evaluator with lfo4's fourth LFO on every voice and nothing of ours"""
+    from dnfw.mods import lfo4 as L4
+    return L4.compose(open(pathlib.Path(os.environ["DT2_SECTIONS"]) / "section_3_MAIN_OS.bin", "rb").read())
+
+
+def eval_cost(build, snapshot, sym, dests, frames=8, without=(), sec3_in=None):
     """instructions of the frame's evaluator call (the build's mod_eval, or stock's 0x40137a06), all
     16 voice rows at full depth with LFO1/2/3 aimed at DESTS; -> the most over FRAMES frames.
-    WITHOUT: in-image edits put back to stock first (lfowaves', whose share is not the cascade's)"""
-    m = machine(build, snapshot)
+    WITHOUT: in-image edits put back to stock first (lfowaves', whose share is not the cascade's).
+    SEC3_IN (with BUILD None): that MAIN OS, its evaluator called as stock's (stock with lfo4 alone)"""
+    m = machine(build, snapshot, sec3_in)
     for e in without:
         m.write(e["va"], bytes.fromhex(e["stock"]))
     m.flush()
@@ -417,23 +536,52 @@ def scenario_cost(a, report, sym):
     # 18 instructions an LFO at a stock wave), 816 instructions a frame that are not the cascade's. The cascade is
     # measured on the build with lfowaves' edits put back to stock; lfowaves' share is checked on its own.
     lw = lfowaves_edits(a.build)
+    # 2026-11-16 (v0.56.2, lfo4 on): lfo4 edits stock's evaluator itself to run a fourth LFO on every voice (its loop
+    # 3 -> 4, its state moved to 0x46700000): that share is lfo4's, not the cascade's. On a build carrying lfo4 the
+    # cascade is measured against stock with lfo4 alone applied (the same evaluator, nothing of ours); lfo4's share
+    # (that reference minus stock) is printed beside it.
+    l4 = stock_with_lfo4() if lfo4_in(a.build) else None
+    # 2026-11-17: a build whose evaluator is lfo_fast (the same work, fewer instructions; checked against stock's
+    # instruction for instruction by lfotest) is measured here with its jmp put back: the cascade's and lfowaves'
+    # shares as before, on stock's evaluator; lfo_fast's own saving beside them
+    lf = lfo_fast_edits(a.build)
     rep = {}
     for label, dests in (("typical", typical), ("worst", worst)):
-        st = eval_cost(None, a.snapshot, sym, dests)
-        bd = eval_cost(a.build, a.snapshot, sym, dests, without=lw)
+        st = eval_cost(None, a.snapshot, sym, dests, sec3_in=l4)
+        if l4 is not None:
+            s0 = eval_cost(None, a.snapshot, sym, dests)
+            rep.setdefault("lfo4", {})[label] = {"stock": s0, "stock_with_lfo4": st, "share": st - s0}
+            print(f"    evaluator frame, {label}: stock {s0}, stock with lfo4 alone {st}: lfo4's share {st - s0} "
+                  f"instructions a frame (the reference below)", flush=True)
+        bd = eval_cost(a.build, a.snapshot, sym, dests, without=lw + lf)
         rep[label] = {"stock": st, "build": bd, "ours": bd - st, "per_second_at_1500": (bd - st) * 1500}
-        print(f"    evaluator frame, {label}: stock {st}, build {bd}{' without lfowaves' if lw else ''}: "
+        print(f"    evaluator frame, {label}: {'stock with lfo4' if l4 is not None else 'stock'} {st}, "
+              f"build {bd}{' without lfowaves' if lw else ''}: "
               f"ours {bd - st} instructions a frame, {(bd - st) * 1500:,} a second", flush=True)
-        bound = {"typical": 800, "worst": 4500}[label]
+        # 2026-11-17 (the User: the same work every frame, no skip by use): lfo4's cascade walks all 16 rows x 8 cells
+        # every frame (csrc/modulation/cascade.c l4_frame), so its cost no longer depends on how many rows are written:
+        # this is the constant-cost rule, not a skip. Bounds = the measured full walk (typical 2,050, worst 5,874 on
+        # claude/mx-worst3's build 6e8d0023) plus about 10 %. Then lfo4 always runs its fourth LFO (the User: "Always run,
+        # like LFO1-3"): typical 2,658, worst 6,482 measured on 30193cb7.
+        bound = {"typical": 2900, "worst": 7100}[label]
         check(f"the cascade's {label} cost is under {bound:,} instructions a frame", 0 <= bd - st < bound,
               f"{bd - st} ({100 * (bd - st) / st:.0f} % of stock's evaluator, {st})")
         if lw:
-            full = eval_cost(a.build, a.snapshot, sym, dests)
+            full = eval_cost(a.build, a.snapshot, sym, dests, without=lf)
             rep[label]["lfowaves"] = full - bd
             print(f"    evaluator frame, {label}: lfowaves' share {full - bd} instructions a frame "
                   f"(the build with it {full})", flush=True)
-            check(f"lfowaves' {label} share is under 1,000 instructions a frame (48 LFOs at a stock wave)",
-                  0 <= full - bd < 1000, f"{full - bd}")
+            # 2026-11-17: lfo4 always runs its fourth LFO through the same hooks: 64 LFOs (1,088 measured on 30193cb7)
+            check(f"lfowaves' {label} share is under 1,200 instructions a frame (64 LFOs at a stock wave)",
+                  0 <= full - bd < 1200, f"{full - bd}")
+        if lf:
+            fast = eval_cost(a.build, a.snapshot, sym, dests)
+            ref = full if lw else eval_cost(a.build, a.snapshot, sym, dests, without=lf)
+            rep[label]["lfo_fast"] = {"shipped": fast, "stock_evaluator": ref, "saved": ref - fast}
+            print(f"    evaluator frame, {label}: lfo_fast {fast}, the build on stock's evaluator {ref}: "
+                  f"{ref - fast} instructions a frame fewer", flush=True)
+            check(f"lfo_fast: the {label} frame costs fewer instructions than on stock's evaluator", fast < ref,
+                  f"{fast} vs {ref}")
     report["cost"] = rep
 
 
@@ -493,6 +641,7 @@ def scenario_line(a, report, sym):
         cells.append((cv, x0 if x0 < 0x80000000 else x0 - (1 << 32), y0 if y0 < 0x80000000 else y0 - (1 << 32), rid))
     h = m.uc.hook_add(UC_HOOK_CODE, on_cell, begin=sym["mv_cell"], end=sym["mv_cell"])
     frame(m, sym)                           # OUT = the smoother's state + the sources, as after any frame
+    rest_on_sound(m)                        # ... settled on the sound's values, nothing added
     v, s = 0, 67
     m.write(sym["sl_lastv"], b"\x00")       # track 1 last played voice 1, which plays it
     m.write(OWNER, struct.pack(">I", 0))
@@ -512,18 +661,14 @@ def scenario_line(a, report, sym):
         return
     canvas, x0, y0, _ = freq[-1]
     print(f"    FREQ's cell at ({x0}, {y0}); cells drawn: {sorted(set((c[1], c[2], c[3]) for c in cells))}", flush=True)
-    st = struct.unpack(">I", m.read(STATE + 4 * idx(v, s), 4))[0]
-    setv = (st + 0x8000) >> 16
+    setv = stored(m, s)
     r = record(m, 36)
     lo, hi = r[2], r[3]
     dy = a.mv_dy
 
     def line_pixels():
         from emu import panel as P
-        buf = bytes(panel.capture.frames[-1]) if panel.capture.frames else None
-        if buf is None:
-            return None
-        lit = P.lit(buf)
+        lit = P.lit(glass(m))
         yp = 63 - (y0 + dy)
         return [x for x in range(x0, x0 + 24) if (x, yp) in lit]
 
@@ -541,7 +686,7 @@ def scenario_line(a, report, sym):
         px = line_pixels()
         want = (heard - lo) * 20 // (hi - lo)
         shots[name] = panel.screen(f"line-{name}")
-        check(f"heard {heard:#06x} (set {setv:#06x}): the UI asked for the redraw itself", asks > 0, f"{asks}")
+        check(f"heard {heard:#06x} (set {setv:#06x}): the UI updated the line itself", asks > 0, f"{asks}")
         check(f"heard {heard:#06x}: a line of {want + 1} px in row y0+{dy}", px is not None and len(px) >= want + 1
               and min(px) == x0 + 1 and max(px) == x0 + 1 + want, f"{px}")
     cells.clear()
@@ -590,8 +735,8 @@ def scenario_line(a, report, sym):
 
 
 # 2026-11-12: our own pages (md_page.c, smp_page.c) draw their knobs themselves and call mv_knob for each
-OURS = (("MACHINEDRUM", 5), ("SOPHIE", 20), ("PLAITS", 18), ("TB303", 19), ("DRONE", 21), ("ANALOG2", 22),
-        ("MONOMACHINE", 6), ("ONESHOT", 8), ("SLICE", 13), ("JUNO", 23))   # 2026-11-13: + JUNO
+OURS = (("MACHINEDRUM", 5), ("SOPHIE", 53), ("PLAITS", 55), ("TB303", 54), ("DRONE", 52), ("ANALOG2", 51),
+        ("MONOMACHINE", 6), ("ONESHOT", 8), ("SLICE", 13), ("JUNO", 50))   # 2026-11-13: + JUNO
 
 
 LFO_ON = ("MACHINEDRUM", "MONOMACHINE")       # a real LFO, run by the evaluator, on these two
@@ -681,19 +826,15 @@ def scenario_ours(a, report, sym):
     rep, shots = {}, {}
 
     def row_lit(x, y, w):
-        buf = bytes(panel.capture.frames[-1]) if panel.capture.frames else None
-        if buf is None:
-            return None
-        lit = P.lit(buf)
+        lit = P.lit(glass(m))
         return [k for k in range(w) if (x + k, 63 - y) in lit]
 
     for name, mtype in OURS:
         if not ours_machine(m, panel, mtype):
             check(f"{name}: track 1 set to type {mtype}", False)
             continue
-        for sl in range(1, 101):                # nothing modulated: heard = set on every slot of voice 1 (the
-            st = struct.unpack(">I", m.read(STATE + 4 * idx(0, sl), 4))[0]   # snapshot's sound has its own
-            w16(m, OUT + 2 * idx(0, sl), (st + 0x8000) >> 16)                # sources), past any linger
+        rest_on_sound(m)                        # nothing modulated: heard = set on every slot of voice 1 (the
+                                                # snapshot's sound has its own sources), past any linger
         m.write(FRAMES, struct.pack(">I", m.long(FRAMES) + 700))
         pages = []
         for tap in range(3):                    # SYN cycles the pages (3 at most): each one once
@@ -734,7 +875,7 @@ def scenario_ours(a, report, sym):
             """the knob's heard value moved: exactly moving.c's line in its row; none once heard = set past the linger"""
             x, y, w, lo, hi = entry
             s = record(m, rid)[1]
-            setv = (struct.unpack(">I", m.read(STATE + 4 * idx(0, s), 4))[0] + 0x8000) >> 16
+            setv = stored(m, s)
             heard = lo + (hi - lo) * 3 // 4
             if heard == setv:
                 heard += 0x100
@@ -781,7 +922,7 @@ def main() -> int:
     p.add_argument("--build", required=True)
     p.add_argument("--before", default=None)
     p.add_argument("--snapshot", default=SNAP)
-    p.add_argument("--scenario", default="lists,cascade,line,ours,cost")
+    p.add_argument("--scenario", default="lists,cascade,line,ours,locks,cost")
     p.add_argument("--frames", type=int, default=3000)
     p.add_argument("--mv-dy", type=int, default=MV_DY_DEFAULT)
     p.add_argument("--json", default=None)
@@ -794,7 +935,8 @@ def main() -> int:
          "cascade": lambda: scenario_cascade(a, report, lay),
          "cost": lambda: scenario_cost(a, report, lay),
          "line": lambda: scenario_line(a, report, lay),
-         "ours": lambda: scenario_ours(a, report, lay)}[sc]()
+         "ours": lambda: scenario_ours(a, report, lay),
+         "locks": lambda: __import__("emu_modlocks").scenario_locks(sys.modules[__name__], a, report, lay)}[sc]()
     if a.json:
         pathlib.Path(a.json).write_text(json.dumps(report, indent=1))
     print(("FAIL: " + "; ".join(FAILS[:6])) if FAILS else "PASS: modulation (" + a.scenario + ")")

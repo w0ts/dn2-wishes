@@ -1,6 +1,6 @@
 # PLAITS: Plaits engines on the DN2 (fork, not released)
 
-A seventh Monomachine-style machine, **Plaits / PLT** in MACHINE SEL (machine type 18), after
+A seventh Monomachine-style machine, **Plaits / PLT** in MACHINE SEL (machine type 55 since 2026-11-18; 18 before, now upstream's FM+ STAT: docs/machine-types.md), after
 SOPHIE. A port of Mutable Instruments Plaits' engines (two at first, thirteen since 2026-11-09:
 see *The other engines*) (Emilie Gillet,
 github.com/pichenettes/eurorack `plaits/`, MIT; THIRD-PARTY.md): **WS** (waveshaping) and
@@ -28,6 +28,13 @@ fifth record (BASE's), at 0 in a project saved before it: MACHINE SEL starts it 
 a PLAITS track saved earlier comes back 64 cents flat until FINE is turned up.
 
 The two other places are empty (`---`). MACHINE SEL starts it at WS, every knob in the middle.
+
+**AMP on the drum models (2026-11-20).** While MODL is on BD, SD or HH, H on the AMP page is AMP ON/OFF, OFF by
+default: the AMP envelope and VOL bypassed in the DSP (gain 1.0, no release: the model's own decay is the hit); ON is
+stock's AMP. WS (MACHINE SEL's start) and the other models keep VOL on H and the AMP as the note's envelope
+(docs/live-select.md "AMP ON/OFF on the drum machines"). BD with HARM, TIMB and MORP at 127 never dies away by itself
+(-82.7 dB after 12 s, measured): with AMP OFF it rings until its voice gets another note. Kept so (the User,
+2026-11-20): the model has its own decay, at its top it is meant to sustain; AMP ON brings stock's AMP back.
 
 ## What is left out (against Plaits)
 

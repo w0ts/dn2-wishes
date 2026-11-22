@@ -16,6 +16,7 @@
  *
  * Length: SLEN in 1/24 of a step (sl_units), at the tempo the frame carries (BPM x 120,
  * frame word 108) and the track's scale (the pattern's, or the track's in per-track mode).
+ * v0.66: NXT (SLEN's first choice, and its value with no lock): until the track's next trig.
  *
  * Per-trig storage: lock records of their own in the pattern's lock pool, RAM header
  * (SL_RAM_SLD / SL_RAM_SLEN, track | SL_TAG), stored (SL_ID_SLD / SL_ID_SLEN, track). The
@@ -60,20 +61,28 @@ struct ext {                                    /* in a lock list at SL_EXT */
     u16 sld, slen;                              /* the step's values, 0xffff: no lock */
     u32 frame;                                  /* FRAMES + 1 of its last apply; 0 never */
     u16 rec, pad;                               /* v0.41: its REC trig's buffer (1, 2), 0xffff none */
-    u16 e2[SL_E2N];                             /* 2026-11-12: ENV2's ATK DEC SUS REL MODE RSET, 0xffff none */
+    u16 e2[SL_E2N];                             /* 2026-11-12: ENV2's ATK DEC SUS REL MODE RSET (2026-11-19: and H; 2026-11-20:
+                                                 * and HOLD), 0xffff none */
+    u16 ins[SL_INSN];                           /* 2026-11-20: the inserts' K1..K6, MIX: INSERT 1's value in the low byte,
+                                                 * INSERT 2's in the high byte (0xff none for that slot), 0xffff none */
+    u16 pad2;
 };
 _Static_assert(SL_EXT + sizeof(struct ext) <= 20 + 202 * 8, "our values fit in the lock list's spare tail");
 
 /* v0.41: a record's head byte for each of our locks: k 0 SLD, 1 SLEN, 2 REC (rectrig.c); 2026-11-12: 3.. ENV2's
- * knobs (csrc/matrix), heads SL_RAM_E2.., stored ids SL_ID_E2.. */
-#define SL_KINDS (3u + SL_E2N)
+ * knobs (csrc/matrix), heads SL_RAM_E2.., stored ids SL_ID_E2..; 2026-11-20: SL_K_INS.. the inserts' K1..K6, MIX
+ * (csrc/inserts), heads SL_RAM_INS.. (right after ENV2's), stored ids SL_ID_INS.. (right after ENV2's) */
+#define SL_K_INS (3u + SL_E2N)
+#define SL_KINDS (SL_K_INS + SL_INSN)
+_Static_assert(SL_RAM_INS == SL_RAM_E2 + SL_E2N && SL_ID_INS == SL_ID_E2 + SL_E2N,
+               "the inserts' heads and ids follow ENV2's: one run from SL_RAM_E2, one from SL_ID_E2");
 static u8 head_of(u32 k)
 {
     return k == 0 ? SL_RAM_SLD : k == 1 ? SL_RAM_SLEN : k == 2 ? SL_RAM_REC : (u8)(SL_RAM_E2 + k - 3u);
 }
 static int our_head(u8 h)
 {
-    return h == SL_RAM_SLD || h == SL_RAM_SLEN || h == SL_RAM_REC || (h >= SL_RAM_E2 && h < SL_RAM_E2 + SL_E2N);
+    return h == SL_RAM_SLD || h == SL_RAM_SLEN || h == SL_RAM_REC || (h >= SL_RAM_E2 && h < SL_RAM_E2 + SL_E2N + SL_INSN);
 }
 static u32 k_of(u8 h)
 {
@@ -86,7 +95,7 @@ static u8 id_of_k(u32 k)                        /* the stored id */
 static int k_of_id(u8 id)                       /* -> k, or -1 not ours */
 {
     return id == SL_ID_SLD ? 0 : id == SL_ID_SLEN ? 1 : id == SL_ID_REC ? 2
-           : id >= SL_ID_E2 && id < SL_ID_E2 + SL_E2N ? 3 + (int)(id - SL_ID_E2) : -1;
+           : id >= SL_ID_E2 && id < SL_ID_E2 + SL_E2N + SL_INSN ? 3 + (int)(id - SL_ID_E2) : -1;
 }
 
 struct slide {
@@ -123,8 +132,15 @@ u16 sl_vel[NV] D;
 
 static void capture(u32 t, u32 from_voice)
 {
-    for (u32 s = 0; s < NS; s++)
-        sl_cap[t][s] = (u16)((STATE[IDX(from_voice, s)] + 0x8000u) >> 16);
+    /* 2026-11-18 (the User's CPU: a step that starts a note on many tracks at once): the voice's 101 state words
+     * read in order through stepped pointers, 6 instructions a slot (the C loop compiled to 13, indexed): each
+     * (word + 0x8000) >> 16 kept as before; swap leaves that high half in the low word, the one stored */
+    const volatile u32 *st = &STATE[IDX(from_voice, 0)];
+    u16 *cap = sl_cap[t];
+    u32 n = NS, w, half = 0x8000u;
+
+    __asm__ volatile ("1:\tmove.l (%0)+,%3\n\tadd.l %4,%3\n\tswap %3\n\tmove.w %3,(%1)+\n\tsubq.l #1,%2\n\tbne.s 1b"
+                      : "+a"(st), "+a"(cap), "+d"(n), "=&d"(w) : "d"(half) : "cc", "memory");
     sl_cap_ok[t] = 1;
 }
 
@@ -188,6 +204,41 @@ static u32 ticks_a_step(u32 t)
     return n ? n : 6;
 }
 
+/* v0.66 (the owner, the Analog Four's rule: "the slide is completed when the next trig is
+ * reached"): the steps from STEP to track T's next trig (a note or a lock trig: step flag bit 0,
+ * which both set: DNX, a note 0x0381, a lock trig 0x7801), round the track's length; no other
+ * trig: the whole length (to itself). The pattern's tracks are 1701 bytes from +0, each step's
+ * flags a u16 at +2 step (stock's step test 0x4004e95a reads them through the track's vtable
+ * +40: the gate checks that pointer is this one for every track); a track's length at +1164
+ * per track, the pattern's at +122196 per pattern (as jump.c). */
+#define PAT_TRACK 1701u
+#define PAT_TLEN 1164u
+#define PAT_LEN 122196u
+#define PAT_MODE 122201u
+u32 sl_nxt_last D;                              /* the steps the last NXT slide found (the checks) */
+
+static u32 steps_to_next(u32 t, u32 step)
+{
+    const u8 *p = PATTERN;
+    if (!p || t >= NV)
+        return 1;
+    int len = p[PAT_MODE] != 0 ? *(const short *)(p + PAT_TRACK * t + PAT_TLEN)
+                               : *(const short *)(p + PAT_LEN);
+    if (len < 1 || len > 128)
+        return 1;
+    if (step >= (u32)len)
+        step %= (u32)len;
+    const u8 *f = p + PAT_TRACK * t;
+    for (u32 k = 1; k < (u32)len; k++) {
+        u32 s = step + k;
+        if (s >= (u32)len)
+            s -= (u32)len;
+        if (f[2 * s + 1] & 1)                   /* the flags' low byte (big-endian u16) */
+            return k;
+    }
+    return (u32)len;
+}
+
 static void trigger(u32 v, u32 t, u8 *list)
 {
     int count = *(int *)(list + 8);
@@ -228,8 +279,12 @@ static void trigger(u32 v, u32 t, u8 *list)
     }
     if (!n)
         return;
-    u32 len = e->slen < SL_NLEN ? e->slen : SL_LEN_DEFAULT;
-    sl->units = sl_units[len];
+    if (e->slen < SL_NLEN)
+        sl->units = sl_units[e->slen];
+    else {                                      /* NXT (or no SLEN lock): to the next trig */
+        sl_nxt_last = steps_to_next(t, e->magic & 0xFFu);
+        sl->units = (u16)(24u * sl_nxt_last);
+    }
     sl->prog = 0;
     sl->mul = (6u << 8) / ticks_a_step(t);
     sl->n = (u16)n;
@@ -262,6 +317,9 @@ void sl_apply(u32 v, u8 *list, void *mirror)
         extern void mx_env2_locks(u32 v, const u16 *e2);
         const struct ext *e = (const struct ext *)(list + SL_EXT);
         mx_env2_locks(v, (e->magic >> 16) == 0x534Cu && ((e->magic >> 8) & 0xFF) == t ? e->e2 : 0);
+        /* 2026-11-20: the step's insert locks to the track's inserts (csrc/inserts ins_trig), none likewise */
+        extern void ins_trig(u32 t, const u16 *lk);
+        ins_trig(t, (e->magic >> 16) == 0x534Cu && ((e->magic >> 8) & 0xFF) == t ? e->ins : 0);
     }
     /* (v0.41..v0.43 fired a REC trig from here, so a step with no note never recorded; v0.44:
      * rectrig.c's rt_frame fires from the sequencer's own step, whatever the step holds) */
@@ -283,6 +341,8 @@ u32 sl_smooth(void *src)
         if (sl_vel[v] && s && s[SOUND_TYPE] >= 5 && s[SOUND_TYPE] < 32)
             OUT[IDX(v, SL_VEL_SLOT)] = sl_vel[v];
     }
+    extern void pv_out(volatile u16 *out);      /* 2026-11-17: PARA's rows in its voices' own frame words (para/one.c) */
+    pv_out(OUT);
     for (u32 v = 0; v < NV; v++) {
         struct slide *sl = &sl_v[v];
         if (!sl->n)
@@ -397,6 +457,9 @@ void sl_build(int track, u8 *list, u8 *table, void *sound, int step, int a6, int
     e->pad = 0;
     for (u32 j = 0; j < SL_E2N; j++)
         e->e2[j] = (u16)sl_lock_get(table, (u32)track, (u32)step, 3u + j);
+    for (u32 j = 0; j < SL_INSN; j++)
+        e->ins[j] = (u16)sl_lock_get(table, (u32)track, (u32)step, SL_K_INS + j);
+    e->pad2 = 0;
     e->frame = 0;
     e->magic = 0x534C0000u | ((u32)track << 8) | (u32)step;
 }
@@ -474,7 +537,7 @@ int sl_ours_any(const u8 *table, u32 t)
  * drawn, so the two places to its left, (24, 0) and (50, 0), get SLD and SLEN, which encoders
  * E and F set. A trig held: its own value (the first held step's), drawn inverted when it is
  * a lock, as stock draws a p-lock; turning sets it on every held step. No trig held: what a
- * trig gets with no lock (OFF, 1 step), and turning does nothing. */
+ * trig gets with no lock (OFF, NXT: v0.66), and turning does nothing. */
 #define SET_PIXEL ((void (*)(void *, int, int, int))0x40113E70u)   /* (canvas, x, y, on) */
 #define TEXT ((void (*)(void *, u32, int, int, int, const char *, ...))0x4011573Cu)
 #define CENTRED 2
@@ -586,7 +649,7 @@ void sl_draw_slen(void *c, int x, int y, u32 i, int locked)
     static u32 font[8] D;                       /* the font object (stock's: on its stack) */
     clear(c, x - 3, y, x + 21, y + 24);
     BOX_FONT_INIT(font, BOX_FONT);
-    TEXT(c, (u32)font, x + 9, y + 13, CENTRED, (const char *)FMT_S, sl_len_text[i < SL_NLEN ? i : SL_LEN_DEFAULT]);
+    TEXT(c, (u32)font, x + 9, y + 13, CENTRED, (const char *)FMT_S, sl_len_text[i <= SL_NXT ? i : SL_LEN_DEFAULT]);
     BOX_FONT_FREE(font);
     RECT(c, x, y + 7, x + 18, y + 23, 1);
     label(c, x, y, "SLEN", locked);
@@ -660,8 +723,11 @@ int sl_knob(u32 index, int delta)
         int step = sl_choice_step(delta);       /* v0.41: four detents a choice */
         if (!step)
             return 1;
-        int n = (int)(cur != 0xFFFF ? cur : SL_LEN_DEFAULT) + step;
-        v = (u32)(n < 0 ? 0 : n >= SL_NLEN ? SL_NLEN - 1 : n);
+        /* v0.66: the choices NXT, 1/8 .. 64 (NXT first, the value with no lock) */
+        u32 c = cur != 0xFFFF && cur <= SL_NXT ? cur : SL_LEN_DEFAULT;
+        int n = (c == SL_NXT ? 0 : (int)c + 1) + step;
+        n = n < 0 ? 0 : n > SL_NLEN ? SL_NLEN : n;
+        v = n == 0 ? SL_NXT : (u32)(n - 1);
     }
     for (u32 s = 0; s < h.len; s++)
         if (BIT_TEST(obj + 600, s) & 0xFF)
@@ -947,7 +1013,7 @@ u8 *sl_ui_table_now(void)
  * The same kind of record as SLD / SLEN (kinds 3.., ids SL_ID_E2..): a trig held, an ENV2 knob turned sets its lock on
  * every held step; the step's values reach the voice through the lock list (sl_build, sl_apply). */
 
-/* a trig held -> its lock of ENV2 knob J (0 ATK .. 5 RSET), 0xffff none; 0x10000 when no trig is held */
+/* a trig held -> its lock of ENV2 knob J (0 ATK .. 5 RSET, 6 H, 7 HOLD), 0xffff none; 0x10000 when no trig is held */
 u32 sl_e2_held(u32 j)
 {
     struct held h;
@@ -970,4 +1036,59 @@ int sl_e2_set(u32 j, u32 value)
     sl_ui_table = h.table;
     ((void (*)(void *, void *))((*(void ***)h.model)[4]))(h.model, 0);   /* the pattern changed (vtable +16) */
     return 1;
+}
+
+/* 2026-11-20 (csrc/inserts): the inserts' locks, a byte a slot in each record's u16 (INSERT 1 low, INSERT 2 high, 0xff
+ * none). A trig held: kind K's value for slot J on the first held step (0..127), 0xff none, 0x10000 no trig held */
+u32 sl_ins_held(u32 k, u32 j)
+{
+    struct held h;
+    if (k >= SL_INSN || j > 1u || !held(&h))
+        return 0x10000u;
+    return (sl_lock_get(h.table, h.track, h.first, SL_K_INS + k) >> (8u * j)) & 0xFFu;
+}
+
+/* a trig held: kind K's value for slot J set to VALUE (0..127; 0xff: that slot's lock cleared) on every held step,
+ * the other slot's byte kept; a step left with neither slot locked holds none (0xffff). -> 1; 0 no trig held, or the
+ * pool full (refused, as stock's own locks are) */
+int sl_ins_set(u32 k, u32 j, u32 value)
+{
+    struct held h;
+    if (k >= SL_INSN || j > 1u || !held(&h))
+        return 0;
+    u8 *obj = HELD_OBJ;
+    int ok = 1;
+    for (u32 s = 0; s < h.len; s++)
+        if (BIT_TEST(obj + 600, s) & 0xFF) {
+            u32 w = sl_lock_get(h.table, h.track, s, SL_K_INS + k), sh = 8u * j;
+            w = (w & ~(0xFFu << sh)) | ((value & 0xFFu) << sh);
+            ok &= sl_lock_set(h.table, h.track, s, SL_K_INS + k, w == 0xFFFFu ? 0xFFFFu : w);
+        }
+    sl_ui_table = h.table;
+    ((void (*)(void *, void *))((*(void ***)h.model)[4]))(h.model, 0);   /* the pattern changed (vtable +16) */
+    return ok;
+}
+
+/* the inserts' kind K record of track T in TABLE (the routes popup's LOCKS, the MIX scan), 0 none */
+const u8 *sl_ins_record(const u8 *table, u32 t, u32 k)
+{
+    if (!table || t >= NV || k >= SL_INSN)
+        return 0;
+    u8 head = head_of(SL_K_INS + k);
+    for (u32 i = 0; i < RECS; i++) {
+        const u8 *r = table + REC * i;
+        if (r[0] == head && r[1] == (SL_TAG | t))
+            return r;
+    }
+    return 0;
+}
+
+/* the UI track's pattern lock table (the UI pass's scans), 0 none */
+u8 *sl_ui_pool(void)
+{
+    u32 ctx = TRACK_CTX(APP());
+    if (!ctx)
+        return 0;
+    void *model = *(void **)(ctx + 44);
+    return model ? (u8 *)((u32 (*)(void *))((*(void ***)model)[10]))(model) : 0;
 }

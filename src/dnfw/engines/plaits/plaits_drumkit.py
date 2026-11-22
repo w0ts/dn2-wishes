@@ -53,9 +53,12 @@ def clear(p: Prog, L, n: int) -> None:
     p.loop_r(2, n, lambda: p.stpost(1, 1))
 
 
+EXP2_F15 = "pldk_exp2"       # 2026-11-20: one copy of exp2 with F15 in and F14 out, for ANALOG 2's and DRONE's too
+
+
 def _exp2(p: Prog, d: int) -> None:
     """Fd = 2^F15 (plk.exp2p, one copy). Clobbers R0, R1, R12, R14, I12."""
-    p.call("pldk_exp2", lambda: K.exp2p(p, 14, 15))
+    p.call(EXP2_F15, lambda: K.exp2p(p, 14, 15))
     if d != 14:
         p.fpass(d, 14)
 
@@ -159,6 +162,12 @@ def soft(p: Prog) -> None:
     """F15 = SoftClip(F15) = SoftLimit(clamp(x, -3, 3)) (SoftLimit(+-3) is +-1, exactly).
     Clobbers R11-R14, I12."""
     def body():
+        # 2026-11-20 (clip-inner; the User: "NO DIGITAL CLIPPING ... drive stages' hard clips included"): past +-3 the
+        # curve is flat (+-1): the voice's clip (perc.program.clip_flag)
+        from ...perc import program as PP
+        K.fabs(p, 14, 15)
+        p.fconst(13, 3.0)
+        PP.clip_flag(p, 14, "GT", 13, 13)
         K.clamp(p, 15, -3.0, 3.0)
         p.fop(14, 15, "*", 15)
         K.addk(p, 13, 14, 27.0)

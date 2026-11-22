@@ -23,6 +23,12 @@ PNAMES = ("WAV1", "MIX", "WAV2", "TIME", "BR1", "WID", "BR2", "TUNE")
 DEFAULTS = (0, 64, 0, 0, 0, 0, 0, 64)
 S_U, S_NEW, S_OLD, S_FD, S_MIX, S_DEC = 0, 1, 2, 3, 8, 9
 SUB, SUB_B = 0x17C70, 0x1AA17
+# MIX's gain: the Monomachine's 4 (P:0x147B56; its references, test_mnm's golden runs, are played with it) puts two
+# full waves at 4 x 0.66 = 2.64 into the 56300's limiter: DDRW at its defaults clipped (92 of 92 settings measured).
+# 2026-11-21 (the User: "just make it quieter! not a limiter... a synth in its normal settings must not clip"): 1.5 on
+# the DN2, the most a full wave reaches 0.99, under the limiter; DDRW's level (perc.program LEVEL_DB) after the machine
+MNM_MIX_GAIN = 4.0
+MIX_GAIN = 1.5
 
 
 def init(p: Prog, L: C.Layout) -> None:
@@ -376,7 +382,7 @@ def _half(p: Prog, L: C.Layout) -> None:
         p.iop(2, 12, "+", 2)
         p.st(W["bit"], 2)
     p.loop(W["osc"], 2, wave)
-    # MIX, ramped over the block: 4 (m (W2 - W1) + 0.66 W1)
+    # MIX, ramped over the block: MIX_GAIN (m (W2 - W1) + 0.66 W1) (the Monomachine's 4)
     C.par(p, 1, 1)
     p.fconst(12, 2.0 * 0x2A9296 * C.Q23)
     p.fop(1, 1, "*", 12)
@@ -398,7 +404,7 @@ def _half(p: Prog, L: C.Layout) -> None:
     p.fpass(3, 2)
     p.fpass(4, 1)
     p.fconst(5, 0x547AE1 * C.Q23)
-    p.fconst(6, 4.0)
+    p.fconst(6, MIX_GAIN)
     p.fconst(7, C.TOP)
     p.fconst(8, -1.0)
 

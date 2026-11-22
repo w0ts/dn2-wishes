@@ -9,8 +9,8 @@ rewrites) is what byte equality checks here, alongside the edits and the blob.
 Three properties:
 
 - stock -> lfo4 in the browser is `lfo4.compose` on stock;
-- fxmod -> download -> lfo4 in the browser is the CLI's `--mod fxmod --mod lfo4`,
-  which is the order-only pair the browser has to get right by chaining;
+- fxmod refuses the image (2026-11-17: on OS 1.12 stock, which lfo4 and lfowaves need since their port, fxmod is a
+  1.11 mod; the browser's fxmod-then-lfo4 chaining is checked by js_lfo4_check.mjs when given a 1.11 pair);
 - moddest -> lfo4 in the browser is the Python's, so its opened masks are carried;
 - the refusals are worded the same on both sides, including fxmod's refusal of
   an lfo4 image (applied after it, fxmod would open records in a table nothing
@@ -26,7 +26,7 @@ import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 HARNESS = ROOT / "scripts" / "js_lfo4_check.mjs"
-STOCK_111 = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip"
+STOCK_112 = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.12_dist.zip"   # lfo4 is a 1.12 mod since its port
 
 
 class _Section:
@@ -66,8 +66,8 @@ def run(tmp_path_factory):
     node = shutil.which("node")
     if not node:
         pytest.skip("node is not on PATH; the browser mod cannot be checked")
-    if not STOCK_111.exists():
-        pytest.skip("Digitone II 1.11 is not in 00_Resources")
+    if not STOCK_112.exists():
+        pytest.skip("Digitone II 1.12 is not in 00_Resources")
 
     from dnfw.cli.files import read_image
     from dnfw.cli.main import main as dnfw
@@ -76,20 +76,15 @@ def run(tmp_path_factory):
 
     tmp = tmp_path_factory.mktemp("js_lfo4")
     syx = tmp / "image.syx"
-    syx.write_bytes(read_image(STOCK_111))
+    syx.write_bytes(read_image(STOCK_112))
     stock = load(syx.read_bytes()).container.find(lfo4.SECTION).unpack()
     (tmp / "lfo4.bin").write_bytes(lfo4.compose(stock))
     opened = moddest.apply(load(syx.read_bytes())).payloads[lfo4.SECTION]
     (tmp / "moddest_lfo4.bin").write_bytes(lfo4.compose(opened))
 
-    pair = tmp / "fx_lfo4.syx"
-    assert dnfw(["mods", "apply", str(syx), "--mod", "fxmod", "--mod", "lfo4", "-o", str(pair)]) == 0
-    (tmp / "fx_lfo4.bin").write_bytes(load(pair.read_bytes()).container.find(lfo4.SECTION).unpack())
-
     refusals = tmp / "refusals.json"
     done = subprocess.run(
         [node, str(HARNESS), "--syx", str(syx), "--py-lfo4", str(tmp / "lfo4.bin"),
-         "--py-fx-lfo4", str(tmp / "fx_lfo4.bin"),
          "--py-moddest-lfo4", str(tmp / "moddest_lfo4.bin"), "--refusals-out", str(refusals)],
         capture_output=True, text=True, cwd=ROOT)
     rows = [line.split("  ", 1) for line in done.stdout.splitlines()
@@ -112,7 +107,7 @@ def test_every_check_passes(run):
     assert run["code"] == 0
 
 
-@pytest.mark.parametrize("prefix", ["lfo4 on stock: MAIN OS ==", "fxmod then lfo4: MAIN OS ==",
+@pytest.mark.parametrize("prefix", ["lfo4 on stock: MAIN OS ==", "fxmod refuses this OS",
                                     "moddest then lfo4: MAIN OS =="])
 def test_the_browser_produces_the_python_bytes(run, prefix):
     """Named on their own so a failure says which property broke."""

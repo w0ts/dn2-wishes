@@ -8,6 +8,27 @@ close that is to the unit. A result from it is evidence of category **1** (the a
 ColdFire and SHARC code together) only for what the table below calls faithful; anything that
 leans on an approximation is said so in the result.
 
+## The resume: the kit stored, as at boot (2026-11-20)
+
+`Coupled` writes the build's runtime (code, `.data`, zeroed BSS) over the snapshot, so our code starts as at
+boot. The build's own snapshot was made by this build, whose UI pass already converted the playing kit for the DEP
+attenuverter (`csrc/matrix/atten.c`: an old sound's DEP moved into its LFOs' first routes' depths, DEP set to 100 %).
+Left so, the next UI pass converted it again with the depth = 100 %, and every LFO of the snapshot's project played at
+full depth (measured: `parachord`'s PARA OFF voices smeared in pitch from v0.62.2 to v0.62.5, the first builds with
+the attenuverter run through it; the NOTE words identical to v0.62.1's). A unit never has this state: at boot stock
+loads the kit stored (DEP = C). On the build's own snapshot (its section 3 image is the build's), `Coupled._store_kit`
+stores each converted kit sound back as the saver does (DEP = `mxa_compat(D, A)`, D from the snapshot's matrix
+tables, `MX_RAM`), in the sound, its voices' rows and the smoother, before the first period; `kit_stored` reports it
+(`emu_coupled_para.py` prints track 3's). Measured on v0.62.2's own snapshot: track 1's DEPs 0x432B, 0x4021, 0x4240 and
+track 3's 0x4350, 0x4016, 0x44B3 at the resume, those of the build before the attenuverter, and one conversion.
+
+(2026-11-21) The ColdFire-only harnesses that write the runtime over a snapshot had the same double conversion; they
+now call `scripts/emulib/attkit.py` `store_kit` right after the runtime (the same store-back; the tables' layout from
+the matrix state's magic, so it also reads a snapshot made with DN2_ROUTE8 or DN2_LFO4; idempotent; `DNFW_ATTKIT=0`
+is the negative control). Gate `matrix`, `attsnap`: on the build's own snapshot (48 converted LFOs) the first UI pass
+converts once; with `DNFW_ATTKIT=0` 41 of them come back at full depth. `Coupled._store_kit` stays until the
+combined branch holds `emulib/mxlayout.py`; then it calls `attkit` too.
+
 ## One period
 
 A period is one DSP block: 32 frames at 48 kHz, 1,500 a second. In each:

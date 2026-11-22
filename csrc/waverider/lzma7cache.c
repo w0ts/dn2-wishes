@@ -24,6 +24,7 @@
  * means the next boot decodes again. Only the sectors below and a 512-byte buffer are written. */
 
 #include <stdint.h>
+#include "../include/dmove.h"
 
 #ifndef DN7C_READ                                    /* the stock block driver (inserts/store.c's) */
 #define DN7C_READ ((int (*)(uint32_t, uint32_t, void *))0x4012C87Au)         /* (sector, bytes, buf) -> 0 ok */
@@ -32,12 +33,14 @@
 #define DN7C_SECTORS (*(volatile uint32_t *)0x4461C6B0u)
 #endif
 
-#define C_HDR 0x6E8000u
+/* v0.69.2: DM_DSP_NEW (0x5FF200) once dmove.c has moved it, DM_DSP_OLD (0x6E8000) before (csrc/include/dmove.h) */
+static uint32_t c_hdr __attribute__((section(".data"))) = 0;                        /* (dn7c_load's place() sets it) */
+#define C_HDR c_hdr
 #define C_DATA (C_HDR + 1u)
 #define C_ROOM 0xFFFFFu                              /* the uploader's buffer after its 0x03 (DN7_MAX) */
-#define C_END (C_DATA + (C_ROOM + 511u) / 512u)      /* 0x6E8801 */
-_Static_assert(C_HDR >= 0x6E0502u && C_END <= 0x6F0000u,
-               "between the inserts' records (to 0x6E0501) and the library's extension (0x6F0000)");
+#define C_SPAN (1u + (C_ROOM + 511u) / 512u)
+#define C_END (C_HDR + C_SPAN)
+_Static_assert(C_SPAN == DM_DSP_N, "the copy's sectors: dmove.h's");
 #define C_MAGIC 0x444E3743u                          /* 'DN7C' */
 #define C_VERSION 1u
 #define C_ID 24u
@@ -52,11 +55,70 @@ extern uint32_t dn7_crc32(const uint8_t *p, uint32_t n);
  * 4 a write failed, 5 a read failed */
 volatile uint32_t dn7c_state __attribute__((section(".data"))) = 0;
 volatile uint32_t dn7c_why __attribute__((section(".data"))) = 0;
-static uint8_t hdr[512] __attribute__((section(".data"), aligned(16)));
+/* v0.69.2: the +Drive's DMA lands here, outside the C chunk (emulib/ramguard.py: no DMA into a chunk the build
+ * places): the unused tail of pools.c's bank list staging (BL_W ends at +0x3A000 of BANK_RAM + 0x80000, BL_H is at
+ * +0x40000), one 512-byte slot each: SAFE MODE's record +0x3F000, the DSP copy's header +0x3F200, the inserts +0x3F400 */
+#ifdef BANK_RAM
+#define hdr ((uint8_t *)(BANK_RAM + 0x80000u + 0x3F200u))
+#else
+static uint8_t hdr[512] __attribute__((section(".data"), aligned(16)));   /* (the host test) */
+#endif
 
 static int drive_ok(void)
 {
-    return DN7C_READY && DN7C_SECTORS >= C_END;
+    return DN7C_READY && DN7C_SECTORS > DM_RECORD && DN7C_SECTORS >= DM_DSP_OLD + DM_DSP_N;
+}
+
+/* v0.69.2 (csrc/include/dmove.h): the copy's place. Its bit in the move record: DM_DSP_NEW. Else the move, once, in
+ * dn7c_load before the decode (BUF, the uploader's buffer, is free then): the old copy (when its header is one)
+ * copied sector for sector through BUF, its header last, the bit set (the other bits kept), then DM_DSP_NEW. Any
+ * read or write that fails: the old place, as before. The old sectors are only read. */
+volatile uint32_t dn7c_moved __attribute__((section(".data"))) = 0;   /* 1 found moved, 2 moved now (a copy), 3 moved */
+static uint32_t get32(const uint8_t *p);
+#define C_HALF 1024u                                 /* sectors through BUF at once (C_ROOM holds 2,047) */
+static void place(uint8_t *buf)
+{
+    c_hdr = 0;                                       /* (the move record unread: no copy this boot, neither place) */
+    if (DN7C_READ(DM_RECORD, 512u, hdr)) {
+        dn7c_state = 5;
+        return;
+    }
+    c_hdr = DM_DSP_OLD;
+    uint32_t bits = dm_bits_of((const uint32_t *)hdr);
+    if (bits & DM_DSP) {
+        c_hdr = DM_DSP_NEW;
+        dn7c_moved = 1;
+        return;
+    }
+    if (DN7C_READ(DM_DSP_OLD, 512u, hdr))
+        return;
+    uint32_t copied = get32(hdr) == C_MAGIC;
+    for (uint32_t s = 0; copied && s < DM_DSP_N - 1u; s += C_HALF) {
+        uint32_t n = DM_DSP_N - 1u - s < C_HALF ? DM_DSP_N - 1u - s : C_HALF;
+        for (uint32_t o = 0; o < n; o += C_CHUNK / 512u) {
+            uint32_t k = n - o < C_CHUNK / 512u ? n - o : C_CHUNK / 512u;
+            if (DN7C_READ(DM_DSP_OLD + 1u + s + o, 512u * k, buf + 512u * o))
+                return;
+        }
+        for (uint32_t o = 0; o < n; o += C_CHUNK / 512u) {
+            uint32_t k = n - o < C_CHUNK / 512u ? n - o : C_CHUNK / 512u;
+            if (DN7C_WRITE(DM_DSP_NEW + 1u + s + o, 512u * k, buf + 512u * o))
+                return;
+        }
+    }
+    if (copied && (DN7C_READ(DM_DSP_OLD, 512u, hdr) || DN7C_WRITE(DM_DSP_NEW, 512u, hdr)))
+        return;
+    uint32_t *m = (uint32_t *)hdr;
+    for (uint32_t i = 0; i < 128u; i++)
+        m[i] = 0;
+    m[0] = DM_MAGIC;
+    m[1] = ~DM_MAGIC;
+    m[2] = bits | DM_DSP;
+    m[3] = m[2] ^ DM_XOR;
+    if (DN7C_WRITE(DM_RECORD, 512u, hdr))
+        return;
+    dn7c_moved = copied ? 2u : 3u;
+    c_hdr = DM_DSP_NEW;
 }
 
 static uint32_t whole(uint32_t len)
@@ -108,6 +170,9 @@ int dn7c_load(const uint8_t *id, uint8_t *dst, uint32_t len, uint32_t crc)
 {
     if (!drive_ok() || whole(len) > C_ROOM)
         return 0;
+    place(dst);                                      /* v0.69.2: where the copy is (the move, once) */
+    if (!c_hdr)
+        return 0;
     if (DN7C_READ(C_HDR, 512u, hdr)) {
         dn7c_state = 5;
         return 0;
@@ -132,8 +197,8 @@ int dn7c_load(const uint8_t *id, uint8_t *dst, uint32_t len, uint32_t crc)
 /* the program just decoded and checked into DST: the copy for the next boot, its header last */
 void dn7c_store(const uint8_t *id, uint8_t *dst, uint32_t len, uint32_t crc)
 {
-    if (!drive_ok() || whole(len) > C_ROOM)
-        return;
+    if (!drive_ok() || whole(len) > C_ROOM || !c_hdr)
+        return;                                      /* (c_hdr 0: dn7c_load could not tell the place) */
     for (uint32_t i = 0; i < 512u; i++)
         hdr[i] = 0;
     if (DN7C_WRITE(C_HDR, 512u, hdr) || span(1, dst, whole(len))) {
