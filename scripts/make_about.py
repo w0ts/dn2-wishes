@@ -117,11 +117,9 @@ PAGE = """<!doctype html>
 <link rel="stylesheet" href="wishes.css">
 <style>
 /* the About page's own layout: the README's intro as the lead, each "## " part a box (common.css does the column) */
-table { margin: var(--sp-2) 0; }
 td { padding: 6px 10px 6px 0; }
 td:first-child { width: 64px; }
 td img { display: block; image-rendering: pixelated; }
-ul { padding-left: 20px; }
 </style>
 <script src="https://w0ts.github.io/site-style/switcher.js" defer></script>
 </head>
