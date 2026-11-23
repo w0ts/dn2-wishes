@@ -1,5 +1,70 @@
 # DN2 WISHES — CHANGELOG — Digitone II (all builds are based on OS 1.12)
 
+## v0.69.2-all (22 Nov 2026)
+
+- **Status:** TEST build. Not released: the checks that guard against bricking the unit passed on this file; the full release check was not run.
+- **Based on:** v0.69.2-fdn8lite2, with v0.69.2-fdn8hw and v0.69.2-dualboot combined (source 50f84725, now on main)
+- **File:** DN2wishes_v0.69.2-all_43117209_TEST.syx
+- **SHA-256:** 43117209a2a2114ff254cd4085c694ea566e687ee493cd8c3b3a6b3d245f19ad
+- **Hardware:** Not installed. Offered on the Wishes builder as the hidden TEST entry (Shift+click on Build).
+
+**Changes**
+
+  - Everything in v0.69.2-fdn8hw (FDN8 as hardware loops) and v0.69.2-dualboot (SAFE MODE with the stock sound).
+  - MACHINE SEL: each DT2 sample machine has its own icon.
+  - The system meter's bottom line counts NOTE / CUT / FX: notes, voices and inserts the guard left out since power-on.
+  - None of our screens (meter, overview, scope) draws over stock's dialogs or the OS upgrade screen.
+
+**Checks on this file (all passed)**
+
+  - The brick-risk steps (preflight, RAM map, boot, machines, engine, UI fuzz and the rest), SAFE MODE's steps, the
+    moves, the erase, meter, mix overview, line redraw, long keys, dialogs; the SHARC runner's fdn8, insbus, stockout,
+    ghost and delay steps; the unit tests (65 passed, 4 skipped).
+
+**Known issues**
+
+  - Not checked on the DN2 yet: SAFE MODE with the stock copy, the FDN8 saving, the meter line.
+
+## v0.69.2-fdn8hw (22 Nov 2026)
+
+- **Status:** TEST build. Not released: the checks that guard against bricking the unit passed on this file; the full release check was not run.
+- **Based on:** v0.69.2-fdn8lite2 (B side of an A/B; A is v0.69.2-fdn8lite2)
+- **File:** DN2wishes_v0.69.2-fdn8hw_91275dca_TEST.syx
+- **SHA-256:** 91275dca4431790bd90cbb786aab99ad0e1a21f4de7a4fdc041c7a11767c6a57
+- **Hardware:** Not installed.
+
+**Changes**
+
+  - FDN8 (the bus inserts and the send reverb) runs its sample loops as the DSP's hardware loops: the
+    loop's count and jump back cost nothing a pass. The sound is unchanged, bit for bit.
+  - In the emulator's count, one playing bus FDN8 costs about 4 % less (15,006 -> 14,424 a block) and the
+    send reverb about 1.4 % less (17,618 -> 17,365). VOICE BUDGET's table carries the new costs.
+
+**Known issues**
+
+  - The saving on the unit is not measured yet (the FDN8 ladder against v0.69.2-fdn8lite2).
+
+## v0.69.2-dualboot (22 Nov 2026)
+
+- **Status:** TEST build. Not released: the checks that guard against bricking the unit passed on this file; the full release check was not run.
+- **Based on:** v0.69.2
+- **File:** DN2wishes_v0.69.2-dualboot_9f6a387d_TEST.syx
+- **SHA-256:** 9f6a387d80e4b545a8e8af6fd18aa38e6bd3b750504ce9d77fe33289d0eba0a7
+- **Hardware:** Not installed.
+
+**Changes**
+
+  - SAFE MODE can start Elektron's stock sound engine. The +Drive can hold stock 1.12's DSP program (sent once
+    over USB, from the builder page after a flash from the page, or with `scripts/stock7_cli.py`). The firmware
+    accepts only that exact program, checks every sector, and writes its header last, so a half-sent copy is never used.
+  - With the copy there, SAFE MODE (STOP held at start, or after a failed start) plays with the stock sound. With no
+    copy or a damaged one, SAFE MODE is silent, as before. A second SAFE MODE start in a row is always the silent one.
+  - SAFE MODE still writes nothing to the +Drive. ERASE MOD DATA also erases the copy.
+
+**Known issues**
+
+  - Not checked on the DN2 yet: sending the copy, and SAFE MODE with the stock sound.
+
 ## v0.69.2-fdn8lite2 (22 Nov 2026)
 
 - **Status:** TEST build. Not released: the checks that guard against bricking the unit passed on this file; the full release check was not run.
