@@ -1,14 +1,8 @@
 # DN2 WISHES
 
-## Using the mod? Go to the site: **[w0ts.github.io/dn2-wishes](https://w0ts.github.io/dn2-wishes/)**
-
-- [About](https://w0ts.github.io/dn2-wishes/): what the mod is, its machines, effects and filters, how to go back to stock.
-- [Builder](https://w0ts.github.io/dn2-wishes/builder.html): builds the firmware in your browser from your own
-  Elektron files, and flashes it over USB.
-- [Help](https://w0ts.github.io/dn2-wishes/help.html), [presets](https://w0ts.github.io/dn2-wishes/presets.html),
-  [sample import](https://w0ts.github.io/dn2-wishes/samples.html).
-
-The rest of this page is for developers.
+> ## [→ w0ts.github.io/dn2-wishes](https://w0ts.github.io/dn2-wishes/)
+> **What the mod is, the builder that makes and flashes it, help, presets and sample import: on the site.**
+> This README is for developers.
 
 ## What this repository is
 
