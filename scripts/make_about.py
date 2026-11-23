@@ -123,6 +123,7 @@ td:first-child { width: 64px; }
 td img { display: block; image-rendering: pixelated; }
 ul { padding-left: 20px; }
 </style>
+<script src="https://w0ts.github.io/site-style/switcher.js" defer></script>
 </head>
 <body>
 <main>

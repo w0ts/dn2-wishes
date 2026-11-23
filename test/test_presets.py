@@ -210,7 +210,9 @@ def test_the_page_lists_only_what_the_site_serves(tmp_path):
             assert (site / "presets" / p["file"]).read_bytes() == (PRESETS / p["file"]).read_bytes()
 
 
-def test_the_readme_links_the_presets_page():
+def test_the_site_links_the_presets_page():
+    """The README is for developers and points to the site (the User, 2026-11-23); the site's pages link the presets."""
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    assert "https://w0ts.github.io/dn2-wishes/presets.html" in readme
+    assert "https://w0ts.github.io/dn2-wishes/" in readme
     assert "presets.html" in (WEB / "builder.html").read_text(encoding="utf-8")
+    assert 'href="presets.html"' in (ROOT / "scripts" / "make_about.py").read_text(encoding="utf-8")
