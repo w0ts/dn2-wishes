@@ -15,12 +15,7 @@
 .card h2 { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; margin: 0; }
 .card ul { margin: 0; padding-left: 18px; font-size: var(--fs-2); } .card li { margin: 2px 0; }
 .card .combo { font-size: var(--fs-2); }
-svg.panel { width: 100%; height: auto; display: block; }
-svg.panel .key rect { fill: var(--off); stroke: var(--line); }
-svg.panel .key text { fill: var(--dim); font: 9px var(--font-mono); text-anchor: middle; dominant-baseline: central; }
-svg.panel .key.hl rect { fill: var(--accent); stroke: var(--accent); } svg.panel .key.hl text { fill: var(--on); }
-svg.panel .enc circle { fill: var(--off); stroke: var(--line); } svg.panel .enc.hl circle { fill: var(--accent); stroke: var(--accent); }
-svg.panel .enc text { fill: var(--dim); font: 9px var(--font-mono); text-anchor: middle; dominant-baseline: central; } svg.panel .enc.hl text { fill: var(--on); }
+.card .keys { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
 .hidden { display: none !important; }
 </style>
 <script src="https://w0ts.github.io/site-style/switcher.js" defer></script>
@@ -39,41 +34,39 @@ svg.panel .enc text { fill: var(--dim); font: 9px var(--font-mono); text-anchor:
 </main>
 <script>
 "use strict";
-// the keys the cards use: [id, label, x, y, w]. Each card's drawing shows only its own keys (the User, 2026-11-22:
-// "remove the buttons, only keep the ones used"), at the same place on every card.
+// the keys a card uses, as one line of chips in the panel's order (the User, 2026-11-23: one line, a series of
+// controls as one chip: "Knob A-H", "1-16").
 const KEYS = [
-  ["TRIGPG", "TRIG", 10, 62, 32], ["SYN", "SYN", 46, 62, 30], ["FLTR", "FLTR", 80, 62, 32], ["AMP", "AMP", 116, 62, 30],
-  ["FX", "FX", 150, 62, 24], ["MOD", "MOD", 178, 62, 30],
-  ["VOICE", "VOICE", 10, 84, 36], ["PRESET", "PRESET", 50, 84, 40], ["TEMPO", "TEMPO", 94, 84, 36], ["PTN", "PTN", 134, 84, 26],
-  ["KB", "KEYBOARD", 164, 84, 46], ["STOP", "STOP", 214, 84, 28],
-  ["FUNC", "FUNC", 10, 106, 40], ["NO", "NO", 54, 106, 30], ["YES", "YES", 88, 106, 32],
-  ["UP", "▲", 182, 106, 26], ["LEFT", "◀", 152, 124, 26], ["DOWN", "▼", 182, 124, 26], ["RIGHT", "▶", 212, 124, 26],
+  ["TRIGPG", "TRIG"], ["SYN", "SYN"], ["FLTR", "FLTR"], ["AMP", "AMP"], ["FX", "FX"], ["MOD", "MOD"],
+  ["VOICE", "VOICE"], ["PRESET", "PRESET"], ["TEMPO", "TEMPO"], ["PTN", "PTN"], ["KB", "KEYBOARD"], ["STOP", "STOP"],
+  ["FUNC", "FUNC"], ["NO", "NO"], ["YES", "YES"],
+  ["UP", "▲"], ["DOWN", "▼"], ["LEFT", "◀"], ["RIGHT", "▶"],
 ];
 const ENC = "ABCDEFGH".split("");
+
+// a series as ranges: [1,2,3,5] -> "1-3 5"; letters the same way
+function ranges(items, all) {
+  const out = [];
+  for (let i = 0; i < items.length; ) {
+    let j = i;
+    while (j + 1 < items.length && all.indexOf(items[j + 1]) === all.indexOf(items[j]) + 1) j++;
+    out.push(j > i ? `${items[i]}-${items[j]}` : `${items[i]}`);
+    i = j + 1;
+  }
+  return out.join(" ");
+}
 
 function panel(hl) {
   const on = new Set(hl);
   if (!on.size) return "";
-  let s = "", y0 = 999, y1 = 0;
-  const span = (a, b) => { y0 = Math.min(y0, a); y1 = Math.max(y1, b); };
-  ENC.forEach((e, i) => {
-    if (!on.has("ENC" + e)) return;
-    s += `<g class="enc hl"><circle cx="${18 + i * 30}" cy="22" r="11"/><text x="${18 + i * 30}" y="22">${e}</text></g>`;
-    span(11, 33);
-  });
-  for (const [id, lab, x, y, w] of KEYS) {
-    if (!on.has(id)) continue;
-    s += `<g class="key hl"><rect x="${x}" y="${y}" width="${w}" height="16" rx="3"/><text x="${x + w / 2}" y="${y + 8}">${lab}</text></g>`;
-    span(y, y + 16);
-  }
-  for (let i = 0; i < 16; i++) {
-    const id = "TRIG" + (i + 1), x = 10 + i * 14.4;
-    if (!on.has(id) && !on.has("TRIG")) continue;
-    s += `<g class="key hl"><rect x="${x}" y="148" width="12" height="14" rx="2"/><text x="${x + 6}" y="155" style="font-size:6.5px">${i + 1}</text></g>`;
-    span(148, 162);
-  }
-  const top = y0 - 4, h = y1 - y0 + 8;
-  return `<svg class="panel" viewBox="0 ${top} 248 ${h}" role="img" aria-label="keys: ${[...on].join(", ")}">${s}</svg>`;
+  const chips = [];
+  const encs = ENC.filter(e => on.has("ENC" + e));
+  if (encs.length) chips.push("Knob " + ranges(encs, ENC));
+  for (const [id, lab] of KEYS) if (on.has(id)) chips.push(lab);
+  const nums = Array.from({ length: 16 }, (_, i) => i + 1);
+  const trigs = on.has("TRIG") ? nums : nums.filter(n => on.has("TRIG" + n));
+  if (trigs.length) chips.push(ranges(trigs, nums));
+  return `<div class="row keys" role="img" aria-label="keys: ${chips.join(", ")}">${chips.map(c => `<kbd class="hl">${c}</kbd>`).join("")}</div>`;
 }
 
 const k = (t, hl = true) => `<kbd${hl ? ' class="hl"' : ""}>${t}</kbd>`;
