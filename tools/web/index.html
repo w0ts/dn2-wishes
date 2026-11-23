@@ -15,10 +15,11 @@
 section { overflow: visible; }
 .pane-body { flex: none; height: 420px; min-height: 200px; resize: vertical; }
 .pane-body .empty { color: var(--dim); text-align: center; padding: 60px var(--sp-4); }
+/* the drop zone (common.css .drop) sits inside the pane: inset, so its dashed edge does not lie on the pane's border */
+#dropHint { margin: var(--sp-2); }
 .pane-body thead th { position: sticky; top: 0; z-index: 1; background: var(--bg); box-shadow: inset 0 -1px 0 var(--line); }
 .mid { width: 120px; }
 .mid .note { margin: 0; font-size: var(--fs-1); }
-#drop .pane-body:has(#dropHint:not([style*="none"])) { border: 1px dashed var(--dim); margin: var(--sp-2); }
 .pane-foot .note, .pane-head .note { margin: 0; }
 #list td input.longIn { width: 100%; min-width: 9em; } #list td input.folderIn { width: 100%; min-width: 6em; }
 td input[type=number], td input[type=text] { min-height: 26px; padding: 2px 6px; font-family: var(--font-mono); width: auto; }
@@ -94,7 +95,7 @@ tr.folder td, tr.up td { cursor: pointer; } tr.up td { color: var(--dim); }
             <thead><tr><th class="ck"><input type="checkbox" id="listAll" aria-label="Select all"></th><th class="proj-only">Slot</th><th>Name</th><th>Folder</th><th class="num hide-sm">Length</th><th class="num proj-only hide-sm">Slices</th><th class="num">Size</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
-          <div class="empty" id="dropHint">Drop audio files or folders here<br><span style="font-size:var(--fs-1)">WAV, AIFF, FLAC, MP3, OGG, M4A</span></div>
+          <div class="empty drop" id="dropHint">Drop audio files or folders here<br><span style="font-size:var(--fs-1)">WAV, AIFF, FLAC, MP3, OGG, M4A</span></div>
         </div>
         <div class="pane-foot"><span id="listNote" class="note"></span><span class="spacer"></span>
           <button class="quiet" id="removeSelBtn" disabled>Remove selected</button> <button class="quiet" id="clearBtn">Clear</button></div>

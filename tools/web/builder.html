@@ -11,8 +11,8 @@
 <link rel="stylesheet" href="wishes.css">
 <style>
 /* the builder's own layout: common.css does the rest */
+/* each .file row has its own Choose… button (and takes a drop): the browser's own file input stays hidden */
 input[type=file] { display: none; }
-.file.over { border-color: var(--accent); }
 .verdict { font-weight: 600; }
 #result:empty, #fMsg:empty, #fState:empty { display: none; }
 #result .hashes { display: grid; grid-template-columns: max-content 1fr; gap: 2px var(--sp-3); font-size: 14px; margin: var(--sp-1) 0 0; }
