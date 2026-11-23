@@ -17,8 +17,8 @@ import sys
 from pathlib import Path
 
 REPO = "https://github.com/w0ts/dn2-wishes"
-NAV = ('<nav class="site" aria-label="Wishes pages"><a href="about.html" aria-current="page">about</a><a href="builder.html">builder</a>'
-       '<a href="samples.html">sample import</a><a href="presets.html">presets</a><a href="help.html">help</a>'
+NAV = ('<nav class="site" aria-label="Wishes pages"><a href="about.html" aria-current="page">About</a><a href="builder.html">Builder</a>'
+       '<a href="samples.html">Sample import</a><a href="presets.html">Presets</a><a href="help.html">Help</a>'
        '<a href="%s" aria-label="GitHub" title="GitHub"><svg viewBox="0 0 16 16" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg></a></nav>' % REPO)
 # files the page links to that are on the site (make_site.sh copies them); any other relative link goes to the repository on GitHub
 SITE_FILES = {"LICENSE", "THIRD-PARTY.md"}
@@ -46,14 +46,14 @@ def inline(text: str) -> str:
 
 def convert(md: str, icons: str) -> tuple[str, str]:
     title, body = "About", []
-    closer = ""            # the box open at this point: the lead under the title, then one <section> per "## " part
+    closer = ""            # the box open at this point: the lead under the title (in its own box), then one <section> per "## " part
     in_lead = [0]          # blocks already in the lead: only the first paragraph stays there, the rest gets a box
 
     def add(html: str) -> None:
         nonlocal closer
-        if closer == "</div>":
+        if closer == "</div></section>":
             if in_lead[0]:
-                body.append("</div><section>")
+                body.append("</div></section><section>")
                 closer = "</section>"
             in_lead[0] += 1
         body.append(html)
@@ -70,9 +70,9 @@ def convert(md: str, icons: str) -> tuple[str, str]:
                 raise SystemExit("make_about: unsupported heading: %r" % line)
             if len(m.group(1)) == 1:
                 title = m.group(2)
-                body.append('<header class="site"><div class="titlebar"><h1><a href="https://w0ts.github.io/">w0ts</a> / DN2-Wishes</h1></div>%s</header>' % "@@NAV@@")
-                body.append('<div class="lead">')
-                closer = "</div>"
+                body.append('<header class="site"><div class="titlebar"><h1><a href="https://w0ts.github.io/">w0ts</a> / Wishes</h1></div>%s</header>' % "@@NAV@@")
+                body.append('<section><div class="lead">')     # (the lead in a box too, as every part)
+                closer = "</div></section>"
             else:
                 if len(m.group(1)) == 2:
                     body.append(closer + "<section>")
@@ -110,7 +110,7 @@ PAGE = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>w0ts / DN2-Wishes · about</title>
+<title>w0ts / Wishes · About</title>
 <link rel="icon" type="image/png" href="icons/wishes-192.png">
 <link rel="apple-touch-icon" href="icons/wishes-180.png">
 <link rel="stylesheet" href="https://w0ts.github.io/site-style/common.css">

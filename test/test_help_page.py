@@ -40,20 +40,21 @@ def test_the_page_uses_its_stylesheet_and_no_page_this_build_lacks(tmp_path: pat
 
 
 def test_every_page_has_the_tabs_and_they_lead_to_pages(tmp_path: pathlib.Path):
-    """builder, sample import, help and presets each carry the same tab bar, styled once in wishes.css, and each
-    tab opens the right page in the served layout (the front page is the builder)."""
+    """About, Builder, Sample import, Presets and Help each carry the same tab bar under the title "w0ts / Wishes"
+    (no DN2: the User, 2026-11-23), and each tab opens the right page in the served layout (About is the front page)."""
     site = _site(tmp_path)
-    assert "nav.top a[aria-current=page]" in (WEB / "wishes.css").read_text(encoding="utf-8")
-    want = {"./": "Wishes · DN2 mod builder", "samples.html": "Wishes · DN2 sample import",
-            "help.html": "Wishes · hidden functions", "presets.html": "Wishes · presets"}
-    for page in ("index.html", "samples.html", "help.html", "presets.html"):
+    want = {"about.html": "Wishes · About", "builder.html": "Wishes · Builder", "samples.html": "Wishes · Sample import",
+            "presets.html": "Wishes · Presets", "help.html": "Wishes · Hidden functions"}
+    labels = ["About", "Builder", "Sample import", "Presets", "Help"]
+    for page in want:
         html = (site / page).read_text(encoding="utf-8")
-        nav = re.search(r'<nav class="top"[^>]*>(.*?)</nav>', html, re.S)
+        assert '<a href="https://w0ts.github.io/">w0ts</a> / Wishes</h1>' in html, page
+        nav = re.search(r'<nav class="site" aria-label="Wishes pages">(.*?)</nav>', html, re.S)
         assert nav, page
+        assert re.findall(r'<a href="[a-z]+\.html"(?: aria-current="page")?>([^<]+)</a>', nav.group(1)) == labels, page
         for href, title in want.items():
             assert f'href="{href}"' in nav.group(1), (page, href)
-            target = site / ("index.html" if href == "./" else href)
-            assert f"<title>{title}</title>" in target.read_text(encoding="utf-8"), (page, href)
+            assert f"<title>w0ts / {title}</title>" in (site / href).read_text(encoding="utf-8"), (page, href)
         assert nav.group(1).count('aria-current="page"') == 1, page
 
 
