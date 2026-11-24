@@ -1,6 +1,6 @@
 # The Wishes builder page on GitHub Pages of w0ts/dn2-wishes (https://w0ts.github.io/dn2-wishes/, also builder.html).
 #
-# MANUAL ONLY (workflow_dispatch): someone starts it from the Actions tab. Nothing here builds firmware or
+# Runs on every push to main, like the other w0ts sites (2026-11-24), and by hand from the Actions tab. Nothing here builds firmware or
 # reads Elektron's files: the page builds in the user's browser from their own. What it publishes is
 # wishes/ on the branch it runs on (scripts/web_bundle.py --wishes writes it locally: wishes.json, one
 # code zip per cleared preset, the published gate records), plus the page's own files, and the sample
@@ -14,6 +14,8 @@
 name: wishes-pages
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
